@@ -102,6 +102,8 @@ fn gen_field_eq(left: Str, right: Str, field: DerivedField) -> Str {
 fn gen_action_eq(left: Str, right: Str, action: FieldAction) -> Str {
     match action {
         FieldAction::Identity => "(${left} === ${right})",
+        FieldAction::FloatIdentity => "(${left} === ${right})",
+        FieldAction::BoolIdentity => "(${left} === ${right})",
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.eq(${left}, ${right}${extra})"
@@ -195,6 +197,8 @@ fn gen_field_clone(expr: Str, field: DerivedField) -> Str {
 fn gen_action_clone(expr: Str, action: FieldAction) -> Str {
     match action {
         FieldAction::Identity => expr,
+        FieldAction::FloatIdentity => expr,
+        FieldAction::BoolIdentity => expr,
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.clone(${expr}${extra})"
@@ -342,6 +346,8 @@ fn gen_field_cmp(left: Str, right: Str, field: DerivedField) -> Str {
 fn gen_action_cmp(left: Str, right: Str, action: FieldAction) -> Str {
     match action {
         FieldAction::Identity => "(${left} < ${right} ? -1 : ${left} > ${right} ? 1 : 0)",
+        FieldAction::FloatIdentity => "(${left} < ${right} ? -1 : ${left} > ${right} ? 1 : 0)",
+        FieldAction::BoolIdentity => "(${left} < ${right} ? -1 : ${left} > ${right} ? 1 : 0)",
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.cmp(${left}, ${right}${extra})"
@@ -461,6 +467,8 @@ fn gen_field_debug(expr: Str, field: DerivedField) -> Str {
 fn gen_action_debug(expr: Str, action: FieldAction) -> Str {
     match action {
         FieldAction::Identity => "String(${expr})",
+        FieldAction::FloatIdentity => "String(${expr})",
+        FieldAction::BoolIdentity => "String(${expr})",
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.debug(${expr}${extra})"

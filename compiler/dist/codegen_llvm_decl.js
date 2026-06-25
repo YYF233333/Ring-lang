@@ -1,7 +1,7 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, exec_sync, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
 import { ANY as types$ANY, BOOL as types$BOOL, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_INT as types$BUILTIN_INT, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, EMPTY_ROW as types$EMPTY_ROW, FLOAT as types$FLOAT, INT as types$INT, NEVER as types$NEVER, STR as types$STR, UNIT as types$UNIT, effect_kind_name as types$effect_kind_name, effect_row as types$effect_row, effect_row_to_string as types$effect_row_to_string, effect_to_string as types$effect_to_string, effects_equal as types$effects_equal, effects_match_kind as types$effects_match_kind, effects_same_kind as types$effects_same_kind, is_list_type as types$is_list_type, is_map_type as types$is_map_type, is_option_type as types$is_option_type, is_set_type as types$is_set_type, list_element as types$list_element, make_list_type as types$make_list_type, make_map_type as types$make_map_type, make_option_type as types$make_option_type, make_set_type as types$make_set_type, open_effect_row as types$open_effect_row, option_inner as types$option_inner, row_contains as types$row_contains, row_merge as types$row_merge, type_to_builtin_name as types$type_to_builtin_name, type_to_string as types$type_to_string, types_equal as types$types_equal, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, EnumVariant as types$EnumVariant, RecordField as types$RecordField, RowMergeResult as types$RowMergeResult, StructField as types$StructField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType } from "./types.js";
 import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, DestructureBinding as ast$DestructureBinding, EffectExpr as ast$EffectExpr, EffectHandler as ast$EffectHandler, EffectOpDecl as ast$EffectOpDecl, EnumVariantDecl as ast$EnumVariantDecl, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, Expr_ReturnExpr as ast$Expr_ReturnExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, MatchArm as ast$MatchArm, NamedEnumField as ast$NamedEnumField, NamedImport as ast$NamedImport, NamedPatternField as ast$NamedPatternField, Param as ast$Param, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, Position as ast$Position, Program as ast$Program, RecordTypeField as ast$RecordTypeField, SigMember as ast$SigMember, Span as ast$Span, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, StructFieldDecl as ast$StructFieldDecl, StructFieldInit as ast$StructFieldInit, TypeBound as ast$TypeBound, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, TypeParam as ast$TypeParam, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, UseDecl as ast$UseDecl, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UsePath as ast$UsePath, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug } from "./ast.js";
-import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, FLOAT_METHODS as hir$FLOAT_METHODS, INT_METHODS as hir$INT_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, SET_HOF_METHODS as hir$SET_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, STR_METHODS as hir$STR_METHODS, collect_extern_type_names as hir$collect_extern_type_names, default_evidence_name as hir$default_evidence_name, default_method_self_name as hir$default_method_self_name, dict_instance_name as hir$dict_instance_name, effect_op_slot as hir$effect_op_slot, evidence_param_name as hir$evidence_param_name, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, hexpr_type as hir$hexpr_type, is_borrow_returning_call as hir$is_borrow_returning_call, is_extern_handle_type as hir$is_extern_handle_type, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, is_rc_excluded_type as hir$is_rc_excluded_type, trait_bound_param_name as hir$trait_bound_param_name, trait_dict_name as hir$trait_dict_name, type_contains_extern_handle as hir$type_contains_extern_handle, variant_js_name as hir$variant_js_name, DerivedField as hir$DerivedField, DerivedImpl as hir$DerivedImpl, DerivedVariant as hir$DerivedVariant, DictDispatchInfo as hir$DictDispatchInfo, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, HAssocType as hir$HAssocType, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, HDictDef as hir$HDictDef, HEffectHandler as hir$HEffectHandler, HEffectOp as hir$HEffectOp, HEnumVariant as hir$HEnumVariant, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HExpr_ReturnExpr as hir$HExpr_ReturnExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HMatchArm as hir$HMatchArm, HParam as hir$HParam, HProgram as hir$HProgram, HSigMember as hir$HSigMember, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HStructField as hir$HStructField, HStructFieldInit as hir$HStructFieldInit, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug } from "./hir.js";
+import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, FLOAT_METHODS as hir$FLOAT_METHODS, INT_METHODS as hir$INT_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, SET_HOF_METHODS as hir$SET_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, STR_METHODS as hir$STR_METHODS, collect_extern_type_names as hir$collect_extern_type_names, default_evidence_name as hir$default_evidence_name, default_method_self_name as hir$default_method_self_name, dict_instance_name as hir$dict_instance_name, effect_op_slot as hir$effect_op_slot, evidence_param_name as hir$evidence_param_name, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, hexpr_type as hir$hexpr_type, is_borrow_returning_call as hir$is_borrow_returning_call, is_extern_handle_type as hir$is_extern_handle_type, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, is_rc_excluded_type as hir$is_rc_excluded_type, trait_bound_param_name as hir$trait_bound_param_name, trait_dict_name as hir$trait_dict_name, type_contains_extern_handle as hir$type_contains_extern_handle, variant_js_name as hir$variant_js_name, DerivedField as hir$DerivedField, DerivedImpl as hir$DerivedImpl, DerivedVariant as hir$DerivedVariant, DictDispatchInfo as hir$DictDispatchInfo, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_FloatIdentity as hir$FieldAction_FloatIdentity, FieldAction_BoolIdentity as hir$FieldAction_BoolIdentity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, HAssocType as hir$HAssocType, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, HDictDef as hir$HDictDef, HEffectHandler as hir$HEffectHandler, HEffectOp as hir$HEffectOp, HEnumVariant as hir$HEnumVariant, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HExpr_ReturnExpr as hir$HExpr_ReturnExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HMatchArm as hir$HMatchArm, HParam as hir$HParam, HProgram as hir$HProgram, HSigMember as hir$HSigMember, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HStructField as hir$HStructField, HStructFieldInit as hir$HStructFieldInit, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug } from "./hir.js";
 import { RING_TYPEID_CELL as codegen_llvm_ctx$RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV as codegen_llvm_ctx$RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_DYN as codegen_llvm_ctx$RING_TYPEID_DICT_DYN, RING_TYPEID_DICT_STATIC as codegen_llvm_ctx$RING_TYPEID_DICT_STATIC, build_entry_alloca as codegen_llvm_ctx$build_entry_alloca, fresh_name as codegen_llvm_ctx$fresh_name, get_builtin_typeid as codegen_llvm_ctx$get_builtin_typeid, get_or_assign_typeid as codegen_llvm_ctx$get_or_assign_typeid, get_or_declare_runtime_fn as codegen_llvm_ctx$get_or_declare_runtime_fn, get_rt_fn_type as codegen_llvm_ctx$get_rt_fn_type, llvm_mangle_fn as codegen_llvm_ctx$llvm_mangle_fn, llvm_mangle_fn_with_prefix as codegen_llvm_ctx$llvm_mangle_fn_with_prefix, llvm_mangle_method as codegen_llvm_ctx$llvm_mangle_method, llvm_resolve_fn as codegen_llvm_ctx$llvm_resolve_fn, llvm_resolve_method as codegen_llvm_ctx$llvm_resolve_method, EnumTypeInfo as codegen_llvm_ctx$EnumTypeInfo, EnumVariantInfo as codegen_llvm_ctx$EnumVariantInfo, ExternFnInfo as codegen_llvm_ctx$ExternFnInfo, ExternParamMarshall_PassthroughPtr as codegen_llvm_ctx$ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr as codegen_llvm_ctx$ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen as codegen_llvm_ctx$ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32 as codegen_llvm_ctx$ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64 as codegen_llvm_ctx$ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble as codegen_llvm_ctx$ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount as codegen_llvm_ctx$ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64 as codegen_llvm_ctx$ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr as codegen_llvm_ctx$ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid as codegen_llvm_ctx$ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed as codegen_llvm_ctx$ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr as codegen_llvm_ctx$ExternRetMarshall_RetStrFromCstr, LlvmCtx as codegen_llvm_ctx$LlvmCtx, StructFieldInfo as codegen_llvm_ctx$StructFieldInfo, __EnumVariantInfo_Clone as codegen_llvm_ctx$__EnumVariantInfo_Clone, __EnumVariantInfo_Debug as codegen_llvm_ctx$__EnumVariantInfo_Debug, __ExternParamMarshall_Eq as codegen_llvm_ctx$__ExternParamMarshall_Eq, __ExternParamMarshall_Clone as codegen_llvm_ctx$__ExternParamMarshall_Clone, __ExternParamMarshall_Ord as codegen_llvm_ctx$__ExternParamMarshall_Ord, __ExternParamMarshall_Debug as codegen_llvm_ctx$__ExternParamMarshall_Debug, __ExternRetMarshall_Eq as codegen_llvm_ctx$__ExternRetMarshall_Eq, __ExternRetMarshall_Clone as codegen_llvm_ctx$__ExternRetMarshall_Clone, __ExternRetMarshall_Ord as codegen_llvm_ctx$__ExternRetMarshall_Ord, __ExternRetMarshall_Debug as codegen_llvm_ctx$__ExternRetMarshall_Debug } from "./codegen_llvm_ctx.js";
 import { box_bool as codegen_llvm_expr$box_bool, box_float as codegen_llvm_expr$box_float, box_int as codegen_llvm_expr$box_int, build_cell_alloc as codegen_llvm_expr$build_cell_alloc, build_cell_store as codegen_llvm_expr$build_cell_store, build_default_evidence_all as codegen_llvm_expr$build_default_evidence_all, emit_memoised_const_body as codegen_llvm_expr$emit_memoised_const_body, emit_memoised_dict_getter as codegen_llvm_expr$emit_memoised_dict_getter, gen_llvm_expr as codegen_llvm_expr$gen_llvm_expr, get_or_create_dict_global as codegen_llvm_expr$get_or_create_dict_global, is_boxed_def as codegen_llvm_expr$is_boxed_def, resolve_static_dict_by_name as codegen_llvm_expr$resolve_static_dict_by_name, unbox_int as codegen_llvm_expr$unbox_int, unbox_to_i1 as codegen_llvm_expr$unbox_to_i1 } from "./codegen_llvm_expr.js";
 import { LIST_HOF_JS_METHOD as codegen_ctx$LIST_HOF_JS_METHOD, emit as codegen_ctx$emit, emit_raw as codegen_ctx$emit_raw, extract_effect_names as codegen_ctx$extract_effect_names, get_evidence_params as codegen_ctx$get_evidence_params, is_imported_name as codegen_ctx$is_imported_name, new_codegen_ctx as codegen_ctx$new_codegen_ctx, pop_indent as codegen_ctx$pop_indent, push_indent as codegen_ctx$push_indent, qualify as codegen_ctx$qualify, safe_ident as codegen_ctx$safe_ident, CodegenCtx as codegen_ctx$CodegenCtx, HTraitDeclInfo as codegen_ctx$HTraitDeclInfo } from "./codegen_ctx.js";
@@ -242,6 +242,8 @@ function Result_unwrap_or(self, _default) {
 function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
+
+
 
 
 
@@ -629,6 +631,22 @@ function emit_debug_field_to_str(ctx, val, action) {
     const __ring_m18 = action;
     if (__ring_m18._tag === "Identity") {
       return emit_identity_to_debug_str(ctx, val);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "FloatIdentity") {
+      const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_float", [ctx.ptr_type], ctx.double_type);
+      const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_float");
+      const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], codegen_llvm_ctx$fresh_name(ctx, "uf"));
+      const to_str_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_float_to_str", [ctx.double_type], ctx.ptr_type);
+      const to_str_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_float_to_str");
+      return LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "fts"));
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "BoolIdentity") {
+      const raw = codegen_llvm_expr$unbox_int(ctx, val);
+      const to_str_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_bool_to_str", [ctx.i64_type], ctx.ptr_type);
+      const to_str_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_bool_to_str");
+      return LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "bts"));
       break __ring_match18;
     }
     if (__ring_m18._tag === "Call") {
@@ -1380,6 +1398,14 @@ function emit_dict_eq_call(ctx, lhs, rhs, dict_name, extra_dicts) {
   return LLVMBuildICmp(ctx.builder, 33, raw, LLVMConstInt(ctx.i64_type, 0, 0), codegen_llvm_ctx$fresh_name(ctx, "di1"));
 }
 
+function emit_float_identity_eq_cmp(ctx, lhs, rhs) {
+  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_float", [ctx.ptr_type], ctx.double_type);
+  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_float");
+  const lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], codegen_llvm_ctx$fresh_name(ctx, "lf"));
+  const rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], codegen_llvm_ctx$fresh_name(ctx, "rf"));
+  return LLVMBuildFCmp(ctx.builder, 1, lhs_raw, rhs_raw, codegen_llvm_ctx$fresh_name(ctx, "feq"));
+}
+
 function emit_identity_eq_cmp(ctx, lhs, rhs) {
   let __ring_blk12;
   __ring_match41: {
@@ -1474,6 +1500,16 @@ function emit_field_eq_cmp(ctx, lhs, rhs, action) {
     const __ring_m43 = action;
     if (__ring_m43._tag === "Identity") {
       return emit_identity_eq_cmp(ctx, lhs, rhs);
+      break __ring_match43;
+    }
+    if (__ring_m43._tag === "FloatIdentity") {
+      return emit_float_identity_eq_cmp(ctx, lhs, rhs);
+      break __ring_match43;
+    }
+    if (__ring_m43._tag === "BoolIdentity") {
+      const lhs_int = llvm_ptrtoint(ctx, lhs);
+      const rhs_int = llvm_ptrtoint(ctx, rhs);
+      return LLVMBuildICmp(ctx.builder, 32, lhs_int, rhs_int, codegen_llvm_ctx$fresh_name(ctx, "beq"));
       break __ring_match43;
     }
     if (__ring_m43._tag === "Call") {
@@ -1866,7 +1902,7 @@ function emit_dict_cmp_call(ctx, lhs, rhs, dict_name, extra_dicts) {
   return LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, [env_ptr, lhs, rhs], codegen_llvm_ctx$fresh_name(ctx, "dcmp"));
 }
 
-function emit_identity_cmp(ctx, lhs, rhs) {
+function emit_float_identity_cmp(ctx, lhs, rhs) {
   let __ring_blk19;
   __ring_match55: {
     const __ring_m55 = ctx.current_fn;
@@ -1876,12 +1912,61 @@ function emit_identity_cmp(ctx, lhs, rhs) {
       break __ring_match55;
     }
     if (__ring_m55._tag === "none") {
-      __ring_blk19 = panic("LLVM codegen: emit_identity_cmp outside function");
+      __ring_blk19 = panic("LLVM codegen: emit_float_identity_cmp outside function");
       break __ring_match55;
     }
     __match_fail(__ring_m55);
   }
   const current_fn = __ring_blk19;
+  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_float", [ctx.ptr_type], ctx.double_type);
+  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_float");
+  const lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], codegen_llvm_ctx$fresh_name(ctx, "lf"));
+  const rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], codegen_llvm_ctx$fresh_name(ctx, "rf"));
+  const is_lt = LLVMBuildFCmp(ctx.builder, 4, lhs_raw, rhs_raw, codegen_llvm_ctx$fresh_name(ctx, "flt"));
+  const is_gt = LLVMBuildFCmp(ctx.builder, 2, lhs_raw, rhs_raw, codegen_llvm_ctx$fresh_name(ctx, "fgt"));
+  const lt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.lt");
+  const gt_check_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.gtchk");
+  const gt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.gt");
+  const eq_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.eq");
+  const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.merge");
+  discard(LLVMBuildCondBr(ctx.builder, is_lt, lt_bb, gt_check_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, lt_bb);
+  const neg_one = LLVMConstInt(ctx.i64_type, (0 - 1), 1);
+  const lt_val = codegen_llvm_expr$box_int(ctx, neg_one);
+  const lt_end = LLVMGetInsertBlock(ctx.builder);
+  discard(LLVMBuildBr(ctx.builder, merge_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, gt_check_bb);
+  discard(LLVMBuildCondBr(ctx.builder, is_gt, gt_bb, eq_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, gt_bb);
+  const gt_val = codegen_llvm_expr$box_int(ctx, LLVMConstInt(ctx.i64_type, 1, 0));
+  const gt_end = LLVMGetInsertBlock(ctx.builder);
+  discard(LLVMBuildBr(ctx.builder, merge_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, eq_bb);
+  const eq_val = codegen_llvm_expr$box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0));
+  const eq_end = LLVMGetInsertBlock(ctx.builder);
+  discard(LLVMBuildBr(ctx.builder, merge_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
+  const phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, codegen_llvm_ctx$fresh_name(ctx, "fcmp"));
+  LLVMAddIncoming(phi, [lt_val, gt_val, eq_val], [lt_end, gt_end, eq_end]);
+  return phi;
+}
+
+function emit_identity_cmp(ctx, lhs, rhs) {
+  let __ring_blk20;
+  __ring_match56: {
+    const __ring_m56 = ctx.current_fn;
+    if (__ring_m56._tag === "some") {
+      const f = __ring_m56._0;
+      __ring_blk20 = f;
+      break __ring_match56;
+    }
+    if (__ring_m56._tag === "none") {
+      __ring_blk20 = panic("LLVM codegen: emit_identity_cmp outside function");
+      break __ring_match56;
+    }
+    __match_fail(__ring_m56);
+  }
+  const current_fn = __ring_blk20;
   const lhs_int = llvm_ptrtoint(ctx, lhs);
   const rhs_int = llvm_ptrtoint(ctx, rhs);
   const one = LLVMConstInt(ctx.i64_type, 1, 0);
@@ -1939,21 +2024,21 @@ function emit_tuple_cmp(ctx, lhs, rhs, element_actions) {
   if ((List_len(element_actions) === 0)) {
     return codegen_llvm_expr$box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0));
   }
-  let __ring_blk20;
-  __ring_match56: {
-    const __ring_m56 = ctx.current_fn;
-    if (__ring_m56._tag === "some") {
-      const f = __ring_m56._0;
-      __ring_blk20 = f;
-      break __ring_match56;
+  let __ring_blk21;
+  __ring_match57: {
+    const __ring_m57 = ctx.current_fn;
+    if (__ring_m57._tag === "some") {
+      const f = __ring_m57._0;
+      __ring_blk21 = f;
+      break __ring_match57;
     }
-    if (__ring_m56._tag === "none") {
-      __ring_blk20 = panic("LLVM codegen: emit_tuple_cmp outside function");
-      break __ring_match56;
+    if (__ring_m57._tag === "none") {
+      __ring_blk21 = panic("LLVM codegen: emit_tuple_cmp outside function");
+      break __ring_match57;
     }
-    __match_fail(__ring_m56);
+    __match_fail(__ring_m57);
   }
-  const current_fn = __ring_blk20;
+  const current_fn = __ring_blk21;
   const list_get_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type);
   const list_get_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_get");
   if ((List_len(element_actions) === 1)) {
@@ -1988,42 +2073,50 @@ function emit_tuple_cmp(ctx, lhs, rhs, element_actions) {
 }
 
 function emit_field_cmp(ctx, lhs, rhs, action) {
-  __ring_match57: {
-    const __ring_m57 = action;
-    if (__ring_m57._tag === "Identity") {
+  __ring_match58: {
+    const __ring_m58 = action;
+    if (__ring_m58._tag === "Identity") {
       return emit_identity_cmp(ctx, lhs, rhs);
-      break __ring_match57;
+      break __ring_match58;
     }
-    if (__ring_m57._tag === "Call") {
-      const dict_name = __ring_m57.dict_name; const extra_dicts = __ring_m57.extra_dicts;
+    if (__ring_m58._tag === "FloatIdentity") {
+      return emit_float_identity_cmp(ctx, lhs, rhs);
+      break __ring_match58;
+    }
+    if (__ring_m58._tag === "BoolIdentity") {
+      return emit_identity_cmp(ctx, lhs, rhs);
+      break __ring_match58;
+    }
+    if (__ring_m58._tag === "Call") {
+      const dict_name = __ring_m58.dict_name; const extra_dicts = __ring_m58.extra_dicts;
       return emit_dict_cmp_call(ctx, lhs, rhs, dict_name, extra_dicts);
-      break __ring_match57;
+      break __ring_match58;
     }
-    if (__ring_m57._tag === "Tuple") {
-      const element_actions = __ring_m57.element_actions;
+    if (__ring_m58._tag === "Tuple") {
+      const element_actions = __ring_m58.element_actions;
       return emit_tuple_cmp(ctx, lhs, rhs, element_actions);
-      break __ring_match57;
+      break __ring_match58;
     }
-    if (__ring_m57._tag === "FnLiteral") {
+    if (__ring_m58._tag === "FnLiteral") {
       return codegen_llvm_expr$box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0));
-      break __ring_match57;
+      break __ring_match58;
     }
-    __match_fail(__ring_m57);
+    __match_fail(__ring_m58);
   }
 }
 
 function emit_enum_cmp_fn(ctx, type_name, variants, bounds) {
   const mangled = codegen_llvm_ctx$llvm_mangle_method(type_name, "cmp");
-  __ring_match58: {
-    const __ring_m58 = _Map_get(ctx.functions, mangled);
-    if (__ring_m58._tag === "some") {
+  __ring_match59: {
+    const __ring_m59 = _Map_get(ctx.functions, mangled);
+    if (__ring_m59._tag === "some") {
       return;
-      break __ring_match58;
+      break __ring_match59;
     }
-    if (__ring_m58._tag === "none") {
-      break __ring_match58;
+    if (__ring_m59._tag === "none") {
+      break __ring_match59;
     }
-    __match_fail(__ring_m58);
+    __match_fail(__ring_m59);
   }
   const dict_params = collect_trait_dict_params(bounds, "Ord");
   let param_types = [ctx.ptr_type, ctx.ptr_type];
@@ -2052,21 +2145,21 @@ function emit_enum_cmp_fn(ctx, type_name, variants, bounds) {
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb);
     return;
   }
-  let __ring_blk21;
-  __ring_match59: {
-    const __ring_m59 = _Map_get(ctx.enum_types, type_name);
-    if (__ring_m59._tag === "some") {
-      const info = __ring_m59._0;
-      __ring_blk21 = info;
-      break __ring_match59;
+  let __ring_blk22;
+  __ring_match60: {
+    const __ring_m60 = _Map_get(ctx.enum_types, type_name);
+    if (__ring_m60._tag === "some") {
+      const info = __ring_m60._0;
+      __ring_blk22 = info;
+      break __ring_match60;
     }
-    if (__ring_m59._tag === "none") {
-      __ring_blk21 = panic("unreachable");
-      break __ring_match59;
+    if (__ring_m60._tag === "none") {
+      __ring_blk22 = panic("unreachable");
+      break __ring_match60;
     }
-    __match_fail(__ring_m59);
+    __match_fail(__ring_m60);
   }
-  const enum_info = __ring_blk21;
+  const enum_info = __ring_blk22;
   const tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0);
   const self_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, codegen_llvm_ctx$fresh_name(ctx, "stp"));
   const self_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, self_tag_ptr, codegen_llvm_ctx$fresh_name(ctx, "stv"));
@@ -2101,21 +2194,21 @@ function emit_enum_cmp_fn(ctx, type_name, variants, bounds) {
   const __ring_end39 = List_len(variants);
   for (let vi = 0; vi < __ring_end39; vi++) {
     const variant = __ring_index(variants, vi);
-    let __ring_blk22;
-    __ring_match60: {
-      const __ring_m60 = _Map_get(enum_info.variants, variant.name);
-      if (__ring_m60._tag === "some") {
-        const vinfo = __ring_m60._0;
-        __ring_blk22 = vinfo.tag;
-        break __ring_match60;
+    let __ring_blk23;
+    __ring_match61: {
+      const __ring_m61 = _Map_get(enum_info.variants, variant.name);
+      if (__ring_m61._tag === "some") {
+        const vinfo = __ring_m61._0;
+        __ring_blk23 = vinfo.tag;
+        break __ring_match61;
       }
-      if (__ring_m60._tag === "none") {
-        __ring_blk22 = vi;
-        break __ring_match60;
+      if (__ring_m61._tag === "none") {
+        __ring_blk23 = vi;
+        break __ring_match61;
       }
-      __match_fail(__ring_m60);
+      __match_fail(__ring_m61);
     }
-    const var_tag = __ring_blk22;
+    const var_tag = __ring_blk23;
     const case_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, `cmp.v.${variant.name}`);
     LLVMAddCase(cmp_switch, LLVMConstInt(ctx.i64_type, var_tag, 0), case_bb);
     LLVMPositionBuilderAtEnd(ctx.builder, case_bb);
@@ -2153,16 +2246,16 @@ function emit_enum_cmp_fn(ctx, type_name, variants, bounds) {
 
 function emit_struct_cmp_fn(ctx, type_name, fields, bounds) {
   const mangled = codegen_llvm_ctx$llvm_mangle_method(type_name, "cmp");
-  __ring_match61: {
-    const __ring_m61 = _Map_get(ctx.functions, mangled);
-    if (__ring_m61._tag === "some") {
+  __ring_match62: {
+    const __ring_m62 = _Map_get(ctx.functions, mangled);
+    if (__ring_m62._tag === "some") {
       return;
-      break __ring_match61;
+      break __ring_match62;
     }
-    if (__ring_m61._tag === "none") {
-      break __ring_match61;
+    if (__ring_m62._tag === "none") {
+      break __ring_match62;
     }
-    __match_fail(__ring_m61);
+    __match_fail(__ring_m62);
   }
   const dict_params = collect_trait_dict_params(bounds, "Ord");
   let param_types = [ctx.ptr_type, ctx.ptr_type];
@@ -2197,21 +2290,21 @@ function emit_struct_cmp_fn(ctx, type_name, fields, bounds) {
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb);
     return;
   }
-  let __ring_blk23;
-  __ring_match62: {
-    const __ring_m62 = _Map_get(ctx.struct_types, type_name);
-    if (__ring_m62._tag === "some") {
-      const info = __ring_m62._0;
-      __ring_blk23 = info;
-      break __ring_match62;
+  let __ring_blk24;
+  __ring_match63: {
+    const __ring_m63 = _Map_get(ctx.struct_types, type_name);
+    if (__ring_m63._tag === "some") {
+      const info = __ring_m63._0;
+      __ring_blk24 = info;
+      break __ring_match63;
     }
-    if (__ring_m62._tag === "none") {
-      __ring_blk23 = panic("unreachable");
-      break __ring_match62;
+    if (__ring_m63._tag === "none") {
+      __ring_blk24 = panic("unreachable");
+      break __ring_match63;
     }
-    __match_fail(__ring_m62);
+    __match_fail(__ring_m63);
   }
-  const struct_info = __ring_blk23;
+  const struct_info = __ring_blk24;
   const __ring_end42 = List_len(fields);
   for (let fi = 0; fi < __ring_end42; fi++) {
     const field = __ring_index(fields, fi);
@@ -2243,30 +2336,14 @@ function emit_struct_cmp_fn(ctx, type_name, fields, bounds) {
 
 function emit_derived_ord_llvm(ctx, di) {
   const type_name = di.type_name;
-  __ring_match63: {
-    const __ring_m63 = di.type_kind;
-    if (__ring_m63._tag === "StructKind") {
-      __ring_match64: {
-        const __ring_m64 = di.struct_fields;
-        if (__ring_m64._tag === "some") {
-          const fields = __ring_m64._0;
-          emit_struct_cmp_fn(ctx, type_name, fields, di.bounds);
-          return emit_derived_trait_dict(ctx, type_name, "Ord");
-          break __ring_match64;
-        }
-        if (__ring_m64._tag === "none") {
-          break __ring_match64;
-        }
-        __match_fail(__ring_m64);
-      }
-      break __ring_match63;
-    }
-    if (__ring_m63._tag === "EnumKind") {
+  __ring_match64: {
+    const __ring_m64 = di.type_kind;
+    if (__ring_m64._tag === "StructKind") {
       __ring_match65: {
-        const __ring_m65 = di.enum_variants;
+        const __ring_m65 = di.struct_fields;
         if (__ring_m65._tag === "some") {
-          const variants = __ring_m65._0;
-          emit_enum_cmp_fn(ctx, type_name, variants, di.bounds);
+          const fields = __ring_m65._0;
+          emit_struct_cmp_fn(ctx, type_name, fields, di.bounds);
           return emit_derived_trait_dict(ctx, type_name, "Ord");
           break __ring_match65;
         }
@@ -2275,9 +2352,25 @@ function emit_derived_ord_llvm(ctx, di) {
         }
         __match_fail(__ring_m65);
       }
-      break __ring_match63;
+      break __ring_match64;
     }
-    __match_fail(__ring_m63);
+    if (__ring_m64._tag === "EnumKind") {
+      __ring_match66: {
+        const __ring_m66 = di.enum_variants;
+        if (__ring_m66._tag === "some") {
+          const variants = __ring_m66._0;
+          emit_enum_cmp_fn(ctx, type_name, variants, di.bounds);
+          return emit_derived_trait_dict(ctx, type_name, "Ord");
+          break __ring_match66;
+        }
+        if (__ring_m66._tag === "none") {
+          break __ring_match66;
+        }
+        __match_fail(__ring_m66);
+      }
+      break __ring_match64;
+    }
+    __match_fail(__ring_m64);
   }
 }
 
@@ -2287,81 +2380,81 @@ function emit_derived_impls_llvm(ctx, derived_impls) {
     const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
     if (__ring_next_43._tag === "none") break;
     const di = __ring_next_43._0;
-    __ring_match66: {
-      const __ring_m66 = di.trait_name;
-      if (__ring_m66 === "Eq") {
+    __ring_match67: {
+      const __ring_m67 = di.trait_name;
+      if (__ring_m67 === "Eq") {
         emit_derived_eq_llvm(ctx, di);
-        break __ring_match66;
+        break __ring_match67;
       }
-      if (__ring_m66 === "Clone") {
+      if (__ring_m67 === "Clone") {
         emit_derived_clone_llvm(ctx, di);
-        break __ring_match66;
+        break __ring_match67;
       }
-      if (__ring_m66 === "Debug") {
+      if (__ring_m67 === "Debug") {
         emit_derived_debug_llvm(ctx, di);
-        break __ring_match66;
+        break __ring_match67;
       }
-      if (__ring_m66 === "Ord") {
+      if (__ring_m67 === "Ord") {
         emit_derived_ord_llvm(ctx, di);
-        break __ring_match66;
+        break __ring_match67;
       }
-      break __ring_match66;
+      break __ring_match67;
     }
   }
 }
 
 function emit_enum_constructors(ctx, name, variants) {
-  let __ring_blk24;
-  __ring_match67: {
-    const __ring_m67 = _Map_get(ctx.enum_types, name);
-    if (__ring_m67._tag === "some") {
-      const info = __ring_m67._0;
-      __ring_blk24 = info;
-      break __ring_match67;
+  let __ring_blk25;
+  __ring_match68: {
+    const __ring_m68 = _Map_get(ctx.enum_types, name);
+    if (__ring_m68._tag === "some") {
+      const info = __ring_m68._0;
+      __ring_blk25 = info;
+      break __ring_match68;
     }
-    if (__ring_m67._tag === "none") {
-      __ring_blk24 = panic(`LLVM codegen: enum '${name}' not registered`);
-      break __ring_match67;
+    if (__ring_m68._tag === "none") {
+      __ring_blk25 = panic(`LLVM codegen: enum '${name}' not registered`);
+      break __ring_match68;
     }
-    __match_fail(__ring_m67);
+    __match_fail(__ring_m68);
   }
-  const enum_info = __ring_blk24;
+  const enum_info = __ring_blk25;
   const __ring_iter_44 = __List_Iterable.iter(variants);
   while (true) {
     const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
     if (__ring_next_44._tag === "none") break;
     const v = __ring_next_44._0;
     const ctor_name = `ring_${name}_${v.name}`;
-    let __ring_blk25;
-    __ring_match68: {
-      const __ring_m68 = _Map_get(enum_info.variants, v.name);
-      if (__ring_m68._tag === "some") {
-        const vi = __ring_m68._0;
-        __ring_blk25 = vi;
-        break __ring_match68;
-      }
-      if (__ring_m68._tag === "none") {
-        __ring_blk25 = panic(`LLVM codegen: variant '${v.name}' not found in enum '${name}'`);
-        break __ring_match68;
-      }
-      __match_fail(__ring_m68);
-    }
-    const variant_info = __ring_blk25;
     let __ring_blk26;
     __ring_match69: {
-      const __ring_m69 = _Map_get(ctx.functions, ctor_name);
+      const __ring_m69 = _Map_get(enum_info.variants, v.name);
       if (__ring_m69._tag === "some") {
-        const fv = __ring_m69._0;
-        __ring_blk26 = fv;
+        const vi = __ring_m69._0;
+        __ring_blk26 = vi;
         break __ring_match69;
       }
       if (__ring_m69._tag === "none") {
-        __ring_blk26 = panic(`LLVM codegen: enum ctor '${ctor_name}' not forward-declared`);
+        __ring_blk26 = panic(`LLVM codegen: variant '${v.name}' not found in enum '${name}'`);
         break __ring_match69;
       }
       __match_fail(__ring_m69);
     }
-    const fn_val = __ring_blk26;
+    const variant_info = __ring_blk26;
+    let __ring_blk27;
+    __ring_match70: {
+      const __ring_m70 = _Map_get(ctx.functions, ctor_name);
+      if (__ring_m70._tag === "some") {
+        const fv = __ring_m70._0;
+        __ring_blk27 = fv;
+        break __ring_match70;
+      }
+      if (__ring_m70._tag === "none") {
+        __ring_blk27 = panic(`LLVM codegen: enum ctor '${ctor_name}' not forward-declared`);
+        break __ring_match70;
+      }
+      __match_fail(__ring_m70);
+    }
+    const fn_val = __ring_blk27;
     const saved_fn = ctx.current_fn;
     ctx.current_fn = Option_some(fn_val);
     const entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry");
@@ -2386,50 +2479,50 @@ function emit_enum_constructors(ctx, name, variants) {
 }
 
 function emit_fn_body(ctx, name, params, effects, body, trait_bounds, impl_type) {
-  let __ring_blk27;
-  __ring_match70: {
-    const __ring_m70 = impl_type;
-    if (__ring_m70._tag === "some") {
-      const t = __ring_m70._0;
-      __ring_blk27 = codegen_llvm_ctx$llvm_mangle_method(t, name);
-      break __ring_match70;
+  let __ring_blk28;
+  __ring_match71: {
+    const __ring_m71 = impl_type;
+    if (__ring_m71._tag === "some") {
+      const t = __ring_m71._0;
+      __ring_blk28 = codegen_llvm_ctx$llvm_mangle_method(t, name);
+      break __ring_match71;
     }
-    if (__ring_m70._tag === "none") {
-      let __ring_blk28;
-      __ring_match71: {
-        const __ring_m71 = ctx.module_prefix;
-        if (__ring_m71._tag === "some") {
-          const prefix = __ring_m71._0;
-          __ring_blk28 = codegen_llvm_ctx$llvm_mangle_fn_with_prefix(prefix, name);
-          break __ring_match71;
+    if (__ring_m71._tag === "none") {
+      let __ring_blk29;
+      __ring_match72: {
+        const __ring_m72 = ctx.module_prefix;
+        if (__ring_m72._tag === "some") {
+          const prefix = __ring_m72._0;
+          __ring_blk29 = codegen_llvm_ctx$llvm_mangle_fn_with_prefix(prefix, name);
+          break __ring_match72;
         }
-        if (__ring_m71._tag === "none") {
-          __ring_blk28 = codegen_llvm_ctx$llvm_mangle_fn(name);
-          break __ring_match71;
+        if (__ring_m72._tag === "none") {
+          __ring_blk29 = codegen_llvm_ctx$llvm_mangle_fn(name);
+          break __ring_match72;
         }
-        __match_fail(__ring_m71);
+        __match_fail(__ring_m72);
       }
-      __ring_blk27 = __ring_blk28;
-      break __ring_match70;
+      __ring_blk28 = __ring_blk29;
+      break __ring_match71;
     }
-    __match_fail(__ring_m70);
+    __match_fail(__ring_m71);
   }
-  const mangled = __ring_blk27;
-  let __ring_blk29;
-  __ring_match72: {
-    const __ring_m72 = _Map_get(ctx.functions, mangled);
-    if (__ring_m72._tag === "some") {
-      const f = __ring_m72._0;
-      __ring_blk29 = f;
-      break __ring_match72;
+  const mangled = __ring_blk28;
+  let __ring_blk30;
+  __ring_match73: {
+    const __ring_m73 = _Map_get(ctx.functions, mangled);
+    if (__ring_m73._tag === "some") {
+      const f = __ring_m73._0;
+      __ring_blk30 = f;
+      break __ring_match73;
     }
-    if (__ring_m72._tag === "none") {
-      __ring_blk29 = panic(`LLVM codegen: function '${mangled}' not forward-declared`);
-      break __ring_match72;
+    if (__ring_m73._tag === "none") {
+      __ring_blk30 = panic(`LLVM codegen: function '${mangled}' not forward-declared`);
+      break __ring_match73;
     }
-    __match_fail(__ring_m72);
+    __match_fail(__ring_m73);
   }
-  const fn_val = __ring_blk29;
+  const fn_val = __ring_blk30;
   const saved_fn = ctx.current_fn;
   ctx.current_fn = Option_some(fn_val);
   const saved_fn_name = ctx.current_fn_name;
@@ -2460,21 +2553,21 @@ function emit_fn_body(ctx, name, params, effects, body, trait_bounds, impl_type)
     _Map_insert(ctx.named_values, dict_name, alloca);
     param_idx = (param_idx + 1);
   }
-  let __ring_blk30;
-  __ring_match73: {
-    const __ring_m73 = _Map_get(ctx.local_fn_effects, name);
-    if (__ring_m73._tag === "some") {
-      const eff = __ring_m73._0;
-      __ring_blk30 = eff;
-      break __ring_match73;
+  let __ring_blk31;
+  __ring_match74: {
+    const __ring_m74 = _Map_get(ctx.local_fn_effects, name);
+    if (__ring_m74._tag === "some") {
+      const eff = __ring_m74._0;
+      __ring_blk31 = eff;
+      break __ring_match74;
     }
-    if (__ring_m73._tag === "none") {
-      __ring_blk30 = effects;
-      break __ring_match73;
+    if (__ring_m74._tag === "none") {
+      __ring_blk31 = effects;
+      break __ring_match74;
     }
-    __match_fail(__ring_m73);
+    __match_fail(__ring_m74);
   }
-  const effective_effects = __ring_blk30;
+  const effective_effects = __ring_blk31;
   const ev_names = codegen_ctx$extract_effect_names(effective_effects);
   const __ring_iter_48 = __List_Iterable.iter(ev_names);
   while (true) {
@@ -2496,16 +2589,16 @@ function emit_fn_body(ctx, name, params, effects, body, trait_bounds, impl_type)
 
 function emit_struct_constructor(ctx, name, fields) {
   const ctor_name = codegen_llvm_ctx$llvm_mangle_fn(name);
-  __ring_match74: {
-    const __ring_m74 = _Map_get(ctx.functions, ctor_name);
-    if (__ring_m74._tag === "some") {
+  __ring_match75: {
+    const __ring_m75 = _Map_get(ctx.functions, ctor_name);
+    if (__ring_m75._tag === "some") {
       return;
-      break __ring_match74;
+      break __ring_match75;
     }
-    if (__ring_m74._tag === "none") {
-      break __ring_match74;
+    if (__ring_m75._tag === "none") {
+      break __ring_match75;
     }
-    __match_fail(__ring_m74);
+    __match_fail(__ring_m75);
   }
   let param_types = [];
   const __ring_iter_49 = __List_Iterable.iter(fields);
@@ -2523,21 +2616,21 @@ function emit_struct_constructor(ctx, name, fields) {
   ctx.current_fn = Option_some(fn_val);
   const entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry");
   LLVMPositionBuilderAtEnd(ctx.builder, entry);
-  let __ring_blk31;
-  __ring_match75: {
-    const __ring_m75 = _Map_get(ctx.struct_types, name);
-    if (__ring_m75._tag === "some") {
-      const info = __ring_m75._0;
-      __ring_blk31 = info;
-      break __ring_match75;
+  let __ring_blk32;
+  __ring_match76: {
+    const __ring_m76 = _Map_get(ctx.struct_types, name);
+    if (__ring_m76._tag === "some") {
+      const info = __ring_m76._0;
+      __ring_blk32 = info;
+      break __ring_match76;
     }
-    if (__ring_m75._tag === "none") {
-      __ring_blk31 = panic(`LLVM codegen: struct '${name}' not registered`);
-      break __ring_match75;
+    if (__ring_m76._tag === "none") {
+      __ring_blk32 = panic(`LLVM codegen: struct '${name}' not registered`);
+      break __ring_match76;
     }
-    __match_fail(__ring_m75);
+    __match_fail(__ring_m76);
   }
-  const struct_info = __ring_blk31;
+  const struct_info = __ring_blk32;
   const size = LLVMSizeOf(struct_info.llvm_type);
   const alloc_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type);
   const alloc_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_alloc");
@@ -2618,29 +2711,29 @@ function emit_trait_default_methods(ctx, trait_name, methods) {
     if ((!method.has_default)) {
       continue;
     }
-    __ring_match76: {
-      const __ring_m76 = method.body;
-      if (__ring_m76._tag === "some") {
-        const body = __ring_m76._0;
+    __ring_match77: {
+      const __ring_m77 = method.body;
+      if (__ring_m77._tag === "some") {
+        const body = __ring_m77._0;
         const default_fn_name = `__${trait_name}_${method.name}`;
-        __ring_match77: {
-          const __ring_m77 = _Map_get(ctx.functions, default_fn_name);
-          if (__ring_m77._tag === "some") {
-            const fn_val = __ring_m77._0;
+        __ring_match78: {
+          const __ring_m78 = _Map_get(ctx.functions, default_fn_name);
+          if (__ring_m78._tag === "some") {
+            const fn_val = __ring_m78._0;
             emit_one_default_method(ctx, fn_val, default_fn_name, trait_name, method, body);
-            break __ring_match77;
+            break __ring_match78;
           }
-          if (__ring_m77._tag === "none") {
-            break __ring_match77;
+          if (__ring_m78._tag === "none") {
+            break __ring_match78;
           }
-          __match_fail(__ring_m77);
+          __match_fail(__ring_m78);
         }
-        break __ring_match76;
+        break __ring_match77;
       }
-      if (__ring_m76._tag === "none") {
-        break __ring_match76;
+      if (__ring_m77._tag === "none") {
+        break __ring_match77;
       }
-      __match_fail(__ring_m76);
+      __match_fail(__ring_m77);
     }
   }
 }
@@ -2653,31 +2746,31 @@ function emit_trait_dict(ctx, target_type, trait_name, methods) {
     const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
     if (__ring_next_55._tag === "none") break;
     const m = __ring_next_55._0;
-    __ring_match78: {
-      const __ring_m78 = m;
-      if (__ring_m78._tag === "Fn") {
-        const name = __ring_m78.name;
+    __ring_match79: {
+      const __ring_m79 = m;
+      if (__ring_m79._tag === "Fn") {
+        const name = __ring_m79.name;
         List_push(impl_methods, name);
-        break __ring_match78;
+        break __ring_match79;
       }
-      break __ring_match78;
-    }
-  }
-  let __ring_blk32;
-  __ring_match79: {
-    const __ring_m79 = _Map_get(ctx.trait_method_order, trait_name);
-    if (__ring_m79._tag === "some") {
-      const order = __ring_m79._0;
-      __ring_blk32 = order;
       break __ring_match79;
     }
-    if (__ring_m79._tag === "none") {
-      __ring_blk32 = impl_methods;
-      break __ring_match79;
-    }
-    __match_fail(__ring_m79);
   }
-  const method_order = __ring_blk32;
+  let __ring_blk33;
+  __ring_match80: {
+    const __ring_m80 = _Map_get(ctx.trait_method_order, trait_name);
+    if (__ring_m80._tag === "some") {
+      const order = __ring_m80._0;
+      __ring_blk33 = order;
+      break __ring_match80;
+    }
+    if (__ring_m80._tag === "none") {
+      __ring_blk33 = impl_methods;
+      break __ring_match80;
+    }
+    __match_fail(__ring_m80);
+  }
+  const method_order = __ring_blk33;
   const method_count = List_len(method_order);
   if ((method_count === 0)) {
     return;
@@ -2708,17 +2801,17 @@ function emit_trait_dict(ctx, target_type, trait_name, methods) {
   const closure_size = LLVMSizeOf(closure_ty);
   const __ring_end57 = method_count;
   for (let i = 0; i < __ring_end57; i++) {
-    __ring_match80: {
-      const __ring_m80 = List_get(method_order, i);
-      if (__ring_m80._tag === "some") {
-        const method_name = __ring_m80._0;
+    __ring_match81: {
+      const __ring_m81 = List_get(method_order, i);
+      if (__ring_m81._tag === "some") {
+        const method_name = __ring_m81._0;
         const _ = emit_dict_method_slot(ctx, target_type, trait_name, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i);
-        break __ring_match80;
+        break __ring_match81;
       }
-      if (__ring_m80._tag === "none") {
-        break __ring_match80;
+      if (__ring_m81._tag === "none") {
+        break __ring_match81;
       }
-      __match_fail(__ring_m80);
+      __match_fail(__ring_m81);
     }
   }
   LLVMBuildRet(ctx.builder, dict_ptr);
@@ -2728,82 +2821,82 @@ function emit_trait_dict(ctx, target_type, trait_name, methods) {
 }
 
 function emit_llvm_decl(ctx, decl) {
-  __ring_match81: {
-    const __ring_m81 = decl;
-    if (__ring_m81._tag === "Fn") {
-      const name = __ring_m81.name; const params = __ring_m81.params; const effects = __ring_m81.effects; const body = __ring_m81.body; const trait_bounds = __ring_m81.trait_bounds;
+  __ring_match82: {
+    const __ring_m82 = decl;
+    if (__ring_m82._tag === "Fn") {
+      const name = __ring_m82.name; const params = __ring_m82.params; const effects = __ring_m82.effects; const body = __ring_m82.body; const trait_bounds = __ring_m82.trait_bounds;
       return emit_fn_body(ctx, name, params, effects, body, trait_bounds, Option_none);
-      break __ring_match81;
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Struct") {
-      const name = __ring_m81.name; const fields = __ring_m81.fields;
+    if (__ring_m82._tag === "Struct") {
+      const name = __ring_m82.name; const fields = __ring_m82.fields;
       return emit_struct_constructor(ctx, name, fields);
-      break __ring_match81;
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Enum") {
-      const name = __ring_m81.name; const variants = __ring_m81.variants;
+    if (__ring_m82._tag === "Enum") {
+      const name = __ring_m82.name; const variants = __ring_m82.variants;
       return emit_enum_constructors(ctx, name, variants);
-      break __ring_match81;
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Impl") {
-      const target_type = __ring_m81.target_type; const trait_name = __ring_m81.trait_name; const methods = __ring_m81.methods;
+    if (__ring_m82._tag === "Impl") {
+      const target_type = __ring_m82.target_type; const trait_name = __ring_m82.trait_name; const methods = __ring_m82.methods;
       const __ring_iter_58 = __List_Iterable.iter(methods);
       while (true) {
         const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
         if (__ring_next_58._tag === "none") break;
         const method = __ring_next_58._0;
-        __ring_match82: {
-          const __ring_m82 = method;
-          if (__ring_m82._tag === "Fn") {
-            const mn = __ring_m82.name; const mp = __ring_m82.params; const me = __ring_m82.effects; const mb = __ring_m82.body; const mtb = __ring_m82.trait_bounds;
+        __ring_match83: {
+          const __ring_m83 = method;
+          if (__ring_m83._tag === "Fn") {
+            const mn = __ring_m83.name; const mp = __ring_m83.params; const me = __ring_m83.effects; const mb = __ring_m83.body; const mtb = __ring_m83.trait_bounds;
             emit_fn_body(ctx, mn, mp, me, mb, mtb, Option_some(target_type));
-            break __ring_match82;
+            break __ring_match83;
           }
-          break __ring_match82;
+          break __ring_match83;
         }
       }
-      __ring_match83: {
-        const __ring_m83 = trait_name;
-        if (__ring_m83._tag === "some") {
-          const tn = __ring_m83._0;
+      __ring_match84: {
+        const __ring_m84 = trait_name;
+        if (__ring_m84._tag === "some") {
+          const tn = __ring_m84._0;
           emit_trait_dict(ctx, target_type, tn, methods);
           return emit_default_method_stubs(ctx, target_type, tn, methods);
-          break __ring_match83;
+          break __ring_match84;
         }
-        if (__ring_m83._tag === "none") {
-          break __ring_match83;
+        if (__ring_m84._tag === "none") {
+          break __ring_match84;
         }
-        __match_fail(__ring_m83);
+        __match_fail(__ring_m84);
       }
-      break __ring_match81;
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Effect") {
-      break __ring_match81;
+    if (__ring_m82._tag === "Effect") {
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Test") {
-      break __ring_match81;
+    if (__ring_m82._tag === "Test") {
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Trait") {
-      const trait_name = __ring_m81.name; const trait_methods = __ring_m81.methods;
+    if (__ring_m82._tag === "Trait") {
+      const trait_name = __ring_m82.name; const trait_methods = __ring_m82.methods;
       return emit_trait_default_methods(ctx, trait_name, trait_methods);
-      break __ring_match81;
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "ExternFn") {
-      break __ring_match81;
+    if (__ring_m82._tag === "ExternFn") {
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "ExternType") {
-      break __ring_match81;
+    if (__ring_m82._tag === "ExternType") {
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "TypeAlias") {
-      break __ring_match81;
+    if (__ring_m82._tag === "TypeAlias") {
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Const") {
-      const name = __ring_m81.name; const init = __ring_m81.init;
+    if (__ring_m82._tag === "Const") {
+      const name = __ring_m82.name; const init = __ring_m82.init;
       return emit_const_body(ctx, name, init);
-      break __ring_match81;
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "ModBlock") {
-      const mod_decls = __ring_m81.decls;
+    if (__ring_m82._tag === "ModBlock") {
+      const mod_decls = __ring_m82.decls;
       const __ring_iter_59 = __List_Iterable.iter(mod_decls);
       while (true) {
         const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
@@ -2811,12 +2904,12 @@ function emit_llvm_decl(ctx, decl) {
         const subdecl = __ring_next_59._0;
         emit_llvm_decl(ctx, subdecl);
       }
-      break __ring_match81;
+      break __ring_match82;
     }
-    if (__ring_m81._tag === "Sig") {
-      break __ring_match81;
+    if (__ring_m82._tag === "Sig") {
+      break __ring_match82;
     }
-    __match_fail(__ring_m81);
+    __match_fail(__ring_m82);
   }
 }
 
@@ -2833,26 +2926,26 @@ function register_enum_info(ctx, name, variants) {
     if ((fc > max_fields)) {
       max_fields = fc;
     }
-    let __ring_blk33;
-    __ring_match84: {
-      const __ring_m84 = v.field_names;
-      if (__ring_m84._tag === "some") {
-        const names = __ring_m84._0;
-        __ring_blk33 = names;
-        break __ring_match84;
+    let __ring_blk34;
+    __ring_match85: {
+      const __ring_m85 = v.field_names;
+      if (__ring_m85._tag === "some") {
+        const names = __ring_m85._0;
+        __ring_blk34 = names;
+        break __ring_match85;
       }
-      if (__ring_m84._tag === "none") {
+      if (__ring_m85._tag === "none") {
         let ns = [];
         const __ring_end61 = fc;
         for (let j = 0; j < __ring_end61; j++) {
           List_push(ns, "");
         }
-        __ring_blk33 = ns;
-        break __ring_match84;
+        __ring_blk34 = ns;
+        break __ring_match85;
       }
-      __match_fail(__ring_m84);
+      __match_fail(__ring_m85);
     }
-    const fnames = __ring_blk33;
+    const fnames = __ring_blk34;
     let frs = [];
     const __ring_iter_62 = __List_Iterable.iter(v.fields);
     while (true) {
