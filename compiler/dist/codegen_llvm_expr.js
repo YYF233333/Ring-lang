@@ -303,6 +303,7 @@ function to_result(f) {
 
 
 
+
 class FnLookupResult {
   constructor(fn_val, fn_mangled) {
     this.fn_val = fn_val;
@@ -2297,6 +2298,11 @@ function gen_float_binop(ctx, op, lhs, rhs) {
       return box_bool(ctx, ext);
       break __ring_match82;
     }
+    if (__ring_m82._tag === "Mod") {
+      const result = LLVMBuildFRem(ctx.builder, lhs_raw, rhs_raw, codegen_llvm_ctx$fresh_name(ctx, "fmod"));
+      return box_float(ctx, result);
+      break __ring_match82;
+    }
     return panic("LLVM codegen: unsupported float binop");
     break __ring_match82;
   }
@@ -2432,6 +2438,24 @@ function gen_str_binop(ctx, op, lhs, rhs) {
       const lt_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_str_lt");
       const result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [rhs, lhs], codegen_llvm_ctx$fresh_name(ctx, "sgt"));
       return box_bool(ctx, result);
+      break __ring_match84;
+    }
+    if (__ring_m84._tag === "Lte") {
+      const lt_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_str_lt", [ctx.ptr_type, ctx.ptr_type], ctx.i64_type);
+      const lt_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_str_lt");
+      const result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [rhs, lhs], codegen_llvm_ctx$fresh_name(ctx, "sgt"));
+      const one = LLVMConstInt(ctx.i64_type, 1, 0);
+      const neg = LLVMBuildSub(ctx.builder, one, result, codegen_llvm_ctx$fresh_name(ctx, "neg"));
+      return box_bool(ctx, neg);
+      break __ring_match84;
+    }
+    if (__ring_m84._tag === "Gte") {
+      const lt_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_str_lt", [ctx.ptr_type, ctx.ptr_type], ctx.i64_type);
+      const lt_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_str_lt");
+      const result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [lhs, rhs], codegen_llvm_ctx$fresh_name(ctx, "slt"));
+      const one = LLVMConstInt(ctx.i64_type, 1, 0);
+      const neg = LLVMBuildSub(ctx.builder, one, result, codegen_llvm_ctx$fresh_name(ctx, "neg"));
+      return box_bool(ctx, neg);
       break __ring_match84;
     }
     return panic("LLVM codegen: unsupported str binop");

@@ -410,6 +410,7 @@ BINOP(LLVMBuildFAdd)
 BINOP(LLVMBuildFSub)
 BINOP(LLVMBuildFMul)
 BINOP(LLVMBuildFDiv)
+BINOP(LLVMBuildFRem)
 
 // ============================================================
 // IR Builder — Comparison (builder, pred, lhs, rhs, name)
@@ -805,6 +806,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         REG(LLVMBuildFSub),
         REG(LLVMBuildFMul),
         REG(LLVMBuildFDiv),
+        REG(LLVMBuildFRem),
         // Comparison
         REG(LLVMBuildICmp),
         REG(LLVMBuildFCmp),

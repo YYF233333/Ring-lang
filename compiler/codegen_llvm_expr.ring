@@ -48,6 +48,7 @@ extern fn LLVMBuildFAdd(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMVal
 extern fn LLVMBuildFSub(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildFMul(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildFDiv(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildFRem(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildICmp(builder: LLVMBuilderRef, predicate: Int, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildFCmp(builder: LLVMBuilderRef, predicate: Int, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildAlloca(builder: LLVMBuilderRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
@@ -877,6 +878,10 @@ fn gen_float_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValu
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
+        BinOp::Mod => {
+            let result = LLVMBuildFRem(ctx.builder, lhs_raw, rhs_raw, fresh_name(ctx, "fmod"))
+            box_float(ctx, result)
+        },
         _ => panic("LLVM codegen: unsupported float binop"),
     }
 }
@@ -909,6 +914,24 @@ fn gen_str_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueR
             let lt_ty = get_rt_fn_type(ctx, "ring_str_lt")
             let result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [rhs, lhs], fresh_name(ctx, "sgt"))
             box_bool(ctx, result)
+        },
+        BinOp::Lte => {
+            // a <= b  ≡  !(b < a)
+            let lt_fn = get_or_declare_runtime_fn(ctx, "ring_str_lt", [ctx.ptr_type, ctx.ptr_type], ctx.i64_type)
+            let lt_ty = get_rt_fn_type(ctx, "ring_str_lt")
+            let result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [rhs, lhs], fresh_name(ctx, "sgt"))
+            let one = LLVMConstInt(ctx.i64_type, 1, 0)
+            let neg = LLVMBuildSub(ctx.builder, one, result, fresh_name(ctx, "neg"))
+            box_bool(ctx, neg)
+        },
+        BinOp::Gte => {
+            // a >= b  ≡  !(a < b)
+            let lt_fn = get_or_declare_runtime_fn(ctx, "ring_str_lt", [ctx.ptr_type, ctx.ptr_type], ctx.i64_type)
+            let lt_ty = get_rt_fn_type(ctx, "ring_str_lt")
+            let result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [lhs, rhs], fresh_name(ctx, "slt"))
+            let one = LLVMConstInt(ctx.i64_type, 1, 0)
+            let neg = LLVMBuildSub(ctx.builder, one, result, fresh_name(ctx, "neg"))
+            box_bool(ctx, neg)
         },
         _ => panic("LLVM codegen: unsupported str binop"),
     }
