@@ -110,9 +110,9 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：**Native 自举 Level 2 完成（2026-06-24）**——B-099 native 自托管验收全过（bootstrap 44/44 一致 + E2E 885/885 + llvm_diff ×3 + ~970 LLVM warning 全消）。B-089 三门全绿 ✅。B-104 完整 Perceus RC ✅。B-080 tagged pointer ✅。B-122 SCC 拓扑序 ✅。B-138 impl SCC 排序 ✅。
+**当前**：**B-100 JS 退役 Phase 1 进行中（2026-06-25）**——Phase 1.1 覆盖矩阵完成（118→144 llvm_diff 用例）+ Phase 1.2 gap 修复完成（11 个 parity bug 修复）。llvm_diff 142/144（仅 #138 Map.fold + receiver_temp_drop skip）。npm test 935/935。下一步：Phase 1.3 对抗 review + Phase 1.4 ×3 零失配。B-099 ✅。B-089 三门全绿 ✅。B-104 完整 Perceus RC ✅。B-080 tagged pointer ✅。B-122 SCC 拓扑序 ✅。B-138 impl SCC 排序 ✅。
 
-**后续**：B-100 JS 退役（B-099 ✅，可立即启动）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002，含简单 move checker）→ L1.5 别名追踪（B-110，非 Drop 类型 mutation 安全）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+**后续**：B-100 Phase 1.3/1.4 → Phase 2（golden 快照 + 删 JS 后端）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002，含简单 move checker）→ L1.5 别名追踪（B-110，非 Drop 类型 mutation 安全）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：impl effect 传播修复（B-138，impl 内 SCC 排序）、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 

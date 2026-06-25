@@ -11,29 +11,25 @@
 
 ## B-100 Phase 1 — Parity 认证门准备（2026-06-25）
 
-### 1. 新增 26 个 llvm_diff 测试，17 通过 / 9 失败 [通知]
+### 1. 新增 26 个 llvm_diff 测试 + 修复 11 个 parity gap [通知]
 
-Phase 1.1 feature 覆盖矩阵审计 + 补缺完成。从 118 → 144 个 llvm_diff 用例。9 个失败暴露了 LLVM 后端真实 parity gap：
+Phase 1.1 feature 覆盖矩阵审计 + 补缺完成。从 118 → 144 个 llvm_diff 用例。发现并修复了 11 个 LLVM 后端 parity gap（9 个来自新测试 + 2 个来自已有测试的新 bug 暴露）：
 
-| 测试 | 错误类型 | 根因 |
-|------|----------|------|
-| cell_update | codegen panic | Cell 类型/方法未实现 (Cell/Cell.update/Cell.get/Cell.set) |
-| delegate_full_scenarios | 输出发散 | 委托 default method 的 self 调用结果不对（`desc=Alice` 而非 `I am Alice`）|
-| for_range_variants | 输出发散 | Map destructure for-in 循环的 key 值未正确提取（`map_keys=0` vs `6`）|
-| match_literal | 超时 60s | LLVM 编译或运行挂起（match Int 字面量可能无限循环）|
-| mod_nested_const | codegen panic | 嵌套模块块内变量解析失败（`undefined variable 'b'`）|
-| ord_derive | runtime 错误 | derive Ord 的 dict 未注册（`no builtin Ord dict for '__Priority_Ord'`）|
-| row_basic | codegen panic | row type 字段访问未实现（`field access on non-struct type: {name: Str}`）|
-| struct_update_generic | 崩溃 0xC0000005 | 泛型 struct update 语法导致访问违规 |
-| supertrait_multi_default | runtime 错误 | 多级 supertrait self-dict 缺失（`no builtin dict for '__ring_self_Nameable'`）|
+| 测试 | 根因 | 修复 |
+|------|------|------|
+| for_range_variants | Map 未转 entries 直接当 list 迭代 (UB) | ✅ codegen_llvm_stmt.ring |
+| cell_update | Cell 类型/方法未实现 + RC double-free | ✅ ring_runtime.cpp + codegen_llvm_expr.ring |
+| match_literal (timeout) | 重复 switch case tag 导致 LLVM UB | ✅ codegen_llvm_expr.ring |
+| match_literal (diverge) | 嵌套 constructor 模式缺内层 tag 检查 | ✅ codegen_llvm_expr.ring |
+| delegate_full_scenarios | delegate dict dispatch 的 trait name 解析 | ✅ codegen_llvm_expr.ring |
+| ord_derive | derive Ord 未在 LLVM 注册 | ✅ codegen_llvm_decl.ring |
+| supertrait_multi_default | 多级 supertrait self-dict 链缺失 | ✅ codegen_llvm_decl.ring + codegen_llvm.ring |
+| row_basic | row type 字段访问 codegen 缺 RecordType 分支 | ✅ codegen_llvm_expr.ring |
+| mod_nested_const | struct pattern 模块限定名与注册名不匹配 | ✅ codegen_llvm_expr.ring |
+| struct_update_generic | enum variant spread 字段未拷贝 | ✅ codegen_llvm_expr.ring |
+| string_builder | runtime 方法 call args 不足 + sb_line null 解引用 | ✅ codegen_llvm_expr.ring + ring_runtime.cpp |
 
-plus 已知 map_set_for_each (#138, Map.fold 未实现)。
-
-**分类**：
-- **未实现特性**（4个）：Cell、row types、derive Ord、Map.fold — LLVM 后端尚未添加
-- **已有机制 bug**（5个）：delegate default method、map destructure for-in、nested module var、generic struct update 崩溃、multi-level supertrait dict、match literal 挂起
-
-这些 gap 需要在 Phase 1.4（×3 零失配）之前修复。
+**最终基线**：142/144 pass, 1 fail (已知 #138 Map.fold), 1 skip (receiver_temp_drop)。
 
 ### 2. Oracle-blind native-only 测试基础设施建立 [通知]
 
@@ -47,9 +43,20 @@ plus 已知 map_set_for_each (#138, Map.fold 未实现)。
 - 整数字面量 > 2^53 编译期丢精度（bootstrap 编译器用 JS Number 解析）— 测试用运行时算术绕过
 - 整数除零是 UB（LLVM `sdiv x, 0` = undefined behavior）— 需 codegen 加 guard（归为未来 codegen 改进）
 
-### 3. 基线测试结果 [通知]
+### 3. 最终基线测试结果 [通知]
 
-- **npm test**: 935/935 全绿（含新增 llvm_diff + verify-rc 对新测试的扫描）
-- **llvm_diff**: 133/144 pass, 10 fail (9 新 + 1 已知 #138), 1 skip
+- **npm test**: 935/935 全绿
+- **llvm_diff**: 142/144 pass, 1 fail (已知 #138 Map.fold), 1 skip (receiver_temp_drop)
 - **native-only**: 2 pass, 1 todo (int_divzero)
+
+### 4. 修复过程中发现的预存问题 [观察]
+
+- **gen_match_arm_enum switch 路径**同样有嵌套 constructor tag 不检查的 bug（已修 if-else 路径，switch 路径仅无 duplicate-tag 时触发，风险较低）
+- **checker infer_method_call 缺参数下溢检查**：`sb.line()` 无参调用通过类型检查（应报 arity error）
+- **整数除零是 LLVM UB**：`sdiv x, 0` 无 guard，exit 0 + garbage（native_only int_divzero 标为 todo）
+- **整数字面量 > 2^53 编译期丢精度**：bootstrap 编译器用 JS Number 解析
+
+### 5. 下一步：B-100 Phase 1.3 对抗 review [通知]
+
+Phase 1.1（覆盖矩阵）✅ + Phase 1.2（gap 修复）✅ 完成。Phase 1.3 需要 `/full-audit` + `/code-review` 多轮对抗 review，loop-until-dry。Phase 1.4 需要 llvm_diff ×3 零失配（当前仅剩 #138，需决定是修复还是从 llvm_diff 排除）。
 
