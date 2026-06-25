@@ -2490,7 +2490,7 @@ extern "C" void* ring_str_char_code_at(void* s, int64_t idx) {
 // ============================================================================
 
 extern "C" void* ring_sb_line(void* sb, void* s) {
-    *(std::string*)sb += *(std::string*)s;
+    if (s) *(std::string*)sb += *(std::string*)s;
     *(std::string*)sb += "\n";
     return sb;
 }

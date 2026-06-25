@@ -2467,6 +2467,15 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
             let fn_val = ensure_runtime_method(ctx, rt_name, call_args.len())
             let fn_ty = get_rt_fn_type(ctx, rt_name)
 
+            // Pad missing trailing args with null (e.g. sb.line() called with
+            // 0 user args but ring_sb_line is declared (ptr,ptr)->ptr).  The
+            // checker allows fewer args than declared for extern methods
+            // (missing arity-underflow check), so codegen must compensate.
+            let expected_params = LLVMCountParams(fn_val)
+            while call_args.len() < expected_params {
+                call_args.push(LLVMConstPointerNull(ctx.ptr_type))
+            }
+
             if is_void_runtime_fn(rt_name) {
                 LLVMBuildCall2(ctx.builder, fn_ty, fn_val, call_args, "")
                 LLVMConstPointerNull(ctx.ptr_type)
