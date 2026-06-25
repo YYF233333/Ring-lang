@@ -159,8 +159,8 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
             gen_lambda(ctx, params, return_type, body, ty),
         HExpr::MatchExpr { scrutinee, arms, ty, .. } =>
             gen_match_expr(ctx, scrutinee, arms, ty),
-        HExpr::NamedVariantConstruct { enum_name, variant_name, fields, .. } =>
-            gen_named_variant_construct(ctx, enum_name, variant_name, fields),
+        HExpr::NamedVariantConstruct { enum_name, variant_name, fields, spread, .. } =>
+            gen_named_variant_construct(ctx, enum_name, variant_name, fields, spread),
         HExpr::TryCatch { body, arms, .. } =>
             gen_try_catch(ctx, body, arms),
         HExpr::HandleExpr { body, handlers, .. } =>
@@ -3839,7 +3839,7 @@ fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty:
 // Named variant construction (enum literal)
 // ============================================================
 
-fn gen_named_variant_construct(mut ctx: LlvmCtx, enum_name: Str, variant_name: Str, fields: List<HStructFieldInit>) -> LLVMValueRef {
+fn gen_named_variant_construct(mut ctx: LlvmCtx, enum_name: Str, variant_name: Str, fields: List<HStructFieldInit>, spread: HExpr?) -> LLVMValueRef {
     match ctx.enum_types.get(enum_name) {
         some(enum_info) => {
             match enum_info.variants.get(variant_name) {
@@ -3855,7 +3855,29 @@ fn gen_named_variant_construct(mut ctx: LlvmCtx, enum_name: Str, variant_name: S
                     let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, 0, fresh_name(ctx, "tag"))
                     discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, vi.tag, 0), tag_ptr))
 
-                    // Store fields by name lookup in variant's field list
+                    // If spread expression exists, copy variant fields from it first.
+                    // Same RC semantics as struct spread (B-098): dup non-overridden
+                    // fields to avoid double-free when both are dropped.
+                    match spread {
+                        some(spread_expr) => {
+                            let mut overridden: Set<Str> = set_new()
+                            for f in fields { overridden.insert(f.name) }
+                            let spread_val = gen_llvm_expr(ctx, spread_expr)
+                            for i in 0..vi.field_names.len() {
+                                // Enum layout: field 0 = tag, payload fields start at index 1
+                                let src_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, spread_val, i + 1, fresh_name(ctx, "evsfp"))
+                                let src_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, src_ptr, fresh_name(ctx, "evsfv"))
+                                if overridden.contains(vi.field_names[i]) == false {
+                                    discard(gen_dup_value(ctx, src_val))
+                                }
+                                let dst_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, i + 1, fresh_name(ctx, "evdfp"))
+                                discard(LLVMBuildStore(ctx.builder, src_val, dst_ptr))
+                            }
+                        },
+                        none => {},
+                    }
+
+                    // Store explicitly specified fields (overriding spread values)
                     for i in 0..fields.len() {
                         match fields.get(i) {
                             some(f) => {
