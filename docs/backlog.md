@@ -609,11 +609,7 @@ source-map 支持 + 断点调试。
 
 ## 语法增强
 
-<!-- B-143 done: 复合赋值运算符 *=, /=, %=。lexer 3 tokens + parser 3 desugaring branches。909 E2E 通过。2026-06-25 -->
-
 ## 已知 Bug / 技术债
-
-<!-- B-144 done (2026-06-25): extern type RC 排除——HProgram.extern_type_names 全局集合 + gen_lambda 闭包捕获跳过 extern dup。#140/#146 修复。10 source files, 909 E2E。 -->
 
 ### B-145 extern type 裸名碰撞修复（#147）[bugfix] [P3] [S] [judgment] [queued]
 
@@ -629,14 +625,6 @@ source-map 支持 + 断点调试。
 **验收标准**：
 - 同名 user struct 不被误排除（负面测试：module A 有 `extern type Foo`，module B 有 `struct Foo`）
 - 现有 E2E + llvm_diff 全绿；自举一致
-
-<!-- B-140 done: apply_subst TypeVar 返回借用 `t` → scope-end drop UAF。修复：TypeVar 总构造新节点 + 移除 Str workaround。ASan ×5 clean。2026-06-24 -->
-<!-- B-139 done: HTraitMethod 加 effects 字段 + codegen_decl evidence 转发。885 E2E, double bootstrap。2026-06-24 -->
-
-<!-- B-141 done: LLVM 后端 default trait method 支持。emit_trait_default_methods + emit_default_method_thunk + emit_default_method_stubs，~285 行。self.method() 走 dict dispatch。trait_default_method.ring parity 通过。2026-06-24 -->
-
-<!-- B-142 done: 13 个函数/5 个文件的 borrow-return-parameter 模式全部消除（env.ring apply_subst*/effect*，andor_lower al_*/dict_lower dl_*，perceus anf_*/rc_*）。885 E2E 通过。2026-06-24 -->
-
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。
@@ -703,12 +691,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 **复杂度**：M（Parser + Checker const generic + Codegen）
 
 ## LLVM 后端质量
-
-<!-- B-097 done: LLVM default effect body injection + delegate/nesting verified. 883 E2E, 90/92 llvm_diff (pre-existing map_set_for_each). Custom-abort 非 parity gap（两后端均只支持 fail.raise abort），不在本项实现。2026-06-16 -->
-
-<!-- B-096 done: evidence struct RC drop (typeid 21 + drop_evidence + emit_evidence_drops on all paths + nested handle fix). Sub-items 1/2 obsolete (ring_try is dead code, inline setjmp). Sub-item 3 N/A (pattern binds are borrow projections, no dup). Sub-item 4 N/A (Range fields are tagged pointers, freed correctly). 883 E2E, 90/92 llvm_diff ×3. 2026-06-17 -->
-
-<!-- B-099 done: native ring.exe 自编译 bootstrap 44/44 一致 + E2E 885/885 + llvm_diff ×3（唯一失败=#138 pre-existing）+ ~970 LLVM warning 全消（剩 13 条 W0001 已知）。2026-06-24 验收。ASan capstone 终验留 milestone。 -->
 
 ### B-100 JS 后端归档（parity 认证门 + golden 快照 + 删除）[feature] [P3] [L] [judgment] [doing]
 
