@@ -10,7 +10,7 @@
 
 ## 前端
 
-### #181 Tarjan SCC index_counter 值类型语义导致索引冲突 [critical] [judgment] [open]
+### #181 Tarjan SCC index_counter 值类型语义导致索引冲突 [critical] [judgment] [doing]
 
 `scc.ring:531-587` 的 `tarjan_strongconnect` 将 `mut index_counter: Int` 作为参数传递。Int 是值类型，`mut` 只允许本地修改——递归调用的计数器增量不会回传给调用者。导致兄弟子树中的节点获得相同的 index 值。
 
@@ -57,15 +57,6 @@
 
 发现者：DS（独立发现）+ Opus（cross-validation confirmed）
 
-### #178 深层嵌套泛型 struct Eq 总返回 false [medium] [judgment] [doing]
-
-3 层泛型 struct 嵌套（`A_outer<T>` → `B_mid<T>` → `C_inner<T>`）的 auto-derive Eq 在 LLVM 后端总返回 `false`。Round 2 修复了泛型 derive 的 dict params 传递（1 层），但多层嵌套的 dict 链传递仍有问题。
-
-**复现**：`tests/cases/llvm/adversarial_regress_generic_derive_deep.ring`（LLVM output 所有 `==` 返回 false）
-
-**根因方向**：`codegen_llvm_decl.ring` 的 `resolve_dict_for_derived` 在嵌套调用时可能取到外层的 dict 而非当前层的。需要跟踪 dict 在多层 derive 调用中的传递路径。
-
-发现者：Phase 1.3 Round 3 对抗回归测试
 
 ### #180 泛型函数 catch 路径返回 Str 时输出 garbage pointer [medium] [judgment] [doing]
 
@@ -75,7 +66,7 @@
 
 发现者：Phase 1.3 Round 3 对抗回归测试
 
-### #182 LLVMSetDataLayout 未调用 [medium] [mechanical] [open]
+### #182 LLVMSetDataLayout 未调用 [medium] [mechanical] [doing]
 
 `codegen_llvm.ring:1443` 和 `1607` 调用 `LLVMSetTarget` 设置 target triple，但从未调用 `LLVMSetDataLayout`。`LLVMSetDataLayout` 在 `llvm_ffi.ring:46` 和 `codegen_llvm.ring:33` 都有声明但从未被调用。缺少 data layout 时 `LLVMSizeOf`（25+ 处调用）返回基于默认布局的值，可能与实际 ABI 不一致。当前 native 自编译正常工作（默认布局对 x86_64 + 全指针类型碰巧正确），但跨平台或优化器推理可能出错。
 
@@ -99,7 +90,7 @@
 
 发现者：Opus（LLVM 审计）
 
-### #185 ring_unbox_float 缺少 null 检查 [medium] [mechanical] [open]
+### #185 ring_unbox_float 缺少 null 检查 [medium] [mechanical] [doing]
 
 `ring_runtime.cpp:629-631` 的 `ring_unbox_float` 直接 `return *(double*)p;` 无 null guard。对比 `ring_unbox_int`（line 619）有 `if (!p) { fprintf(stderr, ...); exit(1); }` 保护。null float 指针到达此函数会导致 segfault。
 
@@ -150,7 +141,7 @@
 
 发现者：Opus（LLVM 审计）+ DS（独立发现）
 
-### #191 generate_llvm / generate_llvm_project ~95% 重复 [medium] [mechanical] [open]
+### #191 generate_llvm / generate_llvm_project ~95% 重复 [medium] [mechanical] [doing]
 
 `codegen_llvm.ring:1429-1584` vs `1593-1771`：两个入口点重复了整个 LLVM 初始化、context 创建、类型缓存、pass pipeline、验证、emit、cleanup 序列（~180 行相同代码）。
 
@@ -158,7 +149,7 @@
 
 发现者：Opus（LLVM 审计）
 
-### #194 ring_get_builtin_dict substring 匹配有误匹配风险 [low] [mechanical] [open]
+### #194 ring_get_builtin_dict substring 匹配有误匹配风险 [low] [mechanical] [doing]
 
 `ring_runtime.cpp:3209-3245` 的 `ring_get_builtin_dict` 使用 `n.find("Ord")`、`n.find("Eq")`、`n.find("Str")` 做子串匹配。用户类型名含 "Ord"（如 "OrdinaryThing"）或 "Str"（如 "StringHelper"）会错误匹配到内置 dict。
 
@@ -244,7 +235,7 @@
 
 发现者：Opus（前端审计）
 
-### #193 scc.ring AST walker 双份 collect_*_callees [medium] [mechanical] [open]
+### #193 scc.ring AST walker 双份 collect_*_callees [medium] [mechanical] [doing]
 
 `scc.ring:156-288` 的 `collect_expr_callees` 和 `332-456` 的 `collect_self_method_callees` 遍历完全相同的 AST 结构，~130 行 match arms 完全一致，只在发现 callee 时的记录逻辑不同。`collect_stmt_callees` / `collect_self_method_stmt_callees` 同理。
 
