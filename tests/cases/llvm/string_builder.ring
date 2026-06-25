@@ -13,7 +13,7 @@ fn main() {
     // String builder with line
     let sb2 = string_builder()
     sb2.add("line1")
-    sb2.line()
+    sb2.line("")
     sb2.add("line2")
     let r2 = sb2.to_str()
     print("has_line1=${r2.contains("line1")}")
