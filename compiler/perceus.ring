@@ -245,6 +245,22 @@ fn anf_fn_body(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr 
 // Whether an expression is a FRESH-OWNED compound that should be materialised when
 // it sits in a hoistable (non-binding) position (R1).  A borrow-returning Call is
 // excluded — its result aliases a live reference, so binding+dropping it would UAF.
+// SYNC NOTE (#205): anf_should_materialize and is_droppable_init (below, ~line
+// 1658) both classify HExpr variants but answer DIFFERENT questions:
+//   - anf_should_materialize: "Is this a fresh-owned value in OPERAND position
+//     that should be hoisted to a temporary for scope-end drop?"
+//   - is_droppable_init: "Is this value in BINDING position safe to scope-end
+//     drop, considering rc_escape will Clone-wrap borrows?"
+// They share a common preamble (rc-excluded / extern-handle / TypeVar guards)
+// and agree on 12+ "fresh constructor" variants (BinOp, UnaryOp, StructLit,
+// ListLit, TupleLit, RangeExpr, StringInterp, Lambda, IntLit, FloatLit,
+// StrLit, BoolLit → true in both).  INTENTIONAL divergences:
+//   - Ident/FieldAccess/non-Str IndexExpr/Clone: NOT materialized (borrows in
+//     operand position → UAF), but IS droppable (rc_escape Clone-wraps them)
+//   - Call (borrow-returning): NOT materialized, IS droppable (same reason)
+//   - MatchExpr/Block/DictConstruct: NOT materialized (conservative), IS
+//     droppable (binding position needs branch-recursive analysis)
+// When adding a NEW HExpr variant, update BOTH functions.
 fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
     //   ② a Unit-typed expression has no value semantics (checker-guaranteed; JS
@@ -1655,6 +1671,10 @@ fn stmt_droppable_locals(s: HStmt, externs: Set<Str>) -> List<Str> {
 // (droppable); a Call/EffectOp result may alias shared state (NOT droppable);
 // Block/If/Match are conservatively NOT droppable (their value may be a Call
 // result on some path).
+// SYNC NOTE (#205): is_droppable_init and anf_should_materialize (above, ~line
+// 248) both classify HExpr variants.  See the SYNC NOTE on
+// anf_should_materialize for the shared/divergent variant table.
+// When adding a NEW HExpr variant, update BOTH functions.
 fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
     //   ② a Unit-typed binding is never dropped: Unit has no value semantics

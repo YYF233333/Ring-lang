@@ -1798,6 +1798,21 @@ if self.check(TokenKind::TkIntLit) {
             return Pattern::Wildcard { span: tok.span }
         }
 
+        // Negative numeric literal patterns: -1, -3.14
+        if self.check(TokenKind::TkMinus) {
+            let next = self.peek_at(1)
+            if next.kind == TokenKind::TkIntLit {
+                self.advance()  // consume '-'
+                self.advance()  // consume int literal
+                return Pattern::Literal { value: LiteralValue::IntVal(0 - parse_int(next.value).unwrap_or(0)), span: self.make_span(start, next.span.end) }
+            }
+            if next.kind == TokenKind::TkFloatLit {
+                self.advance()  // consume '-'
+                self.advance()  // consume float literal
+                return Pattern::Literal { value: LiteralValue::FloatVal(0.0 - parse_float(next.value).unwrap_or(0.0)), span: self.make_span(start, next.span.end) }
+            }
+        }
+
         if self.check(TokenKind::TkIntLit) {
             self.advance()
             return Pattern::Literal { value: LiteralValue::IntVal(parse_int(tok.value).unwrap_or(0)), span: tok.span }
