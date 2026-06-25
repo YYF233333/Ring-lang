@@ -49,7 +49,7 @@ fn open_row(mut env: TypeEnv) -> OpenRow {
 // ============================================================
 
 fn make_list_struct(t: Type) -> Type {
-    Type::StructType { name: BUILTIN_LIST, type_params: [t], fields: [] }
+    Type::StructType { name: BUILTIN_LIST, type_params: [t] }
 }
 
 // ============================================================
@@ -57,7 +57,7 @@ fn make_list_struct(t: Type) -> Type {
 // ============================================================
 
 fn make_set_struct(t: Type) -> Type {
-    Type::StructType { name: BUILTIN_SET, type_params: [t], fields: [] }
+    Type::StructType { name: BUILTIN_SET, type_params: [t] }
 }
 
 // ============================================================
@@ -164,8 +164,7 @@ fn register_cell(mut env: TypeEnv) {
     let ctor_t = Type::TypeVar { id: ctor_t_id, name: none }
     let ctor_ret = Type::StructType {
         name: BUILTIN_CELL,
-        type_params: [ctor_t],
-        fields: [StructField { name: "value", ty: ctor_t, is_pub: true }]
+        type_params: [ctor_t]
     }
     env.bind(BUILTIN_CELL, TypeScheme {
         ty: Type::FnType { params: [ctor_t], return_type: ctor_ret, effects: EMPTY_ROW },
@@ -180,8 +179,7 @@ fn register_cell(mut env: TypeEnv) {
     let mut_row = EffectRow { effects: [Effect::MutEffect { state_type: m_t }], tail: none }
     let self_type = Type::StructType {
         name: BUILTIN_CELL,
-        type_params: [m_t],
-        fields: [StructField { name: "value", ty: m_t, is_pub: true }]
+        type_params: [m_t]
     }
 
     let mut methods: Map<Str, TypeScheme> = map_new()
@@ -515,7 +513,7 @@ fn register_debug_trait(mut env: TypeEnv) {
     // List<T: Debug> Debug impl
     let mut t_id = env.fresh_var_id()
     let mut t = Type::TypeVar { id: t_id, name: none }
-    let list_self = Type::StructType { name: BUILTIN_LIST, type_params: [t], fields: [] }
+    let list_self = Type::StructType { name: BUILTIN_LIST, type_params: [t] }
     let list_debug_fn = Type::FnType { params: [list_self], return_type: STR, effects: EMPTY_ROW }
     let mut list_methods = get_or_create_methods(env, BUILTIN_LIST)
     list_methods.insert("debug", TypeScheme {
@@ -557,7 +555,7 @@ fn register_debug_trait(mut env: TypeEnv) {
     // Set<T> Debug impl (no bounds required in TS source)
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
-    let set_self = Type::StructType { name: BUILTIN_SET, type_params: [t], fields: [] }
+    let set_self = Type::StructType { name: BUILTIN_SET, type_params: [t] }
     let set_debug_fn = Type::FnType { params: [set_self], return_type: STR, effects: EMPTY_ROW }
     let mut set_methods = get_or_create_methods(env, BUILTIN_SET)
     set_methods.insert("debug", TypeScheme {

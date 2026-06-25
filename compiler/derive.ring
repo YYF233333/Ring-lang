@@ -463,28 +463,8 @@ fn get_method_names(trait_name: Str) -> List<Str> {
 
 fn build_self_type(env: TypeEnv, type_name: Str, type_kind: TypeKind, type_params: List<Type>) -> Type {
     match type_kind {
-        TypeKind::StructKind => {
-            let def = env.types.structs.get(type_name)
-            let fields = match def {
-                some(d) => d.fields.map(fn(f) { StructField { name: f.name, ty: f.ty, is_pub: f.is_pub } }),
-                none => {
-                    let e: List<StructField> = []
-                    e
-                },
-            }
-            Type::StructType { name: type_name, type_params: type_params, fields: fields }
-        },
-        TypeKind::EnumKind => {
-            let def = env.types.enums.get(type_name)
-            let variants = match def {
-                some(d) => d.variants.map(fn(v) { EnumVariant { name: v.name, fields: v.fields, field_names: v.field_names } }),
-                none => {
-                    let e: List<EnumVariant> = []
-                    e
-                },
-            }
-            Type::EnumType { name: type_name, type_params: type_params, variants: variants }
-        },
+        TypeKind::StructKind => Type::StructType { name: type_name, type_params: type_params },
+        TypeKind::EnumKind => Type::EnumType { name: type_name, type_params: type_params },
     }
 }
 

@@ -1332,7 +1332,7 @@ function type_contains_extern_rec(ty, externs, visited) {
   __ring_match21: {
     const __ring_m21 = ty;
     if (__ring_m21._tag === "StructType") {
-      const name = __ring_m21.name; const type_params = __ring_m21.type_params; const fields = __ring_m21.fields;
+      const name = __ring_m21.name; const type_params = __ring_m21.type_params;
       if (_Set_contains(externs, name, __Str_Eq)) {
         return true;
       } else {
@@ -1350,49 +1350,25 @@ function type_contains_extern_rec(ty, externs, visited) {
               found = true;
             }
           }
-          const __ring_iter_7 = __List_Iterable.iter(fields);
-          while (true) {
-            const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-            if (__ring_next_7._tag === "none") break;
-            const f = __ring_next_7._0;
-            if (type_contains_extern_rec(f.ty, externs, visited)) {
-              found = true;
-            }
-          }
           return found;
         }
       }
       break __ring_match21;
     }
     if (__ring_m21._tag === "EnumType") {
-      const name = __ring_m21.name; const type_params = __ring_m21.type_params; const variants = __ring_m21.variants;
+      const name = __ring_m21.name; const type_params = __ring_m21.type_params;
       if (_Set_contains(visited, `E:${name}`, __Str_Eq)) {
         return false;
       } else {
         _Set_insert(visited, `E:${name}`);
         let found = false;
-        const __ring_iter_8 = __List_Iterable.iter(type_params);
+        const __ring_iter_7 = __List_Iterable.iter(type_params);
         while (true) {
-          const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-          if (__ring_next_8._tag === "none") break;
-          const tp = __ring_next_8._0;
+          const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+          if (__ring_next_7._tag === "none") break;
+          const tp = __ring_next_7._0;
           if (type_contains_extern_rec(tp, externs, visited)) {
             found = true;
-          }
-        }
-        const __ring_iter_9 = __List_Iterable.iter(variants);
-        while (true) {
-          const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-          if (__ring_next_9._tag === "none") break;
-          const v = __ring_next_9._0;
-          const __ring_iter_10 = __List_Iterable.iter(v.fields);
-          while (true) {
-            const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-            if (__ring_next_10._tag === "none") break;
-            const ft = __ring_next_10._0;
-            if (type_contains_extern_rec(ft, externs, visited)) {
-              found = true;
-            }
           }
         }
         return found;
@@ -1402,11 +1378,11 @@ function type_contains_extern_rec(ty, externs, visited) {
     if (__ring_m21._tag === "TupleType") {
       const elements = __ring_m21.elements;
       let found = false;
-      const __ring_iter_11 = __List_Iterable.iter(elements);
+      const __ring_iter_8 = __List_Iterable.iter(elements);
       while (true) {
-        const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
-        if (__ring_next_11._tag === "none") break;
-        const e = __ring_next_11._0;
+        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+        if (__ring_next_8._tag === "none") break;
+        const e = __ring_next_8._0;
         if (type_contains_extern_rec(e, externs, visited)) {
           found = true;
         }
@@ -1417,11 +1393,11 @@ function type_contains_extern_rec(ty, externs, visited) {
     if (__ring_m21._tag === "GenericType") {
       const base = __ring_m21.base; const args = __ring_m21.args;
       let found = type_contains_extern_rec(base, externs, visited);
-      const __ring_iter_12 = __List_Iterable.iter(args);
+      const __ring_iter_9 = __List_Iterable.iter(args);
       while (true) {
-        const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-        if (__ring_next_12._tag === "none") break;
-        const a = __ring_next_12._0;
+        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+        if (__ring_next_9._tag === "none") break;
+        const a = __ring_next_9._0;
         if (type_contains_extern_rec(a, externs, visited)) {
           found = true;
         }
@@ -1432,11 +1408,11 @@ function type_contains_extern_rec(ty, externs, visited) {
     if (__ring_m21._tag === "RecordType") {
       const fields = __ring_m21.fields;
       let found = false;
-      const __ring_iter_13 = __List_Iterable.iter(fields);
+      const __ring_iter_10 = __List_Iterable.iter(fields);
       while (true) {
-        const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-        if (__ring_next_13._tag === "none") break;
-        const f = __ring_next_13._0;
+        const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+        if (__ring_next_10._tag === "none") break;
+        const f = __ring_next_10._0;
         if (type_contains_extern_rec(f.ty, externs, visited)) {
           found = true;
         }

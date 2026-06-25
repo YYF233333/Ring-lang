@@ -756,13 +756,13 @@ function apply_subst(subst, t) {
       break __ring_match18;
     }
     if (__ring_m18._tag === "StructType") {
-      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const fields = __ring_m18.fields;
-      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst(subst, p); })), fields);
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params;
+      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst(subst, p); })));
       break __ring_match18;
     }
     if (__ring_m18._tag === "EnumType") {
-      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const variants = __ring_m18.variants;
-      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst(subst, p); })), variants);
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params;
+      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst(subst, p); })));
       break __ring_match18;
     }
     if (__ring_m18._tag === "GenericType") {
@@ -966,13 +966,13 @@ function apply_subst_map(subst, t) {
       break __ring_match28;
     }
     if (__ring_m28._tag === "StructType") {
-      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const fields = __ring_m28.fields;
-      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), fields);
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params;
+      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })));
       break __ring_match28;
     }
     if (__ring_m28._tag === "EnumType") {
-      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const variants = __ring_m28.variants;
-      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), variants);
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params;
+      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })));
       break __ring_match28;
     }
     if (__ring_m28._tag === "GenericType") {

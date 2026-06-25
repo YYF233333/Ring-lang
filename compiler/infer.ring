@@ -444,7 +444,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                                                 // For impl<T> Iterable for List<T>, Iter = ListIterator<T>
                                                 // The T in ListIterator<T> maps positionally to T in List<T>
                                                 // So ListIterator gets the same concrete type params as List
-                                                let concrete_iter_type = Type::StructType { name: itn, type_params: concrete_type_params, fields: [] }
+                                                let concrete_iter_type = Type::StructType { name: itn, type_params: concrete_type_params }
                                                 // Look up Iterator impl for the iterator type
                                                 let iterator_impl = find_impl(ctx.env.trait_reg, itn, "Iterator")
                                                 match iterator_impl {
@@ -961,7 +961,7 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
             let me = merge_effects(ctx.env, start_r.effects, end_r.effects, s)
             let mut range_effects = me.0
             s = me.1
-            let range_type = Type::EnumType { name: BUILTIN_RANGE, type_params: [INT], variants: [] }
+            let range_type = Type::EnumType { name: BUILTIN_RANGE, type_params: [INT] }
             InferResult {
                 hexpr: HExpr::RangeExpr {
                     start: start_r.hexpr, end: end_r.hexpr, inclusive: inclusive,
@@ -2500,11 +2500,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
             let me = merge_effects(ctx.env, effects, sr.effects, s)
             effects = me.0
             s = me.1
-            let mut spread_fields: List<StructField> = []
-            for f in struct_def.fields {
-                spread_fields.push(StructField { name: f.name, ty: apply_subst_map(inst_map, f.ty), is_pub: f.is_pub })
-            }
-            let spread_type = Type::StructType { name: struct_def.name, type_params: type_param_types, fields: spread_fields }
+            let spread_type = Type::StructType { name: struct_def.name, type_params: type_param_types }
             s = unify_at(ctx.sink, ctx.env, hexpr_type(sr.hexpr), spread_type, s, span)
             hspread = some(sr.hexpr)
         },
@@ -2547,8 +2543,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 
     let struct_type = Type::StructType {
-        name: struct_def.name, type_params: type_param_types,
-        fields: struct_def.fields
+        name: struct_def.name, type_params: type_param_types
     }
 
     InferResult {
@@ -2587,7 +2582,7 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
             let me = merge_effects(ctx.env, effects, sr.effects, s)
             effects = me.0
             s = me.1
-            let spread_enum_type = Type::EnumType { name: enum_name, type_params: type_param_types, variants: enum_def.variants }
+            let spread_enum_type = Type::EnumType { name: enum_name, type_params: type_param_types }
             s = unify_at(ctx.sink, ctx.env, hexpr_type(sr.hexpr), spread_enum_type, s, span)
             hspread = some(sr.hexpr)
         },
@@ -2628,7 +2623,7 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
         }
     }
 
-    let enum_type = Type::EnumType { name: enum_name, type_params: type_param_types, variants: enum_def.variants }
+    let enum_type = Type::EnumType { name: enum_name, type_params: type_param_types }
 
     InferResult {
         hexpr: HExpr::NamedVariantConstruct {
@@ -3173,7 +3168,7 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
 fn infer_list_literal(mut ctx: InferCtx, elements: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     if elements.len() == 0 {
         let elem_type = ctx.env.fresh_var()
-        let list_type = Type::StructType { name: BUILTIN_LIST, type_params: [elem_type], fields: [] }
+        let list_type = Type::StructType { name: BUILTIN_LIST, type_params: [elem_type] }
         return InferResult {
             hexpr: HExpr::ListLit { elements: [], ty: list_type, effects: EMPTY_ROW, span: span },
             subst: subst, effects: EMPTY_ROW
@@ -3193,7 +3188,7 @@ fn infer_list_literal(mut ctx: InferCtx, elements: List<Expr>, span: Span, subst
         combined_effects = me.0
         s = me.1
     }
-    let list_type = Type::StructType { name: BUILTIN_LIST, type_params: [apply_subst(s, elem_type)], fields: [] }
+    let list_type = Type::StructType { name: BUILTIN_LIST, type_params: [apply_subst(s, elem_type)] }
     InferResult {
         hexpr: HExpr::ListLit { elements: helements, ty: list_type, effects: combined_effects, span: span },
         subst: s, effects: combined_effects

@@ -283,6 +283,7 @@ fn register_decl_info(decls: List<HDecl>, mut ctx: CodegenCtx) {
             },
             HDecl::Enum { name, variants, .. } => {
                 ctx.local_names.insert(name)
+                ctx.enum_variants.insert(name, variants)
                 for v in variants {
                     ctx.local_names.insert(v.name)
                     ctx.local_names.insert("${name}_${v.name}")

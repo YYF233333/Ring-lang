@@ -277,14 +277,14 @@ function build_inst_map(type_param_vars, type_params) {
   return inst_map;
 }
 
-function instantiate_enum_variants(env, name, type_params, template_variants) {
+function instantiate_enum_variants(env, name, type_params) {
   __ring_match7: {
     const __ring_m7 = _Map_get(env.types.enums, name);
     if (__ring_m7._tag === "some") {
       const enum_def = __ring_m7._0;
       const inst_map = build_inst_map(enum_def.type_param_vars, type_params);
       if ((_Map_len(inst_map) === 0)) {
-        return template_variants;
+        return enum_def.variants;
       }
       let result = [];
       const __ring_iter_2 = __List_Iterable.iter(enum_def.variants);
@@ -299,21 +299,21 @@ function instantiate_enum_variants(env, name, type_params, template_variants) {
       break __ring_match7;
     }
     if (__ring_m7._tag === "none") {
-      return template_variants;
+      return [];
       break __ring_match7;
     }
     __match_fail(__ring_m7);
   }
 }
 
-function instantiate_struct_fields(env, name, type_params, template_fields) {
+function instantiate_struct_fields(env, name, type_params) {
   __ring_match8: {
     const __ring_m8 = _Map_get(env.types.structs, name);
     if (__ring_m8._tag === "some") {
       const struct_def = __ring_m8._0;
       const inst_map = build_inst_map(struct_def.type_param_vars, type_params);
       if ((_Map_len(inst_map) === 0)) {
-        return template_fields;
+        return struct_def.fields;
       }
       let result = [];
       const __ring_iter_3 = __List_Iterable.iter(struct_def.fields);
@@ -327,7 +327,7 @@ function instantiate_struct_fields(env, name, type_params, template_fields) {
       break __ring_match8;
     }
     if (__ring_m8._tag === "none") {
-      return template_fields;
+      return [];
       break __ring_match8;
     }
     __match_fail(__ring_m8);
@@ -359,8 +359,8 @@ function finite_type_ctors(env, ty, cache) {
       break __ring_match10;
     }
     if (__ring_m10._tag === "EnumType") {
-      const name = __ring_m10.name; const type_params = __ring_m10.type_params; const variants = __ring_m10.variants;
-      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
+      const name = __ring_m10.name; const type_params = __ring_m10.type_params;
+      const inst_variants = instantiate_enum_variants(env, name, type_params);
       let r = [];
       const __ring_iter_4 = __List_Iterable.iter(inst_variants);
       while (true) {
@@ -373,8 +373,8 @@ function finite_type_ctors(env, ty, cache) {
       break __ring_match10;
     }
     if (__ring_m10._tag === "StructType") {
-      const name = __ring_m10.name; const type_params = __ring_m10.type_params; const fields = __ring_m10.fields;
-      const inst_fields = instantiate_struct_fields(env, name, type_params, fields);
+      const name = __ring_m10.name; const type_params = __ring_m10.type_params;
+      const inst_fields = instantiate_struct_fields(env, name, type_params);
       let field_types = [];
       let field_names = [];
       const __ring_iter_5 = __List_Iterable.iter(inst_fields);
@@ -659,8 +659,8 @@ function type_contains_key(env, ty, key, visited) {
   __ring_match18: {
     const __ring_m18 = ty;
     if (__ring_m18._tag === "EnumType") {
-      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const variants = __ring_m18.variants;
-      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params;
+      const inst_variants = instantiate_enum_variants(env, name, type_params);
       const __ring_iter_13 = __List_Iterable.iter(inst_variants);
       while (true) {
         const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
@@ -680,8 +680,8 @@ function type_contains_key(env, ty, key, visited) {
       break __ring_match18;
     }
     if (__ring_m18._tag === "StructType") {
-      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const fields = __ring_m18.fields;
-      const inst_fields = instantiate_struct_fields(env, name, type_params, fields);
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params;
+      const inst_fields = instantiate_struct_fields(env, name, type_params);
       const __ring_iter_15 = __List_Iterable.iter(inst_fields);
       while (true) {
         const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
@@ -744,8 +744,8 @@ function type_is_recursive(env, ty, key, cache) {
   __ring_match20: {
     const __ring_m20 = ty;
     if (__ring_m20._tag === "EnumType") {
-      const name = __ring_m20.name; const type_params = __ring_m20.type_params; const variants = __ring_m20.variants;
-      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
+      const name = __ring_m20.name; const type_params = __ring_m20.type_params;
+      const inst_variants = instantiate_enum_variants(env, name, type_params);
       let visited = map_new();
       _Map_insert(visited, key, true);
       let found = false;
@@ -993,8 +993,8 @@ function check_patterns(env, patterns, ty, subst) {
   __ring_match30: {
     const __ring_m30 = resolved;
     if (__ring_m30._tag === "EnumType") {
-      const name = __ring_m30.name; const type_params = __ring_m30.type_params; const variants = __ring_m30.variants;
-      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
+      const name = __ring_m30.name; const type_params = __ring_m30.type_params;
+      const inst_variants = instantiate_enum_variants(env, name, type_params);
       const variant_names = inst_variants.map((function(v) { return v.name; }));
       let covered = map_new();
       const __ring_iter_27 = __List_Iterable.iter(inst_variants);
@@ -1130,8 +1130,8 @@ function check_patterns(env, patterns, ty, subst) {
       break __ring_match30;
     }
     if (__ring_m30._tag === "StructType") {
-      const sname = __ring_m30.name; const stp = __ring_m30.type_params; const sfields = __ring_m30.fields;
-      const inst_fields = instantiate_struct_fields(env, sname, stp, sfields);
+      const sname = __ring_m30.name; const stp = __ring_m30.type_params;
+      const inst_fields = instantiate_struct_fields(env, sname, stp);
       let covered = false;
       let sub_patterns = [];
       let field_names = [];
@@ -1155,7 +1155,7 @@ function check_patterns(env, patterns, ty, subst) {
             const pname = __ring_m36.name; const nfields = __ring_m36.fields;
             if (names_match_struct(pname, sname)) {
               covered = true;
-              const positional = named_pattern_to_positional(nfields, field_names, List_len(sfields));
+              const positional = named_pattern_to_positional(nfields, field_names, List_len(inst_fields));
               List_push(sub_patterns, positional);
             }
             break __ring_match36;

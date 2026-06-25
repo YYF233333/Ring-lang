@@ -449,7 +449,7 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                 vi = vi + 1
             }
 
-            let enum_type = Type::EnumType { name: name, type_params: tv_types, variants: def.variants }
+            let enum_type = Type::EnumType { name: name, type_params: tv_types }
             let tv_ids = def.type_param_vars
             for variant in def.variants {
                 ctx.env.types.variant_to_enum.insert(variant.name, name)
@@ -896,9 +896,9 @@ fn resolve_impl_self_type(mut ctx: InferCtx, target_type: Str, impl_type_params:
         }
     }
     match ctx.env.types.structs.get(target_type) {
-        some(def) => Type::StructType { name: def.name, type_params: impl_tp_types, fields: def.fields },
+        some(def) => Type::StructType { name: def.name, type_params: impl_tp_types },
         none => match ctx.env.types.enums.get(target_type) {
-            some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types, variants: def.variants },
+            some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types },
             none => resolve_self_type(ctx, target_type)
         }
     }

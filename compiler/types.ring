@@ -37,8 +37,8 @@ pub enum Type {
     AnyType,
     TypeVar { id: Int, name: Str? },
     FnType { params: List<Type>, return_type: Type, effects: EffectRow },
-    StructType { name: Str, type_params: List<Type>, fields: List<StructField> },
-    EnumType { name: Str, type_params: List<Type>, variants: List<EnumVariant> },
+    StructType { name: Str, type_params: List<Type> },
+    EnumType { name: Str, type_params: List<Type> },
     GenericType { base: Type, args: List<Type> },
     RecordType { fields: List<RecordField>, tail: Int?, tail_name: Str? },
     EffectRowType { effects: List<Effect>, tail: Int? },
@@ -125,11 +125,7 @@ pub fn type_to_builtin_name(t: Type) -> Str? {
 pub fn make_option_type(inner: Type) -> Type {
     Type::EnumType {
         name: BUILTIN_OPTION,
-        type_params: [inner],
-        variants: [
-            EnumVariant { name: "some", fields: [inner], field_names: none },
-            EnumVariant { name: "none", fields: [], field_names: none }
-        ]
+        type_params: [inner]
     }
 }
 
@@ -149,12 +145,12 @@ pub fn option_inner(t: Type) -> Type {
 }
 
 pub fn make_list_type(element: Type) -> Type {
-    Type::StructType { name: BUILTIN_LIST, type_params: [element], fields: [] }
+    Type::StructType { name: BUILTIN_LIST, type_params: [element] }
 }
 
 pub fn is_list_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, type_params, fields } => name == BUILTIN_LIST && type_params.len() == 1 && fields.len() == 0,
+        Type::StructType { name, type_params, .. } => name == BUILTIN_LIST && type_params.len() == 1,
         _ => false
     }
 }
@@ -167,23 +163,23 @@ pub fn list_element(t: Type) -> Type {
 }
 
 pub fn make_map_type(key: Type, value: Type) -> Type {
-    Type::StructType { name: BUILTIN_MAP, type_params: [key, value], fields: [] }
+    Type::StructType { name: BUILTIN_MAP, type_params: [key, value] }
 }
 
 pub fn is_map_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, type_params, fields } => name == BUILTIN_MAP && type_params.len() == 2 && fields.len() == 0,
+        Type::StructType { name, type_params, .. } => name == BUILTIN_MAP && type_params.len() == 2,
         _ => false
     }
 }
 
 pub fn make_set_type(element: Type) -> Type {
-    Type::StructType { name: BUILTIN_SET, type_params: [element], fields: [] }
+    Type::StructType { name: BUILTIN_SET, type_params: [element] }
 }
 
 pub fn is_set_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, type_params, fields } => name == BUILTIN_SET && type_params.len() == 1 && fields.len() == 0,
+        Type::StructType { name, type_params, .. } => name == BUILTIN_SET && type_params.len() == 1,
         _ => false
     }
 }

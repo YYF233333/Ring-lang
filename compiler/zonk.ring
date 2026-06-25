@@ -50,17 +50,15 @@ fn label_vars(names: Map<Int, Str>, t: Type) -> Type {
                 return_type: label_vars(names, return_type),
                 effects: label_effect_row(names, effects)
             },
-        Type::StructType { name, type_params, fields } =>
+        Type::StructType { name, type_params } =>
             Type::StructType {
                 name: name,
-                type_params: type_params.map(fn(p) { label_vars(names, p) }),
-                fields: fields
+                type_params: type_params.map(fn(p) { label_vars(names, p) })
             },
-        Type::EnumType { name, type_params, variants } =>
+        Type::EnumType { name, type_params } =>
             Type::EnumType {
                 name: name,
-                type_params: type_params.map(fn(p) { label_vars(names, p) }),
-                variants: variants
+                type_params: type_params.map(fn(p) { label_vars(names, p) })
             },
         Type::GenericType { base, args } =>
             Type::GenericType {

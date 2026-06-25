@@ -338,7 +338,7 @@ function apply_var_mapping(ty, mapping) {
       break __ring_match7;
     }
     if (__ring_m7._tag === "StructType") {
-      const name = __ring_m7.name; const type_params = __ring_m7.type_params; const fields = __ring_m7.fields;
+      const name = __ring_m7.name; const type_params = __ring_m7.type_params;
       let mapped_tps = [];
       const __ring_iter_5 = __List_Iterable.iter(type_params);
       while (true) {
@@ -347,11 +347,11 @@ function apply_var_mapping(ty, mapping) {
         const tp = __ring_next_5._0;
         List_push(mapped_tps, apply_var_mapping(tp, mapping));
       }
-      return types$Type_StructType(name, mapped_tps, fields);
+      return types$Type_StructType(name, mapped_tps);
       break __ring_match7;
     }
     if (__ring_m7._tag === "EnumType") {
-      const name = __ring_m7.name; const type_params = __ring_m7.type_params; const variants = __ring_m7.variants;
+      const name = __ring_m7.name; const type_params = __ring_m7.type_params;
       let mapped_tps = [];
       const __ring_iter_6 = __List_Iterable.iter(type_params);
       while (true) {
@@ -360,7 +360,7 @@ function apply_var_mapping(ty, mapping) {
         const tp = __ring_next_6._0;
         List_push(mapped_tps, apply_var_mapping(tp, mapping));
       }
-      return types$Type_EnumType(name, mapped_tps, variants);
+      return types$Type_EnumType(name, mapped_tps);
       break __ring_match7;
     }
     if (__ring_m7._tag === "TupleType") {
@@ -1347,7 +1347,7 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
     const __ring_m53 = _Map_get(ctx.env.types.structs, target_type);
     if (__ring_m53._tag === "some") {
       const def = __ring_m53._0;
-      return types$Type_StructType(def.name, impl_tp_types, def.fields);
+      return types$Type_StructType(def.name, impl_tp_types);
       break __ring_match53;
     }
     if (__ring_m53._tag === "none") {
@@ -1355,7 +1355,7 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
         const __ring_m54 = _Map_get(ctx.env.types.enums, target_type);
         if (__ring_m54._tag === "some") {
           const def = __ring_m54._0;
-          return types$Type_EnumType(def.name, impl_tp_types, def.variants);
+          return types$Type_EnumType(def.name, impl_tp_types);
           break __ring_match54;
         }
         if (__ring_m54._tag === "none") {
@@ -1954,7 +1954,7 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
     const __ring_m82 = _Map_get(ctx.env.types.structs, target_type);
     if (__ring_m82._tag === "some") {
       const def = __ring_m82._0;
-      return types$Type_StructType(def.name, impl_tp_types, def.fields);
+      return types$Type_StructType(def.name, impl_tp_types);
       break __ring_match82;
     }
     if (__ring_m82._tag === "none") {
@@ -1962,7 +1962,7 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
         const __ring_m83 = _Map_get(ctx.env.types.enums, target_type);
         if (__ring_m83._tag === "some") {
           const def = __ring_m83._0;
-          return types$Type_EnumType(def.name, impl_tp_types, def.variants);
+          return types$Type_EnumType(def.name, impl_tp_types);
           break __ring_match83;
         }
         if (__ring_m83._tag === "none") {

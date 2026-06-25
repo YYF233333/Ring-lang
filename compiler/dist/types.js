@@ -295,11 +295,11 @@ function Type_TypeVar(id, name) {
 function Type_FnType(params, return_type, effects) {
   return { _tag: "FnType", params, return_type, effects };
 }
-function Type_StructType(name, type_params, fields) {
-  return { _tag: "StructType", name, type_params, fields };
+function Type_StructType(name, type_params) {
+  return { _tag: "StructType", name, type_params };
 }
-function Type_EnumType(name, type_params, variants) {
-  return { _tag: "EnumType", name, type_params, variants };
+function Type_EnumType(name, type_params) {
+  return { _tag: "EnumType", name, type_params };
 }
 function Type_GenericType(base, args) {
   return { _tag: "GenericType", base, args };
@@ -1106,9 +1106,9 @@ function is_list_type(t) {
   __ring_match48: {
     const __ring_m48 = t;
     if (__ring_m48._tag === "StructType") {
-      const name = __ring_m48.name; const type_params = __ring_m48.type_params; const fields = __ring_m48.fields;
-      if (((name === BUILTIN_LIST) ? (List_len(type_params) === 1) : false)) {
-        return (List_len(fields) === 0);
+      const name = __ring_m48.name; const type_params = __ring_m48.type_params;
+      if ((name === BUILTIN_LIST)) {
+        return (List_len(type_params) === 1);
       } else {
         return false;
       }
@@ -1123,9 +1123,9 @@ function is_map_type(t) {
   __ring_match49: {
     const __ring_m49 = t;
     if (__ring_m49._tag === "StructType") {
-      const name = __ring_m49.name; const type_params = __ring_m49.type_params; const fields = __ring_m49.fields;
-      if (((name === BUILTIN_MAP) ? (List_len(type_params) === 2) : false)) {
-        return (List_len(fields) === 0);
+      const name = __ring_m49.name; const type_params = __ring_m49.type_params;
+      if ((name === BUILTIN_MAP)) {
+        return (List_len(type_params) === 2);
       } else {
         return false;
       }
@@ -1157,9 +1157,9 @@ function is_set_type(t) {
   __ring_match51: {
     const __ring_m51 = t;
     if (__ring_m51._tag === "StructType") {
-      const name = __ring_m51.name; const type_params = __ring_m51.type_params; const fields = __ring_m51.fields;
-      if (((name === BUILTIN_SET) ? (List_len(type_params) === 1) : false)) {
-        return (List_len(fields) === 0);
+      const name = __ring_m51.name; const type_params = __ring_m51.type_params;
+      if ((name === BUILTIN_SET)) {
+        return (List_len(type_params) === 1);
       } else {
         return false;
       }
@@ -1184,19 +1184,19 @@ function list_element(t) {
 }
 
 function make_list_type(element) {
-  return Type_StructType(BUILTIN_LIST, [element], []);
+  return Type_StructType(BUILTIN_LIST, [element]);
 }
 
 function make_map_type(key, value) {
-  return Type_StructType(BUILTIN_MAP, [key, value], []);
+  return Type_StructType(BUILTIN_MAP, [key, value]);
 }
 
 function make_option_type(inner) {
-  return Type_EnumType(BUILTIN_OPTION, [inner], [new EnumVariant("some", [inner], Option_none), new EnumVariant("none", [], Option_none)]);
+  return Type_EnumType(BUILTIN_OPTION, [inner]);
 }
 
 function make_set_type(element) {
-  return Type_StructType(BUILTIN_SET, [element], []);
+  return Type_StructType(BUILTIN_SET, [element]);
 }
 
 function open_effect_row(effects, tail) {

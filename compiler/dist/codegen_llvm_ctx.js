@@ -410,14 +410,14 @@ function get_builtin_typeid(ty) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "StructType") {
-      const name = __ring_m6.name; const type_params = __ring_m6.type_params; const fields = __ring_m6.fields;
-      if ((((name === "List") ? (List_len(type_params) === 1) : false) ? (List_len(fields) === 0) : false)) {
+      const name = __ring_m6.name; const type_params = __ring_m6.type_params;
+      if (((name === "List") ? (List_len(type_params) === 1) : false)) {
         return 4;
       } else {
-        if ((((name === "Map") ? (List_len(type_params) === 2) : false) ? (List_len(fields) === 0) : false)) {
+        if (((name === "Map") ? (List_len(type_params) === 2) : false)) {
           return 5;
         } else {
-          if ((((name === "Set") ? (List_len(type_params) === 1) : false) ? (List_len(fields) === 0) : false)) {
+          if (((name === "Set") ? (List_len(type_params) === 1) : false)) {
             return 6;
           } else {
             if ((name === "StringBuilder")) {

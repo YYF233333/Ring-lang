@@ -488,8 +488,8 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
   __ring_match17: {
     const __ring_m17 = hir$hexpr_type(iterable);
     if (__ring_m17._tag === "StructType") {
-      const name = __ring_m17.name; const type_params = __ring_m17.type_params; const fields = __ring_m17.fields;
-      __ring_blk5 = ((((name === "Set") ? (List_len(type_params) === 1) : false) ? (List_len(fields) === 0) : false) ? (function() {
+      const name = __ring_m17.name; const type_params = __ring_m17.type_params;
+      __ring_blk5 = (((name === "Set") ? (List_len(type_params) === 1) : false) ? (function() {
   let __ring_blk6;
   __ring_match18: {
     const __ring_m18 = __ring_index(type_params, 0);

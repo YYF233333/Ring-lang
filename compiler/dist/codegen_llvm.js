@@ -1235,8 +1235,8 @@ function is_extern_type_ref(ty, ctx) {
   __ring_match30: {
     const __ring_m30 = ty;
     if (__ring_m30._tag === "StructType") {
-      const name = __ring_m30.name; const type_params = __ring_m30.type_params; const fields = __ring_m30.fields;
-      if (((List_len(fields) === 0) ? (List_len(type_params) === 0) : false)) {
+      const name = __ring_m30.name; const type_params = __ring_m30.type_params;
+      if ((List_len(type_params) === 0)) {
         return _Set_contains(ctx.extern_types, name, __Str_Eq);
       } else {
         return false;
@@ -1252,9 +1252,9 @@ function is_list_type(ty) {
   __ring_match31: {
     const __ring_m31 = ty;
     if (__ring_m31._tag === "StructType") {
-      const name = __ring_m31.name; const type_params = __ring_m31.type_params; const fields = __ring_m31.fields;
-      if (((name === "List") ? (List_len(type_params) >= 1) : false)) {
-        return (List_len(fields) === 0);
+      const name = __ring_m31.name; const type_params = __ring_m31.type_params;
+      if ((name === "List")) {
+        return (List_len(type_params) >= 1);
       } else {
         return false;
       }

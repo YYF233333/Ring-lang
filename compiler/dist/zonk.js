@@ -279,13 +279,13 @@ function label_vars(names, t) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "StructType") {
-      const name = __ring_m6.name; const type_params = __ring_m6.type_params; const fields = __ring_m6.fields;
-      return types$Type_StructType(name, type_params.map((function(p) { return label_vars(names, p); })), fields);
+      const name = __ring_m6.name; const type_params = __ring_m6.type_params;
+      return types$Type_StructType(name, type_params.map((function(p) { return label_vars(names, p); })));
       break __ring_match6;
     }
     if (__ring_m6._tag === "EnumType") {
-      const name = __ring_m6.name; const type_params = __ring_m6.type_params; const variants = __ring_m6.variants;
-      return types$Type_EnumType(name, type_params.map((function(p) { return label_vars(names, p); })), variants);
+      const name = __ring_m6.name; const type_params = __ring_m6.type_params;
+      return types$Type_EnumType(name, type_params.map((function(p) { return label_vars(names, p); })));
       break __ring_match6;
     }
     if (__ring_m6._tag === "GenericType") {

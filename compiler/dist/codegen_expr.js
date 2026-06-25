@@ -1069,9 +1069,9 @@ function gen_named_variant_construct(ctx, enum_name, variant_name, fields, sprea
     _Map_insert(field_map, f.name, f.value);
   }
   __ring_match30: {
-    const __ring_m30 = ty;
-    if (__ring_m30._tag === "EnumType") {
-      const variants = __ring_m30.variants;
+    const __ring_m30 = _Map_get(ctx.enum_variants, enum_name);
+    if (__ring_m30._tag === "some") {
+      const variants = __ring_m30._0;
       const __ring_iter_22 = __List_Iterable.iter(variants);
       while (true) {
         const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
@@ -1127,7 +1127,10 @@ function gen_named_variant_construct(ctx, enum_name, variant_name, fields, sprea
       }
       break __ring_match30;
     }
-    break __ring_match30;
+    if (__ring_m30._tag === "none") {
+      break __ring_match30;
+    }
+    __match_fail(__ring_m30);
   }
   let args = [];
   const __ring_iter_24 = __List_Iterable.iter(fields);

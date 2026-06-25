@@ -1699,7 +1699,7 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
       const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, s, __ring_ev_fail);
       effects = me[0];
       s = me[1];
-      const spread_enum_type = types$Type_EnumType(enum_name, type_param_types, enum_def.variants);
+      const spread_enum_type = types$Type_EnumType(enum_name, type_param_types);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(sr.hexpr), spread_enum_type, s, span);
       hspread = Option_some(sr.hexpr);
       break __ring_match91;
@@ -1766,7 +1766,7 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
       }
     }
   }
-  const enum_type = types$Type_EnumType(enum_name, type_param_types, enum_def.variants);
+  const enum_type = types$Type_EnumType(enum_name, type_param_types);
   return new infer_ctx$InferResult(hir$HExpr_NamedVariantConstruct(enum_name, variant_name, hfields, hspread, enum_type, effects, span), s, effects);
 }
 
@@ -2005,15 +2005,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
       const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, s, __ring_ev_fail);
       effects = me[0];
       s = me[1];
-      let spread_fields = [];
-      const __ring_iter_16 = __List_Iterable.iter(struct_def.fields);
-      while (true) {
-        const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
-        if (__ring_next_16._tag === "none") break;
-        const f = __ring_next_16._0;
-        List_push(spread_fields, new types$StructField(f.name, env$apply_subst_map(inst_map, f.ty), f.is_pub));
-      }
-      const spread_type = types$Type_StructType(struct_def.name, type_param_types, spread_fields);
+      const spread_type = types$Type_StructType(struct_def.name, type_param_types);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(sr.hexpr), spread_type, s, span);
       hspread = Option_some(sr.hexpr);
       break __ring_match110;
@@ -2023,11 +2015,11 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
     }
     __match_fail(__ring_m110);
   }
-  const __ring_iter_17 = __List_Iterable.iter(fields);
+  const __ring_iter_16 = __List_Iterable.iter(fields);
   while (true) {
-    const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
-    if (__ring_next_17._tag === "none") break;
-    const field = __ring_next_17._0;
+    const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+    if (__ring_next_16._tag === "none") break;
+    const field = __ring_next_16._0;
     const fr = infer_expr(ctx, field.value, s, __ring_ev_fail);
     s = fr.subst;
     const me = infer_ctx$merge_effects(ctx.env, effects, fr.effects, s, __ring_ev_fail);
@@ -2053,24 +2045,24 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
   }
   if (Option_is_none(spread)) {
     let provided = set_new();
-    const __ring_iter_18 = __List_Iterable.iter(fields);
+    const __ring_iter_17 = __List_Iterable.iter(fields);
+    while (true) {
+      const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+      if (__ring_next_17._tag === "none") break;
+      const f = __ring_next_17._0;
+      _Set_insert(provided, f.name);
+    }
+    const __ring_iter_18 = __List_Iterable.iter(struct_def.fields);
     while (true) {
       const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
       if (__ring_next_18._tag === "none") break;
-      const f = __ring_next_18._0;
-      _Set_insert(provided, f.name);
-    }
-    const __ring_iter_19 = __List_Iterable.iter(struct_def.fields);
-    while (true) {
-      const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
-      if (__ring_next_19._tag === "none") break;
-      const df = __ring_next_19._0;
+      const df = __ring_next_18._0;
       if ((!_Set_contains(provided, df.name, __Str_Eq))) {
         const _ = infer_ctx$type_error(ctx.sink, codes$E0203, `Missing field '${df.name}' in struct literal '${name}'`, span, diagnostics$DiagnosticContext_MissingField(df.name, name, Option_none));
       }
     }
   }
-  const struct_type = types$Type_StructType(struct_def.name, type_param_types, struct_def.fields);
+  const struct_type = types$Type_StructType(struct_def.name, type_param_types);
   return new infer_ctx$InferResult(hir$HExpr_StructLit(struct_def.name, [], hfields, hspread, struct_type, effects, span), s, effects);
 }
 
@@ -2078,11 +2070,11 @@ function infer_string_interp(ctx, parts, span, subst, __ring_ev_fail) {
   let s = subst;
   let effects = types$EMPTY_ROW;
   let hparts = [];
-  const __ring_iter_20 = __List_Iterable.iter(parts);
+  const __ring_iter_19 = __List_Iterable.iter(parts);
   while (true) {
-    const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
-    if (__ring_next_20._tag === "none") break;
-    const part = __ring_next_20._0;
+    const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+    if (__ring_next_19._tag === "none") break;
+    const part = __ring_next_19._0;
     __ring_match112: {
       const __ring_m112 = part;
       if (__ring_m112._tag === "LitPart") {
@@ -2161,22 +2153,22 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   let inst_map = map_new();
   let inst_type_args = [];
   let tpi = 0;
-  const __ring_iter_21 = __List_Iterable.iter(effect_def.type_param_vars);
+  const __ring_iter_20 = __List_Iterable.iter(effect_def.type_param_vars);
   while (true) {
-    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-    if (__ring_next_21._tag === "none") break;
-    const tpv = __ring_next_21._0;
+    const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+    if (__ring_next_20._tag === "none") break;
+    const tpv = __ring_next_20._0;
     const fresh = env$TypeEnv_fresh_var(ctx.env);
     _Map_insert(inst_map, tpv, fresh);
     List_push(inst_type_args, fresh);
     tpi = (tpi + 1);
   }
   let inst_params = [];
-  const __ring_iter_22 = __List_Iterable.iter(op.params);
+  const __ring_iter_21 = __List_Iterable.iter(op.params);
   while (true) {
-    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
-    if (__ring_next_22._tag === "none") break;
-    const pt = __ring_next_22._0;
+    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+    if (__ring_next_21._tag === "none") break;
+    const pt = __ring_next_21._0;
     List_push(inst_params, env$apply_subst_map(inst_map, pt));
   }
   const inst_ret = env$apply_subst_map(inst_map, op.return_type);
@@ -2187,11 +2179,11 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   let effects = types$EMPTY_ROW;
   let hargs = [];
   let i = 0;
-  const __ring_iter_23 = __List_Iterable.iter(args);
+  const __ring_iter_22 = __List_Iterable.iter(args);
   while (true) {
-    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-    if (__ring_next_23._tag === "none") break;
-    const arg = __ring_next_23._0;
+    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+    if (__ring_next_22._tag === "none") break;
+    const arg = __ring_next_22._0;
     const ar = infer_expr(ctx, arg, s, __ring_ev_fail);
     s = ar.subst;
     const me = infer_ctx$merge_effects(ctx.env, effects, ar.effects, s, __ring_ev_fail);
@@ -2389,11 +2381,11 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
       const __ring_m129 = recv_var_id;
       if (__ring_m129._tag === "some") {
         const rvid = __ring_m129._0;
-        const __ring_iter_24 = __List_Iterable.iter(ctx.current_fn_bounds);
+        const __ring_iter_23 = __List_Iterable.iter(ctx.current_fn_bounds);
         while (true) {
-          const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-          if (__ring_next_24._tag === "none") break;
-          const fb = __ring_next_24._0;
+          const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+          if (__ring_next_23._tag === "none") break;
+          const fb = __ring_next_23._0;
           if ((resolve_var_id(fb.type_param_var_id, s) === rvid)) {
             __ring_match130: {
               const __ring_m130 = _Map_get(ctx.env.trait_reg.traits, fb.trait_name);
@@ -2466,11 +2458,11 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
   }
   let hargs = [];
   let ai = 0;
-  const __ring_iter_25 = __List_Iterable.iter(args);
+  const __ring_iter_24 = __List_Iterable.iter(args);
   while (true) {
-    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
-    if (__ring_next_25._tag === "none") break;
-    const arg = __ring_next_25._0;
+    const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+    if (__ring_next_24._tag === "none") break;
+    const arg = __ring_next_24._0;
     let __ring_blk10;
     __ring_match135: {
       const __ring_m135 = arg;
@@ -2551,11 +2543,11 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
         if (__ring_m141._tag === "FnType") {
           const mt_params = __ring_m141.params; const mt_ret = __ring_m141.return_type; const mt_effects = __ring_m141.effects;
           let i = 0;
-          const __ring_iter_26 = __List_Iterable.iter(hargs);
+          const __ring_iter_25 = __List_Iterable.iter(hargs);
           while (true) {
-            const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
-            if (__ring_next_26._tag === "none") break;
-            const harg = __ring_next_26._0;
+            const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+            if (__ring_next_25._tag === "none") break;
+            const harg = __ring_next_25._0;
             if (((i + 1) < List_len(mt_params))) {
               __ring_match142: {
                 const __ring_m142 = List_get(mt_params, (i + 1));
@@ -2661,11 +2653,11 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
   let effects = scrut_r.effects;
   const result_type = env$TypeEnv_fresh_var(ctx.env);
   let harms = [];
-  const __ring_iter_27 = __List_Iterable.iter(arms);
+  const __ring_iter_26 = __List_Iterable.iter(arms);
   while (true) {
-    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-    if (__ring_next_27._tag === "none") break;
-    const arm = __ring_next_27._0;
+    const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+    if (__ring_next_26._tag === "none") break;
+    const arm = __ring_next_26._0;
     env$TypeEnv_push_scope(ctx.env);
     const arm_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some((function() {
   const match_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern);
@@ -2731,18 +2723,18 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
 function infer_list_literal(ctx, elements, span, subst, __ring_ev_fail) {
   if ((List_len(elements) === 0)) {
     const elem_type = env$TypeEnv_fresh_var(ctx.env);
-    const list_type = types$Type_StructType(hir$BUILTIN_LIST, [elem_type], []);
+    const list_type = types$Type_StructType(hir$BUILTIN_LIST, [elem_type]);
     return new infer_ctx$InferResult(hir$HExpr_ListLit([], list_type, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
   }
   let s = subst;
   let helements = [];
   let elem_type = env$TypeEnv_fresh_var(ctx.env);
   let combined_effects = types$EMPTY_ROW;
-  const __ring_iter_28 = __List_Iterable.iter(elements);
+  const __ring_iter_27 = __List_Iterable.iter(elements);
   while (true) {
-    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
-    if (__ring_next_28._tag === "none") break;
-    const el = __ring_next_28._0;
+    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+    if (__ring_next_27._tag === "none") break;
+    const el = __ring_next_27._0;
     const r = infer_expr(ctx, el, s, __ring_ev_fail);
     s = r.subst;
     s = infer_ctx$unify_at(ctx.sink, ctx.env, env$apply_subst(s, hir$hexpr_type(r.hexpr)), env$apply_subst(s, elem_type), s, span);
@@ -2752,7 +2744,7 @@ function infer_list_literal(ctx, elements, span, subst, __ring_ev_fail) {
     combined_effects = me[0];
     s = me[1];
   }
-  const list_type = types$Type_StructType(hir$BUILTIN_LIST, [env$apply_subst(s, elem_type)], []);
+  const list_type = types$Type_StructType(hir$BUILTIN_LIST, [env$apply_subst(s, elem_type)]);
   return new infer_ctx$InferResult(hir$HExpr_ListLit(helements, list_type, combined_effects, span), s, combined_effects);
 }
 
@@ -2868,11 +2860,11 @@ function infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail) {
   let effects = body_r.effects;
   let hhandlers = [];
   let handled_effects = set_new();
-  const __ring_iter_29 = __List_Iterable.iter(handlers);
+  const __ring_iter_28 = __List_Iterable.iter(handlers);
   while (true) {
-    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
-    if (__ring_next_29._tag === "none") break;
-    const handler = __ring_next_29._0;
+    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+    if (__ring_next_28._tag === "none") break;
+    const handler = __ring_next_28._0;
     env$TypeEnv_push_scope(ctx.env);
     const effect_def = _Map_get(ctx.env.types.effects, handler.effect_name);
     let handler_inst_map = map_new();
@@ -2880,11 +2872,11 @@ function infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail) {
       const __ring_m154 = effect_def;
       if (__ring_m154._tag === "some") {
         const ed = __ring_m154._0;
-        const __ring_iter_30 = __List_Iterable.iter(ed.type_param_vars);
+        const __ring_iter_29 = __List_Iterable.iter(ed.type_param_vars);
         while (true) {
-          const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
-          if (__ring_next_30._tag === "none") break;
-          const tpv = __ring_next_30._0;
+          const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+          if (__ring_next_29._tag === "none") break;
+          const tpv = __ring_next_29._0;
           const fresh = env$TypeEnv_fresh_var(ctx.env);
           _Map_insert(handler_inst_map, tpv, fresh);
         }
@@ -2910,11 +2902,11 @@ function infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail) {
     }
     let hparams = [];
     let hi = 0;
-    const __ring_iter_31 = __List_Iterable.iter(handler.params);
+    const __ring_iter_30 = __List_Iterable.iter(handler.params);
     while (true) {
-      const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
-      if (__ring_next_31._tag === "none") break;
-      const p = __ring_next_31._0;
+      const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+      if (__ring_next_30._tag === "none") break;
+      const p = __ring_next_30._0;
       let __ring_blk16;
       __ring_match156: {
         const __ring_m156 = p.type_annotation;
@@ -3010,11 +3002,11 @@ function infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail) {
   }
   const resolved_effects = env$apply_subst_row(s, effects);
   let filtered_effects = [];
-  const __ring_iter_32 = __List_Iterable.iter(resolved_effects.effects);
+  const __ring_iter_31 = __List_Iterable.iter(resolved_effects.effects);
   while (true) {
-    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
-    if (__ring_next_32._tag === "none") break;
-    const e = __ring_next_32._0;
+    const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+    if (__ring_next_31._tag === "none") break;
+    const e = __ring_next_31._0;
     let __ring_blk20;
     __ring_match162: {
       const __ring_m162 = e;
@@ -3172,11 +3164,11 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
   let effects = expr_r.effects;
   let error_type = env$TypeEnv_fresh_var(ctx.env);
   let found_fail = false;
-  const __ring_iter_33 = __List_Iterable.iter(effects.effects);
+  const __ring_iter_32 = __List_Iterable.iter(effects.effects);
   while (true) {
-    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
-    if (__ring_next_33._tag === "none") break;
-    const eff = __ring_next_33._0;
+    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+    if (__ring_next_32._tag === "none") break;
+    const eff = __ring_next_32._0;
     __ring_match171: {
       const __ring_m171 = eff;
       if (__ring_m171._tag === "FailEffect") {
@@ -3214,11 +3206,11 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
   const result_type = env$TypeEnv_fresh_var(ctx.env);
   s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(expr_r.hexpr), result_type, s, span);
   let harms = [];
-  const __ring_iter_34 = __List_Iterable.iter(arms);
+  const __ring_iter_33 = __List_Iterable.iter(arms);
   while (true) {
-    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
-    if (__ring_next_34._tag === "none") break;
-    const arm = __ring_next_34._0;
+    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+    if (__ring_next_33._tag === "none") break;
+    const arm = __ring_next_33._0;
     env$TypeEnv_push_scope(ctx.env);
     const arm_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some((function() {
   infer_ctx$bind_pattern(ctx, arm.pattern, error_type, s);
@@ -3287,11 +3279,11 @@ function infer_lambda(ctx, params, body, span, subst, expected_param_types, __ri
   let hparams = [];
   let param_types = [];
   let pi = 0;
-  const __ring_iter_35 = __List_Iterable.iter(params);
+  const __ring_iter_34 = __List_Iterable.iter(params);
   while (true) {
-    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-    if (__ring_next_35._tag === "none") break;
-    const p = __ring_next_35._0;
+    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+    if (__ring_next_34._tag === "none") break;
+    const p = __ring_next_34._0;
     let __ring_blk22;
     __ring_match176: {
       const __ring_m176 = p.type_annotation;
@@ -3378,21 +3370,21 @@ function infer_lambda(ctx, params, body, span, subst, expected_param_types, __ri
       const body_r = __ring_m181._0;
       s = body_r.subst;
       let applied_params = [];
-      const __ring_iter_36 = __List_Iterable.iter(param_types);
+      const __ring_iter_35 = __List_Iterable.iter(param_types);
       while (true) {
-        const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
-        if (__ring_next_36._tag === "none") break;
-        const pt = __ring_next_36._0;
+        const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+        if (__ring_next_35._tag === "none") break;
+        const pt = __ring_next_35._0;
         List_push(applied_params, env$apply_subst(s, pt));
       }
       const applied_ret = env$apply_subst(s, hir$hexpr_type(body_r.hexpr));
       const fn_type = types$Type_FnType(applied_params, applied_ret, body_r.effects);
       let final_hparams = [];
-      const __ring_iter_37 = __List_Iterable.iter(hparams);
+      const __ring_iter_36 = __List_Iterable.iter(hparams);
       while (true) {
-        const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
-        if (__ring_next_37._tag === "none") break;
-        const hp = __ring_next_37._0;
+        const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+        if (__ring_next_36._tag === "none") break;
+        const hp = __ring_next_36._0;
         List_push(final_hparams, new hir$HParam(hp.name, env$apply_subst(s, hp.ty), hp.def_id, hp.is_mutable));
       }
       return new infer_ctx$InferResult(hir$HExpr_Lambda(final_hparams, applied_ret, body_r.hexpr, fn_type, types$EMPTY_ROW, span), s, types$EMPTY_ROW);
@@ -3425,11 +3417,11 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
   let hargs = [];
   let arg_types = [];
   let ai = 0;
-  const __ring_iter_38 = __List_Iterable.iter(args);
+  const __ring_iter_37 = __List_Iterable.iter(args);
   while (true) {
-    const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
-    if (__ring_next_38._tag === "none") break;
-    const arg = __ring_next_38._0;
+    const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+    if (__ring_next_37._tag === "none") break;
+    const arg = __ring_next_37._0;
     let __ring_blk24;
     __ring_match183: {
       const __ring_m183 = arg;
@@ -3688,11 +3680,11 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
     break __ring_match197;
   }
   let final_hargs = [];
-  const __ring_iter_39 = __List_Iterable.iter(hargs);
+  const __ring_iter_38 = __List_Iterable.iter(hargs);
   while (true) {
-    const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
-    if (__ring_next_39._tag === "none") break;
-    const harg = __ring_next_39._0;
+    const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+    if (__ring_next_38._tag === "none") break;
+    const harg = __ring_next_38._0;
     List_push(final_hargs, resolve_arg_dict_closure(ctx, harg, s));
   }
   return new infer_ctx$InferResult(hir$HExpr_Call(callee_r.hexpr, final_hargs, [], resolved_dicts, Option_none, result_type, effects, span), s, effects);
@@ -4017,7 +4009,7 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
                       if (__ring_m223._tag === "some") {
                         const itn = __ring_m223._0;
                         iter_type_name = Option_some(itn);
-                        const concrete_iter_type = types$Type_StructType(itn, concrete_type_params, []);
+                        const concrete_iter_type = types$Type_StructType(itn, concrete_type_params);
                         const iterator_impl = env$find_impl(ctx.env.trait_reg, itn, "Iterator");
                         __ring_match224: {
                           const __ring_m224 = iterator_impl;
@@ -4052,11 +4044,11 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
                                     const elements = __ring_m226.elements;
                                     let concrete_elems = [];
                                     let ei = 0;
-                                    const __ring_iter_40 = __List_Iterable.iter(elements);
+                                    const __ring_iter_39 = __List_Iterable.iter(elements);
                                     while (true) {
-                                      const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
-                                      if (__ring_next_40._tag === "none") break;
-                                      const elem = __ring_next_40._0;
+                                      const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
+                                      if (__ring_next_39._tag === "none") break;
+                                      const elem = __ring_next_39._0;
                                       __ring_match228: {
                                         const __ring_m228 = elem;
                                         if (__ring_m228._tag === "TypeVar") {
@@ -4506,11 +4498,11 @@ function infer_block(ctx, body, initial_subst, __ring_ev_fail) {
       let subst = __ring_blk42;
       let effects = types$EMPTY_ROW;
       let hstmts = [];
-      const __ring_iter_41 = __List_Iterable.iter(stmts);
+      const __ring_iter_40 = __List_Iterable.iter(stmts);
       while (true) {
-        const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
-        if (__ring_next_41._tag === "none") break;
-        const stmt = __ring_next_41._0;
+        const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
+        if (__ring_next_40._tag === "none") break;
+        const stmt = __ring_next_40._0;
         const sr = infer_stmt(ctx, stmt, subst, __ring_ev_fail);
         subst = sr.subst;
         const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, subst, __ring_ev_fail);
@@ -4649,11 +4641,11 @@ function infer_expr(ctx, expr, subst, __ring_ev_fail) {
       let s = subst;
       let helements = [];
       let combined_effects = types$EMPTY_ROW;
-      const __ring_iter_42 = __List_Iterable.iter(elements);
+      const __ring_iter_41 = __List_Iterable.iter(elements);
       while (true) {
-        const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
-        if (__ring_next_42._tag === "none") break;
-        const el = __ring_next_42._0;
+        const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
+        if (__ring_next_41._tag === "none") break;
+        const el = __ring_next_41._0;
         const r = infer_expr(ctx, el, s, __ring_ev_fail);
         s = r.subst;
         List_push(helements, r.hexpr);
@@ -4662,11 +4654,11 @@ function infer_expr(ctx, expr, subst, __ring_ev_fail) {
         s = me[1];
       }
       let elem_types = [];
-      const __ring_iter_43 = __List_Iterable.iter(helements);
+      const __ring_iter_42 = __List_Iterable.iter(helements);
       while (true) {
-        const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
-        if (__ring_next_43._tag === "none") break;
-        const he = __ring_next_43._0;
+        const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
+        if (__ring_next_42._tag === "none") break;
+        const he = __ring_next_42._0;
         List_push(elem_types, env$apply_subst(s, hir$hexpr_type(he)));
       }
       const tuple_type = types$Type_TupleType(elem_types);
@@ -4682,7 +4674,7 @@ function infer_expr(ctx, expr, subst, __ring_ev_fail) {
       const me = infer_ctx$merge_effects(ctx.env, start_r.effects, end_r.effects, s, __ring_ev_fail);
       let range_effects = me[0];
       s = me[1];
-      const range_type = types$Type_EnumType(hir$BUILTIN_RANGE, [types$INT], []);
+      const range_type = types$Type_EnumType(hir$BUILTIN_RANGE, [types$INT]);
       return new infer_ctx$InferResult(hir$HExpr_RangeExpr(start_r.hexpr, end_r.hexpr, inclusive, range_type, range_effects, span), s, range_effects);
       break __ring_match255;
     }

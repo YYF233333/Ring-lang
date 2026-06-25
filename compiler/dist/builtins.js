@@ -265,11 +265,11 @@ function get_or_create_methods(env, type_name) {
 }
 
 function make_list_struct(t) {
-  return types$Type_StructType(types$BUILTIN_LIST, [t], []);
+  return types$Type_StructType(types$BUILTIN_LIST, [t]);
 }
 
 function make_set_struct(t) {
-  return types$Type_StructType(types$BUILTIN_SET, [t], []);
+  return types$Type_StructType(types$BUILTIN_SET, [t]);
 }
 
 function open_row(env) {
@@ -283,12 +283,12 @@ function register_cell(env) {
   _Map_insert(env.types.structs, types$BUILTIN_CELL, new env$StructDef(types$BUILTIN_CELL, ["T"], [cell_t_id], [new types$StructField("value", cell_t, true)], false));
   const ctor_t_id = env$TypeEnv_fresh_var_id(env);
   const ctor_t = types$Type_TypeVar(ctor_t_id, Option_none);
-  const ctor_ret = types$Type_StructType(types$BUILTIN_CELL, [ctor_t], [new types$StructField("value", ctor_t, true)]);
+  const ctor_ret = types$Type_StructType(types$BUILTIN_CELL, [ctor_t]);
   env$TypeEnv_bind(env, types$BUILTIN_CELL, new env$TypeScheme(types$Type_FnType([ctor_t], ctor_ret, types$EMPTY_ROW), [ctor_t_id], [], Option_none));
   const m_t_id = env$TypeEnv_fresh_var_id(env);
   const m_t = types$Type_TypeVar(m_t_id, Option_none);
   const mut_row = new types$EffectRow([types$Effect_MutEffect(m_t)], Option_none);
-  const self_type = types$Type_StructType(types$BUILTIN_CELL, [m_t], [new types$StructField("value", m_t, true)]);
+  const self_type = types$Type_StructType(types$BUILTIN_CELL, [m_t]);
   let methods = map_new();
   _Map_insert(methods, "get", new env$TypeScheme(types$Type_FnType([self_type], m_t, mut_row), [m_t_id], [], Option_none));
   _Map_insert(methods, "set", new env$TypeScheme(types$Type_FnType([self_type, m_t], types$UNIT, mut_row), [m_t_id], [], Option_none));
@@ -332,7 +332,7 @@ function register_debug_trait(env) {
   }
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
-  const list_self = types$Type_StructType(types$BUILTIN_LIST, [t], []);
+  const list_self = types$Type_StructType(types$BUILTIN_LIST, [t]);
   const list_debug_fn = types$Type_FnType([list_self], types$STR, types$EMPTY_ROW);
   let list_methods = get_or_create_methods(env, types$BUILTIN_LIST);
   _Map_insert(list_methods, "debug", new env$TypeScheme(list_debug_fn, [t_id], [new env$SchemeBound(t_id, "Debug", [])], Option_none));
@@ -348,7 +348,7 @@ function register_debug_trait(env) {
   env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_MAP, ["K", "V"], ["debug"], map_new()));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
-  const set_self = types$Type_StructType(types$BUILTIN_SET, [t], []);
+  const set_self = types$Type_StructType(types$BUILTIN_SET, [t]);
   const set_debug_fn = types$Type_FnType([set_self], types$STR, types$EMPTY_ROW);
   let set_methods = get_or_create_methods(env, types$BUILTIN_SET);
   _Map_insert(set_methods, "debug", new env$TypeScheme(set_debug_fn, [t_id], [], Option_none));

@@ -1,6 +1,6 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, effect_kind_name, effects_match_kind, UNIT}
 use union_find::{UnionFind, uf_bind, uf_lookup, uf_insert, new_union_find}
-use env::{TypeEnv, apply_subst, apply_subst_row}
+use env::{TypeEnv, apply_subst, apply_subst_row, apply_subst_map}
 
 // ============================================================
 // Unification error (raised via fail effect, caught by infer-ctx)
@@ -353,8 +353,27 @@ fn unify_record_rows(ra: Type, rb: Type, subst: UnionFind, mut env: TypeEnv) -> 
 
 fn unify_struct_with_record(st: Type, rt: Type, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
     match (st, rt) {
-        (Type::StructType { name, fields: struct_fields, .. },
+        (Type::StructType { name, type_params, .. },
          Type::RecordType { fields: record_fields, tail: record_tail, .. }) => {
+            // Look up struct fields from registry and instantiate with type_params
+            let struct_fields = match env.types.structs.get(name) {
+                some(struct_def) => {
+                    let mut inst_map: Map<Int, Type> = map_new()
+                    let mut fi = 0
+                    while fi < struct_def.type_param_vars.len() && fi < type_params.len() {
+                        match (struct_def.type_param_vars.get(fi), type_params.get(fi)) {
+                            (some(var_id), some(tp)) => inst_map.insert(var_id, tp),
+                            _ => {}
+                        }
+                        fi = fi + 1
+                    }
+                    struct_def.fields.map(fn(f) { StructField { name: f.name, ty: apply_subst_map(inst_map, f.ty), is_pub: f.is_pub } })
+                },
+                none => {
+                    let empty: List<StructField> = []
+                    empty
+                }
+            }
             let mut s = subst
 
             for rf in record_fields {
