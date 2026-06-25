@@ -15,7 +15,8 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     llvm_resolve_fn, build_entry_alloca,
     get_or_assign_typeid, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV,
-    RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN}
+    RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN,
+    RING_TYPEID_CLOSURE, RING_TYPEID_TUPLE, RING_TYPEID_EVIDENCE}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -62,6 +63,7 @@ extern fn LLVMBuildRet(builder: LLVMBuilderRef, val: LLVMValueRef) -> LLVMValueR
 extern fn LLVMBuildCall2(builder: LLVMBuilderRef, fn_ty: LLVMTypeRef, fn_val: LLVMValueRef, args: List<LLVMValueRef>, name: Str) -> LLVMValueRef
 extern fn LLVMBuildTrunc(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildZExt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildSExt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildPhi(builder: LLVMBuilderRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMAddIncoming(phi: LLVMValueRef, vals: List<LLVMValueRef>, blocks: List<LLVMBasicBlockRef>) -> Unit
 extern fn LLVMBuildGlobalStringPtr(builder: LLVMBuilderRef, str: Str, name: Str) -> LLVMValueRef
@@ -548,10 +550,10 @@ fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_
         slot_idx = slot_idx + 1
     }
 
-    // Closure pair { fn_ptr=thunk, env_ptr } (typeid 7).
+    // Closure pair { fn_ptr=thunk, env_ptr } (RING_TYPEID_CLOSURE).
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let closure_size = LLVMSizeOf(closure_ty)
-    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)
+    let closure_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE, 0)
     let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "wcls"))
     let fp_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "wfp"))
     discard(LLVMBuildStore(ctx.builder, thunk_fn, fp_slot))
@@ -1520,7 +1522,7 @@ fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, i
 
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let closure_size = LLVMSizeOf(closure_ty)
-    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)
+    let closure_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE, 0)
 
     let inner_count = inner_vals.len()
 
@@ -1977,7 +1979,7 @@ fn gen_extern_fn_call(mut ctx: LlvmCtx, name: Str, arg_vals: List<LLVMValueRef>,
         ExternRetMarshall::RetVoid => LLVMConstPointerNull(ctx.ptr_type),
         ExternRetMarshall::RetIntToBoxed => {
             // C i32 → sext to i64 → box_int
-            let ext = LLVMBuildZExt(ctx.builder, c_result, ctx.i64_type, fresh_name(ctx, "iext"))
+            let ext = LLVMBuildSExt(ctx.builder, c_result, ctx.i64_type, fresh_name(ctx, "iext"))
             box_int(ctx, ext)
         },
         ExternRetMarshall::RetStrFromCstr => {
@@ -2016,11 +2018,23 @@ fn gen_extern_LLVMGetTargetFromTriple(mut ctx: LlvmCtx, arg_vals: List<LLVMValue
     let c_args: List<LLVMValueRef> = [triple_cstr, target_alloca, err_alloca]
     let result = LLVMBuildCall2(ctx.builder, info.c_fn_type, info.c_fn_val, c_args, fresh_name(ctx, "gtt"))
 
-    // Check result — if non-zero, panic with error message
-    // For simplicity, just load and return the target (mirrors addon behavior which panics on error)
-    // The addon panics: if(result) { throw error }; return target
-    // We match that: if error, the caller gets a null target and downstream LLVM calls will fail
-    // TODO: could emit a conditional panic here
+    // Check result — if non-zero, panic with error message (mirrors addon which throws on error).
+    let zero_i32 = LLVMConstInt(ctx.i32_type, 0, 0)
+    let is_err = LLVMBuildICmp(ctx.builder, 33, result, zero_i32, fresh_name(ctx, "gtt_err"))  // 33 = LLVMIntNE
+    let current_fn = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
+    let panic_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "gtt.panic")
+    let cont_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "gtt.cont")
+    discard(LLVMBuildCondBr(ctx.builder, is_err, panic_bb, cont_bb))
+    LLVMPositionBuilderAtEnd(ctx.builder, panic_bb)
+    let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
+    let panic_ty = get_rt_fn_type(ctx, "ring_panic")
+    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "LLVMGetTargetFromTriple failed", fresh_name(ctx, "panicmsg"))
+    let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
+    let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
+    let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "panicstr"))
+    discard(LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [str_val], ""))
+    discard(LLVMBuildUnreachable(ctx.builder))
+    LLVMPositionBuilderAtEnd(ctx.builder, cont_bb)
 
     // Load the target from the output alloca
     LLVMBuildLoad2(ctx.builder, ctx.ptr_type, target_alloca, fresh_name(ctx, "target"))
@@ -4508,7 +4522,7 @@ fn gen_range_expr(mut ctx: LlvmCtx, start: HExpr, end: HExpr, inclusive: Bool) -
     let size = LLVMSizeOf(range_ty)
     let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
     let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
-    let range_typeid = LLVMConstInt(ctx.i64_type, 10, 0)  // RING_TYPEID_TUPLE (range is tuple-like)
+    let range_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_TUPLE, 0)  // range is tuple-like
     let range_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, range_typeid], fresh_name(ctx, "rng"))
 
     let start_val = gen_llvm_expr(ctx, start)
@@ -4679,7 +4693,6 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
 
     // Generate a unique name for the lambda function
     let lambda_name = fresh_name(ctx, "ring_lambda_")
-    ctx.lambda_counter = ctx.lambda_counter + 1
 
     // Collect captures: variables referenced in body that are not params and not global functions
     let mut captures: List<Str> = []
@@ -4771,7 +4784,7 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
     let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
     let env_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)
-    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
+    let closure_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE, 0)
     let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, env_typeid], fresh_name(ctx, "env"))
 
     // Store the capture count into slot 0 (B-084: drop_closure_env iterates it).
@@ -4796,7 +4809,7 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
                 // Load the captured variable from the current scope
                 let cap_val = match ctx.named_values.get(cap_name) {
                     some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "cv")),
-                    none => LLVMConstPointerNull(ctx.ptr_type),
+                    none => panic("LLVM codegen: captured variable not found: ${cap_name}"),
                 }
                 // Own the capture: bump its refcount for the env's reference.
                 // B-144: skip dup for extern handle captures (no RC header).
@@ -5493,7 +5506,7 @@ pub fn build_default_evidence_all(mut ctx: LlvmCtx) {
                 // this pointer dup/drop around the initial ref; it never reaches 0.
                 let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
                 let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
-                let ev_typeid = LLVMConstInt(ctx.i64_type, 21, 0)  // RING_TYPEID_EVIDENCE
+                let ev_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_EVIDENCE, 0)
                 let ev_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [ev_size, ev_typeid], fresh_name(ctx, "defev"))
 
                 // Store count in field 0.
@@ -5757,7 +5770,7 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
     // count and ring_drop's each non-null closure slot.
     let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
     let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
-    let ev_typeid = LLVMConstInt(ctx.i64_type, 21, 0)  // RING_TYPEID_EVIDENCE
+    let ev_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_EVIDENCE, 0)
     let ev_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [ev_size, ev_typeid], fresh_name(ctx, "ev_st"))
 
     // Store count in field 0.

@@ -28,13 +28,6 @@
 
 
 
-### #183 RetIntToBoxed 使用 ZExt 而非 SExt [medium] [mechanical] [doing]
-
-`codegen_llvm_expr.ring:1978-1981` 将 C int (i32) 返回值扩展为 Ring Int (i64) 时使用 `LLVMBuildZExt`（零扩展），注释写的是 "sext to i64"。对返回负值的 C 函数，零扩展会产生错误的大正数。当前 LLVM-C 函数返回 int 只返回 0/1（LLVMBool），所以是 latent。`LLVMBuildSExt` 未在任何 `.ring` 文件中声明。
-
-**修复**：在 `llvm_ffi.ring` 中声明 `LLVMBuildSExt`，替换 `codegen_llvm_expr.ring:1980` 的 `LLVMBuildZExt`。
-
-发现者：Opus（LLVM 审计）
 
 ### #184 字符串插值 fallback 将非基本类型当 Int 处理 [medium] [mechanical] [doing]
 
@@ -45,22 +38,8 @@
 发现者：Opus（LLVM 审计）
 
 
-### #186 LLVMGetTargetFromTriple 错误时静默继续 [medium] [judgment] [doing]
-
-`codegen_llvm_expr.ring:2019-2027` 中 `gen_extern_LLVMGetTargetFromTriple` 调用后未检查返回值。若 triple 无效，output alloca 保持 null，后续 LLVM API 调用 null target → segfault。注释承认 `// TODO: could emit a conditional panic here`。
-
-**修复**：emit 条件分支检查返回值，非零则 panic 并输出错误消息。参考 `emit_divzero_guard` 模式。
-
-发现者：Opus（LLVM 审计）+ DS（独立发现）
 
 
-### #188 Lambda 捕获变量未找到时静默存入 null [medium] [judgment] [doing]
-
-`codegen_llvm_expr.ring:4797-4799` 中 `gen_lambda` 构造闭包环境时，若捕获变量在 `ctx.named_values` 中找不到，fallback 存入 `LLVMConstPointerNull`。Checker 保证捕获变量有效，所以正常情况下不触发。但若发生（codegen 与 checker 的 scope 不一致等边角），运行时使用 null 捕获值会 segfault，且无任何诊断信息。
-
-**修复**：将 null fallback 替换为 codegen panic（`panic("LLVM codegen: captured variable not found: ${cap_name}")`），使问题在编译时暴露而非运行时静默崩溃。
-
-发现者：DS（独立发现）
 
 ### #189 codegen_llvm_decl derive 四实现 ~1700 行结构性重复 [medium] [judgment] [doing]
 
@@ -85,13 +64,6 @@
 
 
 
-### #204 RING_TYPEID 常量不一致——部分命名、部分裸数字 [low] [mechanical] [doing]
-
-`codegen_llvm_expr.ring` 中部分 typeid 用命名常量（`RING_TYPEID_DICT_STATIC`），另一些用裸整数：`7` (CLOSURE, line 1523)、`10` (TUPLE, line 4511)、`21` (EVIDENCE, line 5493)。`codegen_llvm_ctx.ring` 已定义 CELL/CLOSURE_ENV/DICT_STATIC/DICT_DYN 常量，但 CLOSURE/EVIDENCE/TUPLE 缺失。
-
-**修复**：在 `codegen_llvm_ctx.ring` 中补充 `RING_TYPEID_CLOSURE = 7`、`RING_TYPEID_TUPLE = 10`、`RING_TYPEID_EVIDENCE = 21`，全局替换裸数字。
-
-发现者：Opus（LLVM 审计）+ DS（独立发现同类问题）
 
 ### #205 Perceus is_droppable_init / anf_should_materialize 必须手动同步 [low] [judgment] [doing]
 
@@ -109,13 +81,6 @@
 
 发现者：DS（独立发现）
 
-### #207 lambda_counter 递增但未使用 [low] [mechanical] [doing]
-
-`codegen_llvm_expr.ring:4682`：`gen_lambda` 中 `ctx.lambda_counter = ctx.lambda_counter + 1` 但该值从未被读取。lambda 名称由 `fresh_name(ctx, "ring_lambda_")` 生成，使用独立的内部计数器。
-
-**修复**：用 `lambda_counter` 生成名称，或删除递增。
-
-发现者：DS（独立发现）
 
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 

@@ -561,6 +561,7 @@ CAST_OP(LLVMBuildIntToPtr)
 CAST_OP(LLVMBuildPtrToInt)
 CAST_OP(LLVMBuildTrunc)
 CAST_OP(LLVMBuildZExt)
+CAST_OP(LLVMBuildSExt)
 
 // ============================================================
 // IR Builder — Phi
@@ -856,6 +857,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         REG(LLVMBuildPtrToInt),
         REG(LLVMBuildTrunc),
         REG(LLVMBuildZExt),
+        REG(LLVMBuildSExt),
         // Phi
         REG(LLVMBuildPhi),
         REG(LLVMAddIncoming),

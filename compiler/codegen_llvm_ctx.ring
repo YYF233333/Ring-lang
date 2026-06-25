@@ -236,6 +236,15 @@ pub struct LlvmCtx {
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).
 pub const RING_TYPEID_CELL: Int = 14
 
+// Closure pair {fn_ptr, env_ptr} typeid (must match RING_TYPEID_CLOSURE in ring_runtime.cpp).
+pub const RING_TYPEID_CLOSURE: Int = 7
+
+// Tuple (and range) typeid (must match RING_TYPEID_TUPLE in ring_runtime.cpp).
+pub const RING_TYPEID_TUPLE: Int = 10
+
+// B-096: evidence struct typeid (must match RING_TYPEID_EVIDENCE in ring_runtime.cpp).
+pub const RING_TYPEID_EVIDENCE: Int = 21
+
 // B-084: the gen_lambda closure-env typeid (must match RING_TYPEID_CLOSURE_ENV in
 // ring_runtime.cpp).  The env struct layout is { i64 count, ptr cap0, ... }; the
 // runtime's drop_closure_env reads `count` and ring_drops each owned capture slot.

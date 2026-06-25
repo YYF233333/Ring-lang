@@ -9,7 +9,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
-    get_or_assign_typeid, RING_TYPEID_DICT_STATIC}
+    get_or_assign_typeid, RING_TYPEID_DICT_STATIC, RING_TYPEID_CLOSURE}
 use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_const_body,
     box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name}
 use codegen_ctx::{extract_effect_names}
@@ -777,7 +777,7 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
 
 fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, alloc_fn: LLVMValueRef, alloc_ty: LLVMTypeRef, slot_idx: Int) {
     let mangled = llvm_mangle_method(target_type, method_name)
-    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
+    let closure_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE, 0)
     match ctx.functions.get(mangled) {
         some(method_fn) => {
             // The dict slot must conform to the uniform closure ABI: a RingClosure
