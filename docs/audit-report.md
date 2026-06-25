@@ -10,20 +10,6 @@
 
 ## 前端
 
-### #181 Tarjan SCC index_counter 值类型语义导致索引冲突 [critical] [judgment] [doing]
-
-`scc.ring:531-587` 的 `tarjan_strongconnect` 将 `mut index_counter: Int` 作为参数传递。Int 是值类型，`mut` 只允许本地修改——递归调用的计数器增量不会回传给调用者。导致兄弟子树中的节点获得相同的 index 值。
-
-**具体反例**：图 `A → [B, C], B → E, C → E, E → A`
-
-- 正确索引：A=0, B=1, E=2, C=3 → 正确 SCC = `{A, B, C, E}`
-- 实际索引：A=0, B=1, E=2, C=1(与 B 冲突!) → C 的 lowlink(1)==index(1) 误判为 SCC root → 错误结果 `{C}` + `{A, B, E}`
-
-**影响**：`tarjan_scc` 在 `infer_decl.ring:665`（impl 方法排序）和 `infer_decl.ring:2022`（顶层函数 SCC）中使用。错误的 SCC 分组导致函数以错误顺序类型检查，可能造成类型推断失败或 effect 传播遗漏。尚未观察到实际症状，但特定的依赖图拓扑**一定会触发**。
-
-**修复**：将 `mut index_counter: Int` 改为 `List<Int>`（长度 1），与 `dict_lower.ring:51,159` 使用的共享计数器模式一致。读取用 `counter[0]`，递增用 `counter.set(0, counter[0] + 1)`。
-
-发现者：Opus（前端审计）
 
 ### #197 resolve_fn_type_effect 与 resolve_effect_expr 逻辑分叉风险 [low] [mechanical] [open]
 
@@ -90,13 +76,6 @@
 
 发现者：Opus（LLVM 审计）
 
-### #185 ring_unbox_float 缺少 null 检查 [medium] [mechanical] [doing]
-
-`ring_runtime.cpp:629-631` 的 `ring_unbox_float` 直接 `return *(double*)p;` 无 null guard。对比 `ring_unbox_int`（line 619）有 `if (!p) { fprintf(stderr, ...); exit(1); }` 保护。null float 指针到达此函数会导致 segfault。
-
-**修复**：添加 `if (!p) { fprintf(stderr, "ring panic: unbox_float(null)\n"); exit(1); }`。
-
-发现者：Opus（LLVM 审计）
 
 ### #186 LLVMGetTargetFromTriple 错误时静默继续 [medium] [judgment] [open]
 
@@ -149,13 +128,6 @@
 
 发现者：Opus（LLVM 审计）
 
-### #194 ring_get_builtin_dict substring 匹配有误匹配风险 [low] [mechanical] [doing]
-
-`ring_runtime.cpp:3209-3245` 的 `ring_get_builtin_dict` 使用 `n.find("Ord")`、`n.find("Eq")`、`n.find("Str")` 做子串匹配。用户类型名含 "Ord"（如 "OrdinaryThing"）或 "Str"（如 "StringHelper"）会错误匹配到内置 dict。
-
-**修复**：改为后缀匹配 `n.ends_with("_Ord")` 或前缀+后缀模式匹配 `__Type_Trait` 命名约定。
-
-发现者：Opus（LLVM 审计）
 
 ### #195 emit_struct_debug_fn 缺少 field_idx < 0 guard [low] [mechanical] [doing]
 
@@ -235,13 +207,6 @@
 
 发现者：Opus（前端审计）
 
-### #193 scc.ring AST walker 双份 collect_*_callees [medium] [mechanical] [doing]
-
-`scc.ring:156-288` 的 `collect_expr_callees` 和 `332-456` 的 `collect_self_method_callees` 遍历完全相同的 AST 结构，~130 行 match arms 完全一致，只在发现 callee 时的记录逻辑不同。`collect_stmt_callees` / `collect_self_method_stmt_callees` 同理。
-
-**修复**：提取单一 AST 遍历函数，接受 callee 记录回调。
-
-发现者：Opus（前端审计）
 
 ### #199 is_value_type 三处相同实现 [low] [mechanical] [open]
 
