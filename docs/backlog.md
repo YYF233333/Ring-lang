@@ -611,7 +611,7 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-### B-145 extern type 裸名碰撞修复（#147）[bugfix] [P3] [S] [judgment] [queued]
+### B-145 extern type 裸名碰撞修复（#147）[bugfix] [P3] [S] [judgment] [doing]
 
 > 2026-06-25 立项。B-144 全局化了 `extern_type_names` 但 `is_extern_handle_type`（hir.ring:504）仍按裸名匹配。跨文件 file-level extern type 用裸名（inline-mod 的已带 `${mod}::${name}` 前缀）。当前风险≈0（`LLVM*Ref` 独占），但应修。
 
@@ -626,7 +626,7 @@ source-map 支持 + 断点调试。
 - 同名 user struct 不被误排除（负面测试：module A 有 `extern type Foo`，module B 有 `struct Foo`）
 - 现有 E2E + llvm_diff 全绿；自举一致
 
-### B-146 gen_match_arm_enum switch 路径嵌套 constructor tag 缺检查 [bugfix] [P3] [S] [judgment] [queued]
+### B-146 gen_match_arm_enum switch 路径嵌套 constructor tag 缺检查 [bugfix] [P3] [S] [judgment] [doing]
 
 > 2026-06-25 立项。if-else 路径已修（ce0e887），switch 路径（无 duplicate-tag 时触发）同样缺内层 tag 检查。风险低但应对齐。
 
@@ -637,7 +637,7 @@ source-map 支持 + 断点调试。
 - 嵌套 constructor 模式在 switch 路径正确匹配
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-147 checker infer_method_call 参数下溢检查 [bugfix] [P2] [S] [judgment] [queued]
+### B-147 checker infer_method_call 参数下溢检查 [bugfix] [P2] [S] [judgment] [doing]
 
 > 2026-06-25 立项。`sb.line()` 无参调用通过类型检查但 runtime 崩溃（方法期望参数）。`infer_method_call` 缺参数数量下溢检查。
 
