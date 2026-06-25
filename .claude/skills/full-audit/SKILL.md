@@ -41,7 +41,7 @@ description: Use when user requests a full codebase review, code audit, cross-va
 
 **禁止省略 DS agent。** 即使时间紧张、即使觉得"这次改动很小不需要"、即使 DS 上次没发现什么——都必须派发。审计的价值在于独立视角，不在于每次都有发现。
 
-**DS Agent 条款**：DS CLI 可用的机器上**必须**并行派发一路 DS 独立审计（`deepseek exec --auto --json --disable subagents`，禁 sub-agent 保前缀缓存）。**本机现状无 deepseek CLI**（见 memory）→ 该路不可达时不阻塞审计，由多 Claude agent 的视角多样性部分替代；不得以此为由在 DS 可用的机器上省略 DS。
+**DS Agent 条款**：**必须**并行派发一路 DS 独立审计。通过 opencode serve HTTP API 调用（`opencode run` 需要 TTY，在 Claude Code sandbox 中会卡死）。DS CLI 不可达时不阻塞审计，由多 Claude agent 的视角多样性部分替代；不得以此为由在 DS 可用的机器上省略 DS。
 
 Dispatch two independent review agents simultaneously:
 
@@ -52,16 +52,29 @@ Dispatch two independent review agents simultaneously:
    - Test least-surprise principle: would a user be confused by any behavior?
    - Write e2e test cases for suspicious code paths and run them
 
-2. **DS Agent** (via deepseek-dispatch skill, **必须派发**):
+2. **DS Agent** (via opencode serve HTTP API, **必须派发**):
    - Independent read-only audit
    - Focus on: missed error handling, unsafe patterns, design-implementation gaps
    - Compare implementation against design.md specification
    - DS 视角独特：更关注具体执行路径、边界条件、模式遗漏，与 Claude 的类型/语义视角互补
-   - **必须加 `--disable subagents`**：审计是长任务，sub-agent 会把单长 session 碎片化成多个短 session，破坏 DeepSeek 前缀缓存积累（75-80% → 90%+）。派发示例：
+   - **调用方式**：`opencode run` 需要 TTY，在 CC sandbox 中 exit 255。必须用 `opencode serve` headless HTTP API。详见 `C:\code\SKILL.md`（deepseek-dispatch skill）。
+   - 派发流程：
      ```powershell
-     deepseek exec --auto --json --disable subagents --model deepseek-v4-pro -p @'
-     <audit prompt>
-     '@ 2>&1 | Out-File -Encoding utf8 "ds-audit.json"
+     # 1. 启动 server（session 级，只启动一次）
+     opencode serve --port 14096 --pure  # run_in_background: true
+     
+     # 2. 创建 session
+     $session = Invoke-RestMethod -Uri "http://localhost:14096/session" -Method Post `
+         -ContentType "application/json" -Body '{"title":"audit"}'
+     $sid = $session.id
+     
+     # 3. 发送审计 prompt（run_in_background: true，DS 可能需要 10-20 分钟）
+     $body = @{ parts = @(@{ type = "text"; text = "<audit prompt>" })
+                model = @{ providerID = "deepseek"; modelID = "deepseek-v4-pro" }
+     } | ConvertTo-Json -Depth 5
+     $result = Invoke-RestMethod -Uri "http://localhost:14096/session/$sid/message" `
+         -Method Post -ContentType "application/json" -Body $body -TimeoutSec 600
+     $result | ConvertTo-Json -Depth 10 | Out-File -Encoding utf8 "ds-audit.json"
      ```
 
 Both agents output structured findings (严重度只允许 `critical` / `medium` / `low`):
