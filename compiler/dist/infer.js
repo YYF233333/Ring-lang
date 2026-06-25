@@ -1206,6 +1206,9 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
           if ((List_len(hargs) > expected_args)) {
             const _ = infer_ctx$type_error(ctx.sink, codes$E0301, `Method '${method}' expects ${Int_to_str(expected_args)} argument(s), got ${Int_to_str(List_len(hargs))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(expected_args)} args`, `${Int_to_str(List_len(hargs))} args`, Option_none));
           }
+          if ((List_len(hargs) < expected_args)) {
+            const _ = infer_ctx$type_error(ctx.sink, codes$E0301, `Method '${method}' expects ${Int_to_str(expected_args)} argument(s), got ${Int_to_str(List_len(hargs))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(expected_args)} args`, `${Int_to_str(List_len(hargs))} args`, Option_none));
+          }
           result_type = env$apply_subst(s, mt_ret);
           const me = infer_ctx$merge_effects(ctx.env, effects, mt_effects, s, __ring_ev_fail);
           effects = me[0];
@@ -1297,7 +1300,7 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
     env$TypeEnv_push_scope(ctx.env);
     const arm_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some((function() {
   const match_pattern = infer_helpers$rewrite_bare_enum_bindings(ctx.env, arm.pattern);
-  infer_ctx$bind_pattern(ctx, match_pattern, hir$hexpr_type(scrut_r.hexpr), s);
+  infer_ctx$bind_pattern(ctx, match_pattern, hir$hexpr_type(scrut_r.hexpr), s, __ring_ev_fail);
   let guard_hexpr = Option_none;
   __ring_match67: {
     const __ring_m67 = arm.guard;
@@ -1305,7 +1308,7 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
       const g = __ring_m67._0;
       const gr = infer_expr(ctx, g, s, __ring_ev_fail);
       s = gr.subst;
-      s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(gr.hexpr), types$BOOL, s, arm.span);
+      s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(gr.hexpr), types$BOOL, s, arm.span, __ring_ev_fail);
       const me = infer_ctx$merge_effects(ctx.env, effects, gr.effects, s, __ring_ev_fail);
       effects = me[0];
       s = me[1];

@@ -625,6 +625,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_empty_list_suggestion.ring", error_pattern: "E0301" },
     { file: "error_effect_suggestion.ring", error_pattern: "E0403" },
     { file: "error_method_extra_args.ring", error_pattern: "E0301" },
+    { file: "error_method_arity_underflow.ring", error_pattern: "E0301" },
   ];
 
   for (const tc of negative_cases) {
