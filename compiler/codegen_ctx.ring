@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
-use hir::{HExpr, HStmt, HTraitMethod, HEffectOp, evidence_param_name}
+use hir::{HExpr, HStmt, HTraitMethod, HEffectOp, HEnumVariant, evidence_param_name}
 
 const JS_RESERVED: Set<Str> = set_from(
     ["abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch",
@@ -46,7 +46,8 @@ pub struct CodegenCtx {
     pub effect_ops: Map<Str, List<HEffectOp>>,
     pub boxed_vars: Set<Int>,
     pub fn_mut_params: Map<Str, List<Bool>>,
-    pub block_counter: Int
+    pub block_counter: Int,
+    pub enum_variants: Map<Str, List<HEnumVariant>>
 }
 
 pub struct HTraitDeclInfo {
@@ -80,7 +81,8 @@ pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx 
         effect_ops: map_new(),
         boxed_vars: set_new(),
         fn_mut_params: map_new(),
-        block_counter: 0
+        block_counter: 0,
+        enum_variants: map_new()
     }
 }
 

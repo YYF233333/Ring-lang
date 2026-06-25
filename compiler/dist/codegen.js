@@ -698,6 +698,7 @@ function register_decl_info(decls, ctx) {
       if (__ring_m20._tag === "Enum") {
         const name = __ring_m20.name; const variants = __ring_m20.variants;
         _Set_insert(ctx.local_names, name);
+        _Map_insert(ctx.enum_variants, name, variants);
         const __ring_iter_18 = __List_Iterable.iter(variants);
         while (true) {
           const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);

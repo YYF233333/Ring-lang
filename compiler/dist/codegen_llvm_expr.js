@@ -3041,27 +3041,15 @@ function is_builtin_collection(ty) {
   __ring_match110: {
     const __ring_m110 = ty;
     if (__ring_m110._tag === "StructType") {
-      const name = __ring_m110.name; const type_params = __ring_m110.type_params; const fields = __ring_m110.fields;
+      const name = __ring_m110.name; const type_params = __ring_m110.type_params;
       if ((name === "List")) {
-        if ((List_len(type_params) === 1)) {
-          return (List_len(fields) === 0);
-        } else {
-          return false;
-        }
+        return (List_len(type_params) === 1);
       } else {
         if ((name === "Map")) {
-          if ((List_len(type_params) === 2)) {
-            return (List_len(fields) === 0);
-          } else {
-            return false;
-          }
+          return (List_len(type_params) === 2);
         } else {
           if ((name === "Set")) {
-            if ((List_len(type_params) === 1)) {
-              return (List_len(fields) === 0);
-            } else {
-              return false;
-            }
+            return (List_len(type_params) === 1);
           } else {
             return false;
           }
@@ -3078,8 +3066,8 @@ function is_int_keyed_map(ty) {
   __ring_match111: {
     const __ring_m111 = ty;
     if (__ring_m111._tag === "StructType") {
-      const name = __ring_m111.name; const type_params = __ring_m111.type_params; const fields = __ring_m111.fields;
-      if ((((name === "Map") ? (List_len(type_params) === 2) : false) ? (List_len(fields) === 0) : false)) {
+      const name = __ring_m111.name; const type_params = __ring_m111.type_params;
+      if (((name === "Map") ? (List_len(type_params) === 2) : false)) {
         __ring_match112: {
           const __ring_m112 = __ring_index(type_params, 0);
           if (__ring_m112._tag === "IntType") {
@@ -3103,8 +3091,8 @@ function is_int_set(ty) {
   __ring_match113: {
     const __ring_m113 = ty;
     if (__ring_m113._tag === "StructType") {
-      const name = __ring_m113.name; const type_params = __ring_m113.type_params; const fields = __ring_m113.fields;
-      if ((((name === "Set") ? (List_len(type_params) === 1) : false) ? (List_len(fields) === 0) : false)) {
+      const name = __ring_m113.name; const type_params = __ring_m113.type_params;
+      if (((name === "Set") ? (List_len(type_params) === 1) : false)) {
         __ring_match114: {
           const __ring_m114 = __ring_index(type_params, 0);
           if (__ring_m114._tag === "IntType") {

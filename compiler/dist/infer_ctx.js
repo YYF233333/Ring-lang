@@ -2100,7 +2100,7 @@ function resolve_named_type(ctx, name, type_args, span) {
             List_push(resolved_params, env$TypeEnv_fresh_var(ctx.env));
           }
         }
-        return types$Type_StructType(def.name, resolved_params, def.fields);
+        return types$Type_StructType(def.name, resolved_params);
         break __ring_match93;
       }
       if (__ring_m93._tag === "none") {
@@ -2135,7 +2135,7 @@ function resolve_named_type(ctx, name, type_args, span) {
             List_push(resolved_params, env$TypeEnv_fresh_var(ctx.env));
           }
         }
-        return types$Type_EnumType(def.name, resolved_params, def.variants);
+        return types$Type_EnumType(def.name, resolved_params);
         break __ring_match94;
       }
       if (__ring_m94._tag === "none") {

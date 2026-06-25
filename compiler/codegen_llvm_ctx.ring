@@ -357,10 +357,10 @@ pub fn get_builtin_typeid(ty: Type) -> Int {
         Type::StrType => 3,        // RING_TYPEID_STR
         Type::UnitType => 9,       // RING_TYPEID_UNIT
         Type::TupleType { .. } => 10,  // RING_TYPEID_TUPLE
-        Type::StructType { name, type_params, fields } => {
-            if name == "List" && type_params.len() == 1 && fields.len() == 0 { 4 }        // RING_TYPEID_LIST
-            else if name == "Map" && type_params.len() == 2 && fields.len() == 0 { 5 }    // RING_TYPEID_MAP
-            else if name == "Set" && type_params.len() == 1 && fields.len() == 0 { 6 }    // RING_TYPEID_SET
+        Type::StructType { name, type_params } => {
+            if name == "List" && type_params.len() == 1 { 4 }        // RING_TYPEID_LIST
+            else if name == "Map" && type_params.len() == 2 { 5 }    // RING_TYPEID_MAP
+            else if name == "Set" && type_params.len() == 1 { 6 }    // RING_TYPEID_SET
             else if name == "StringBuilder" { 13 }  // RING_TYPEID_SB
             else { -1 }  // user struct — use get_or_assign_typeid
         },

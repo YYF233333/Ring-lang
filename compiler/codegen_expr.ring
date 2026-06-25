@@ -845,8 +845,8 @@ fn gen_named_variant_construct(mut ctx: CodegenCtx, enum_name: Str, variant_name
     let mut field_map: Map<Str, HExpr> = map_new()
     for f in fields { field_map.insert(f.name, f.value) }
 
-    match ty {
-        Type::EnumType { variants, .. } => {
+    match ctx.enum_variants.get(enum_name) {
+        some(variants) => {
             for v in variants {
                 if v.name == variant_name {
                     match v.field_names {
@@ -871,7 +871,7 @@ fn gen_named_variant_construct(mut ctx: CodegenCtx, enum_name: Str, variant_name
                 }
             }
         },
-        _ => {},
+        none => {},
     }
 
     let mut args: List<Str> = []

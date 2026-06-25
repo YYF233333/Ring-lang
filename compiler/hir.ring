@@ -548,7 +548,7 @@ pub fn type_contains_extern_handle(ty: Type, externs: Set<Str>) -> Bool {
 
 fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) -> Bool {
     match ty {
-        Type::StructType { name, type_params, fields } => {
+        Type::StructType { name, type_params } => {
             if externs.contains(name) {
                 true
             } else if visited.contains("S:${name}") {
@@ -559,13 +559,10 @@ fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) 
                 for tp in type_params {
                     if type_contains_extern_rec(tp, externs, visited) { found = true }
                 }
-                for f in fields {
-                    if type_contains_extern_rec(f.ty, externs, visited) { found = true }
-                }
                 found
             }
         },
-        Type::EnumType { name, type_params, variants } => {
+        Type::EnumType { name, type_params } => {
             if visited.contains("E:${name}") {
                 false
             } else {
@@ -573,11 +570,6 @@ fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) 
                 let mut found = false
                 for tp in type_params {
                     if type_contains_extern_rec(tp, externs, visited) { found = true }
-                }
-                for v in variants {
-                    for ft in v.fields {
-                        if type_contains_extern_rec(ft, externs, visited) { found = true }
-                    }
                 }
                 found
             }

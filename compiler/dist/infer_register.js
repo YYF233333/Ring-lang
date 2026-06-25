@@ -412,7 +412,7 @@ function complete_enum_variants(ctx, name, type_params, variants) {
         _Map_insert(def.variant_index, v.name, vi);
         vi = (vi + 1);
       }
-      const enum_type = types$Type_EnumType(name, tv_types, def.variants);
+      const enum_type = types$Type_EnumType(name, tv_types);
       const tv_ids = def.type_param_vars;
       const __ring_iter_8 = __List_Iterable.iter(def.variants);
       while (true) {
@@ -1455,7 +1455,7 @@ function resolve_impl_self_type(ctx, target_type, impl_type_params) {
     const __ring_m56 = _Map_get(ctx.env.types.structs, target_type);
     if (__ring_m56._tag === "some") {
       const def = __ring_m56._0;
-      return types$Type_StructType(def.name, impl_tp_types, def.fields);
+      return types$Type_StructType(def.name, impl_tp_types);
       break __ring_match56;
     }
     if (__ring_m56._tag === "none") {
@@ -1463,7 +1463,7 @@ function resolve_impl_self_type(ctx, target_type, impl_type_params) {
         const __ring_m57 = _Map_get(ctx.env.types.enums, target_type);
         if (__ring_m57._tag === "some") {
           const def = __ring_m57._0;
-          return types$Type_EnumType(def.name, impl_tp_types, def.variants);
+          return types$Type_EnumType(def.name, impl_tp_types);
           break __ring_match57;
         }
         if (__ring_m57._tag === "none") {

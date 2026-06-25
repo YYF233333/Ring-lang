@@ -89,8 +89,8 @@ extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -
 
 fn is_int_keyed_map(ty: Type) -> Bool {
     match ty {
-        Type::StructType { name, type_params, fields } =>
-            name == "Map" && type_params.len() == 2 && fields.len() == 0 && match type_params[0] {
+        Type::StructType { name, type_params } =>
+            name == "Map" && type_params.len() == 2 && match type_params[0] {
                 Type::IntType => true,
                 _ => false,
             },
@@ -100,8 +100,8 @@ fn is_int_keyed_map(ty: Type) -> Bool {
 
 fn is_int_set(ty: Type) -> Bool {
     match ty {
-        Type::StructType { name, type_params, fields } =>
-            name == "Set" && type_params.len() == 1 && fields.len() == 0 && match type_params[0] {
+        Type::StructType { name, type_params } =>
+            name == "Set" && type_params.len() == 1 && match type_params[0] {
                 Type::IntType => true,
                 _ => false,
             },
@@ -110,14 +110,14 @@ fn is_int_set(ty: Type) -> Bool {
 }
 
 // B-134: Validate that a StructType claiming to be List/Map/Set has the correct
-// structural signature (type_params count + no fields). Returns false for user
+// structural signature (type_params count). Returns false for user
 // structs that happen to share a builtin collection name.
 fn is_builtin_collection(ty: Type) -> Bool {
     match ty {
-        Type::StructType { name, type_params, fields } => {
-            if name == "List" { type_params.len() == 1 && fields.len() == 0 }
-            else if name == "Map" { type_params.len() == 2 && fields.len() == 0 }
-            else if name == "Set" { type_params.len() == 1 && fields.len() == 0 }
+        Type::StructType { name, type_params } => {
+            if name == "List" { type_params.len() == 1 }
+            else if name == "Map" { type_params.len() == 2 }
+            else if name == "Set" { type_params.len() == 1 }
             else { false }
         },
         _ => false,

@@ -1149,8 +1149,7 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
                 }
                 return Type::StructType {
                     name: def.name,
-                    type_params: resolved_params,
-                    fields: def.fields
+                    type_params: resolved_params
                 }
             },
             none => {}
@@ -1178,8 +1177,7 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
                 }
                 return Type::EnumType {
                     name: def.name,
-                    type_params: resolved_params,
-                    variants: def.variants
+                    type_params: resolved_params
                 }
             },
             none => {}

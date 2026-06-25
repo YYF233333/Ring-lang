@@ -501,8 +501,8 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
     // accepted residual as the B-104b range drops.
     let mut set_converted = false
     let list_val = match hexpr_type(iterable) {
-        Type::StructType { name, type_params, fields } => {
-            if name == "Set" && type_params.len() == 1 && fields.len() == 0 {
+        Type::StructType { name, type_params } => {
+            if name == "Set" && type_params.len() == 1 {
                 let is_int_elem = match type_params[0] {
                     Type::IntType => true,
                     _ => false,

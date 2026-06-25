@@ -407,17 +407,15 @@ pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
                 return_type: apply_subst_map(subst, return_type),
                 effects: apply_subst_row_map(subst, effects)
             },
-        Type::StructType { name, type_params, fields } =>
+        Type::StructType { name, type_params } =>
             Type::StructType {
                 name: name,
-                type_params: type_params.map(fn(p) { apply_subst_map(subst, p) }),
-                fields: fields
+                type_params: type_params.map(fn(p) { apply_subst_map(subst, p) })
             },
-        Type::EnumType { name, type_params, variants } =>
+        Type::EnumType { name, type_params } =>
             Type::EnumType {
                 name: name,
-                type_params: type_params.map(fn(p) { apply_subst_map(subst, p) }),
-                variants: variants
+                type_params: type_params.map(fn(p) { apply_subst_map(subst, p) })
             },
         Type::GenericType { base, args } =>
             Type::GenericType {
@@ -529,17 +527,15 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
                 return_type: apply_subst(subst, return_type),
                 effects: apply_subst_row(subst, effects)
             },
-        Type::StructType { name, type_params, fields } =>
+        Type::StructType { name, type_params } =>
             Type::StructType {
                 name: name,
-                type_params: type_params.map(fn(p) { apply_subst(subst, p) }),
-                fields: fields
+                type_params: type_params.map(fn(p) { apply_subst(subst, p) })
             },
-        Type::EnumType { name, type_params, variants } =>
+        Type::EnumType { name, type_params } =>
             Type::EnumType {
                 name: name,
-                type_params: type_params.map(fn(p) { apply_subst(subst, p) }),
-                variants: variants
+                type_params: type_params.map(fn(p) { apply_subst(subst, p) })
             },
         Type::GenericType { base, args } =>
             Type::GenericType {

@@ -242,7 +242,7 @@ function to_result(f) {
 const JS_RESERVED = set_from(["abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "debugger", "default", "delete", "do", "double", "else", "enum", "eval", "export", "extends", "false", "final", "finally", "float", "for", "function", "goto", "if", "implements", "import", "in", "instanceof", "int", "interface", "let", "long", "native", "new", "null", "package", "private", "protected", "public", "return", "short", "static", "super", "switch", "synchronized", "this", "throw", "throws", "transient", "true", "try", "typeof", "undefined", "var", "void", "volatile", "while", "with", "yield", "Object", "Array", "Map", "Set", "String", "Number", "Boolean", "Symbol", "Promise", "Error", "RegExp", "Date", "Math", "JSON", "Proxy", "Reflect", "WeakMap", "WeakSet", "WeakRef", "BigInt", "ArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Float32Array", "Float64Array", "NaN", "Infinity", "globalThis", "console", "process"]);
 
 class CodegenCtx {
-  constructor(lines, indent_level, impl_methods, struct_field_order, trait_decls, match_counter, dt_counter, loop_counter, module_prefix, imports_map, skip_preamble, skip_main_call, local_names, local_fn_effects, current_fn_effects, in_try_fail, module_imports, module_exports, default_evidence_effects, default_evidence_params, effect_ops, boxed_vars, fn_mut_params, block_counter) {
+  constructor(lines, indent_level, impl_methods, struct_field_order, trait_decls, match_counter, dt_counter, loop_counter, module_prefix, imports_map, skip_preamble, skip_main_call, local_names, local_fn_effects, current_fn_effects, in_try_fail, module_imports, module_exports, default_evidence_effects, default_evidence_params, effect_ops, boxed_vars, fn_mut_params, block_counter, enum_variants) {
     this.lines = lines;
     this.indent_level = indent_level;
     this.impl_methods = impl_methods;
@@ -267,6 +267,7 @@ class CodegenCtx {
     this.boxed_vars = boxed_vars;
     this.fn_mut_params = fn_mut_params;
     this.block_counter = block_counter;
+    this.enum_variants = enum_variants;
   }
 }
 
@@ -367,7 +368,7 @@ function is_imported_name(ctx, name) {
 }
 
 function new_codegen_ctx(skip_preamble, skip_main_call) {
-  return new CodegenCtx([], 0, map_new(), map_new(), map_new(), 0, 0, 0, Option_none, Option_none, skip_preamble, skip_main_call, set_new(), map_new(), Option_none, false, Option_none, Option_none, set_new(), map_new(), map_new(), set_new(), map_new(), 0);
+  return new CodegenCtx([], 0, map_new(), map_new(), map_new(), 0, 0, 0, Option_none, Option_none, skip_preamble, skip_main_call, set_new(), map_new(), Option_none, false, Option_none, Option_none, set_new(), map_new(), map_new(), set_new(), map_new(), 0, map_new());
 }
 
 function pop_indent(ctx) {

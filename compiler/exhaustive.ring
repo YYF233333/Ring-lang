@@ -57,11 +57,11 @@ fn build_inst_map(type_param_vars: List<Int>, type_params: List<Type>) -> Map<In
 // Re-derive an enum's variants with this instantiation's concrete type_params
 // substituted into every variant field. Falls back to the (template) variants
 // passed in if the enum definition is unknown (builtins / cross-module).
-fn instantiate_enum_variants(env: TypeEnv, name: Str, type_params: List<Type>, template_variants: List<EnumVariant>) -> List<EnumVariant> {
+fn instantiate_enum_variants(env: TypeEnv, name: Str, type_params: List<Type>) -> List<EnumVariant> {
     match env.types.enums.get(name) {
         some(enum_def) => {
             let inst_map = build_inst_map(enum_def.type_param_vars, type_params)
-            if inst_map.len() == 0 { return template_variants }
+            if inst_map.len() == 0 { return enum_def.variants }
             let mut result: List<EnumVariant> = []
             for v in enum_def.variants {
                 let inst_fields = v.fields.map(fn(f) { apply_subst_map(inst_map, f) })
@@ -69,25 +69,25 @@ fn instantiate_enum_variants(env: TypeEnv, name: Str, type_params: List<Type>, t
             }
             result
         },
-        none => template_variants
+        none => []
     }
 }
 
 // Re-derive a struct's fields with this instantiation's concrete type_params
-// substituted into every field type. Falls back to the (template) fields passed
-// in if the struct definition is unknown (builtins / cross-module).
-fn instantiate_struct_fields(env: TypeEnv, name: Str, type_params: List<Type>, template_fields: List<StructField>) -> List<StructField> {
+// substituted into every field type. Falls back to empty list when the struct
+// definition is unknown (builtins / cross-module).
+fn instantiate_struct_fields(env: TypeEnv, name: Str, type_params: List<Type>) -> List<StructField> {
     match env.types.structs.get(name) {
         some(struct_def) => {
             let inst_map = build_inst_map(struct_def.type_param_vars, type_params)
-            if inst_map.len() == 0 { return template_fields }
+            if inst_map.len() == 0 { return struct_def.fields }
             let mut result: List<StructField> = []
             for f in struct_def.fields {
                 result.push(StructField { name: f.name, ty: apply_subst_map(inst_map, f.ty), is_pub: f.is_pub })
             }
             result
         },
-        none => template_fields
+        none => []
     }
 }
 
@@ -119,8 +119,8 @@ fn type_is_recursive(env: TypeEnv, ty: Type, key: Str, mut cache: ExhCache) -> B
         none => {}
     }
     let result = match ty {
-        Type::EnumType { name, type_params, variants } => {
-            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
+        Type::EnumType { name, type_params } => {
+            let inst_variants = instantiate_enum_variants(env, name, type_params)
             // Use Map<Str, Bool> instead of Set<Str> for O(1) lookups
             let mut visited: Map<Str, Bool> = map_new()
             visited.insert(key, true)
@@ -146,8 +146,8 @@ fn type_contains_key(env: TypeEnv, ty: Type, key: Str, mut visited: Map<Str, Boo
     if visited.contains_key(ty_str) { return false }
     visited.insert(ty_str, true)
     match ty {
-        Type::EnumType { name, type_params, variants } => {
-            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
+        Type::EnumType { name, type_params } => {
+            let inst_variants = instantiate_enum_variants(env, name, type_params)
             for v in inst_variants {
                 for ft in v.fields {
                     if type_contains_key(env, ft, key, visited) { return true }
@@ -155,8 +155,8 @@ fn type_contains_key(env: TypeEnv, ty: Type, key: Str, mut visited: Map<Str, Boo
             }
             false
         },
-        Type::StructType { name, type_params, fields } => {
-            let inst_fields = instantiate_struct_fields(env, name, type_params, fields)
+        Type::StructType { name, type_params } => {
+            let inst_fields = instantiate_struct_fields(env, name, type_params)
             for f in inst_fields {
                 if type_contains_key(env, f.ty, key, visited) { return true }
             }
@@ -221,10 +221,10 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
     let mut cache = ExhCache { ftc: map_new(), tir: map_new() }
 
     match resolved {
-        Type::EnumType { name, type_params, variants } => {
+        Type::EnumType { name, type_params } => {
             // Re-derive variant payloads with this instantiation's type_params
             // (A2 soundness: template variants reference the enum def's vars).
-            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
+            let inst_variants = instantiate_enum_variants(env, name, type_params)
             let variant_names = inst_variants.map(fn(v) { v.name })
             // B-132: use Map<Str, Bool> for O(1) lookups instead of Set<Str>
             let mut covered: Map<Str, Bool> = map_new()
@@ -314,9 +314,9 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                 some("true")
             }
         },
-        Type::StructType { name: sname, type_params: stp, fields: sfields } => {
+        Type::StructType { name: sname, type_params: stp } => {
             // Re-derive field types with this instantiation's type_params (A2 soundness).
-            let inst_fields = instantiate_struct_fields(env, sname, stp, sfields)
+            let inst_fields = instantiate_struct_fields(env, sname, stp)
             let mut covered = false
             let mut sub_patterns: List<List<Pattern>> = []
             let mut field_names: List<Str> = []
@@ -330,7 +330,7 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                     Pattern::NamedConstructor { name: pname, fields: nfields, .. } => {
                         if names_match_struct(pname, sname) {
                             covered = true
-                            let positional = named_pattern_to_positional(nfields, field_names, sfields.len())
+                            let positional = named_pattern_to_positional(nfields, field_names, inst_fields.len())
                             sub_patterns.push(positional)
                         }
                     },
@@ -418,18 +418,18 @@ fn finite_type_ctors(env: TypeEnv, ty: Type, mut cache: ExhCache) -> List<Ctor>?
             r.push(Ctor { name: "false", arity: 0, field_types: [], field_names: none, is_tuple: false })
             some(r)
         },
-        Type::EnumType { name, type_params, variants } => {
+        Type::EnumType { name, type_params } => {
             // Re-derive variant payloads with this instantiation's type_params (A2 soundness).
-            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
+            let inst_variants = instantiate_enum_variants(env, name, type_params)
             let mut r: List<Ctor> = []
             for v in inst_variants {
                 r.push(Ctor { name: v.name, arity: v.fields.len(), field_types: v.fields, field_names: v.field_names, is_tuple: false })
             }
             some(r)
         },
-        Type::StructType { name, type_params, fields } => {
+        Type::StructType { name, type_params } => {
             // Re-derive field types with this instantiation's type_params (A2 soundness).
-            let inst_fields = instantiate_struct_fields(env, name, type_params, fields)
+            let inst_fields = instantiate_struct_fields(env, name, type_params)
             let mut field_types: List<Type> = []
             let mut field_names: List<Str> = []
             for f in inst_fields {

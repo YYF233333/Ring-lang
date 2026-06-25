@@ -534,10 +534,8 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
 
 fn is_extern_type_ref(ty: Type, ctx: LlvmCtx) -> Bool {
     match ty {
-        Type::StructType { name, type_params, fields } => {
-            if fields.len() == 0 && type_params.len() == 0 {
-                ctx.extern_types.contains(name)
-            } else { false }
+        Type::StructType { name, type_params } => {
+            type_params.len() == 0 && ctx.extern_types.contains(name)
         },
         _ => false,
     }
@@ -545,8 +543,8 @@ fn is_extern_type_ref(ty: Type, ctx: LlvmCtx) -> Bool {
 
 fn is_list_type(ty: Type) -> Bool {
     match ty {
-        Type::StructType { name, type_params, fields } => {
-            name == "List" && type_params.len() >= 1 && fields.len() == 0
+        Type::StructType { name, type_params } => {
+            name == "List" && type_params.len() >= 1
         },
         _ => false,
     }

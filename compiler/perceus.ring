@@ -1414,11 +1414,9 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // not clone.  Carries inner's type/effects/span on the Clone node.
 fn rc_escape(expr: HExpr, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, mut gensym: List<Int>, loop_base: Int) -> HExpr {
     // B-102 R-clean: Type-DAG values participate in normal clone-all-escape RC —
-    // an escaping owner-bearing Type substructure (e.g. apply_subst's
-    // `Type::StructType { ..., fields: fields }`, where `fields` is a borrowed
-    // List<StructField> from the input) is Clone-wrapped (ring_dup) so the new
-    // parent Type owns its own (shallow) reference, symmetric with the recursive
-    // drop_T that releases it.  (A1's never-drop special case is removed.)
+    // an escaping owner-bearing Type substructure is Clone-wrapped (ring_dup) so
+    // the new parent Type owns its own (shallow) reference, symmetric with the
+    // recursive drop_T that releases it.  (A1's never-drop special case is removed.)
     //
     // B-104 D1 rule ① (audit #139) + rule ② (Unit), both TYPE-level:
     //   ① a DIRECT extern-handle value never Clones — ring_dup would WRITE a

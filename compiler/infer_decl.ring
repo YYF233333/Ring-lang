@@ -562,9 +562,9 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
             }
         }
         match ctx.env.types.structs.get(target_type) {
-            some(def) => Type::StructType { name: def.name, type_params: impl_tp_types, fields: def.fields },
+            some(def) => Type::StructType { name: def.name, type_params: impl_tp_types },
             none => match ctx.env.types.enums.get(target_type) {
-                some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types, variants: def.variants },
+                some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types },
                 none => resolve_self_type(ctx, target_type)
             }
         }
@@ -746,9 +746,9 @@ fn expand_delegate_impls(
                             }
                         }
                         match ctx.env.types.structs.get(target_type) {
-                            some(def) => Type::StructType { name: def.name, type_params: impl_tp_types, fields: def.fields },
+                            some(def) => Type::StructType { name: def.name, type_params: impl_tp_types },
                             none => match ctx.env.types.enums.get(target_type) {
-                                some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types, variants: def.variants },
+                                some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types },
                                 none => resolve_self_type(ctx, target_type)
                             }
                         }
@@ -1857,15 +1857,15 @@ fn apply_var_mapping(ty: Type, mapping: Map<Int, Type>) -> Type {
                 effects: map_effect_row(effects, mapping)
             }
         },
-        Type::StructType { name, type_params, fields } => {
+        Type::StructType { name, type_params } => {
             let mut mapped_tps: List<Type> = []
             for tp in type_params { mapped_tps.push(apply_var_mapping(tp, mapping)) }
-            Type::StructType { name: name, type_params: mapped_tps, fields: fields }
+            Type::StructType { name: name, type_params: mapped_tps }
         },
-        Type::EnumType { name, type_params, variants } => {
+        Type::EnumType { name, type_params } => {
             let mut mapped_tps: List<Type> = []
             for tp in type_params { mapped_tps.push(apply_var_mapping(tp, mapping)) }
-            Type::EnumType { name: name, type_params: mapped_tps, variants: variants }
+            Type::EnumType { name: name, type_params: mapped_tps }
         },
         Type::TupleType { elements } => {
             let mut mapped_els: List<Type> = []
