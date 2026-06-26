@@ -15,15 +15,19 @@
 
 ## LLVM Codegen
 
-### #208 dist-llvm 自编译段错误（P1.4 阻塞）[medium] [judgment] [open]
+### #209 ring.exe 编译嵌套表达式崩溃（双 bootstrap 阻塞）[medium] [judgment] [open]
 
-`node compiler/dist/main.js build compiler/main.ring --target=llvm` 段错误（exit 0xC0000005）。小文件编译正常（llvm_diff 209/209 全绿），仅编译器自身（44 文件、大型项目）时崩溃。
+native ring.exe 编译含嵌套二元运算的源文件时段错误（0xC0000005）。`3 * 2 * 2` 崩溃，`let a = 3 * 2; let x = a * 2` 正常——嵌套 BinOp 的中间临时值疑似被 Perceus RC 提前释放（use-after-free）。316 个测试用例中 57 个（~18%）复现。
 
-已修复 impl method effect 传播 nounwind 问题（`collect_fn_callees` qualified key + `body_contains_try_or_handle` 守卫），但自编译仍崩——可能是更大代码库暴露的同类或不同 codegen bug。
+**阻塞**：P1.4 双 bootstrap（ring.exe 无法编译完整编译器项目）。
 
-**阻塞**：P1.4 的 native E2E 和双 bootstrap 验收。
+**诊断线索**：
+- 嵌套算术（`a * b * c`）和链式加法（`1 + 2 + 3`）均崩溃
+- 拆成独立 let 绑定正常（临时值有名字 → RC 不提前释放）
+- 疑似 Perceus 对 `gen_js_expr` / `gen_llvm_expr` 返回的临时 Str 的 drop 位置错误
+- G-b（2026-06-16）双 bootstrap 通过——之后的 RC/codegen 修改（#175 perceus sink overclassification / #193-#206 审计修复）可能引入回归
 
-发现者：Worker（P1.4 执行中）
+发现者：Worker（P1.4 执行中，#208 修复后暴露）
 
 ### #207 JS 后端 catch arm guard 中 pattern binding 在 guard 之后才 emit [low] [mechanical] [open]
 

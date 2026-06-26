@@ -718,7 +718,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 1. **feature 覆盖矩阵** ✅：穷举语言面，每个特性 ≥1 个 llvm_diff 用例断言两后端输出一致（不抽样）。补齐当前 llvm_diff 未覆盖的特性。
 2. **关闭残留 G-c gap** ✅：B-097（custom-abort / default / delegate / nesting）+ B-096（闭包 RC 泄漏）全绿。
 3. **复数轮对抗 review** ✅（2026-06-26，R4+R5）：`/full-audit` 多轮交叉验证（Claude + DS 双模型），修复 #193-#206 后收敛。P1.3 通过。
-4. 全 llvm_diff **×3** 零失配 ✅（2026-06-26，209/209 × 3 轮）+ native E2E 待做 + 双 bootstrap 待做。**阻塞**：dist-llvm 自编译段错误（pre-existing，impl method effect 传播 nounwind 修复后仍有残留——可能是更大项目暴露的同类问题）。
+4. 全 llvm_diff **×3** 零失配 ✅（2026-06-26，209/209 × 3 轮）+ native E2E ✅（test:native-only 4/4 + test:native 3/3）+ 双 bootstrap ❌（#209 ring.exe 嵌套表达式 RC 崩溃阻塞，见 audit-report）。#208 已修复（emit_fn_body effect key qualified 化）。
 
 **Phase 2 — golden 快照 + 删除**（认证通过后）：
 1. 把 parity 认证的 llvm_diff 语料**快照成 golden 输出**，存为回归基准（取代 JS-oracle 的活对照）。
