@@ -10,7 +10,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid}
 use codegen_llvm_expr::{gen_llvm_expr, build_default_evidence_all}
-use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info, emit_derived_impls_llvm}
+use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info, emit_derived_impls_llvm, emit_builtin_derived_impls}
 use codegen_ctx::{extract_effect_names}
 use codegen::{collect_fn_callees}
 
@@ -1729,6 +1729,10 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // First pass: forward declare all Ring functions
     forward_declare_functions(ctx, program.decls)
 
+    // Emit derived trait dicts for builtin enums (Option) — these are excluded
+    // from derive.ring's BUILTIN_TYPES so they need explicit synthesis here.
+    emit_builtin_derived_impls(ctx)
+
     // B-100: emit auto-derived trait impls (Eq, Clone, Debug) BEFORE body pass.
     // Method calls in function bodies need ring_<Type>_clone etc. in ctx.functions.
     emit_derived_impls_llvm(ctx, program.derived_impls)
@@ -1801,6 +1805,9 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         let (prefix, program, _uses) = m
         forward_declare_functions_with_prefix(ctx, program.decls, some(prefix))
     }
+
+    // Emit derived trait dicts for builtin enums (Option)
+    emit_builtin_derived_impls(ctx)
 
     // Emit derived impls for all modules (before body pass)
     for m in modules {

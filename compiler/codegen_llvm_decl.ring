@@ -989,6 +989,90 @@ pub fn emit_derived_impls_llvm(mut ctx: LlvmCtx, derived_impls: List<DerivedImpl
     }
 }
 
+// ── Builtin enum derived impls (Option) ───────────────────────
+//
+// Option is a builtin enum excluded from derive.ring's collect_user_types
+// (BUILTIN_TYPES set). The JS backend provides its trait dicts in
+// runtime.ring as hardcoded JS functions. The LLVM backend has no
+// equivalent — ring_get_builtin_dict in C++ only handles primitives.
+//
+// This function synthesises DerivedImpl entries for Option and feeds them
+// through the existing derive machinery so the LLVM module contains
+// ring_Option_eq / ring_Option_ne / ring_Option_debug / ring_Option_cmp /
+// ring_Option_clone plus their dict globals (__Option_Eq / __Option_Debug /
+// __Option_Ord / __Option_Clone).
+
+fn option_some_variant(dict_name: Str) -> DerivedVariant {
+    DerivedVariant {
+        name: "some",
+        fields: [DerivedField {
+            name: "_0",
+            positional_index: some(0),
+            action: FieldAction::Call { dict_name: dict_name, extra_dicts: [] }
+        }],
+        has_named_fields: false
+    }
+}
+
+fn option_none_variant() -> DerivedVariant {
+    DerivedVariant { name: "none", fields: [], has_named_fields: false }
+}
+
+pub fn emit_builtin_derived_impls(mut ctx: LlvmCtx) {
+    let option_eq = DerivedImpl {
+        type_name: "Option",
+        trait_name: "Eq",
+        type_params: ["T"],
+        bounds: [TraitBound { type_param: "T", trait_name: "Eq" }],
+        type_kind: TypeKind::EnumKind,
+        struct_fields: none,
+        enum_variants: some([
+            option_some_variant(trait_bound_param_name("T", "Eq")),
+            option_none_variant()
+        ])
+    }
+    emit_derived_eq_llvm(ctx, option_eq)
+
+    let option_debug = DerivedImpl {
+        type_name: "Option",
+        trait_name: "Debug",
+        type_params: ["T"],
+        bounds: [TraitBound { type_param: "T", trait_name: "Debug" }],
+        type_kind: TypeKind::EnumKind,
+        struct_fields: none,
+        enum_variants: some([
+            option_some_variant(trait_bound_param_name("T", "Debug")),
+            option_none_variant()
+        ])
+    }
+    emit_derived_debug_llvm(ctx, option_debug)
+
+    let option_ord = DerivedImpl {
+        type_name: "Option",
+        trait_name: "Ord",
+        type_params: ["T"],
+        bounds: [TraitBound { type_param: "T", trait_name: "Ord" }],
+        type_kind: TypeKind::EnumKind,
+        struct_fields: none,
+        enum_variants: some([
+            option_some_variant(trait_bound_param_name("T", "Ord")),
+            option_none_variant()
+        ])
+    }
+    emit_derived_ord_llvm(ctx, option_ord)
+
+    let option_clone = DerivedImpl {
+        type_name: "Option",
+        trait_name: "Clone",
+        type_params: ["T"],
+        bounds: [],
+        type_kind: TypeKind::EnumKind,
+        struct_fields: none,
+        enum_variants: none
+    }
+    emit_derived_clone_llvm(ctx, option_clone)
+}
+
 // ── Scaffold helpers for derived method codegen ─────────────────
 //
 // All derived methods (eq, ne, cmp, debug, clone) share the same boilerplate:
