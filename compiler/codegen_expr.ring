@@ -1308,7 +1308,7 @@ fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
 
         let mut guard_js = ""
         match arm.guard {
-            some(g) => { guard_js = " && (${gen_expr(ctx, g)})" },
+            some(g) => { guard_js = gen_expr(ctx, g) },
             none => {}
         }
 
@@ -1344,14 +1344,23 @@ fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
             let bind_s = arm_bindings_list[i]
             let bodyj_s = arm_body_jss[i]
             let guardj_s = arm_guard_jss[i]
-            if lines.len() > 0 {
-                r.push("      if (${cond_s}${guardj_s}) {")
+            if guardj_s.len() > 0 {
+                // #207: emit bindings before guard, matching match-arm structure
+                r.push("      if (${cond_s}) {")
+                if bind_s.len() > 0 { r.push("        ${bind_s.trim()}") }
+                r.push("        if (${guardj_s}) {")
+                r.extend(lines)
+                r.push("          return ${bodyj_s};")
+                r.push("        }")
+                r.push("      }")
+            } else if lines.len() > 0 {
+                r.push("      if (${cond_s}) {")
                 r.push("        ${bind_s}")
                 r.extend(lines)
                 r.push("        return ${bodyj_s};")
                 r.push("      }")
             } else {
-                r.push("      if (${cond_s}${guardj_s}) { ${bind_s}return ${bodyj_s}; }")
+                r.push("      if (${cond_s}) { ${bind_s}return ${bodyj_s}; }")
             }
         }
         r.push("      throw __ring_e;")
@@ -1365,7 +1374,13 @@ fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
     // Compact single-line format (no emitted statements)
     let mut arm_js: List<Str> = []
     for i in 0..arm_conds.len() {
-        arm_js.push("if (${arm_conds[i]}${arm_guard_jss[i]}) { ${arm_bindings_list[i]}return ${arm_body_jss[i]}; }")
+        let guardj = arm_guard_jss[i]
+        if guardj.len() > 0 {
+            // #207: emit bindings before guard, matching match-arm structure
+            arm_js.push("if (${arm_conds[i]}) { ${arm_bindings_list[i]}if (${guardj}) { return ${arm_body_jss[i]}; } }")
+        } else {
+            arm_js.push("if (${arm_conds[i]}) { ${arm_bindings_list[i]}return ${arm_body_jss[i]}; }")
+        }
     }
 
     let mut p: List<Str> = []
@@ -1387,18 +1402,34 @@ fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
     p.push(q)
     p.push(") { const __ring_err = __ring_e.value; ")
 
-    // Emit arm chain
-    let mut first = true
-    for aj in arm_js {
-        if first { p.push(aj); first = false }
-        else { p.push(" else ${aj}") }
+    // #207: check if any arm has a guard
+    let mut has_any_guard = false
+    for gj in arm_guard_jss {
+        if gj.len() > 0 { has_any_guard = true }
     }
 
-    // Always re-throw unmatched errors as runtime safety net
-    if arm_js.len() > 0 {
-        p.push(" else { throw __ring_e; }")
-    } else {
+    // Emit arm chain
+    if has_any_guard {
+        // #207: use separate if blocks when guards exist,
+        // so a failed guard falls through to the next arm
+        for aj in arm_js {
+            p.push(aj)
+            p.push(" ")
+        }
         p.push("throw __ring_e;")
+    } else {
+        let mut first = true
+        for aj in arm_js {
+            if first { p.push(aj); first = false }
+            else { p.push(" else ${aj}") }
+        }
+
+        // Always re-throw unmatched errors as runtime safety net
+        if arm_js.len() > 0 {
+            p.push(" else { throw __ring_e; }")
+        } else {
+            p.push("throw __ring_e;")
+        }
     }
 
     p.push(" } throw __ring_e; } })()")
