@@ -23,33 +23,7 @@
 
 ## LLVM Codegen
 
-### #193 ReturnExpr（表达式位置 return）跳过 handle/try 清理栈 [medium] [mechanical] [open]
 
-`codegen_llvm_expr.ring:189-210`：`HExpr::ReturnExpr`（match arm 表达式位置的 `return x`）直接 emit `LLVMBuildRet`，完全跳过了 `ctx.handle_cleanup_stack` 遍历。对比 `HStmt::Return` 走的 `emit_return`（`codegen_llvm_stmt.ring:203-230`）会正确遍历清理栈、弹出 catch 帧（`ring_catch_pop`）并 drop evidence。
-
-**影响**：在 handle-expr 或 try-catch 作用域内的 match arm 中写 `return` → catch 帧不被弹出 → `ring_raise`/`ring_try` 后续可能读取被破坏的栈；非 abort 路径的 evidence struct 泄漏。
-
-**修复**：在 `ReturnExpr` 分支中复用 `emit_return` 的清理逻辑。
-
-发现者：DS
-
-### #194 collect_captures / collect_extern_capture_names 跳过 match arm guard [medium] [mechanical] [open]
-
-`codegen_llvm_expr.ring:4972-4974` 和 `4568-4571`：收集 lambda 闭包捕获变量时，两函数均遍历 `arm.body` 但跳过 `arm.guard`。若 lambda 体包含 `match x { Pat if outer_var > 0 => ... }`，`outer_var` 不会被捕获进闭包 env，导致 codegen panic（"captured variable not found"）。
-
-**对比**：编译器其他模块（`infer.ring:1892`、`perceus.ring:943`、`scc.ring:234`、`verify_rc.ring:728`）均正确处理 `arm.guard`。
-
-**修复**：在两处 MatchExpr 分支中添加 `match arm.guard { some(g) => collect_*(ctx, g, ...), none => {} }`。
-
-发现者：Opus
-
-### #197 get_dict_method_count 对未知 trait 硬编码回退值 4 [low] [mechanical] [open]
-
-`codegen_llvm_expr.ring:1836-1848`：当 trait 不在 `ctx.trait_method_order` 中时，回退为 4（Eq/Clone/Ord/Debug 的最大值）。对 5+ 方法的用户定义 trait 进行 dict dispatch 时，构建的 LLVM struct 类型过小 → 方法 5+ 的 GEP 越界读取。
-
-目前安全（内建 trait 最大 2 方法，均在 map 中），但 latent。应在 trait 声明时注册方法计数到全局 context，回退时 panic 而非静默假设。
-
-发现者：DS
 
 ### #198 emit_trait_dict 未保存/恢复 builder 插入块 [low] [mechanical] [open]
 
@@ -59,13 +33,6 @@
 
 发现者：Opus
 
-### #199 convert_to_str else 分支对未知类型按 Int 处理（死代码）[low] [mechanical] [open]
-
-`codegen_llvm_expr.ring:3171-3178`：字符串插值的 `convert_to_str` 最终 else 分支对未知类型调用 `unbox_int` + `ring_int_to_str`。checker 已限制插值类型为 Str/Int/Float/Bool（`infer.ring:2064-2068`），此分支对合法程序不可达。但未解析 TypeVar 可能穿透。
-
-应替换为 panic 以便诊断。
-
-发现者：Opus
 
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
