@@ -696,6 +696,14 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
                 hmethods.push(check_extern_fn_decl(ctx, name, mtps, params, declared_effects, is_pub, mspan)),
             Decl::Fn { name, type_params: mtps, params, return_type, declared_effects, body, is_pub, span: mspan, .. } => {
                 let hdecl = check_fn_decl(ctx, name, mtps, params, return_type, declared_effects, body, is_pub, mspan, some(impl_self_type))
+                // #210: Also register fn_mut_params with qualified key for cross-module export.
+                // check_fn_decl inserts with unqualified `name`; exports.ring looks up
+                // with "${target_type}_${mname}", so we mirror that key here.
+                let qual_key = "${target_type}_${name}"
+                match ctx.fn_mut_params.get(name) {
+                    some(flags) => ctx.fn_mut_params.insert(qual_key, flags),
+                    none => {}
+                }
                 hmethods.push(hdecl)
                 match hdecl {
                     HDecl::Fn { name: mname, effects: inferred_effects, .. } => {
