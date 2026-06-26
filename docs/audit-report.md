@@ -15,8 +15,23 @@
 
 ## LLVM Codegen
 
+### #206 TryCatch arm guard 在 LLVM 后端被系统性忽略 [medium] [mechanical] [open]
 
+`codegen_llvm_expr.ring:5251+`（`gen_catch_arms`）：catch arm 的 `guard` 从未被求值——单臂路径（line 5270-5293）和多臂 switch 路径（line 5345-5408）均直接执行 arm body，完全忽略 guard 条件。JS 后端在 `codegen_expr.ring:1310-1313` 正确处理了 catch arm guard（`" && (${gen_expr(ctx, g)})"`）。
 
+**影响**：`catch { SomeError(x) if x > 0 => ... }` 在 LLVM 后端会无条件匹配，语义错误。当前无测试触发（`grep "catch.*if" tests/cases/` 零命中）。
+
+**关联遗漏**（同一根因，TryCatch arm.guard 在多处 visitor 中被跳过）：
+1. `codegen_llvm_expr.ring:4635` — `collect_extern_capture_names` 跳过 TryCatch arm.guard
+2. `codegen_llvm_expr.ring:5045` — `collect_captures` 跳过 TryCatch arm.guard
+3. `codegen.ring:462` — `collect_local_calls` 跳过 TryCatch arm.guard
+4. `perceus.ring:960` — ANF pass 透传 TryCatch arm.guard 未转换
+5. `perceus.ring:2311` — RC pass 透传 TryCatch arm.guard 未转换
+6. `verify_rc.ring:769` — verify 跳过 TryCatch arm.guard
+
+**修复**：在 `gen_catch_arms` 中添加 guard 求值（参照 `emit_match_arm_body:3667-3690` 的模式），并在 6 处 visitor 中补充 TryCatch arm.guard 遍历。补充回归测试。
+
+发现者：Opus（R5）
 
 
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
