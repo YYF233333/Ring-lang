@@ -3,9 +3,8 @@ use hir::{HProgram}
 use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
 use formatter::{format_human, format_llm}
 use checker::{CheckResult, check as check_single}
-use codegen::{generate}
 use codegen_llvm::{generate_llvm}
-use compiler_mod::{compile_project, compile_project_esm, compile_project_llvm, verify_project_rc}
+use compiler_mod::{compile_project, compile_project_llvm, verify_project_rc}
 use parser::{parse}
 use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{verify_rc_program, rc_fatal_count, format_rc_findings}
@@ -74,34 +73,6 @@ pub fn cli_main() {
             }
             return
         }
-        if parsed.target == "llvm" {
-            // LLVM multi-file mode: all modules → single .o
-            if parsed.command == "check" {
-                let result = compile_project(file_path, parsed.error_format)
-                if result.success {
-                    print("OK")
-                } else {
-                    eprintln("Compilation failed")
-                    exit_process(1)
-                }
-            } else {
-                if parsed.command == "build" {
-                    let out_dir = path_resolve(parsed.out_dir)
-                    let out_path = path_join(out_dir, path_basename(file_path).replace(".ring", ".o"))
-                    let result = compile_project_llvm(file_path, out_path, parsed.error_format)
-                    if result.success {
-                        // success message printed by generate_llvm_project
-                    } else {
-                        eprintln("Compilation failed")
-                        exit_process(1)
-                    }
-                } else {
-                    eprintln("LLVM target only supports 'build' and 'check' commands")
-                    exit_process(1)
-                }
-            }
-            return
-        }
         if parsed.command == "check" {
             let result = compile_project(file_path, parsed.error_format)
             if result.success {
@@ -113,31 +84,17 @@ pub fn cli_main() {
         } else {
             if parsed.command == "build" {
                 let out_dir = path_resolve(parsed.out_dir)
-                let result = compile_project_esm(file_path, out_dir, parsed.error_format)
+                let out_path = path_join(out_dir, path_basename(file_path).replace(".ring", ".o"))
+                let result = compile_project_llvm(file_path, out_path, parsed.error_format)
                 if result.success {
-                    print("Compiled: ${out_dir}/")
+                    // success message printed by generate_llvm_project
                 } else {
                     eprintln("Compilation failed")
                     exit_process(1)
                 }
             } else {
-                if parsed.command == "run" {
-                    // Use temp dir for ESM output
-                    let tmp_dir = path_join(path_dirname(file_path), ".ring_tmp")
-                    let result = compile_project_esm(file_path, tmp_dir, parsed.error_format)
-                    if result.success {
-                        // Execute the entry JS file
-                        // Note: exec_sync not yet available as extern fn
-                        eprintln("Multi-file run not yet implemented in Ring bootstrap")
-                        exit_process(1)
-                    } else {
-                        eprintln("Compilation failed")
-                        exit_process(1)
-                    }
-                } else {
-                    eprintln("Unknown command: ${parsed.command}")
-                    exit_process(1)
-                }
+                eprintln("Only 'build' and 'check' commands are supported")
+                exit_process(1)
             }
         }
         return
@@ -188,45 +145,16 @@ pub fn cli_main() {
         return
     }
 
-    if parsed.target == "llvm" {
-        if parsed.command == "check" {
-            print("OK")
-        } else {
-            if parsed.command == "build" {
-                let out_path = file_path.replace(".ring", ".o")
-                let rc_program = perceus_transform(check_result.program)
-                generate_llvm(rc_program, out_path)
-            } else {
-                eprintln("LLVM target only supports 'build' and 'check' commands")
-                exit_process(1)
-            }
-        }
-        return
-    }
-
-    let js = generate(check_result.program, false, false, none, none, none, none, none, none, none)
-
     if parsed.command == "check" {
         print("OK")
     } else {
         if parsed.command == "build" {
-            let out_path = file_path.replace(".ring", ".js")
-            write_file(out_path, js)
-            print("Compiled: ${out_path}")
+            let out_path = file_path.replace(".ring", ".o")
+            let rc_program = perceus_transform(check_result.program)
+            generate_llvm(rc_program, out_path)
         } else {
-            if parsed.command == "run" {
-                let basename = path_basename(file_path).replace(".ring", "")
-                let tmp_file = path_join(path_dirname(file_path), ".${basename}.ring_tmp.js")
-                write_file(tmp_file, js)
-                let code = exec_sync("node", [tmp_file])
-                delete_file(tmp_file)
-                if code != 0 {
-                    exit_process(code)
-                }
-            } else {
-                eprintln("Unknown command: ${parsed.command}")
-                exit_process(1)
-            }
+            eprintln("Only 'build' and 'check' commands are supported")
+            exit_process(1)
         }
     }
 }
@@ -251,7 +179,7 @@ fn parse_cli_args(args: List<Str>) -> CliArgs {
     let mut debug = false
     let mut error_format = "human"
     let mut out_dir = "dist"
-    let mut target = "js"
+    let mut target = "llvm"
     let mut verify_rc = false
     let mut verify_strict = false
     let mut rc_mutate = ""
@@ -311,8 +239,7 @@ fn usage() {
     print("Ring-lang compiler v0.1.0 (Ring bootstrap)")
     print("")
     print("Usage:")
-    print("  ring build <file.ring>    Compile to .js file(s)")
-    print("  ring run <file.ring>      Compile and execute with Node.js")
+    print("  ring build <file.ring>    Compile to native .o file")
     print("  ring check <file.ring>    Type-check only")
     print("  ring help                 Show this help")
     print("")
@@ -320,7 +247,6 @@ fn usage() {
     print("  --debug                   Print intermediate info")
     print("  --error-format=human|llm  Error output format (default: human)")
     print("  --out-dir=<path>          Output directory (default: dist)")
-    print("  --target=js|llvm          Code generation target (default: js)")
     print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR")
     print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail")
 }
