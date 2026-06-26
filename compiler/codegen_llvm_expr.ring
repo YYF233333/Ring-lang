@@ -20,7 +20,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     LLVM_INT_EQ, LLVM_INT_NE, LLVM_INT_SGT, LLVM_INT_SGE, LLVM_INT_SLT, LLVM_INT_SLE,
     LLVM_REAL_OEQ, LLVM_REAL_OGT, LLVM_REAL_OGE, LLVM_REAL_OLT, LLVM_REAL_OLE, LLVM_REAL_ONE}
 use codegen_llvm_stmt::{emit_llvm_stmt}
-use codegen_ctx::{extract_effect_names}
+use effect_analysis::{extract_effect_names}
 
 // Re-declare LLVM types and functions to avoid ESM cross-module import issues
 extern type LLVMContextRef

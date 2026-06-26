@@ -1,5 +1,6 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
 use hir::{HExpr, HStmt, HTraitMethod, HEffectOp, HEnumVariant, evidence_param_name}
+use effect_analysis::{extract_effect_names}
 
 const JS_RESERVED: Set<Str> = set_from(
     ["abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch",
@@ -148,24 +149,6 @@ pub fn qualify(ctx: CodegenCtx, name: Str) -> Str {
         none => {},
     }
     safe_ident(name)
-}
-
-pub fn extract_effect_names(effects: EffectRow) -> List<Str> {
-    let mut names: List<Str> = []
-    for e in effects.effects {
-        // Skip MutEffect — it is a compile-time marker with zero runtime cost
-        match e {
-            Effect::MutEffect { .. } => {},
-            _ => {
-                let n = effect_kind_name(e)
-                if names.contains(n) == false {
-                    names.push(n)
-                }
-            }
-        }
-    }
-    names.sort()
-    names
 }
 
 pub fn get_evidence_params(effects: EffectRow) -> List<Str> {

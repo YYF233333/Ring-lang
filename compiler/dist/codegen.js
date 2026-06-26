@@ -4,10 +4,11 @@ import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, Bin
 import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, FLOAT_METHODS as hir$FLOAT_METHODS, INT_METHODS as hir$INT_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, SET_HOF_METHODS as hir$SET_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, STR_METHODS as hir$STR_METHODS, collect_extern_type_names as hir$collect_extern_type_names, compare_by_first as hir$compare_by_first, default_evidence_name as hir$default_evidence_name, default_method_self_name as hir$default_method_self_name, dict_instance_name as hir$dict_instance_name, effect_op_slot as hir$effect_op_slot, evidence_param_name as hir$evidence_param_name, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, hexpr_type as hir$hexpr_type, is_borrow_returning_call as hir$is_borrow_returning_call, is_extern_handle_type as hir$is_extern_handle_type, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, is_rc_excluded_type as hir$is_rc_excluded_type, trait_bound_param_name as hir$trait_bound_param_name, trait_dict_name as hir$trait_dict_name, type_contains_extern_handle as hir$type_contains_extern_handle, variant_js_name as hir$variant_js_name, DerivedField as hir$DerivedField, DerivedImpl as hir$DerivedImpl, DerivedVariant as hir$DerivedVariant, DictDispatchInfo as hir$DictDispatchInfo, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_FloatIdentity as hir$FieldAction_FloatIdentity, FieldAction_BoolIdentity as hir$FieldAction_BoolIdentity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, HAssocType as hir$HAssocType, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, HDictDef as hir$HDictDef, HEffectHandler as hir$HEffectHandler, HEffectOp as hir$HEffectOp, HEnumVariant as hir$HEnumVariant, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HExpr_ReturnExpr as hir$HExpr_ReturnExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HMatchArm as hir$HMatchArm, HParam as hir$HParam, HProgram as hir$HProgram, HSigMember as hir$HSigMember, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HStructField as hir$HStructField, HStructFieldInit as hir$HStructFieldInit, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug } from "./hir.js";
 import { CELL_METHODS as builtin_methods$CELL_METHODS, FLOAT_METHODS as builtin_methods$FLOAT_METHODS, INT_METHODS as builtin_methods$INT_METHODS, LIST_HOF_METHODS as builtin_methods$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as builtin_methods$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as builtin_methods$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as builtin_methods$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as builtin_methods$OPTION_HOF_METHODS, OPTION_NON_HOF_METHODS as builtin_methods$OPTION_NON_HOF_METHODS, SET_HOF_METHODS as builtin_methods$SET_HOF_METHODS, SET_NON_HOF_METHODS as builtin_methods$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as builtin_methods$STRINGBUILDER_METHODS, STR_METHODS as builtin_methods$STR_METHODS } from "./builtin_methods.js";
 import { RUNTIME_CODE as runtime$RUNTIME_CODE, RUNTIME_EXPORT_NAMES as runtime$RUNTIME_EXPORT_NAMES, runtime_esm_code as runtime$runtime_esm_code } from "./runtime.js";
-import { LIST_HOF_JS_METHOD as codegen_ctx$LIST_HOF_JS_METHOD, emit as codegen_ctx$emit, emit_raw as codegen_ctx$emit_raw, extract_effect_names as codegen_ctx$extract_effect_names, get_evidence_params as codegen_ctx$get_evidence_params, is_imported_name as codegen_ctx$is_imported_name, new_codegen_ctx as codegen_ctx$new_codegen_ctx, pop_indent as codegen_ctx$pop_indent, push_indent as codegen_ctx$push_indent, qualify as codegen_ctx$qualify, safe_ident as codegen_ctx$safe_ident, CodegenCtx as codegen_ctx$CodegenCtx, HTraitDeclInfo as codegen_ctx$HTraitDeclInfo } from "./codegen_ctx.js";
+import { LIST_HOF_JS_METHOD as codegen_ctx$LIST_HOF_JS_METHOD, emit as codegen_ctx$emit, emit_raw as codegen_ctx$emit_raw, get_evidence_params as codegen_ctx$get_evidence_params, is_imported_name as codegen_ctx$is_imported_name, new_codegen_ctx as codegen_ctx$new_codegen_ctx, pop_indent as codegen_ctx$pop_indent, push_indent as codegen_ctx$push_indent, qualify as codegen_ctx$qualify, safe_ident as codegen_ctx$safe_ident, CodegenCtx as codegen_ctx$CodegenCtx, HTraitDeclInfo as codegen_ctx$HTraitDeclInfo } from "./codegen_ctx.js";
 import { emit_decl as codegen_decl$emit_decl, emit_fn_decl as codegen_decl$emit_fn_decl, emit_toplevel_evidence as codegen_decl$emit_toplevel_evidence } from "./codegen_decl.js";
 import { gen_expr as codegen_expr$gen_expr, wrapped_dict_js as codegen_expr$wrapped_dict_js } from "./codegen_expr.js";
 import { emit_derived_impl as codegen_derive$emit_derived_impl, get_derived_method_names as codegen_derive$get_derived_method_names } from "./codegen_derive.js";
+import { collect_fn_callees as effect_analysis$collect_fn_callees, collect_local_calls as effect_analysis$collect_local_calls, collect_local_calls_stmt as effect_analysis$collect_local_calls_stmt, extract_effect_names as effect_analysis$extract_effect_names } from "./effect_analysis.js";
 
 
 
@@ -246,712 +247,242 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
-function collect_local_calls_stmt(stmt, local_names, out) {
-  __ring_match6: {
-    const __ring_m6 = stmt;
-    if (__ring_m6._tag === "Let") {
-      const init = __ring_m6.init;
-      return collect_local_calls(init, local_names, out);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "Var") {
-      const init = __ring_m6.init;
-      return collect_local_calls(init, local_names, out);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "Assign") {
-      const target = __ring_m6.target; const value = __ring_m6.value;
-      collect_local_calls(target, local_names, out);
-      return collect_local_calls(value, local_names, out);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "ExprStmt") {
-      const expr = __ring_m6.expr;
-      return collect_local_calls(expr, local_names, out);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "Return") {
-      const value = __ring_m6.value;
-      __ring_match7: {
-        const __ring_m7 = value;
-        if (__ring_m7._tag === "some") {
-          const v = __ring_m7._0;
-          return collect_local_calls(v, local_names, out);
-          break __ring_match7;
-        }
-        if (__ring_m7._tag === "none") {
-          break __ring_match7;
-        }
-        __match_fail(__ring_m7);
-      }
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "While") {
-      const condition = __ring_m6.condition; const body = __ring_m6.body;
-      collect_local_calls(condition, local_names, out);
-      return collect_local_calls(body, local_names, out);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "ForIn") {
-      const iterable = __ring_m6.iterable; const body = __ring_m6.body;
-      collect_local_calls(iterable, local_names, out);
-      return collect_local_calls(body, local_names, out);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "LetDestructure") {
-      const init = __ring_m6.init;
-      return collect_local_calls(init, local_names, out);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "IfLet") {
-      const expr = __ring_m6.expr; const then_block = __ring_m6.then_block; const else_block = __ring_m6.else_block;
-      collect_local_calls(expr, local_names, out);
-      collect_local_calls(then_block, local_names, out);
-      __ring_match8: {
-        const __ring_m8 = else_block;
-        if (__ring_m8._tag === "some") {
-          const eb = __ring_m8._0;
-          return collect_local_calls(eb, local_names, out);
-          break __ring_match8;
-        }
-        if (__ring_m8._tag === "none") {
-          break __ring_match8;
-        }
-        __match_fail(__ring_m8);
-      }
-      break __ring_match6;
-    }
-    break __ring_match6;
-  }
-}
-
-function collect_local_calls(expr, local_names, out) {
-  __ring_match9: {
-    const __ring_m9 = expr;
-    if (__ring_m9._tag === "Call") {
-      const callee = __ring_m9.callee; const args = __ring_m9.args;
-      __ring_match10: {
-        const __ring_m10 = callee;
-        if (__ring_m10._tag === "Ident") {
-          const name = __ring_m10.name;
-          if (_Set_contains(local_names, name, __Str_Eq)) {
-            _Set_insert(out, name);
-          }
-          break __ring_match10;
-        }
-        if (__ring_m10._tag === "FieldAccess") {
-          const recv = __ring_m10.receiver; const field = __ring_m10.field;
-          let found_qualified = false;
-          __ring_match11: {
-            const __ring_m11 = hir$hexpr_type(recv);
-            if (__ring_m11._tag === "StructType") {
-              const tn = __ring_m11.name;
-              const qn = `${tn}_${field}`;
-              if (_Set_contains(local_names, qn, __Str_Eq)) {
-                _Set_insert(out, qn);
-                found_qualified = true;
-              }
-              break __ring_match11;
-            }
-            if (__ring_m11._tag === "EnumType") {
-              const tn = __ring_m11.name;
-              const qn = `${tn}_${field}`;
-              if (_Set_contains(local_names, qn, __Str_Eq)) {
-                _Set_insert(out, qn);
-                found_qualified = true;
-              }
-              break __ring_match11;
-            }
-            if (__ring_m11._tag === "GenericType") {
-              const base = __ring_m11.base;
-              __ring_match12: {
-                const __ring_m12 = base;
-                if (__ring_m12._tag === "StructType") {
-                  const tn = __ring_m12.name;
-                  const qn = `${tn}_${field}`;
-                  if (_Set_contains(local_names, qn, __Str_Eq)) {
-                    _Set_insert(out, qn);
-                    found_qualified = true;
-                  }
-                  break __ring_match12;
-                }
-                if (__ring_m12._tag === "EnumType") {
-                  const tn = __ring_m12.name;
-                  const qn = `${tn}_${field}`;
-                  if (_Set_contains(local_names, qn, __Str_Eq)) {
-                    _Set_insert(out, qn);
-                    found_qualified = true;
-                  }
-                  break __ring_match12;
-                }
-                break __ring_match12;
-              }
-              break __ring_match11;
-            }
-            break __ring_match11;
-          }
-          if ((!found_qualified)) {
-            if (_Set_contains(local_names, field, __Str_Eq)) {
-              _Set_insert(out, field);
-            }
-          }
-          break __ring_match10;
-        }
-        break __ring_match10;
-      }
-      collect_local_calls(callee, local_names, out);
-      const __ring_iter_2 = __List_Iterable.iter(args);
-      while (true) {
-        const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
-        if (__ring_next_2._tag === "none") break;
-        const a = __ring_next_2._0;
-        collect_local_calls(a, local_names, out);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "Block") {
-      const stmts = __ring_m9.stmts; const tail = __ring_m9.tail;
-      const __ring_iter_3 = __List_Iterable.iter(stmts);
-      while (true) {
-        const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
-        if (__ring_next_3._tag === "none") break;
-        const s = __ring_next_3._0;
-        collect_local_calls_stmt(s, local_names, out);
-      }
-      __ring_match13: {
-        const __ring_m13 = tail;
-        if (__ring_m13._tag === "some") {
-          const t = __ring_m13._0;
-          return collect_local_calls(t, local_names, out);
-          break __ring_match13;
-        }
-        if (__ring_m13._tag === "none") {
-          break __ring_match13;
-        }
-        __match_fail(__ring_m13);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "IfExpr") {
-      const condition = __ring_m9.condition; const then_branch = __ring_m9.then_branch; const else_branch = __ring_m9.else_branch;
-      collect_local_calls(condition, local_names, out);
-      collect_local_calls(then_branch, local_names, out);
-      __ring_match14: {
-        const __ring_m14 = else_branch;
-        if (__ring_m14._tag === "some") {
-          const eb = __ring_m14._0;
-          return collect_local_calls(eb, local_names, out);
-          break __ring_match14;
-        }
-        if (__ring_m14._tag === "none") {
-          break __ring_match14;
-        }
-        __match_fail(__ring_m14);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "MatchExpr") {
-      const scrutinee = __ring_m9.scrutinee; const arms = __ring_m9.arms;
-      collect_local_calls(scrutinee, local_names, out);
-      const __ring_iter_4 = __List_Iterable.iter(arms);
-      while (true) {
-        const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-        if (__ring_next_4._tag === "none") break;
-        const arm = __ring_next_4._0;
-        collect_local_calls(arm.body, local_names, out);
-        __ring_match15: {
-          const __ring_m15 = arm.guard;
-          if (__ring_m15._tag === "some") {
-            const g = __ring_m15._0;
-            collect_local_calls(g, local_names, out);
-            break __ring_match15;
-          }
-          if (__ring_m15._tag === "none") {
-            break __ring_match15;
-          }
-          __match_fail(__ring_m15);
-        }
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "BinOp") {
-      const left = __ring_m9.left; const right = __ring_m9.right;
-      collect_local_calls(left, local_names, out);
-      return collect_local_calls(right, local_names, out);
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "UnaryOp") {
-      const operand = __ring_m9.operand;
-      return collect_local_calls(operand, local_names, out);
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "FieldAccess") {
-      const receiver = __ring_m9.receiver;
-      return collect_local_calls(receiver, local_names, out);
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "StructLit") {
-      const fields = __ring_m9.fields; const spread = __ring_m9.spread;
-      const __ring_iter_5 = __List_Iterable.iter(fields);
-      while (true) {
-        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-        if (__ring_next_5._tag === "none") break;
-        const f = __ring_next_5._0;
-        collect_local_calls(f.value, local_names, out);
-      }
-      __ring_match16: {
-        const __ring_m16 = spread;
-        if (__ring_m16._tag === "some") {
-          const s = __ring_m16._0;
-          return collect_local_calls(s, local_names, out);
-          break __ring_match16;
-        }
-        if (__ring_m16._tag === "none") {
-          break __ring_match16;
-        }
-        __match_fail(__ring_m16);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "NamedVariantConstruct") {
-      const fields = __ring_m9.fields; const spread = __ring_m9.spread;
-      const __ring_iter_6 = __List_Iterable.iter(fields);
-      while (true) {
-        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-        if (__ring_next_6._tag === "none") break;
-        const f = __ring_next_6._0;
-        collect_local_calls(f.value, local_names, out);
-      }
-      __ring_match17: {
-        const __ring_m17 = spread;
-        if (__ring_m17._tag === "some") {
-          const s = __ring_m17._0;
-          return collect_local_calls(s, local_names, out);
-          break __ring_match17;
-        }
-        if (__ring_m17._tag === "none") {
-          break __ring_match17;
-        }
-        __match_fail(__ring_m17);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "StringInterp") {
-      const parts = __ring_m9.parts;
-      const __ring_iter_7 = __List_Iterable.iter(parts);
-      while (true) {
-        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-        if (__ring_next_7._tag === "none") break;
-        const p = __ring_next_7._0;
-        __ring_match18: {
-          const __ring_m18 = p;
-          if (__ring_m18._tag === "Expression") {
-            const e = __ring_m18._0;
-            collect_local_calls(e, local_names, out);
-            break __ring_match18;
-          }
-          if (__ring_m18._tag === "Literal") {
-            break __ring_match18;
-          }
-          __match_fail(__ring_m18);
-        }
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "TryCatch") {
-      const body = __ring_m9.body; const arms = __ring_m9.arms;
-      collect_local_calls(body, local_names, out);
-      const __ring_iter_8 = __List_Iterable.iter(arms);
-      while (true) {
-        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-        if (__ring_next_8._tag === "none") break;
-        const arm = __ring_next_8._0;
-        __ring_match19: {
-          const __ring_m19 = arm.guard;
-          if (__ring_m19._tag === "some") {
-            const g = __ring_m19._0;
-            collect_local_calls(g, local_names, out);
-            break __ring_match19;
-          }
-          if (__ring_m19._tag === "none") {
-            break __ring_match19;
-          }
-          __match_fail(__ring_m19);
-        }
-        collect_local_calls(arm.body, local_names, out);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "HandleExpr") {
-      const body = __ring_m9.body; const handlers = __ring_m9.handlers;
-      collect_local_calls(body, local_names, out);
-      const __ring_iter_9 = __List_Iterable.iter(handlers);
-      while (true) {
-        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-        if (__ring_next_9._tag === "none") break;
-        const h = __ring_next_9._0;
-        collect_local_calls(h.body, local_names, out);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "Lambda") {
-      const body = __ring_m9.body;
-      return collect_local_calls(body, local_names, out);
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "RangeExpr") {
-      const start = __ring_m9.start; const end = __ring_m9.end;
-      collect_local_calls(start, local_names, out);
-      return collect_local_calls(end, local_names, out);
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "ListLit") {
-      const elements = __ring_m9.elements;
-      const __ring_iter_10 = __List_Iterable.iter(elements);
-      while (true) {
-        const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-        if (__ring_next_10._tag === "none") break;
-        const e = __ring_next_10._0;
-        collect_local_calls(e, local_names, out);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "TupleLit") {
-      const elements = __ring_m9.elements;
-      const __ring_iter_11 = __List_Iterable.iter(elements);
-      while (true) {
-        const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
-        if (__ring_next_11._tag === "none") break;
-        const e = __ring_next_11._0;
-        collect_local_calls(e, local_names, out);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "EffectOp") {
-      const args = __ring_m9.args;
-      const __ring_iter_12 = __List_Iterable.iter(args);
-      while (true) {
-        const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-        if (__ring_next_12._tag === "none") break;
-        const a = __ring_next_12._0;
-        collect_local_calls(a, local_names, out);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "IndexExpr") {
-      const receiver = __ring_m9.receiver; const index = __ring_m9.index;
-      collect_local_calls(receiver, local_names, out);
-      return collect_local_calls(index, local_names, out);
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "ReturnExpr") {
-      const value = __ring_m9.value;
-      __ring_match20: {
-        const __ring_m20 = value;
-        if (__ring_m20._tag === "some") {
-          const v = __ring_m20._0;
-          return collect_local_calls(v, local_names, out);
-          break __ring_match20;
-        }
-        if (__ring_m20._tag === "none") {
-          break __ring_match20;
-        }
-        __match_fail(__ring_m20);
-      }
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "Clone") {
-      const inner = __ring_m9.inner;
-      return collect_local_calls(inner, local_names, out);
-      break __ring_match9;
-    }
-    break __ring_match9;
-  }
-}
-
-function collect_fn_callees(decls, local_names, fn_callees) {
-  const __ring_iter_13 = __List_Iterable.iter(decls);
-  while (true) {
-    const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-    if (__ring_next_13._tag === "none") break;
-    const decl = __ring_next_13._0;
-    __ring_match21: {
-      const __ring_m21 = decl;
-      if (__ring_m21._tag === "Fn") {
-        const name = __ring_m21.name; const body = __ring_m21.body;
-        let callees = set_new();
-        collect_local_calls(body, local_names, callees);
-        _Map_insert(fn_callees, name, callees);
-        break __ring_match21;
-      }
-      if (__ring_m21._tag === "Impl") {
-        const target_type = __ring_m21.target_type; const methods = __ring_m21.methods;
-        const __ring_iter_14 = __List_Iterable.iter(methods);
-        while (true) {
-          const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
-          if (__ring_next_14._tag === "none") break;
-          const m = __ring_next_14._0;
-          __ring_match22: {
-            const __ring_m22 = m;
-            if (__ring_m22._tag === "Fn") {
-              const mn = __ring_m22.name; const mb = __ring_m22.body;
-              let callees = set_new();
-              collect_local_calls(mb, local_names, callees);
-              const qualified = `${target_type}_${mn}`;
-              _Map_insert(fn_callees, qualified, callees);
-              break __ring_match22;
-            }
-            break __ring_match22;
-          }
-        }
-        break __ring_match21;
-      }
-      if (__ring_m21._tag === "ModBlock") {
-        const mod_decls = __ring_m21.decls;
-        collect_fn_callees(mod_decls, local_names, fn_callees);
-        break __ring_match21;
-      }
-      break __ring_match21;
-    }
-  }
-}
-
 function register_builtin_methods(ctx, type_name, methods) {
   const sn = codegen_ctx$safe_ident(type_name);
-  const __ring_iter_15 = __List_Iterable.iter(methods);
+  const __ring_iter_2 = __List_Iterable.iter(methods);
   while (true) {
-    const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
-    if (__ring_next_15._tag === "none") break;
-    const m = __ring_next_15._0;
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const m = __ring_next_2._0;
     const key = `${sn}.${m}`;
     _Map_insert(ctx.impl_methods, key, Option_none);
   }
 }
 
 function register_decl_info(decls, ctx) {
-  const __ring_iter_16 = __List_Iterable.iter(decls);
+  const __ring_iter_3 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
-    if (__ring_next_16._tag === "none") break;
-    const decl = __ring_next_16._0;
-    __ring_match23: {
-      const __ring_m23 = decl;
-      if (__ring_m23._tag === "Fn") {
-        const name = __ring_m23.name; const effects = __ring_m23.effects;
+    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+    if (__ring_next_3._tag === "none") break;
+    const decl = __ring_next_3._0;
+    __ring_match6: {
+      const __ring_m6 = decl;
+      if (__ring_m6._tag === "Fn") {
+        const name = __ring_m6.name; const effects = __ring_m6.effects;
         _Set_insert(ctx.local_names, name);
         if ((List_len(effects.effects) > 0)) {
           _Map_insert(ctx.local_fn_effects, name, effects);
         }
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Struct") {
-        const name = __ring_m23.name; const fields = __ring_m23.fields;
+      if (__ring_m6._tag === "Struct") {
+        const name = __ring_m6.name; const fields = __ring_m6.fields;
         _Set_insert(ctx.local_names, name);
         const qname = codegen_ctx$qualify(ctx, name);
         let field_names = [];
-        const __ring_iter_17 = __List_Iterable.iter(fields);
+        const __ring_iter_4 = __List_Iterable.iter(fields);
         while (true) {
-          const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
-          if (__ring_next_17._tag === "none") break;
-          const f = __ring_next_17._0;
+          const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+          if (__ring_next_4._tag === "none") break;
+          const f = __ring_next_4._0;
           List_push(field_names, f.name);
         }
         _Map_insert(ctx.struct_field_order, qname, field_names);
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Enum") {
-        const name = __ring_m23.name; const variants = __ring_m23.variants;
+      if (__ring_m6._tag === "Enum") {
+        const name = __ring_m6.name; const variants = __ring_m6.variants;
         _Set_insert(ctx.local_names, name);
         _Map_insert(ctx.enum_variants, name, variants);
-        const __ring_iter_18 = __List_Iterable.iter(variants);
+        const __ring_iter_5 = __List_Iterable.iter(variants);
         while (true) {
-          const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
-          if (__ring_next_18._tag === "none") break;
-          const v = __ring_next_18._0;
+          const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+          if (__ring_next_5._tag === "none") break;
+          const v = __ring_next_5._0;
           _Set_insert(ctx.local_names, v.name);
           _Set_insert(ctx.local_names, `${name}_${v.name}`);
         }
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Trait") {
-        const name = __ring_m23.name; const methods = __ring_m23.methods; const supertraits = __ring_m23.supertraits;
+      if (__ring_m6._tag === "Trait") {
+        const name = __ring_m6.name; const methods = __ring_m6.methods; const supertraits = __ring_m6.supertraits;
         _Set_insert(ctx.local_names, name);
         _Map_insert(ctx.trait_decls, name, new codegen_ctx$HTraitDeclInfo(name, methods, supertraits));
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Impl") {
-        const target_type = __ring_m23.target_type; const trait_name = __ring_m23.trait_name; const methods = __ring_m23.methods;
+      if (__ring_m6._tag === "Impl") {
+        const target_type = __ring_m6.target_type; const trait_name = __ring_m6.trait_name; const methods = __ring_m6.methods;
         _Set_insert(ctx.local_names, target_type);
         let explicit_methods = set_new();
-        const __ring_iter_19 = __List_Iterable.iter(methods);
+        const __ring_iter_6 = __List_Iterable.iter(methods);
         while (true) {
-          const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
-          if (__ring_next_19._tag === "none") break;
-          const method = __ring_next_19._0;
-          __ring_match24: {
-            const __ring_m24 = method;
-            if (__ring_m24._tag === "Fn") {
-              const name = __ring_m24.name;
+          const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+          if (__ring_next_6._tag === "none") break;
+          const method = __ring_next_6._0;
+          __ring_match7: {
+            const __ring_m7 = method;
+            if (__ring_m7._tag === "Fn") {
+              const name = __ring_m7.name;
               _Set_insert(explicit_methods, name);
               const key = `${codegen_ctx$qualify(ctx, target_type)}.${name}`;
-              __ring_match25: {
-                const __ring_m25 = trait_name;
-                if (__ring_m25._tag === "none") {
-                  __ring_match26: {
-                    const __ring_m26 = _Map_get(ctx.impl_methods, key);
-                    if (__ring_m26._tag === "none") {
+              __ring_match8: {
+                const __ring_m8 = trait_name;
+                if (__ring_m8._tag === "none") {
+                  __ring_match9: {
+                    const __ring_m9 = _Map_get(ctx.impl_methods, key);
+                    if (__ring_m9._tag === "none") {
                       _Map_insert(ctx.impl_methods, key, Option_none);
-                      break __ring_match26;
+                      break __ring_match9;
                     }
-                    if (__ring_m26._tag === "some") {
-                      break __ring_match26;
+                    if (__ring_m9._tag === "some") {
+                      break __ring_match9;
                     }
-                    __match_fail(__ring_m26);
+                    __match_fail(__ring_m9);
                   }
-                  break __ring_match25;
+                  break __ring_match8;
                 }
-                if (__ring_m25._tag === "some") {
-                  const tn = __ring_m25._0;
-                  __ring_match27: {
-                    const __ring_m27 = _Map_get(ctx.impl_methods, key);
-                    if (__ring_m27._tag === "none") {
+                if (__ring_m8._tag === "some") {
+                  const tn = __ring_m8._0;
+                  __ring_match10: {
+                    const __ring_m10 = _Map_get(ctx.impl_methods, key);
+                    if (__ring_m10._tag === "none") {
                       _Map_insert(ctx.impl_methods, key, Option_some(tn));
-                      break __ring_match27;
+                      break __ring_match10;
                     }
-                    if (__ring_m27._tag === "some") {
-                      break __ring_match27;
+                    if (__ring_m10._tag === "some") {
+                      break __ring_match10;
                     }
-                    __match_fail(__ring_m27);
+                    __match_fail(__ring_m10);
                   }
-                  break __ring_match25;
+                  break __ring_match8;
                 }
-                __match_fail(__ring_m25);
+                __match_fail(__ring_m8);
               }
-              break __ring_match24;
+              break __ring_match7;
             }
-            break __ring_match24;
+            break __ring_match7;
           }
         }
-        __ring_match28: {
-          const __ring_m28 = trait_name;
-          if (__ring_m28._tag === "some") {
-            const tn = __ring_m28._0;
-            __ring_match29: {
-              const __ring_m29 = _Map_get(ctx.trait_decls, tn);
-              if (__ring_m29._tag === "some") {
-                const trait_info = __ring_m29._0;
-                const __ring_iter_20 = __List_Iterable.iter(trait_info.methods);
+        __ring_match11: {
+          const __ring_m11 = trait_name;
+          if (__ring_m11._tag === "some") {
+            const tn = __ring_m11._0;
+            __ring_match12: {
+              const __ring_m12 = _Map_get(ctx.trait_decls, tn);
+              if (__ring_m12._tag === "some") {
+                const trait_info = __ring_m12._0;
+                const __ring_iter_7 = __List_Iterable.iter(trait_info.methods);
                 while (true) {
-                  const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
-                  if (__ring_next_20._tag === "none") break;
-                  const tm = __ring_next_20._0;
+                  const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+                  if (__ring_next_7._tag === "none") break;
+                  const tm = __ring_next_7._0;
                   if ((tm.has_default ? (!_Set_contains(explicit_methods, tm.name, __Str_Eq)) : false)) {
                     const key = `${codegen_ctx$qualify(ctx, target_type)}.${tm.name}`;
-                    __ring_match30: {
-                      const __ring_m30 = _Map_get(ctx.impl_methods, key);
-                      if (__ring_m30._tag === "none") {
+                    __ring_match13: {
+                      const __ring_m13 = _Map_get(ctx.impl_methods, key);
+                      if (__ring_m13._tag === "none") {
                         _Map_insert(ctx.impl_methods, key, Option_some(tn));
-                        break __ring_match30;
+                        break __ring_match13;
                       }
-                      if (__ring_m30._tag === "some") {
-                        break __ring_match30;
+                      if (__ring_m13._tag === "some") {
+                        break __ring_match13;
                       }
-                      __match_fail(__ring_m30);
+                      __match_fail(__ring_m13);
                     }
                   }
                 }
-                break __ring_match29;
+                break __ring_match12;
               }
-              if (__ring_m29._tag === "none") {
-                break __ring_match29;
+              if (__ring_m12._tag === "none") {
+                break __ring_match12;
               }
-              __match_fail(__ring_m29);
+              __match_fail(__ring_m12);
             }
-            break __ring_match28;
+            break __ring_match11;
           }
-          if (__ring_m28._tag === "none") {
-            break __ring_match28;
+          if (__ring_m11._tag === "none") {
+            break __ring_match11;
           }
-          __match_fail(__ring_m28);
+          __match_fail(__ring_m11);
         }
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Effect") {
-        const name = __ring_m23.name;
+      if (__ring_m6._tag === "Effect") {
+        const name = __ring_m6.name;
         _Set_insert(ctx.local_names, name);
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Const") {
-        const name = __ring_m23.name;
+      if (__ring_m6._tag === "Const") {
+        const name = __ring_m6.name;
         _Set_insert(ctx.local_names, name);
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "ModBlock") {
-        const name = __ring_m23.name; const mod_decls = __ring_m23.decls;
+      if (__ring_m6._tag === "ModBlock") {
+        const name = __ring_m6.name; const mod_decls = __ring_m6.decls;
         _Set_insert(ctx.local_names, name);
         register_decl_info(mod_decls, ctx);
-        break __ring_match23;
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Test") {
-        break __ring_match23;
+      if (__ring_m6._tag === "Test") {
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "ExternFn") {
-        break __ring_match23;
+      if (__ring_m6._tag === "ExternFn") {
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "ExternType") {
-        break __ring_match23;
+      if (__ring_m6._tag === "ExternType") {
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "TypeAlias") {
-        break __ring_match23;
+      if (__ring_m6._tag === "TypeAlias") {
+        break __ring_match6;
       }
-      if (__ring_m23._tag === "Sig") {
-        break __ring_match23;
+      if (__ring_m6._tag === "Sig") {
+        break __ring_match6;
       }
-      __match_fail(__ring_m23);
+      __match_fail(__ring_m6);
     }
   }
 }
 
 function is_codegen_value_type(t) {
-  __ring_match31: {
-    const __ring_m31 = t;
-    if (__ring_m31._tag === "IntType") {
+  __ring_match14: {
+    const __ring_m14 = t;
+    if (__ring_m14._tag === "IntType") {
       return true;
-      break __ring_match31;
+      break __ring_match14;
     }
-    if (__ring_m31._tag === "FloatType") {
+    if (__ring_m14._tag === "FloatType") {
       return true;
-      break __ring_match31;
+      break __ring_match14;
     }
-    if (__ring_m31._tag === "BoolType") {
+    if (__ring_m14._tag === "BoolType") {
       return true;
-      break __ring_match31;
+      break __ring_match14;
     }
-    if (__ring_m31._tag === "StrType") {
+    if (__ring_m14._tag === "StrType") {
       return true;
-      break __ring_match31;
+      break __ring_match14;
     }
     return false;
-    break __ring_match31;
+    break __ring_match14;
   }
 }
 
 function scan_fn_mut_params(decls, ctx) {
-  const __ring_iter_21 = __List_Iterable.iter(decls);
+  const __ring_iter_8 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-    if (__ring_next_21._tag === "none") break;
-    const decl = __ring_next_21._0;
-    __ring_match32: {
-      const __ring_m32 = decl;
-      if (__ring_m32._tag === "Fn") {
-        const name = __ring_m32.name; const params = __ring_m32.params;
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const decl = __ring_next_8._0;
+    __ring_match15: {
+      const __ring_m15 = decl;
+      if (__ring_m15._tag === "Fn") {
+        const name = __ring_m15.name; const params = __ring_m15.params;
         let flags = [];
-        const __ring_iter_22 = __List_Iterable.iter(params);
+        const __ring_iter_9 = __List_Iterable.iter(params);
         while (true) {
-          const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
-          if (__ring_next_22._tag === "none") break;
-          const p = __ring_next_22._0;
+          const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+          if (__ring_next_9._tag === "none") break;
+          const p = __ring_next_9._0;
           if (((p.name === "self") ? true : (!p.is_mutable))) {
             List_push(flags, false);
           } else {
@@ -963,25 +494,25 @@ function scan_fn_mut_params(decls, ctx) {
         if ((qname !== name)) {
           _Map_insert(ctx.fn_mut_params, qname, flags);
         }
-        break __ring_match32;
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Impl") {
-        const target_type = __ring_m32.target_type; const methods = __ring_m32.methods;
-        const __ring_iter_23 = __List_Iterable.iter(methods);
+      if (__ring_m15._tag === "Impl") {
+        const target_type = __ring_m15.target_type; const methods = __ring_m15.methods;
+        const __ring_iter_10 = __List_Iterable.iter(methods);
         while (true) {
-          const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-          if (__ring_next_23._tag === "none") break;
-          const m = __ring_next_23._0;
-          __ring_match33: {
-            const __ring_m33 = m;
-            if (__ring_m33._tag === "Fn") {
-              const mn = __ring_m33.name; const mp = __ring_m33.params;
+          const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+          if (__ring_next_10._tag === "none") break;
+          const m = __ring_next_10._0;
+          __ring_match16: {
+            const __ring_m16 = m;
+            if (__ring_m16._tag === "Fn") {
+              const mn = __ring_m16.name; const mp = __ring_m16.params;
               let flags = [];
-              const __ring_iter_24 = __List_Iterable.iter(mp);
+              const __ring_iter_11 = __List_Iterable.iter(mp);
               while (true) {
-                const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-                if (__ring_next_24._tag === "none") break;
-                const p = __ring_next_24._0;
+                const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+                if (__ring_next_11._tag === "none") break;
+                const p = __ring_next_11._0;
                 if (((p.name === "self") ? true : (!p.is_mutable))) {
                   List_push(flags, false);
                 } else {
@@ -990,49 +521,49 @@ function scan_fn_mut_params(decls, ctx) {
               }
               const ufcs_name = `${codegen_ctx$qualify(ctx, target_type)}_${codegen_ctx$safe_ident(mn)}`;
               _Map_insert(ctx.fn_mut_params, ufcs_name, flags);
-              break __ring_match33;
+              break __ring_match16;
             }
-            break __ring_match33;
+            break __ring_match16;
           }
         }
-        break __ring_match32;
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "ModBlock") {
-        const mod_decls = __ring_m32.decls;
+      if (__ring_m15._tag === "ModBlock") {
+        const mod_decls = __ring_m15.decls;
         scan_fn_mut_params(mod_decls, ctx);
-        break __ring_match32;
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Struct") {
-        break __ring_match32;
+      if (__ring_m15._tag === "Struct") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Enum") {
-        break __ring_match32;
+      if (__ring_m15._tag === "Enum") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Trait") {
-        break __ring_match32;
+      if (__ring_m15._tag === "Trait") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Effect") {
-        break __ring_match32;
+      if (__ring_m15._tag === "Effect") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Test") {
-        break __ring_match32;
+      if (__ring_m15._tag === "Test") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "ExternFn") {
-        break __ring_match32;
+      if (__ring_m15._tag === "ExternFn") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "ExternType") {
-        break __ring_match32;
+      if (__ring_m15._tag === "ExternType") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "TypeAlias") {
-        break __ring_match32;
+      if (__ring_m15._tag === "TypeAlias") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Const") {
-        break __ring_match32;
+      if (__ring_m15._tag === "Const") {
+        break __ring_match15;
       }
-      if (__ring_m32._tag === "Sig") {
-        break __ring_match32;
+      if (__ring_m15._tag === "Sig") {
+        break __ring_match15;
       }
-      __match_fail(__ring_m32);
+      __match_fail(__ring_m15);
     }
   }
 }
@@ -1045,178 +576,178 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
   ctx.module_exports = module_exports;
   ctx.boxed_vars = program.boxed_vars;
   scan_fn_mut_params(program.decls, ctx);
-  __ring_match34: {
-    const __ring_m34 = external_fn_mut_params;
-    if (__ring_m34._tag === "some") {
-      const efmp = __ring_m34._0;
+  __ring_match17: {
+    const __ring_m17 = external_fn_mut_params;
+    if (__ring_m17._tag === "some") {
+      const efmp = __ring_m17._0;
       let sorted_entries = _Map_entries(efmp);
       sorted_entries.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
-      const __ring_iter_25 = __List_Iterable.iter(sorted_entries);
+      const __ring_iter_12 = __List_Iterable.iter(sorted_entries);
       while (true) {
-        const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
-        if (__ring_next_25._tag === "none") break;
-        const entry = __ring_next_25._0;
+        const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+        if (__ring_next_12._tag === "none") break;
+        const entry = __ring_next_12._0;
         const __ring_dt0 = entry;
         const k = __ring_dt0[0];
         const v = __ring_dt0[1];
         _Map_insert(ctx.fn_mut_params, k, v);
       }
-      break __ring_match34;
+      break __ring_match17;
     }
-    if (__ring_m34._tag === "none") {
-      break __ring_match34;
+    if (__ring_m17._tag === "none") {
+      break __ring_match17;
     }
-    __match_fail(__ring_m34);
+    __match_fail(__ring_m17);
   }
-  __ring_match35: {
-    const __ring_m35 = external_struct_fields;
-    if (__ring_m35._tag === "some") {
-      const esf = __ring_m35._0;
+  __ring_match18: {
+    const __ring_m18 = external_struct_fields;
+    if (__ring_m18._tag === "some") {
+      const esf = __ring_m18._0;
       let sorted_entries = _Map_entries(esf);
       sorted_entries.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
-      const __ring_iter_26 = __List_Iterable.iter(sorted_entries);
+      const __ring_iter_13 = __List_Iterable.iter(sorted_entries);
       while (true) {
-        const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
-        if (__ring_next_26._tag === "none") break;
-        const entry = __ring_next_26._0;
+        const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+        if (__ring_next_13._tag === "none") break;
+        const entry = __ring_next_13._0;
         const __ring_dt1 = entry;
         const k = __ring_dt1[0];
         const v = __ring_dt1[1];
         _Map_insert(ctx.struct_field_order, k, v);
       }
-      break __ring_match35;
+      break __ring_match18;
     }
-    if (__ring_m35._tag === "none") {
-      break __ring_match35;
+    if (__ring_m18._tag === "none") {
+      break __ring_match18;
     }
-    __match_fail(__ring_m35);
+    __match_fail(__ring_m18);
   }
-  __ring_match36: {
-    const __ring_m36 = external_impl_methods;
-    if (__ring_m36._tag === "some") {
-      const eim = __ring_m36._0;
+  __ring_match19: {
+    const __ring_m19 = external_impl_methods;
+    if (__ring_m19._tag === "some") {
+      const eim = __ring_m19._0;
       let sorted_entries = _Map_entries(eim);
       sorted_entries.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
-      const __ring_iter_27 = __List_Iterable.iter(sorted_entries);
+      const __ring_iter_14 = __List_Iterable.iter(sorted_entries);
       while (true) {
-        const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-        if (__ring_next_27._tag === "none") break;
-        const entry = __ring_next_27._0;
+        const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+        if (__ring_next_14._tag === "none") break;
+        const entry = __ring_next_14._0;
         const __ring_dt2 = entry;
         const k = __ring_dt2[0];
         const v = __ring_dt2[1];
         _Map_insert(ctx.impl_methods, k, v);
       }
-      break __ring_match36;
+      break __ring_match19;
     }
-    if (__ring_m36._tag === "none") {
-      break __ring_match36;
+    if (__ring_m19._tag === "none") {
+      break __ring_match19;
     }
-    __match_fail(__ring_m36);
+    __match_fail(__ring_m19);
   }
   let __ring_blk0;
-  __ring_match37: {
-    const __ring_m37 = ctx.module_imports;
-    if (__ring_m37._tag === "some") {
-      const imports = __ring_m37._0;
+  __ring_match20: {
+    const __ring_m20 = ctx.module_imports;
+    if (__ring_m20._tag === "some") {
+      const imports = __ring_m20._0;
       __ring_blk0 = (List_len(imports) > 0);
-      break __ring_match37;
+      break __ring_match20;
     }
-    if (__ring_m37._tag === "none") {
+    if (__ring_m20._tag === "none") {
       __ring_blk0 = false;
-      break __ring_match37;
+      break __ring_match20;
     }
-    __match_fail(__ring_m37);
+    __match_fail(__ring_m20);
   }
   const has_imports = __ring_blk0;
   if (has_imports) {
-    __ring_match38: {
-      const __ring_m38 = ctx.module_imports;
-      if (__ring_m38._tag === "some") {
-        const imports = __ring_m38._0;
-        const __ring_iter_28 = __List_Iterable.iter(imports);
+    __ring_match21: {
+      const __ring_m21 = ctx.module_imports;
+      if (__ring_m21._tag === "some") {
+        const imports = __ring_m21._0;
+        const __ring_iter_15 = __List_Iterable.iter(imports);
         while (true) {
-          const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
-          if (__ring_next_28._tag === "none") break;
-          const imp = __ring_next_28._0;
+          const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+          if (__ring_next_15._tag === "none") break;
+          const imp = __ring_next_15._0;
           codegen_ctx$emit_raw(ctx, imp);
         }
-        break __ring_match38;
+        break __ring_match21;
       }
-      if (__ring_m38._tag === "none") {
-        break __ring_match38;
+      if (__ring_m21._tag === "none") {
+        break __ring_match21;
       }
-      __match_fail(__ring_m38);
+      __match_fail(__ring_m21);
     }
     const empty = "";
     codegen_ctx$emit_raw(ctx, empty);
   }
   register_decl_info(program.decls, ctx);
-  const __ring_iter_29 = __List_Iterable.iter(program.static_dicts);
+  const __ring_iter_16 = __List_Iterable.iter(program.static_dicts);
   while (true) {
-    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
-    if (__ring_next_29._tag === "none") break;
-    const sd = __ring_next_29._0;
+    const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+    if (__ring_next_16._tag === "none") break;
+    const sd = __ring_next_16._0;
     if ((List_len(sd.inner) > 0)) {
       _Set_insert(ctx.local_names, sd.name);
     }
   }
   if ((_Map_len(ctx.local_fn_effects) > 0)) {
     let fn_callees = map_new();
-    collect_fn_callees(program.decls, ctx.local_names, fn_callees);
+    effect_analysis$collect_fn_callees(program.decls, ctx.local_names, fn_callees);
     let changed = true;
     while (changed) {
       changed = false;
       let sorted_callees = _Map_entries(fn_callees);
       sorted_callees.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
-      const __ring_iter_30 = __List_Iterable.iter(sorted_callees);
+      const __ring_iter_17 = __List_Iterable.iter(sorted_callees);
       while (true) {
-        const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
-        if (__ring_next_30._tag === "none") break;
-        const entry = __ring_next_30._0;
+        const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+        if (__ring_next_17._tag === "none") break;
+        const entry = __ring_next_17._0;
         const __ring_dt3 = entry;
         const name = __ring_dt3[0];
         const callees = __ring_dt3[1];
         let sorted_callee_names = _Set_to_list(callees);
         List_sort(sorted_callee_names, __Str_Ord);
-        const __ring_iter_31 = __List_Iterable.iter(sorted_callee_names);
+        const __ring_iter_18 = __List_Iterable.iter(sorted_callee_names);
         while (true) {
-          const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
-          if (__ring_next_31._tag === "none") break;
-          const callee = __ring_next_31._0;
-          __ring_match39: {
-            const __ring_m39 = _Map_get(ctx.local_fn_effects, callee);
-            if (__ring_m39._tag === "some") {
-              const callee_effects = __ring_m39._0;
-              __ring_match40: {
-                const __ring_m40 = _Map_get(ctx.local_fn_effects, name);
-                if (__ring_m40._tag === "none") {
+          const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+          if (__ring_next_18._tag === "none") break;
+          const callee = __ring_next_18._0;
+          __ring_match22: {
+            const __ring_m22 = _Map_get(ctx.local_fn_effects, callee);
+            if (__ring_m22._tag === "some") {
+              const callee_effects = __ring_m22._0;
+              __ring_match23: {
+                const __ring_m23 = _Map_get(ctx.local_fn_effects, name);
+                if (__ring_m23._tag === "none") {
                   let effs = [];
-                  const __ring_iter_32 = __List_Iterable.iter(callee_effects.effects);
+                  const __ring_iter_19 = __List_Iterable.iter(callee_effects.effects);
                   while (true) {
-                    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
-                    if (__ring_next_32._tag === "none") break;
-                    const e = __ring_next_32._0;
+                    const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+                    if (__ring_next_19._tag === "none") break;
+                    const e = __ring_next_19._0;
                     List_push(effs, e);
                   }
                   _Map_insert(ctx.local_fn_effects, name, new types$EffectRow(effs, Option_none));
                   changed = true;
-                  break __ring_match40;
+                  break __ring_match23;
                 }
-                if (__ring_m40._tag === "some") {
-                  const current = __ring_m40._0;
-                  const __ring_iter_33 = __List_Iterable.iter(callee_effects.effects);
+                if (__ring_m23._tag === "some") {
+                  const current = __ring_m23._0;
+                  const __ring_iter_20 = __List_Iterable.iter(callee_effects.effects);
                   while (true) {
-                    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
-                    if (__ring_next_33._tag === "none") break;
-                    const e = __ring_next_33._0;
+                    const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+                    if (__ring_next_20._tag === "none") break;
+                    const e = __ring_next_20._0;
                     const ename = types$effect_kind_name(e);
                     let found = false;
-                    const __ring_iter_34 = __List_Iterable.iter(current.effects);
+                    const __ring_iter_21 = __List_Iterable.iter(current.effects);
                     while (true) {
-                      const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
-                      if (__ring_next_34._tag === "none") break;
-                      const ce = __ring_next_34._0;
+                      const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+                      if (__ring_next_21._tag === "none") break;
+                      const ce = __ring_next_21._0;
                       if ((types$effect_kind_name(ce) === ename)) {
                         found = true;
                       }
@@ -1226,16 +757,16 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
                       changed = true;
                     }
                   }
-                  break __ring_match40;
+                  break __ring_match23;
                 }
-                __match_fail(__ring_m40);
+                __match_fail(__ring_m23);
               }
-              break __ring_match39;
+              break __ring_match22;
             }
-            if (__ring_m39._tag === "none") {
-              break __ring_match39;
+            if (__ring_m22._tag === "none") {
+              break __ring_match22;
             }
-            __match_fail(__ring_m39);
+            __match_fail(__ring_m22);
           }
         }
       }
@@ -1250,19 +781,19 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
   register_builtin_methods(ctx, hir$BUILTIN_FLOAT, builtin_methods$FLOAT_METHODS);
   register_builtin_methods(ctx, hir$BUILTIN_OPTION, builtin_methods$OPTION_NON_HOF_METHODS);
   register_builtin_methods(ctx, hir$BUILTIN_STRING_BUILDER, builtin_methods$STRINGBUILDER_METHODS);
-  const __ring_iter_35 = __List_Iterable.iter([hir$BUILTIN_INT, hir$BUILTIN_FLOAT, hir$BUILTIN_STR, hir$BUILTIN_BOOL]);
+  const __ring_iter_22 = __List_Iterable.iter([hir$BUILTIN_INT, hir$BUILTIN_FLOAT, hir$BUILTIN_STR, hir$BUILTIN_BOOL]);
   while (true) {
-    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-    if (__ring_next_35._tag === "none") break;
-    const prim = __ring_next_35._0;
+    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+    if (__ring_next_22._tag === "none") break;
+    const prim = __ring_next_22._0;
     const key = `${codegen_ctx$safe_ident(prim)}.debug`;
     _Map_insert(ctx.impl_methods, key, Option_some("Debug"));
   }
-  const __ring_iter_36 = __List_Iterable.iter([hir$BUILTIN_LIST, hir$BUILTIN_MAP, hir$BUILTIN_SET, hir$BUILTIN_OPTION]);
+  const __ring_iter_23 = __List_Iterable.iter([hir$BUILTIN_LIST, hir$BUILTIN_MAP, hir$BUILTIN_SET, hir$BUILTIN_OPTION]);
   while (true) {
-    const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
-    if (__ring_next_36._tag === "none") break;
-    const coll = __ring_next_36._0;
+    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+    if (__ring_next_23._tag === "none") break;
+    const coll = __ring_next_23._0;
     const key = `${codegen_ctx$safe_ident(coll)}.debug`;
     _Map_insert(ctx.impl_methods, key, Option_some("Debug"));
   }
@@ -1270,60 +801,60 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
     codegen_ctx$emit_raw(ctx, runtime$RUNTIME_CODE());
     codegen_ctx$emit_raw(ctx, "");
   }
-  const __ring_iter_37 = __List_Iterable.iter(program.derived_impls);
+  const __ring_iter_24 = __List_Iterable.iter(program.derived_impls);
   while (true) {
-    const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
-    if (__ring_next_37._tag === "none") break;
-    const impl_ = __ring_next_37._0;
-    const __ring_iter_38 = __List_Iterable.iter(codegen_derive$get_derived_method_names(impl_.trait_name));
+    const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+    if (__ring_next_24._tag === "none") break;
+    const impl_ = __ring_next_24._0;
+    const __ring_iter_25 = __List_Iterable.iter(codegen_derive$get_derived_method_names(impl_.trait_name));
     while (true) {
-      const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
-      if (__ring_next_38._tag === "none") break;
-      const method_name = __ring_next_38._0;
+      const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+      if (__ring_next_25._tag === "none") break;
+      const method_name = __ring_next_25._0;
       const key = `${codegen_ctx$qualify(ctx, impl_.type_name)}.${method_name}`;
-      __ring_match41: {
-        const __ring_m41 = _Map_get(ctx.impl_methods, key);
-        if (__ring_m41._tag === "none") {
+      __ring_match24: {
+        const __ring_m24 = _Map_get(ctx.impl_methods, key);
+        if (__ring_m24._tag === "none") {
           _Map_insert(ctx.impl_methods, key, Option_some(impl_.trait_name));
-          break __ring_match41;
+          break __ring_match24;
         }
-        if (__ring_m41._tag === "some") {
-          break __ring_match41;
+        if (__ring_m24._tag === "some") {
+          break __ring_match24;
         }
-        __match_fail(__ring_m41);
+        __match_fail(__ring_m24);
       }
     }
   }
-  const __ring_iter_39 = __List_Iterable.iter(program.decls);
+  const __ring_iter_26 = __List_Iterable.iter(program.decls);
   while (true) {
-    const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
-    if (__ring_next_39._tag === "none") break;
-    const decl = __ring_next_39._0;
+    const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+    if (__ring_next_26._tag === "none") break;
+    const decl = __ring_next_26._0;
     codegen_decl$emit_decl(ctx, decl);
     codegen_ctx$emit_raw(ctx, "");
   }
-  const __ring_iter_40 = __List_Iterable.iter(program.derived_impls);
+  const __ring_iter_27 = __List_Iterable.iter(program.derived_impls);
   while (true) {
-    const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
-    if (__ring_next_40._tag === "none") break;
-    const impl_ = __ring_next_40._0;
+    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+    if (__ring_next_27._tag === "none") break;
+    const impl_ = __ring_next_27._0;
     codegen_derive$emit_derived_impl(ctx, impl_);
     codegen_ctx$emit_raw(ctx, "");
   }
   let emitted_instance = false;
-  const __ring_iter_41 = __List_Iterable.iter(program.static_dicts);
+  const __ring_iter_28 = __List_Iterable.iter(program.static_dicts);
   while (true) {
-    const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
-    if (__ring_next_41._tag === "none") break;
-    const sd = __ring_next_41._0;
+    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+    if (__ring_next_28._tag === "none") break;
+    const sd = __ring_next_28._0;
     if ((List_len(sd.inner) > 0)) {
       const d = codegen_ctx$qualify(ctx, sd.base_dict);
       let inner_strs = [];
-      const __ring_iter_42 = __List_Iterable.iter(sd.inner);
+      const __ring_iter_29 = __List_Iterable.iter(sd.inner);
       while (true) {
-        const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
-        if (__ring_next_42._tag === "none") break;
-        const inn = __ring_next_42._0;
+        const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+        if (__ring_next_29._tag === "none") break;
+        const inn = __ring_next_29._0;
         List_push(inner_strs, codegen_ctx$qualify(ctx, inn));
       }
       codegen_ctx$emit(ctx, `const ${codegen_ctx$qualify(ctx, sd.name)} = ${codegen_expr$wrapped_dict_js(d, sd.trait_name, inner_strs)};`);
@@ -1334,15 +865,15 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
     codegen_ctx$emit_raw(ctx, "");
   }
   if ((ctx.skip_main_call === false)) {
-    const __ring_iter_43 = __List_Iterable.iter(program.decls);
+    const __ring_iter_30 = __List_Iterable.iter(program.decls);
     while (true) {
-      const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
-      if (__ring_next_43._tag === "none") break;
-      const decl = __ring_next_43._0;
-      __ring_match42: {
-        const __ring_m42 = decl;
-        if (__ring_m42._tag === "Fn") {
-          const name = __ring_m42.name; const effects = __ring_m42.effects;
+      const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+      if (__ring_next_30._tag === "none") break;
+      const decl = __ring_next_30._0;
+      __ring_match25: {
+        const __ring_m25 = decl;
+        if (__ring_m25._tag === "Fn") {
+          const name = __ring_m25.name; const effects = __ring_m25.effects;
           if ((name === "main")) {
             const fn_name = codegen_ctx$qualify(ctx, "main");
             const ev_params = codegen_ctx$get_evidence_params(effects);
@@ -1354,27 +885,27 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
               codegen_ctx$emit(ctx, `${fn_name}();`);
             }
           }
-          break __ring_match42;
+          break __ring_match25;
         }
-        break __ring_match42;
+        break __ring_match25;
       }
     }
   }
-  __ring_match43: {
-    const __ring_m43 = ctx.module_exports;
-    if (__ring_m43._tag === "some") {
-      const exports = __ring_m43._0;
+  __ring_match26: {
+    const __ring_m26 = ctx.module_exports;
+    if (__ring_m26._tag === "some") {
+      const exports = __ring_m26._0;
       if ((List_len(exports) > 0)) {
         codegen_ctx$emit_raw(ctx, "");
         const joined = List_join(exports, ", ");
         codegen_ctx$emit_raw(ctx, `export { ${joined} };`);
       }
-      break __ring_match43;
+      break __ring_match26;
     }
-    if (__ring_m43._tag === "none") {
-      break __ring_match43;
+    if (__ring_m26._tag === "none") {
+      break __ring_match26;
     }
-    __match_fail(__ring_m43);
+    __match_fail(__ring_m26);
   }
   return List_join(ctx.lines, "\n");
 }
@@ -1441,4 +972,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { generate, collect_fn_callees, collect_local_calls, collect_local_calls_stmt };
+export { generate };

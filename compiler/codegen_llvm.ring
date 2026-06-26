@@ -11,8 +11,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     get_or_assign_typeid}
 use codegen_llvm_expr::{gen_llvm_expr, build_default_evidence_all, discard}
 use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info, emit_derived_impls_llvm, emit_builtin_derived_impls}
-use codegen_ctx::{extract_effect_names}
-use codegen::{collect_fn_callees}
+use effect_analysis::{extract_effect_names, collect_fn_callees}
 
 // Re-declare LLVM types and functions to avoid ESM cross-module import issues
 extern type LLVMContextRef
