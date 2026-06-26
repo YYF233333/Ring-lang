@@ -956,8 +956,12 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             let new_body = anf_block_expr(body, externs, counter)
             let mut new_arms: List<HMatchArm> = []
             for arm in arms {
+                let new_guard = match arm.guard {
+                    some(g) => some(anf_cond_in_own_scope(g, externs, counter)),
+                    none => none,
+                }
                 let new_body_arm = anf_block_expr(arm.body, externs, counter)
-                new_arms.push(HMatchArm { pattern: arm.pattern, guard: arm.guard, body: new_body_arm, span: arm.span })
+                new_arms.push(HMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body_arm, span: arm.span })
             }
             HExpr::TryCatch { body: new_body, arms: new_arms, ty: ty, effects: effects, span: span }
         },
@@ -2307,8 +2311,13 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
             for arm in arms {
                 // catch-arm pattern bindings project borrows from the caught error
                 // value — not owned, excluded from the arm's owned set.
+                // Guard borrows (boolean test).
+                let new_guard = match arm.guard {
+                    some(g) => some(rc_expr(g, false, owned, boxed, externs, gensym, loop_base)),
+                    none => none,
+                }
                 let new_body_arm = rc_block_root(arm.body, escape, owned, boxed, externs, gensym, loop_base)
-                new_arms.push(HMatchArm { pattern: arm.pattern, guard: arm.guard, body: new_body_arm, span: arm.span })
+                new_arms.push(HMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body_arm, span: arm.span })
             }
             HExpr::TryCatch { body: new_body, arms: new_arms, ty: ty, effects: effects, span: span }
         },

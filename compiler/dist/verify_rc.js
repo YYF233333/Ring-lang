@@ -1703,6 +1703,18 @@ function v_expr(expr, mode, ctx) {
           const bn = __ring_next_26._0;
           v_bind(ctx, bn, K_BORROW, arm.span);
         }
+        __ring_match37: {
+          const __ring_m37 = arm.guard;
+          if (__ring_m37._tag === "some") {
+            const g = __ring_m37._0;
+            v_cond(g, ctx);
+            break __ring_match37;
+          }
+          if (__ring_m37._tag === "none") {
+            break __ring_match37;
+          }
+          __match_fail(__ring_m37);
+        }
         v_cf_branch(arm.body, mode, ctx);
         v_pop_frame(ctx);
         const snap_arm = v_snapshot(ctx);
@@ -1761,17 +1773,17 @@ function v_expr(expr, mode, ctx) {
     }
     if (__ring_m30._tag === "ReturnExpr") {
       const value = __ring_m30.value; const span = __ring_m30.span;
-      __ring_match37: {
-        const __ring_m37 = value;
-        if (__ring_m37._tag === "some") {
-          const v = __ring_m37._0;
+      __ring_match38: {
+        const __ring_m38 = value;
+        if (__ring_m38._tag === "some") {
+          const v = __ring_m38._0;
           const _ = v_consume(v, ctx);
-          break __ring_match37;
+          break __ring_match38;
         }
-        if (__ring_m37._tag === "none") {
-          break __ring_match37;
+        if (__ring_m38._tag === "none") {
+          break __ring_match38;
         }
-        __match_fail(__ring_m37);
+        __match_fail(__ring_m38);
       }
       let i = 0;
       while ((i < List_len(ctx.names))) {
@@ -1800,10 +1812,10 @@ function v_borrow(expr, exempt, ctx) {
 }
 
 function v_assign(target, value, span, ctx) {
-  __ring_match38: {
-    const __ring_m38 = target;
-    if (__ring_m38._tag === "Ident") {
-      const name = __ring_m38.name; const def_id = __ring_m38.def_id; const ty = __ring_m38.ty;
+  __ring_match39: {
+    const __ring_m39 = target;
+    if (__ring_m39._tag === "Ident") {
+      const name = __ring_m39.name; const def_id = __ring_m39.def_id; const ty = __ring_m39.ty;
       v_consume(value, ctx);
       const idx = v_lookup(ctx, name);
       if ((idx < 0)) {
@@ -1815,18 +1827,18 @@ function v_assign(target, value, span, ctx) {
       }
       if (((__ring_index(ctx.states, idx) === S_LIVE) ? (__ring_index(ctx.kinds, idx) === K_OWNED) : false)) {
         let __ring_blk3;
-        __ring_match39: {
-          const __ring_m39 = def_id;
-          if (__ring_m39._tag === "some") {
-            const d = __ring_m39._0;
+        __ring_match40: {
+          const __ring_m40 = def_id;
+          if (__ring_m40._tag === "some") {
+            const d = __ring_m40._0;
             __ring_blk3 = _Set_contains(ctx.boxed, d, __Int_Eq);
-            break __ring_match39;
+            break __ring_match40;
           }
-          if (__ring_m39._tag === "none") {
+          if (__ring_m40._tag === "none") {
             __ring_blk3 = false;
-            break __ring_match39;
+            break __ring_match40;
           }
-          __match_fail(__ring_m39);
+          __match_fail(__ring_m40);
         }
         const boxed_var = __ring_blk3;
         if ((v_type_excluded(ty, ctx.externs) ? true : hir$type_contains_extern_handle(ty, ctx.externs))) {
@@ -1843,26 +1855,26 @@ function v_assign(target, value, span, ctx) {
         }
       }
       return List_set(ctx.states, idx, S_LIVE);
-      break __ring_match38;
+      break __ring_match39;
     }
-    if (__ring_m38._tag === "FieldAccess") {
-      const receiver = __ring_m38.receiver; const field = __ring_m38.field; const ty = __ring_m38.ty;
+    if (__ring_m39._tag === "FieldAccess") {
+      const receiver = __ring_m39.receiver; const field = __ring_m39.field; const ty = __ring_m39.ty;
       v_borrow(receiver, "", ctx);
       v_consume(value, ctx);
       if (((v_type_excluded(ty, ctx.externs) === false) ? (hir$type_contains_extern_handle(ty, ctx.externs) === false) : false)) {
         return v_report(ctx, "x-overwrite-field", false, `field '${field}' overwrite does not drop the old value (codegen field-store convention; B-109 ① class)`, span);
       }
-      break __ring_match38;
+      break __ring_match39;
     }
-    if (__ring_m38._tag === "IndexExpr") {
-      const receiver = __ring_m38.receiver; const index = __ring_m38.index;
+    if (__ring_m39._tag === "IndexExpr") {
+      const receiver = __ring_m39.receiver; const index = __ring_m39.index;
       v_borrow(receiver, "", ctx);
       v_borrow(index, "", ctx);
       const _ = v_consume(value, ctx);
-      break __ring_match38;
+      break __ring_match39;
     }
     const _ = v_consume(value, ctx);
-    break __ring_match38;
+    break __ring_match39;
   }
 }
 
@@ -1872,60 +1884,60 @@ function verify_decls(decls, boxed, externs, findings) {
     const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
     if (__ring_next_29._tag === "none") break;
     const d = __ring_next_29._0;
-    __ring_match40: {
-      const __ring_m40 = d;
-      if (__ring_m40._tag === "Fn") {
-        const name = __ring_m40.name; const params = __ring_m40.params; const body = __ring_m40.body;
+    __ring_match41: {
+      const __ring_m41 = d;
+      if (__ring_m41._tag === "Fn") {
+        const name = __ring_m41.name; const params = __ring_m41.params; const body = __ring_m41.body;
         v_fn_scope(params, body, name, boxed, externs, findings);
-        break __ring_match40;
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Impl") {
-        const methods = __ring_m40.methods;
+      if (__ring_m41._tag === "Impl") {
+        const methods = __ring_m41.methods;
         verify_decls(methods, boxed, externs, findings);
-        break __ring_match40;
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Test") {
-        const description = __ring_m40.description; const body = __ring_m40.body;
+      if (__ring_m41._tag === "Test") {
+        const description = __ring_m41.description; const body = __ring_m41.body;
         const no_params = [];
         v_fn_scope(no_params, body, `test ${description}`, boxed, externs, findings);
-        break __ring_match40;
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Const") {
-        const name = __ring_m40.name; const init = __ring_m40.init;
+      if (__ring_m41._tag === "Const") {
+        const name = __ring_m41.name; const init = __ring_m41.init;
         let ctx = v_new_ctx(boxed, externs, findings, `const ${name}`);
         const _ = v_consume(init, ctx);
-        break __ring_match40;
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "ModBlock") {
-        const mod_decls = __ring_m40.decls;
+      if (__ring_m41._tag === "ModBlock") {
+        const mod_decls = __ring_m41.decls;
         verify_decls(mod_decls, boxed, externs, findings);
-        break __ring_match40;
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Struct") {
-        break __ring_match40;
+      if (__ring_m41._tag === "Struct") {
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Enum") {
-        break __ring_match40;
+      if (__ring_m41._tag === "Enum") {
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Effect") {
-        break __ring_match40;
+      if (__ring_m41._tag === "Effect") {
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Trait") {
-        break __ring_match40;
+      if (__ring_m41._tag === "Trait") {
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "ExternFn") {
-        break __ring_match40;
+      if (__ring_m41._tag === "ExternFn") {
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "ExternType") {
-        break __ring_match40;
+      if (__ring_m41._tag === "ExternType") {
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "TypeAlias") {
-        break __ring_match40;
+      if (__ring_m41._tag === "TypeAlias") {
+        break __ring_match41;
       }
-      if (__ring_m40._tag === "Sig") {
-        break __ring_match40;
+      if (__ring_m41._tag === "Sig") {
+        break __ring_match41;
       }
-      __match_fail(__ring_m40);
+      __match_fail(__ring_m41);
     }
   }
 }
