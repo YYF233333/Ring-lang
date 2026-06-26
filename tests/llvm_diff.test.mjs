@@ -1,10 +1,16 @@
-// LLVM backend differential regression tests.
+// LLVM backend golden-snapshot regression tests.
 //
-// For each case in tests/cases/llvm/, compile it with BOTH backends and assert the
-// runtime output is identical. The JS backend is the oracle: any divergence means
-// the LLVM codegen regressed. These guard the fixes from the LLVM self-hosting work
+// For each case in tests/cases/llvm/, compile and run it with the LLVM backend,
+// then assert the output matches the golden snapshot in the corresponding
+// .expected file. These guard the fixes from the LLVM self-hosting work
 // (tuple-match tag checks, OR-patterns, Set iteration, generic Eq/Ord dispatch,
 // List.contains, fail/catch via ring_try, nested named patterns, field ordering).
+//
+// Golden snapshots are checked in as tests/cases/llvm/<name>.expected.
+// To regenerate all snapshots:
+//   node --test ../tests/llvm_diff.test.mjs --update-golden
+// or for a single case:
+//   node --test ../tests/llvm_diff.test.mjs --update-golden=<name>.ring
 //
 // Requires a native toolchain (clang) + ring_runtime.cpp. If clang is unavailable
 // (e.g. CI without LLVM), every test is skipped rather than failing.
@@ -26,6 +32,14 @@ const CASES = path.join(REPO, "tests", "cases", "llvm");
 const RUNTIME_CPP = path.join(REPO, "ring_runtime.cpp");
 const RUNTIME_O = path.join(REPO, "ring_runtime.o");
 
+// --update-golden or --update-golden=<file> flag: regenerate golden snapshots
+// instead of comparing against them.
+const UPDATE_GOLDEN_ARG = process.argv.find(a => a.startsWith("--update-golden"));
+const UPDATE_GOLDEN = !!UPDATE_GOLDEN_ARG;
+const UPDATE_GOLDEN_FILTER = UPDATE_GOLDEN_ARG && UPDATE_GOLDEN_ARG.includes("=")
+  ? UPDATE_GOLDEN_ARG.split("=")[1]
+  : null;
+
 function have(cmd) {
   try { execSync(cmd, { stdio: "pipe" }); return true; } catch { return false; }
 }
@@ -40,16 +54,6 @@ function buildRuntime() {
   if (fs.existsSync(RUNTIME_O) &&
       fs.statSync(RUNTIME_O).mtimeMs >= fs.statSync(RUNTIME_CPP).mtimeMs) return;
   sh(`clang++ -c "${RUNTIME_CPP}" -o "${RUNTIME_O}" -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS`);
-}
-
-function runJs(ringFile) {
-  const jsFile = ringFile.replace(/\.ring$/, ".js");
-  try {
-    sh(`node "${RING}" build "${ringFile}"`);
-    return sh(`node "${jsFile}"`);
-  } finally {
-    fs.rmSync(jsFile, { force: true });
-  }
 }
 
 function runLlvm(ringFile) {
@@ -73,28 +77,49 @@ function runLlvm(ringFile) {
   }
 }
 
+function readGolden(ringFile) {
+  const expectedFile = ringFile.replace(/\.ring$/, ".expected");
+  if (!fs.existsSync(expectedFile)) {
+    throw new Error(
+      `Golden snapshot not found: ${expectedFile}\n` +
+      `Run with --update-golden to generate it.`
+    );
+  }
+  return fs.readFileSync(expectedFile, "utf-8");
+}
+
+function writeGolden(ringFile, output) {
+  const expectedFile = ringFile.replace(/\.ring$/, ".expected");
+  fs.writeFileSync(expectedFile, output, "utf-8");
+}
+
+// Normalize line endings: the native exe writes CRLF via Windows text-mode
+// stdout, node writes LF. We compare logical output, not byte encoding.
+const norm = (s) => s.replace(/\r\n/g, "\n");
+
 const caseFiles = fs.existsSync(CASES)
   ? fs.readdirSync(CASES).filter(f => f.endsWith(".ring")).sort()
   : [];
 
-// JS backend hangs on these cases (infinite loop / never returns).
-// Native backend runs them correctly. Skip to avoid orphaned node processes.
-const JS_SKIP = new Set(["receiver_temp_drop.ring"]);
-
-describe("llvm backend == js backend (differential)", () => {
+describe("llvm backend golden-snapshot regression", () => {
   before(() => { if (HAVE_CLANG) buildRuntime(); });
 
   for (const f of caseFiles) {
-    const skip = !HAVE_CLANG ? "clang not available" : JS_SKIP.has(f) ? "JS backend hangs" : false;
+    const skip = !HAVE_CLANG ? "clang not available" : false;
     test(`${f}`, { skip }, () => {
       const ringFile = path.join(CASES, f);
-      // Normalize line endings: the native exe writes CRLF via Windows text-mode
-      // stdout, node writes LF. We compare logical output, not byte encoding.
-      const norm = (s) => s.replace(/\r\n/g, "\n");
-      const jsOut = norm(runJs(ringFile));
       const llvmOut = norm(runLlvm(ringFile));
-      assert.strictEqual(llvmOut, jsOut,
-        `LLVM output diverged from JS for ${f}\n--- JS ---\n${jsOut}\n--- LLVM ---\n${llvmOut}`);
+
+      if (UPDATE_GOLDEN && (!UPDATE_GOLDEN_FILTER || UPDATE_GOLDEN_FILTER === f)) {
+        writeGolden(ringFile, llvmOut);
+        return; // snapshot updated, no comparison
+      }
+
+      const golden = readGolden(ringFile);
+      assert.strictEqual(llvmOut, golden,
+        `LLVM output diverged from golden snapshot for ${f}\n` +
+        `--- golden ---\n${golden}\n--- actual ---\n${llvmOut}\n` +
+        `Run with --update-golden=${f} to update the snapshot.`);
     });
   }
 });

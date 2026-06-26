@@ -1,0 +1,17 @@
+T1: b:4;c:6;d:8;
+T2: b=2;c=3;
+T3a: true
+T3b: evens_len=4
+T4a: true
+T4b: false
+T5: alice(95,PASS);bob(80,FAIL);carol(90,PASS);
+T6: scores: [alice=95] [bob=80] [carol=90]
+T7a: empty_filter_len=0
+T7b: empty_any=false
+T7c: empty_fold=init
+T7d: empty_mv_len=0
+T8a: empty_set_filter_len=0
+T8b: empty_set_any=false
+T8c: empty_set_all=true
+T8d: empty_set_fold=0
+adversarial_regress_map_chain_ops: done

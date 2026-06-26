@@ -1,0 +1,4 @@
+fn_param_int=42
+fn_param_str=hello
+higher_order=num(99)
+multi_bound=btn: 12

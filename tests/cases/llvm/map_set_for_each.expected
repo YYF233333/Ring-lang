@@ -1,0 +1,16 @@
+map_fold=a=1;b=2;c=3;
+map_filter_len=2
+map_filter_has_a=true
+map_filter_has_b=false
+map_filter_has_c=true
+map_any_c=true
+map_any_z=false
+map_values=a:11;b:22;c:33;
+map_int_fold=10-x;20-y;30-z;
+set_fold=x,y,z,
+set_filter_len=2
+set_any_z=true
+set_all_len1=true
+set_int_sum=6
+drop_stress=[k1=hello][k2=world]
+done
