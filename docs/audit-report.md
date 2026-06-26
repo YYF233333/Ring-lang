@@ -119,6 +119,14 @@
 
 发现者：DS
 
+### #205 verify_rc 负面测试套件覆盖不全（15 类仅 3 类有专用测试）[low] [mechanical] [open]
+
+`tests/cases/llvm/verify_rc_*` 下仅覆盖 `x-overwrite-field`、`leak-temp`、`uaf-drop-borrow` 三类。其余 12 类（`leak-binding`/`leak-return`/`leak-loop-exit`/`leak-scalar-reassign`/`uaf-escaped-borrow`/`uaf-use-after-drop`/`uaf-double-drop`/`uaf-drop-unknown`/`uaf-shadow-mismatch`/`rc-imbalance`/`x-spread`/`x-shadow-overwrite`/`x-overwrite-param`）依赖 self-verify 门和 LLVM 用例扫荡间接覆盖，无直接负面回归测试。
+
+应为每个未覆盖类别构造最小触发用例。
+
+发现者：DS
+
 ### #204 fieldless enum Eq 比较中 4 条死 IR 指令 [low] [mechanical] [open]
 
 `codegen_llvm_decl.ring:1279-1309`：`result`、`ext`、`tags_equal`、`as_i64` 四条 LLVM IR 指令被 emit 但未使用，为不完整重构的残留。LLVM 优化器会移除，但增加代码可读性负担。

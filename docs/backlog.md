@@ -289,6 +289,7 @@ trait Functor {
 3. **`"${x}"` 要求 Display 约束**——无 Display 的类型插值 = 编译错误
 4. **`derive(Display)` 可选**：default impl 委托给 `debug()`，用户一行 derive 即可用于插值
 5. **Debug vs Display 分工**：Debug 给开发者（`dbg(x)` 等结构化输出），Display 给用户（插值、print）
+6. **Debug/Display 所有权契约**：`debug()` 和 `display()` 返回值必须是 fresh-owned `Str`（调用方无条件 `ring_drop`）。derive Debug 已遵守此契约（`gen_str_lit_simple` 总返回 fresh；`emit_identity_to_debug_str` 的 heap 路径通过 `ring_dup` 补偿）。此契约需在 design.md Debug/Display trait 小节显式记录（2026-06-26 审计观察 #4 触发）
 
 **即时修复**（#184 audit-report 条目）：checker 阶段对非基本类型插值报编译错误，不依赖 Display trait 存在。Display trait 实现后放宽为"要求 Display impl"。
 
