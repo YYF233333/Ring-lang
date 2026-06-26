@@ -214,8 +214,12 @@ fn emit_fn_body(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: Effe
         param_idx = param_idx + 1
     }
 
-    // Map evidence params
-    let effective_effects = match ctx.local_fn_effects.get(name) {
+    // Map evidence params — use qualified key for impl methods (matching scan_fn_effects)
+    let effect_key = match impl_type {
+        some(t) => "${t}_${name}",
+        none => name,
+    }
+    let effective_effects = match ctx.local_fn_effects.get(effect_key) {
         some(eff) => eff,
         none => effects,
     }
