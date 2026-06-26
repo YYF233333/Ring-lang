@@ -16,13 +16,6 @@
 ## LLVM Codegen
 
 
-### #207 JS 后端 catch arm guard 中 pattern binding 在 guard 之后才 emit [low] [mechanical] [doing]
-
-`codegen_expr.ring`：JS 后端的 catch arm codegen 中，pattern bindings（`const x = __ring_err;`）在 guard 条件检查之后才 emit，导致 guard 中引用绑定变量时 ReferenceError（如 `catch { x if x > 10 => ... }`）。match arm guard 不受影响（bindings 在 guard 之前 emit）。
-
-**影响**：catch arm guard 引用 pattern 绑定变量时 JS 后端运行时错误。LLVM 后端已修复（#206）。
-
-发现者：Opus（#206 修复过程中发现）
 
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
