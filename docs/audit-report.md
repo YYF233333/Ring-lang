@@ -15,6 +15,16 @@
 
 ## LLVM Codegen
 
+### #208 dist-llvm 自编译段错误（P1.4 阻塞）[medium] [judgment] [open]
+
+`node compiler/dist/main.js build compiler/main.ring --target=llvm` 段错误（exit 0xC0000005）。小文件编译正常（llvm_diff 209/209 全绿），仅编译器自身（44 文件、大型项目）时崩溃。
+
+已修复 impl method effect 传播 nounwind 问题（`collect_fn_callees` qualified key + `body_contains_try_or_handle` 守卫），但自编译仍崩——可能是更大代码库暴露的同类或不同 codegen bug。
+
+**阻塞**：P1.4 的 native E2E 和双 bootstrap 验收。
+
+发现者：Worker（P1.4 执行中）
+
 ### #207 JS 后端 catch arm guard 中 pattern binding 在 guard 之后才 emit [low] [mechanical] [open]
 
 `codegen_expr.ring`：JS 后端的 catch arm codegen 中，pattern bindings（`const x = __ring_err;`）在 guard 条件检查之后才 emit，导致 guard 中引用绑定变量时 ReferenceError（如 `catch { x if x > 10 => ... }`）。match arm guard 不受影响（bindings 在 guard 之前 emit）。
