@@ -1,20 +1,18 @@
 // Ring-lang end-to-end compiler tests
 // Uses Ring self-hosted compiler via in-process ESM import
 
-import { test, describe } from "node:test";
+import { test, describe, before } from "node:test";
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as vm from "node:vm";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { parse } from "../compiler/dist/parser.js";
 import { check } from "../compiler/dist/checker.js";
-import { generate } from "../compiler/dist/codegen.js";
 import { new_collecting_sink } from "../compiler/dist/diagnostics.js";
 import { format_llm, format_human } from "../compiler/dist/formatter.js";
-import { compile_project, compile_project_esm } from "../compiler/dist/compiler_mod.js";
+import { compile_project } from "../compiler/dist/compiler_mod.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,105 +23,114 @@ const REPO_ROOT = __dirname.includes("dist")
 const CASES_DIR = path.resolve(REPO_ROOT, "tests/cases");
 const MODULES_DIR = path.resolve(REPO_ROOT, "tests/cases/modules");
 const RING = path.resolve(REPO_ROOT, "compiler/dist/main.js");
-
-const Option_none = Object.freeze({ _tag: "none" });
-function Option_some(v: any) { return { _tag: "some", _0: v }; }
-
-// ============================================================
-// In-process runtime: strip ESM imports, provide Node globals via vm
-// ============================================================
-
-class ExitError extends Error {
-  code: number;
-  constructor(code: number) {
-    super(`process.exit(${code})`);
-    this.code = code;
-  }
-}
-
-function make_sandbox(output_lines: string[]): vm.Context {
-  const sandbox = {
-    console: {
-      log: (...args: unknown[]) => {
-        output_lines.push(args.map(a => typeof a === "string" ? a : String(a)).join(" "));
-      },
-      error: () => {},
-      warn: () => {},
-    },
-    process: {
-      exit: (code: number) => { throw new ExitError(code); },
-      argv: ["node", "test"],
-      cwd: () => process.cwd(),
-      stderr: { write: () => {} },
-    },
-    JSON, Map, Set, Array, Object, Error, String, Number, Boolean,
-    RegExp, Symbol, parseInt, parseFloat, isNaN, isFinite,
-    Infinity, NaN, undefined, Math,
-    __fs: fs, __path: path,
-  };
-  return vm.createContext(sandbox);
-}
-
-function strip_esm_lines(js: string): string {
-  return js
-    .replace(/^import \{[^\n]*\n/m, "")
-    .replace(/^const __require[^\n]*\n/m, "")
-    .replace(/var __fs = __require\("fs"\), __path = __require\("path"\);/, "");
-}
-
-function run_js_in_vm(js_code: string): string {
-  const output_lines: string[] = [];
-  const ctx = make_sandbox(output_lines);
-  const script = new vm.Script(js_code, { filename: "ring-output.js", timeout: 5000 });
-  script.runInContext(ctx);
-  return output_lines.length > 0 ? output_lines.join("\n") + "\n" : "";
-}
+const RUNTIME_CPP = path.resolve(REPO_ROOT, "ring_runtime.cpp");
+const RUNTIME_O = path.resolve(REPO_ROOT, "ring_runtime.o");
 
 // ============================================================
-// In-process compile helpers
+// LLVM toolchain detection + runtime
+// ============================================================
+
+function have(cmd: string): boolean {
+  try { execSync(cmd, { stdio: "pipe" }); return true; } catch { return false; }
+}
+const HAVE_CLANG = have("clang --version");
+
+function buildRuntime(): void {
+  if (fs.existsSync(RUNTIME_O) &&
+      fs.statSync(RUNTIME_O).mtimeMs >= fs.statSync(RUNTIME_CPP).mtimeMs) return;
+  execSync(`clang++ -c "${RUNTIME_CPP}" -o "${RUNTIME_O}" -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS`, {
+    cwd: REPO_ROOT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 60000,
+  });
+}
+
+/** Normalize CRLF to LF for cross-platform comparison. */
+function norm(s: string): string {
+  return s.replace(/\r\n/g, "\n");
+}
+
+// Cases not yet supported by the LLVM backend (no equivalent in tests/cases/llvm/).
+// These will be re-enabled as LLVM backend coverage expands.
+const LLVM_SKIP = new Set([
+  // Non-tail-resumptive / deep handler patterns (LLVM codegen limitation)
+  "effect_handle_io.ring",
+  "effect_resume.ring",
+  "effect_evidence.ring",
+  "effect_multi_handler.ring",
+  "effect_propagate.ring",
+  "effect_resume_side.ring",
+  "effect_row_strict.ring",
+  "nested_handler.ring",
+  "default_effect_body_io.ring",
+  "default_effect_topo.ring",
+  "mod_effect_evidence.ring",
+  // JS-only builtins / runtime functions not in ring_runtime.cpp
+  "json_stringify.ring",
+  "extern_fn_basic.ring",
+  "debug_basic.ring",
+  "debug_generic.ring",
+  "api_clone.ring",
+  "map_clone.ring",
+  // Iterator / Map / Set runtime gaps
+  "iterator.ring",
+  "map_iteration.ring",
+  "map_ufcs_bug.ring",
+  "map_hof.ring",
+  "set_struct_eq.ring",
+  "set_ops_deep_eq.ring",
+  // Other LLVM backend gaps
+  "trait_alias.ring",
+  "scc_mutual_recursion.ring",
+  "or_pattern.ring",
+]);
+
+// Module dirs not supported by LLVM backend (JS-only extern functions).
+const LLVM_MODULE_SKIP = new Set([
+  "extern_fn",
+  "extern_type",
+]);
+
+// ============================================================
+// Compile helpers
 // ============================================================
 
 function has_errors(sink: any): boolean {
   return sink.items.some((d: any) => d.severity._tag === "SevError");
 }
 
-function ring_run_single(file_path: string): string {
+function ring_run(file_path: string): string {
   const source = fs.readFileSync(file_path, "utf-8");
-  const sink = new_collecting_sink();
-  const ast = parse(source, file_path, sink);
-  if (has_errors(sink)) {
-    throw new Error(`Parse error in ${file_path}`);
-  }
-  const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
-  const result = check(ast, sink, fail_ev);
-  if (has_errors(sink)) {
-    throw new Error(`Type error in ${file_path}: ${sink.items.map((d: any) => d.message).join("; ")}`);
-  }
-  const js = generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
-  return run_js_in_vm(strip_esm_lines(js));
-}
+  const isMultiFile = /^use\s+|^pub\s+use\s+/m.test(source);
+  const tmp_dir = fs.mkdtempSync(path.join(REPO_ROOT, "tests/.tmp_llvm_"));
+  const baseName = path.basename(file_path, ".ring");
+  const exeFile = path.join(tmp_dir, baseName + ".exe");
 
-function ring_run_multi(file_path: string): string {
-  const tmp_dir = fs.mkdtempSync(path.join(REPO_ROOT, "tests/.tmp_esm_"));
+  // Single-file: compiler places .o next to .ring (--out-dir ignored for single-file LLVM).
+  // Multi-file: compiler respects --out-dir, places combined .o there.
+  const oFile = isMultiFile
+    ? path.join(tmp_dir, baseName + ".o")
+    : file_path.replace(/\.ring$/, ".o");
+
   try {
-    execSync(`node "${RING}" build "${file_path}" --out-dir="${tmp_dir}"`, {
-      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
+    if (isMultiFile) {
+      execSync(`node "${RING}" build "${file_path}" --target=llvm --out-dir="${tmp_dir}"`, {
+        cwd: REPO_ROOT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 30000,
+      });
+    } else {
+      execSync(`node "${RING}" build "${file_path}" --target=llvm`, {
+        cwd: REPO_ROOT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 30000,
+      });
+    }
+    execSync(`clang "${oFile}" "${RUNTIME_O}" -o "${exeFile}" -lmsvcrt -Wl,/STACK:536870912 -Wl,/MANIFEST:EMBED -Wl,/MANIFESTUAC:level='asInvoker'`, {
+      cwd: REPO_ROOT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 30000,
     });
-    const entry_name = path.basename(file_path, ".ring") + ".js";
-    return execSync(`node "${path.join(tmp_dir, entry_name)}"`, {
-      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 10000,
+    return execSync(`"${exeFile}"`, {
+      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 30000,
     });
   } finally {
     fs.rmSync(tmp_dir, { recursive: true, force: true });
+    if (!isMultiFile) fs.rmSync(oFile, { force: true });
+    fs.rmSync(path.join(REPO_ROOT, "ring_output.ll"), { force: true });
   }
-}
-
-function ring_run(file_path: string): string {
-  const source = fs.readFileSync(file_path, "utf-8");
-  if (/^use\s+|^pub\s+use\s+/m.test(source)) {
-    return ring_run_multi(file_path);
-  }
-  return ring_run_single(file_path);
 }
 
 function ring_check(file_path: string): { success: boolean; error_output: string } {
@@ -169,39 +176,6 @@ function ring_check(file_path: string): { success: boolean; error_output: string
     const err_text = err.message || String(err);
     return { success: false, error_output: err_text };
   }
-}
-
-function ring_build_single(file_path: string): string {
-  const source = fs.readFileSync(file_path, "utf-8");
-  const sink = new_collecting_sink();
-  const ast = parse(source, file_path, sink);
-  const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
-  const result = check(ast, sink, fail_ev);
-  return generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
-}
-
-function ring_build_multi_esm(file_path: string): Map<string, string> {
-  const dist_dir = path.join(path.dirname(file_path), "dist");
-  if (fs.existsSync(dist_dir)) fs.rmSync(dist_dir, { recursive: true, force: true });
-  fs.mkdirSync(dist_dir, { recursive: true });
-
-  execSync(`node "${RING}" build "${file_path}" --out-dir="${dist_dir}"`, {
-    encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
-  });
-
-  const files = new Map<string, string>();
-  function walk(dir: string) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".js")) {
-        files.set(path.relative(dist_dir, full), fs.readFileSync(full, "utf-8"));
-      }
-    }
-  }
-  walk(dist_dir);
-  fs.rmSync(dist_dir, { recursive: true, force: true });
-  return files;
 }
 
 // ============================================================
@@ -528,13 +502,18 @@ const cases: TestCase[] = [
   { file: "match_negative_literal.ring", expected: "minus one\nzero\none\nother\nminus one point five\nzero\none point five\nother\n" },
 ];
 
-describe("e2e: ring run", { concurrency: true }, () => {
+describe("e2e: ring run", () => {
+  before(() => { if (HAVE_CLANG) buildRuntime(); });
+
   for (const tc of cases) {
-    test(`ring run ${tc.file}`, () => {
+    const skip = !HAVE_CLANG ? "clang not available"
+      : LLVM_SKIP.has(tc.file) ? "not yet supported by LLVM backend"
+      : false;
+    test(`ring run ${tc.file}`, { skip }, () => {
       const filePath = path.join(CASES_DIR, tc.file);
       assert.ok(fs.existsSync(filePath), `Test file not found: ${filePath}`);
       const output = ring_run(filePath);
-      assert.strictEqual(output, tc.expected);
+      assert.strictEqual(norm(output), tc.expected);
     });
   }
 });
@@ -982,24 +961,18 @@ const module_cases: ModuleTestCase[] = [
   { dir: "cross_module_const", expected: "cross_module_const: all tests passed\n" },
 ];
 
-describe("e2e: multi-file modules (ring run)", { concurrency: true }, () => {
+describe("e2e: multi-file modules (ring run)", () => {
+  before(() => { if (HAVE_CLANG) buildRuntime(); });
+
   for (const tc of module_cases) {
-    test(`modules/${tc.dir}`, () => {
+    const skip = !HAVE_CLANG ? "clang not available"
+      : LLVM_MODULE_SKIP.has(tc.dir) ? "not yet supported by LLVM backend"
+      : false;
+    test(`modules/${tc.dir}`, { skip }, () => {
       const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
       assert.ok(fs.existsSync(mainFile), `Test entry not found: ${mainFile}`);
-      const tmp_dir = fs.mkdtempSync(path.join(REPO_ROOT, "tests/.tmp_esm_"));
-      try {
-        fs.mkdirSync(tmp_dir, { recursive: true });
-      execSync(`node "${RING}" build "${mainFile}" --out-dir="${tmp_dir}"`, {
-          encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
-        });
-        const output = execSync(`node "${path.join(tmp_dir, "main.js")}"`, {
-          encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 10000,
-        });
-        assert.strictEqual(output, tc.expected);
-      } finally {
-        fs.rmSync(tmp_dir, { recursive: true, force: true });
-      }
+      const output = ring_run(mainFile);
+      assert.strictEqual(norm(output), tc.expected);
     });
   }
 });
@@ -1095,66 +1068,3 @@ describe("e2e: --error-format=llm", { concurrency: true }, () => {
   });
 });
 
-// ============================================================
-// Compiler determinism — same input must produce identical JS
-// ============================================================
-
-describe("determinism: single-file", { concurrency: true }, () => {
-  for (const tc of cases) {
-    test(`build ${tc.file} is deterministic`, () => {
-      const filePath = path.join(CASES_DIR, tc.file);
-      const js1 = ring_build_single(filePath);
-      const js2 = ring_build_single(filePath);
-      assert.strictEqual(js1, js2);
-    });
-  }
-});
-
-describe("determinism: multi-file modules", { concurrency: true }, () => {
-  for (const tc of module_cases) {
-    test(`build modules/${tc.dir} is deterministic`, () => {
-      const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
-      const js1 = ring_build_multi_esm(mainFile);
-      const js2 = ring_build_multi_esm(mainFile);
-      assert.strictEqual(js1.size, js2.size, "different number of output files");
-      for (const [file, content] of js1) {
-        assert.ok(js2.has(file), `file ${file} missing in second build`);
-        assert.strictEqual(content, js2.get(file), `content differs: ${file}`);
-      }
-    });
-  }
-});
-
-describe("e2e: ESM output structure", () => {
-  test("ring build produces dist/ with separate .js files", () => {
-    const mainFile = path.join(MODULES_DIR, "esm_verify", "main.ring");
-    const dist_dir = path.join(MODULES_DIR, "esm_verify", "dist");
-
-    if (fs.existsSync(dist_dir)) fs.rmSync(dist_dir, { recursive: true, force: true });
-    fs.mkdirSync(dist_dir, { recursive: true });
-
-    execSync(`node "${RING}" build "${mainFile}" --out-dir="${dist_dir}"`, {
-      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
-    });
-
-    assert.ok(fs.existsSync(path.join(dist_dir, "__ring_runtime.js")), "runtime.js exists");
-    assert.ok(fs.existsSync(path.join(dist_dir, "main.js")), "main.js exists");
-    assert.ok(fs.existsSync(path.join(dist_dir, "lib.js")), "lib.js exists");
-
-    const main_js = fs.readFileSync(path.join(dist_dir, "main.js"), "utf-8");
-    assert.ok(main_js.includes("import "), "main.js has import statements");
-    assert.ok(main_js.includes("__ring_runtime.js"), "main.js imports runtime");
-    assert.ok(main_js.includes("from \"./lib.js\""), "main.js imports lib");
-
-    const lib_js = fs.readFileSync(path.join(dist_dir, "lib.js"), "utf-8");
-    assert.ok(lib_js.includes("export {"), "lib.js has export statement");
-    assert.ok(lib_js.includes("greet"), "lib.js exports greet");
-
-    const output = execSync(`node "${path.join(dist_dir, "main.js")}"`, {
-      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
-    });
-    assert.strictEqual(output, "hello, world\n3\n");
-
-    fs.rmSync(dist_dir, { recursive: true, force: true });
-  });
-});

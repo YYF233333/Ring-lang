@@ -82,7 +82,6 @@ function List_extend(self, other) { for (var i = 0; i < other.length; i++) self.
 function List_slice(self, start, end) { return self.slice(start, end); }
 function List_reverse(self) { self.reverse(); }
 function List_join(self, sep) { return self.join(sep); }
-function List_sort(self) { self.sort(function(a, b) { return a < b ? -1 : a > b ? 1 : 0; }); }
 function List_sort_by(self, cmp) { self.sort(cmp); }
 function List_pop(self) { return self.length > 0 ? { _tag: "some", _0: self.pop() } : { _tag: "none" }; }
 function List_shift(self) { return self.length > 0 ? { _tag: "some", _0: self.shift() } : { _tag: "none" }; }
@@ -145,6 +144,7 @@ function argv() { return process.argv.slice(2); }
 function exit_process(code) { process.exit(code); }
 function eprintln(msg) { process.stderr.write(msg + "\n"); }
 function cwd() { return process.cwd(); }
+function exec_sync(cmd, args) { var r = __require("child_process").spawnSync(cmd, args, { stdio: "inherit" }); if (r.error) { process.stderr.write("Error: " + r.error.message + "\n"); return 1; } return r.status !== null ? r.status : 1; }
 
 const __Int_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
 const __Float_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
@@ -206,6 +206,9 @@ const Option_none = Object.freeze({ _tag: "none" });
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -217,9 +220,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -277,6 +277,10 @@ function List_index_of(self, item, __ring_T_Eq) {
     i = (i + 1);
   }
   return Option_none;
+}
+
+function List_sort(self, __ring_T_Ord) {
+  return self.sort((function(a, b) { return ((__ring_T_Ord.cmp(a, b) < 0) ? (-1) : ((__ring_T_Ord.cmp(a, b) > 0) ? 1 : 0)); }));
 }
 
 class MapIterator {
@@ -357,12 +361,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -373,60 +377,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -453,11 +457,6 @@ function main(__ring_ev_io) {
   return print(greet(g), __ring_ev_io);
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __Greeting_Eq_eq(self, other) {
   return (self.target === other.target) && (self.enthusiasm === other.enthusiasm);
 }
@@ -473,25 +472,20 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
 
-function __SetIterator_Clone_clone(self, __ring_T_Clone) {
-  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+function __Greeting_Clone_clone(self) {
+  return new Greeting(self.target, self.enthusiasm);
 }
-const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
+const __Greeting_Clone = { clone: __Greeting_Clone_clone };
 
 function __ListIterator_Clone_clone(self, __ring_T_Clone) {
   return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
 }
 const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
 
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
 }
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
-function __Greeting_Clone_clone(self) {
-  return new Greeting(self.target, self.enthusiasm);
-}
-const __Greeting_Clone = { clone: __Greeting_Clone_clone };
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   switch (self._tag) {
@@ -501,11 +495,6 @@ function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   }
 }
 const __Result_Clone = { clone: __Result_Clone_clone };
-
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
 function __Greeting_Ord_cmp(self, other) {
   var c;
@@ -528,25 +517,20 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
 
-function __SetIterator_Debug_debug(self, __ring_T_Debug) {
-  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+function __Greeting_Debug_debug(self) {
+  return "Greeting { " + "target: " + String(self.target) + ", " + "enthusiasm: " + String(self.enthusiasm) + " }";
 }
-const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
+const __Greeting_Debug = { debug: __Greeting_Debug_debug };
 
 function __ListIterator_Debug_debug(self, __ring_T_Debug) {
   return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
 
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
-
-function __Greeting_Debug_debug(self) {
-  return "Greeting { " + "target: " + String(self.target) + ", " + "enthusiasm: " + String(self.enthusiasm) + " }";
-}
-const __Greeting_Debug = { debug: __Greeting_Debug_debug };
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
   switch (self._tag) {
