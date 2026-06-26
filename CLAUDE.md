@@ -78,8 +78,9 @@ Ring-lang/
 - **负面测试**（期望编译错误）：定义类型系统边界，含 pending 测试标记未来特性
 - **回归测试写 E2E 层**：不写 "第 X 行生成的 JS 应该是 Y"——codegen 实现可变
 - **度量语义覆盖**，不度量代码行覆盖
-- **LLVM 差分回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例用 JS 和 LLVM 两个后端编译运行，断言输出一致（JS 后端是 oracle）。锁定历次 LLVM codegen/RC/effect-handler 修复——用例即规约，修复明细在 git history。需本地 clang，无则自动 skip。**动 RC 的改动必须 ×3 跑全套**（间歇性堆损坏单跑约 1/3 命中，单跑假绿）。
+- **LLVM golden 回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例用 LLVM 后端编译运行，断言输出与 `.expected` golden 快照一致。锁定历次 LLVM codegen/RC/effect-handler 修复——用例即规约，修复明细在 git history。需本地 clang，无则自动 skip。重新生成快照：`node --test ../tests/llvm_diff.test.mjs --update-golden`。**动 RC 的改动必须 ×3 跑全套**（间歇性堆损坏单跑约 1/3 命中，单跑假绿）。
 - **RC 静态 verifier 套件**（`tests/verify_rc.test.mjs`，随 `npm test`）：post-RC HIR 线性检查（LEAK/UAF/BALANCE 三判据）——self-verify 门（编译器自身 0 errors）+ llvm 用例 in-process sweep + 负面套件。见 design.md §7.11 D2
+- **Agent 测试纪律**：测试耗时长（E2E 含 LLVM 编译链接 ~2-3 分钟），agent 不得因 grep 遗漏反复重跑。规则：① 测试输出**完整重定向到临时文件**（`npm test 2>&1 > test_output.txt`），后续从文件中 grep 分析，不丢失任何信息；② **结果无变动不重跑**——只有代码改动后才重跑测试，仅读代码/grep/分析阶段不触发测试；③ 编译失败先修再跑测试，不要"跑一下看看"
 
 ## 已知限制
 
