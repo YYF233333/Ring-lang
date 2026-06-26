@@ -7,7 +7,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     default_method_self_name, ENUM_TAG_FIELD,
     hexpr_effects}
 use codegen_ctx::{CodegenCtx, HTraitDeclInfo, emit, emit_raw, push_indent, pop_indent,
-    qualify, safe_ident, extract_effect_names, get_evidence_params}
+    qualify, safe_ident, get_evidence_params}
+use effect_analysis::{extract_effect_names}
 use codegen_stmt::{emit_block_body}
 use codegen_expr::{gen_expr}
 

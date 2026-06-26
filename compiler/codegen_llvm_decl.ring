@@ -15,7 +15,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
 use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_const_body,
     box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name,
     discard}
-use codegen_ctx::{extract_effect_names}
+use effect_analysis::{extract_effect_names}
 
 // Collect all transitive supertraits for a given trait. Local copy to avoid
 // circular dependency with codegen_llvm.ring.
