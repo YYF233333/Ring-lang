@@ -4632,7 +4632,13 @@ fn collect_extern_capture_names(expr: HExpr, captures: List<Str>, externs: Set<S
         },
         HExpr::TryCatch { body: tc_body, arms: tc_arms, .. } => {
             collect_extern_capture_names(tc_body, captures, externs, out)
-            for arm in tc_arms { collect_extern_capture_names(arm.body, captures, externs, out) }
+            for arm in tc_arms {
+                match arm.guard {
+                    some(g) => collect_extern_capture_names(g, captures, externs, out),
+                    none => {},
+                }
+                collect_extern_capture_names(arm.body, captures, externs, out)
+            }
         },
         HExpr::HandleExpr { body: he_body, .. } => {
             collect_extern_capture_names(he_body, captures, externs, out)
@@ -5042,7 +5048,13 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
         },
         HExpr::TryCatch { body: tc_body, arms: tc_arms, .. } => {
             collect_captures(ctx, tc_body, params, captures)
-            for arm in tc_arms { collect_captures(ctx, arm.body, params, captures) }
+            for arm in tc_arms {
+                match arm.guard {
+                    some(g) => collect_captures(ctx, g, params, captures),
+                    none => {},
+                }
+                collect_captures(ctx, arm.body, params, captures)
+            }
         },
         HExpr::HandleExpr { body: he_body, .. } => {
             collect_captures(ctx, he_body, params, captures)
@@ -5256,18 +5268,26 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
     // Check if we need enum tag-based dispatch: multiple arms with Constructor
     // or NamedConstructor patterns require a switch, just like gen_match_expr.
     // Single arm or catch-all (Binding/Wildcard) uses the simple path.
+    // Also detect guarded arms: a switch gives each tag exactly one target with
+    // no fall-through, but a false guard must fall through to the NEXT arm, so
+    // guarded catches are lowered as an if-else chain (#206).
     let mut has_constructor = false
     let mut constructor_count = 0
+    let mut has_guard = false
     for arm in arms {
         match arm.pattern {
             Pattern::Constructor { .. } => { has_constructor = true; constructor_count = constructor_count + 1 },
             Pattern::NamedConstructor { .. } => { has_constructor = true; constructor_count = constructor_count + 1 },
             _ => {},
         }
+        match arm.guard {
+            some(_) => { has_guard = true },
+            none => {},
+        }
     }
 
-    // Simple path: single arm or no constructors — bind and execute directly
-    if !has_constructor || (arms.len() == 1) {
+    // Simple path: single arm or no constructors, no guards — bind and execute directly
+    if (!has_constructor || (arms.len() == 1)) && !has_guard {
         let arm = arms[0]
         match arm.pattern {
             Pattern::Binding { name, .. } => {
@@ -5290,6 +5310,109 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
             _ => {
                 return gen_llvm_expr(ctx, arm.body)
             },
+        }
+    }
+
+    // Guarded catch arms: if-else chain (#206).  A switch gives each tag exactly
+    // one target with no fall-through, but a false guard must fall through to the
+    // NEXT arm.  Lower as a linear if-else chain (same strategy as
+    // gen_match_if_else for guarded enum matches).
+    if has_guard {
+        let current_fn = match ctx.current_fn {
+            some(f) => f,
+            none => panic("LLVM codegen: catch arms outside function"),
+        }
+        let catch_merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.merge")
+        let catch_default_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.default")
+        let mut phi_vals: List<LLVMValueRef> = []
+        let mut phi_bbs: List<LLVMBasicBlockRef> = []
+        let mut open_block = false
+
+        let total = arms.len()
+        for i in 0..total {
+            match arms.get(i) {
+                some(arm) => {
+                    let is_last = i == total - 1
+                    let has_arm_guard = match arm.guard { some(_) => true, none => false }
+                    match arm.pattern {
+                        Pattern::Wildcard { .. } => {
+                            open_block = false
+                            let next_bb = if has_arm_guard && is_last == false { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.next") } else { catch_default_bb }
+                            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.wild")
+                            discard(LLVMBuildBr(ctx.builder, arm_bb))
+                            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                            emit_match_arm_body(ctx, arm, catch_merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                            if has_arm_guard && is_last == false {
+                                LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                                open_block = true
+                            }
+                        },
+                        Pattern::Binding { name, .. } => {
+                            open_block = false
+                            let next_bb = if has_arm_guard && is_last == false { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.next") } else { catch_default_bb }
+                            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.bind")
+                            discard(LLVMBuildBr(ctx.builder, arm_bb))
+                            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                            let alloca = build_entry_alloca(ctx, ctx.ptr_type, name)
+                            discard(LLVMBuildStore(ctx.builder, error_val, alloca))
+                            ctx.named_values.insert(name, alloca)
+                            emit_match_arm_body(ctx, arm, catch_merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                            if has_arm_guard && is_last == false {
+                                LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                                open_block = true
+                            }
+                        },
+                        Pattern::Constructor { name: cname, qualifier, fields, .. } => {
+                            let next_bb = if is_last { catch_default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.next") }
+                            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.ctor.${cname}")
+                            gen_ctor_tag_test(ctx, error_val, cname, qualifier, arm_bb, next_bb, current_fn)
+                            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                            bind_constructor_fields(ctx, error_val, cname, qualifier, fields)
+                            emit_match_arm_body(ctx, arm, catch_merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                            if is_last == false {
+                                LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                                open_block = true
+                            } else {
+                                open_block = false
+                            }
+                        },
+                        Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
+                            let next_bb = if is_last { catch_default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.next") }
+                            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.ctor.${cname}")
+                            gen_ctor_tag_test(ctx, error_val, cname, qualifier, arm_bb, next_bb, current_fn)
+                            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                            bind_named_constructor_fields(ctx, error_val, cname, qualifier, nfields)
+                            emit_match_arm_body(ctx, arm, catch_merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                            if is_last == false {
+                                LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                                open_block = true
+                            } else {
+                                open_block = false
+                            }
+                        },
+                        _ => {},
+                    }
+                },
+                none => {},
+            }
+        }
+
+        if open_block {
+            discard(LLVMBuildBr(ctx.builder, catch_default_bb))
+        }
+
+        // Default: unreachable (exhaustive catch)
+        LLVMPositionBuilderAtEnd(ctx.builder, catch_default_bb)
+        discard(LLVMBuildUnreachable(ctx.builder))
+
+        // Merge
+        LLVMPositionBuilderAtEnd(ctx.builder, catch_merge_bb)
+        if phi_vals.len() > 0 {
+            let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "cv"))
+            LLVMAddIncoming(phi, phi_vals, phi_bbs)
+            return phi
+        } else {
+            return LLVMConstPointerNull(ctx.ptr_type)
         }
     }
 

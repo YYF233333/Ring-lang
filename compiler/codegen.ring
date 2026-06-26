@@ -459,7 +459,13 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
         },
         HExpr::TryCatch { body, arms, .. } => {
             collect_local_calls(body, local_names, out)
-            for arm in arms { collect_local_calls(arm.body, local_names, out) }
+            for arm in arms {
+                match arm.guard {
+                    some(g) => collect_local_calls(g, local_names, out),
+                    none => {},
+                }
+                collect_local_calls(arm.body, local_names, out)
+            }
         },
         HExpr::HandleExpr { body, handlers, .. } => {
             collect_local_calls(body, local_names, out)

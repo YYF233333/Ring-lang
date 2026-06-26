@@ -766,6 +766,10 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 let mut bnames: List<Str> = []
                 v_pattern_bindings(arm.pattern, bnames)
                 for bn in bnames { v_bind(ctx, bn, K_BORROW, arm.span) }
+                match arm.guard {
+                    some(g) => { v_cond(g, ctx) },
+                    none => {},
+                }
                 v_cf_branch(arm.body, mode, ctx)
                 v_pop_frame(ctx)
                 // #167: detect catch arm altering enclosing binding state
