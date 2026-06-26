@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+## 语言约束
+
+- **回复必须使用中文**：所有对话回复、解释、讨论一律用中文。技术术语（如 trait、effect、codegen、HIR 等）可保留英文，但整体行文必须是中文。代码和命令不受此限制。
+
 ## 项目概述
 
 Ring-lang：不信任程序员的 native 编程语言——编译器是最终权威，不是程序员。写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。代数 effect system + HM 类型推断 + trait 多态，编译器全推断，零标注负担。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
