@@ -59,6 +59,18 @@
 
 发现者：DS
 
+### #210 exports.ring fn_mut_params 跨模块 key 不匹配 [low] [mechanical] [open]
+
+`infer_decl.ring:1599` 用未限定名 `name` 插入 `fn_mut_params`，`exports.ring:139` 用限定名 `"${target_type}_${mname}"` 查找。导致 impl method 的 mut 参数标记跨模块导出失效（auto-boxing 不生效）。
+
+发现者：Opus（qualified name 全仓库审计）
+
+### #211 collect_local_calls TypeVar/generic 接收者 unqualified fallback [low] [judgment] [open]
+
+`codegen.ring:collect_local_calls` 修复后优先用 qualified name，但当 `hexpr_type(recv)` 返回 TypeVar/AppliedType（泛型方法调用）时，qualified 路径不触发，仍 fallback 到 unqualified name 插入 callee set。可能与同名顶层函数碰撞导致错误 effect 传播。实际触发条件苛刻（需要泛型方法名恰好与带 effect 的顶层函数同名）。
+
+发现者：Opus（qualified name 全仓库审计）
+
 
 ### #192 andor_lower / dict_lower HIR walker 结构性重复 [medium] [judgment] [deferred]
 
