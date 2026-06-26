@@ -2,7 +2,7 @@ use types::{Type, Effect, EffectRow, effect_kind_name}
 use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, DerivedImpl, HStringInterpPart, HMatchArm,
-    HEffectHandler, HStructFieldInit, compare_by_first,
+    HEffectHandler, HStructFieldInit, compare_by_first, hexpr_type,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT,
     BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_CELL, BUILTIN_OPTION,
     BUILTIN_STRING_BUILDER}
@@ -365,13 +365,15 @@ pub fn collect_fn_callees(decls: List<HDecl>, local_names: Set<Str>, mut fn_call
                 collect_local_calls(body, local_names, callees)
                 fn_callees.insert(name, callees)
             },
-            HDecl::Impl { methods, .. } => {
+            HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
                     match m {
                         HDecl::Fn { name: mn, body: mb, .. } => {
                             let mut callees = set_new()
                             collect_local_calls(mb, local_names, callees)
-                            fn_callees.insert(mn, callees)
+                            // Use qualified key matching scan_fn_effects / collect_local_names_rec
+                            let qualified = "${target_type}_${mn}"
+                            fn_callees.insert(qualified, callees)
                         },
                         _ => {},
                     }
@@ -392,8 +394,21 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
                 HExpr::Ident { name, .. } => {
                     if local_names.contains(name) { out.insert(name) }
                 },
-                HExpr::FieldAccess { field, .. } => {
+                HExpr::FieldAccess { receiver: recv, field, .. } => {
                     if local_names.contains(field) { out.insert(field) }
+                    // Also try qualified name for impl methods (LLVM backend
+                    // registers impl methods as "TypeName_method" in local_names)
+                    match hexpr_type(recv) {
+                        Type::StructType { name: tn, .. } => {
+                            let qn = "${tn}_${field}"
+                            if local_names.contains(qn) { out.insert(qn) }
+                        },
+                        Type::EnumType { name: tn, .. } => {
+                            let qn = "${tn}_${field}"
+                            if local_names.contains(qn) { out.insert(qn) }
+                        },
+                        _ => {},
+                    }
                 },
                 _ => {},
             }

@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, effect_kind_name, is_option_type}
 use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
-    HTraitMethod, TraitBound, HEffectOp, DerivedImpl,
+    HTraitMethod, TraitBound, HEffectOp, DerivedImpl, HStringInterpPart,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
     compare_by_first, hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
@@ -359,17 +359,17 @@ fn forward_declare_functions(mut ctx: LlvmCtx, decls: List<HDecl>) {
 fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, prefix: Str?) {
     for decl in decls {
         match decl {
-            HDecl::Fn { name, params, effects, trait_bounds, .. } => {
-                forward_declare_fn(ctx, name, params, effects, trait_bounds, prefix)
+            HDecl::Fn { name, params, effects, trait_bounds, body, .. } => {
+                forward_declare_fn(ctx, name, params, effects, trait_bounds, prefix, some(body))
             },
             HDecl::Impl { target_type, methods, .. } => {
                 for method in methods {
                     match method {
-                        HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, .. } => {
+                        HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, body: mb, .. } => {
                             let mangled = llvm_mangle_method(target_type, mn)
                             // #177: use qualified key matching scan_fn_effects
                             let qualified = "${target_type}_${mn}"
-                            forward_declare_fn_with_name(ctx, mangled, qualified, mp, me, mtb)
+                            forward_declare_fn_with_name(ctx, mangled, qualified, mp, me, mtb, some(mb))
                         },
                         _ => {},
                     }
@@ -463,10 +463,130 @@ fn has_fail_effect(effects: EffectRow) -> Bool {
     false
 }
 
-fn apply_fn_attributes(ctx: LlvmCtx, fn_val: LLVMValueRef, params: List<HParam>, effects: EffectRow) {
-    // nounwind: function-level attribute if no fail effect
+// Recursively check if an HIR expression tree contains TryCatch or HandleExpr.
+// These nodes generate _setjmp calls, so the enclosing function must NOT be
+// marked nounwind — even if its declared effects don't include fail.
+fn body_contains_try_or_handle(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::TryCatch { .. } => true,
+        HExpr::HandleExpr { .. } => true,
+        HExpr::Block { stmts, tail, .. } => {
+            for s in stmts {
+                match s {
+                    HStmt::Let { init, .. } => {
+                        if body_contains_try_or_handle(init) { return true }
+                    },
+                    HStmt::Var { init, .. } => {
+                        if body_contains_try_or_handle(init) { return true }
+                    },
+                    HStmt::ExprStmt { expr, .. } => {
+                        if body_contains_try_or_handle(expr) { return true }
+                    },
+                    HStmt::Assign { target, value, .. } => {
+                        if body_contains_try_or_handle(target) { return true }
+                        if body_contains_try_or_handle(value) { return true }
+                    },
+                    HStmt::While { condition, body: wb, .. } => {
+                        if body_contains_try_or_handle(condition) { return true }
+                        if body_contains_try_or_handle(wb) { return true }
+                    },
+                    HStmt::ForIn { iterable, body: fb, .. } => {
+                        if body_contains_try_or_handle(iterable) { return true }
+                        if body_contains_try_or_handle(fb) { return true }
+                    },
+                    HStmt::Return { value, .. } => {
+                        match value {
+                            some(v) => { if body_contains_try_or_handle(v) { return true } },
+                            none => {},
+                        }
+                    },
+                    HStmt::LetDestructure { init, .. } => {
+                        if body_contains_try_or_handle(init) { return true }
+                    },
+                    HStmt::IfLet { expr, then_block, else_block, .. } => {
+                        if body_contains_try_or_handle(expr) { return true }
+                        if body_contains_try_or_handle(then_block) { return true }
+                        match else_block {
+                            some(eb) => { if body_contains_try_or_handle(eb) { return true } },
+                            none => {},
+                        }
+                    },
+                    _ => {},
+                }
+            }
+            match tail {
+                some(t) => body_contains_try_or_handle(t),
+                none => false,
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            if body_contains_try_or_handle(condition) { return true }
+            if body_contains_try_or_handle(then_branch) { return true }
+            match else_branch {
+                some(eb) => body_contains_try_or_handle(eb),
+                none => false,
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            if body_contains_try_or_handle(scrutinee) { return true }
+            for arm in arms {
+                if body_contains_try_or_handle(arm.body) { return true }
+                match arm.guard {
+                    some(g) => { if body_contains_try_or_handle(g) { return true } },
+                    none => {},
+                }
+            }
+            false
+        },
+        HExpr::Call { callee, args, .. } => {
+            if body_contains_try_or_handle(callee) { return true }
+            for a in args {
+                if body_contains_try_or_handle(a) { return true }
+            }
+            false
+        },
+        HExpr::Lambda { body, .. } => body_contains_try_or_handle(body),
+        HExpr::BinOp { left, right, .. } => {
+            body_contains_try_or_handle(left) || body_contains_try_or_handle(right)
+        },
+        HExpr::UnaryOp { operand, .. } => body_contains_try_or_handle(operand),
+        HExpr::FieldAccess { receiver, .. } => body_contains_try_or_handle(receiver),
+        HExpr::IndexExpr { receiver, index, .. } => {
+            body_contains_try_or_handle(receiver) || body_contains_try_or_handle(index)
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for p in parts {
+                match p {
+                    HStringInterpPart::Expression(e) => {
+                        if body_contains_try_or_handle(e) { return true }
+                    },
+                    HStringInterpPart::Literal(_) => {},
+                }
+            }
+            false
+        },
+        HExpr::ReturnExpr { value, .. } => {
+            match value {
+                some(v) => body_contains_try_or_handle(v),
+                none => false,
+            }
+        },
+        HExpr::Clone { inner, .. } => body_contains_try_or_handle(inner),
+        _ => false,
+    }
+}
+
+fn apply_fn_attributes(ctx: LlvmCtx, fn_val: LLVMValueRef, params: List<HParam>, effects: EffectRow, body: HExpr?) {
+    // nounwind: function-level attribute if no fail effect.
     // Functions with fail effect may longjmp, so they can unwind.
-    if has_fail_effect(effects) == false {
+    // Defensive guard: even if declared effects don't include fail, a body
+    // containing TryCatch or HandleExpr generates _setjmp calls — marking
+    // such a function nounwind lets LLVM O2 break setjmp/longjmp semantics.
+    let has_setjmp = match body {
+        some(b) => body_contains_try_or_handle(b),
+        none => false,
+    }
+    if has_fail_effect(effects) == false && has_setjmp == false {
         let nounwind_kind = LLVMGetEnumAttributeKindForName("nounwind", 8)
         if nounwind_kind > 0 {
             let nounwind_attr = LLVMCreateEnumAttribute(ctx.context, nounwind_kind, 0)
@@ -492,15 +612,15 @@ fn apply_fn_attributes(ctx: LlvmCtx, fn_val: LLVMValueRef, params: List<HParam>,
     }
 }
 
-fn forward_declare_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>, prefix: Str?) {
+fn forward_declare_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>, prefix: Str?, body: HExpr?) {
     let mangled = match prefix {
         some(p) => llvm_mangle_fn_with_prefix(p, name),
         none => llvm_mangle_fn(name),
     }
-    forward_declare_fn_with_name(ctx, mangled, name, params, effects, trait_bounds)
+    forward_declare_fn_with_name(ctx, mangled, name, params, effects, trait_bounds, body)
 }
 
-fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>) {
+fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>, body: HExpr?) {
     let ptr = ctx.ptr_type
 
     // Calculate total param count: regular params + trait dict params + evidence params
@@ -539,7 +659,7 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
 
     // B-117: apply nonnull / nounwind attributes
-    apply_fn_attributes(ctx, fn_val, params, effective_effects)
+    apply_fn_attributes(ctx, fn_val, params, effective_effects, body)
 
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
