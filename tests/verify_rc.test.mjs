@@ -160,4 +160,104 @@ describe("verify-rc: negative cases (the verifier must report)", () => {
     assert.equal(cli.code, 1, cli.stdout.slice(0, 2000));
     assert.match(cli.stdout, /rc-verify\[uaf-drop-borrow\]/);
   });
+
+  // ---- #205: expanded negative suite covering additional finding classes ----
+
+  test("x-shadow-overwrite: re-binding a live owned name leaks the previous value", () => {
+    const file = path.join(NEG_CASES, "shadow_overwrite.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-shadow-overwrite");
+    assert.ok(hits.length >= 1, `expected >=1 x-shadow-overwrite, got ${hits.length}`);
+  });
+
+  test("x-cf-value: match arms yield owned values in a discarded (non-consuming) position", () => {
+    const file = path.join(NEG_CASES, "cf_value_leak.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-cf-value");
+    assert.ok(hits.length >= 2, `expected >=2 x-cf-value (one per match arm), got ${hits.length}`);
+  });
+
+  test("x-effect-value: catch value bound to a non-droppable binding", () => {
+    const file = path.join(NEG_CASES, "effect_value.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-effect-value");
+    assert.ok(hits.length >= 1, `expected >=1 x-effect-value, got ${hits.length}`);
+  });
+
+  test("x-overwrite-param: assignment to a (mut) parameter overwrites a borrow", () => {
+    const file = path.join(NEG_CASES, "overwrite_param.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-overwrite-param");
+    assert.ok(hits.length >= 1, `expected >=1 x-overwrite-param, got ${hits.length}`);
+  });
+
+  test("x-overwrite-var: non-scalar mut-var reassignment leaks the old value", () => {
+    const file = path.join(NEG_CASES, "overwrite_var.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-overwrite-var");
+    assert.ok(hits.length >= 1, `expected >=1 x-overwrite-var, got ${hits.length}`);
+  });
+
+  test("x-spread: fresh-owned spread source leaks (raw field-pointer copy, no dup)", () => {
+    const file = path.join(NEG_CASES, "spread_leak.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-spread");
+    assert.ok(hits.length >= 1, `expected >=1 x-spread, got ${hits.length}`);
+  });
+
+  test("x-discard: let _ = <owned> discards without a drop", () => {
+    const file = path.join(NEG_CASES, "discard_owned.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-discard");
+    assert.ok(hits.length >= 1, `expected >=1 x-discard, got ${hits.length}`);
+  });
+
+  test("x-overwrite-boxed: auto-boxed mut cell write leaks the old cell value", () => {
+    const file = path.join(NEG_CASES, "overwrite_boxed.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-overwrite-boxed");
+    assert.ok(hits.length >= 1, `expected >=1 x-overwrite-boxed, got ${hits.length}`);
+  });
+
+  test("x-callee-call: callee that is itself a Call leaks the intermediate closure", () => {
+    const file = path.join(NEG_CASES, "callee_call.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    assert.equal(inFile(fatals(findings), file).length, 0, "no fatals expected in the test file");
+    const hits = local.filter((f) => f.class === "x-callee-call");
+    assert.ok(hits.length >= 1, `expected >=1 x-callee-call, got ${hits.length}`);
+  });
+
+  test("uaf-shadow-mismatch (fatal): re-binding flips droppability on the shared alloca", () => {
+    const file = path.join(NEG_CASES, "shadow_mismatch.ring");
+    const findings = verifyFile(file);
+    const local = inFile(findings, file);
+    // This produces fatal findings: uaf-shadow-mismatch at the re-binding,
+    // and uaf-drop-borrow at the scope-end Drop (consequent).
+    const mismatch = local.filter((f) => f.class === "uaf-shadow-mismatch" && f.fatal);
+    assert.ok(mismatch.length >= 1, `expected >=1 fatal uaf-shadow-mismatch, got ${mismatch.length}`);
+    // Also produces x-shadow-overwrite (non-fatal) and x-effect-value (non-fatal)
+    const shadow = local.filter((f) => f.class === "x-shadow-overwrite");
+    assert.ok(shadow.length >= 1, `expected >=1 x-shadow-overwrite, got ${shadow.length}`);
+    // CLI: non-strict gate fails (fatal findings present)
+    const cli = runCli(["check", file, "--verify-rc"]);
+    assert.equal(cli.code, 1, cli.stdout.slice(0, 2000));
+    assert.match(cli.stdout, /rc-verify\[uaf-shadow-mismatch\]/);
+  });
 });

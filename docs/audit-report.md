@@ -63,11 +63,9 @@
 
 发现者：DS
 
-### #205 verify_rc 负面测试套件覆盖不全（15 类仅 3 类有专用测试）[low] [mechanical] [open]
+### #205 verify_rc 负面测试套件覆盖不全（22 类中 9 类仍缺专用测试）[low] [mechanical] [open]
 
-`tests/cases/llvm/verify_rc_*` 下仅覆盖 `x-overwrite-field`、`leak-temp`、`uaf-drop-borrow` 三类。其余 12 类（`leak-binding`/`leak-return`/`leak-loop-exit`/`leak-scalar-reassign`/`uaf-escaped-borrow`/`uaf-use-after-drop`/`uaf-double-drop`/`uaf-drop-unknown`/`uaf-shadow-mismatch`/`rc-imbalance`/`x-spread`/`x-shadow-overwrite`/`x-overwrite-param`）依赖 self-verify 门和 LLVM 用例扫荡间接覆盖，无直接负面回归测试。
-
-应为每个未覆盖类别构造最小触发用例。
+覆盖已从 3/22 扩展到 13/22（+10 个新用例）。剩余 9 类均为 fatal 类别，仅从 RC pass 回归触发（非源码 pattern），需要新 mutation 类型支持。
 
 发现者：DS
 
