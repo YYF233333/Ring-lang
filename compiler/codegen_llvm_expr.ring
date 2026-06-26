@@ -187,6 +187,31 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
         // B-113: return in match arm expression position — emit LLVM ret.
         // Same logic as emit_return in codegen_llvm_stmt.ring.
         HExpr::ReturnExpr { value, .. } => {
+            // #193: before emitting LLVMBuildRet, walk the handle/try cleanup stack
+            // innermost-first — same logic as emit_return in codegen_llvm_stmt.ring.
+            let mut ci = ctx.handle_cleanup_stack.len() - 1
+            while ci >= 0 {
+                match ctx.handle_cleanup_stack.get(ci) {
+                    some(cleanup) => {
+                        if cleanup.needs_catch_pop {
+                            let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
+                            let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
+                            discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+                        }
+                        if cleanup.ev_drop_allocas.len() > 0 {
+                            let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+                            let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+                            for alloca in cleanup.ev_drop_allocas {
+                                let ev_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "ev_ret_drop"))
+                                discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [ev_ptr], ""))
+                            }
+                        }
+                    },
+                    none => {},
+                }
+                ci = ci - 1
+            }
+
             match value {
                 some(v) => {
                     let val = gen_llvm_expr(ctx, v)
@@ -1841,9 +1866,9 @@ fn get_dict_method_count(mut ctx: LlvmCtx, dict_param: Str) -> Int {
     match trait_name_opt {
         some(trait_name) => match ctx.trait_method_order.get(trait_name) {
             some(order) => order.len(),
-            none => 4,
+            none => panic("LLVM codegen: get_dict_method_count: trait '${trait_name}' not found in trait_method_order"),
         },
-        none => 4,
+        none => panic("LLVM codegen: get_dict_method_count: cannot determine trait name for dict param '${dict_param}'"),
     }
 }
 
@@ -3169,12 +3194,7 @@ fn convert_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, ty: Type) -> LLVMValueRef
                     let to_str_ty = get_rt_fn_type(ctx, "ring_bool_to_str")
                     LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "bts"))
                 } else {
-                    // Default: pass as ptr, try ring_int_to_str after unbox
-                    // B-080: inline untag
-                    let raw = unbox_int(ctx, val)
-                    let to_str_fn = get_or_declare_runtime_fn(ctx, "ring_int_to_str", [ctx.i64_type], ctx.ptr_type)
-                    let to_str_ty = get_rt_fn_type(ctx, "ring_int_to_str")
-                    LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "ts"))
+                    panic("LLVM codegen: convert_to_str called with unsupported type")
                 }
             }
         }
@@ -4567,7 +4587,13 @@ fn collect_extern_capture_names(expr: HExpr, captures: List<Str>, externs: Set<S
         },
         HExpr::MatchExpr { scrutinee, arms, .. } => {
             collect_extern_capture_names(scrutinee, captures, externs, out)
-            for arm in arms { collect_extern_capture_names(arm.body, captures, externs, out) }
+            for arm in arms {
+                match arm.guard {
+                    some(g) => collect_extern_capture_names(g, captures, externs, out),
+                    none => {},
+                }
+                collect_extern_capture_names(arm.body, captures, externs, out)
+            }
         },
         HExpr::StringInterp { parts, .. } => {
             for part in parts {
@@ -4971,7 +4997,13 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
         },
         HExpr::MatchExpr { scrutinee, arms, .. } => {
             collect_captures(ctx, scrutinee, params, captures)
-            for arm in arms { collect_captures(ctx, arm.body, params, captures) }
+            for arm in arms {
+                match arm.guard {
+                    some(g) => collect_captures(ctx, g, params, captures),
+                    none => {},
+                }
+                collect_captures(ctx, arm.body, params, captures)
+            }
         },
         HExpr::StringInterp { parts, .. } => {
             for part in parts {
