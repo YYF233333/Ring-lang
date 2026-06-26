@@ -10,14 +10,6 @@
 
 ## 前端
 
-### #196 effects_match_kind 对 MutEffect 的 TypeVar 去重可能过早丢弃 effect [medium] [judgment] [open]
-
-`types.ring:96-97`：`effects_match_kind` 在 `row_merge` 期间，当 `MutEffect` 的任一 `state_type` 是 TypeVar 时即视为"同种"并去重。若 `mut<?T>` 和 `mut<Int>` 被去重，后续 `?T` 解析为 `Str` 时，`mut<Str>` effect 被静默丢弃——可能导致 LLVM codegen 跳过 evidence 设置。
-
-需要验证所有 `row_merge` 调用点是否被后续 `unify_effect_rows` 覆盖。若未覆盖，应限制 TypeVar 回退仅在两侧均为 TypeVar 时生效。
-
-发现者：Opus
-
 
 ---
 
