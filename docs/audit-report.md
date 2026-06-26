@@ -25,13 +25,6 @@
 
 
 
-### #198 emit_trait_dict 未保存/恢复 builder 插入块 [low] [mechanical] [open]
-
-`codegen_llvm_decl.ring:699-778`：`emit_trait_dict` 保存/恢复 `ctx.current_fn`，但不保存 `LLVMGetInsertBlock`。函数返回后 builder 停留在 memoised getter 的块上。对比 `emit_derived_trait_dict` 正确保存/恢复了 insert block。
-
-目前无 bug（调用后无立即 emit IR 的代码），但 latent——新代码在 `emit_trait_dict` 后 emit IR 会产生错位指令。
-
-发现者：Opus
 
 
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
@@ -48,13 +41,6 @@
 
 ## 跨模块代码健康
 
-### #201 emit_c_main / emit_c_main_project 代码重复 ~90% [low] [judgment] [open]
-
-`codegen_llvm.ring:1336-1427` vs `1708-1777`：单文件与多文件 C main 生成函数逻辑高度重复。单文件路径检查 `ctx.functions` 后才声明 `ring_runtime_init`，多文件路径无条件 `LLVMAddFunction`。一处修复的 bug 不一定在另一处同步。
-
-应提取共享的 `emit_c_main_common(ctx, ring_main_name)` 消除重复。
-
-发现者：Opus
 
 ### #202 LLVM extern 类型重声明分散在 5 个 codegen 文件 [low] [judgment] [open]
 
@@ -78,11 +64,6 @@
 
 发现者：DS
 
-### #204 fieldless enum Eq 比较中 4 条死 IR 指令 [low] [mechanical] [open]
-
-`codegen_llvm_decl.ring:1279-1309`：`result`、`ext`、`tags_equal`、`as_i64` 四条 LLVM IR 指令被 emit 但未使用，为不完整重构的残留。LLVM 优化器会移除，但增加代码可读性负担。
-
-发现者：Opus
 
 ### #192 andor_lower / dict_lower HIR walker 结构性重复 [medium] [judgment] [deferred]
 
