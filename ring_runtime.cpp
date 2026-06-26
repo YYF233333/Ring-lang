@@ -2236,8 +2236,6 @@ extern "C" void* ring_write_file(void* path, void* content) {
 
 extern "C" void* ring_exit(void* boxed_code) {
     int64_t code = ring_unbox_int(boxed_code);
-    fprintf(stderr, "[RING_EXIT] code=%lld\n", (long long)code);
-    fflush(stderr);
     exit((int)code);
     return nullptr;  // unreachable
 }
@@ -3075,10 +3073,22 @@ static void* ring_Float_debug(void* /*env*/, void* val) {
     return ring_float_to_str(*(double*)val);
 }
 static void* ring_Str_debug(void* /*env*/, void* val) {
-    // Debug for Str: wrap in quotes (e.g. "hello" -> "\"hello\"")
+    // Debug for Str: wrap in quotes and escape special characters
     std::string* s = (std::string*)val;
+    std::string result = "\"";
+    for (char c : *s) {
+        switch (c) {
+            case '"':  result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\t': result += "\\t"; break;
+            case '\r': result += "\\r"; break;
+            default:   result += c; break;
+        }
+    }
+    result += "\"";
     void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string("\"" + *s + "\"");
+    new (data) std::string(std::move(result));
     return data;
 }
 static void* ring_make_debug_dict(void* debugfn) {

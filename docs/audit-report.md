@@ -43,16 +43,6 @@
 
 发现者：Opus
 
-### #195 ring_exit 无条件输出 `[RING_EXIT]` 到 stderr（JS/LLVM 分歧）[medium] [mechanical] [open]
-
-`ring_runtime.cpp:2239`：`ring_exit` 对所有调用（含 `exit(0)`）输出 `fprintf(stderr, "[RING_EXIT] code=%lld\n", ...)`，未受任何调试标志保护。JS 后端的 `process.exit(code)` 无此输出。任何使用 `exit()` 的 Ring 程序在 LLVM 后端会有意外 stderr 输出。
-
-**影响**：JS/LLVM 输出分歧，会导致 B-100 P1.4 差分测试失败。
-
-**修复**：删除该 fprintf 或放到 `RING_RC_DEBUG` / `RING_ALLOC_STATS` 条件保护下。
-
-发现者：Opus
-
 ### #197 get_dict_method_count 对未知 trait 硬编码回退值 4 [low] [mechanical] [open]
 
 `codegen_llvm_expr.ring:1836-1848`：当 trait 不在 `ctx.trait_method_order` 中时，回退为 4（Eq/Clone/Ord/Debug 的最大值）。对 5+ 方法的用户定义 trait 进行 dict dispatch 时，构建的 LLVM struct 类型过小 → 方法 5+ 的 GEP 越界读取。
@@ -74,12 +64,6 @@
 `codegen_llvm_expr.ring:3171-3178`：字符串插值的 `convert_to_str` 最终 else 分支对未知类型调用 `unbox_int` + `ring_int_to_str`。checker 已限制插值类型为 Str/Int/Float/Bool（`infer.ring:2064-2068`），此分支对合法程序不可达。但未解析 TypeVar 可能穿透。
 
 应替换为 panic 以便诊断。
-
-发现者：Opus
-
-### #200 ring_Str_debug 未转义特殊字符 [low] [mechanical] [open]
-
-`ring_runtime.cpp:3077-3083`：`ring_Str_debug` 仅在字符串前后加引号，不转义内嵌的 `"`、`\`、`\n`。对含特殊字符的字符串产生畸形 debug 输出。对比 `ring_json_stringify` 正确转义。
 
 发现者：Opus
 
