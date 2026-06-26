@@ -40,11 +40,6 @@
 
 发现者：DS
 
-### #203 discard 函数在 4 个 codegen 文件中重复定义 [low] [mechanical] [doing]
-
-`codegen_llvm.ring:90-92`、`codegen_llvm_stmt.ring:54-56`、`codegen_llvm_decl.ring:2619`、`codegen_llvm_expr.ring:3226-3228`：相同的空函数定义了 4 次。应提取到共享模块。
-
-发现者：DS
 
 ### #205 verify_rc 负面测试套件覆盖不全（22 类中 9 类仍缺专用测试）[low] [mechanical] [open]
 
