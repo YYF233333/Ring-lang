@@ -4,9 +4,8 @@ import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUI
 import { make_diag as diagnostics$make_diag, make_diagnostic as diagnostics$make_diagnostic, new_collecting_sink as diagnostics$new_collecting_sink, severity_to_str as diagnostics$severity_to_str, CollectingSink as diagnostics$CollectingSink, Diagnostic as diagnostics$Diagnostic, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, DiagnosticNote as diagnostics$DiagnosticNote, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, Suggestion as diagnostics$Suggestion, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
 import { format_human as formatter$format_human, format_llm as formatter$format_llm } from "./formatter.js";
 import { check as checker$check, check_module as checker$check_module, CheckResult as checker$CheckResult } from "./checker.js";
-import { generate as codegen$generate } from "./codegen.js";
 import { collect_all_supertraits_llvm as codegen_llvm$collect_all_supertraits_llvm, generate_llvm as codegen_llvm$generate_llvm, generate_llvm_project as codegen_llvm$generate_llvm_project } from "./codegen_llvm.js";
-import { compile_project as compiler_mod$compile_project, compile_project_esm as compiler_mod$compile_project_esm, compile_project_llvm as compiler_mod$compile_project_llvm, verify_project_rc as compiler_mod$verify_project_rc, CompileProjectResult as compiler_mod$CompileProjectResult, EsmCompileResult as compiler_mod$EsmCompileResult, LlvmCompileResult as compiler_mod$LlvmCompileResult, RcProjectVerifyResult as compiler_mod$RcProjectVerifyResult, __CompileProjectResult_Eq as compiler_mod$__CompileProjectResult_Eq, __CompileProjectResult_Clone as compiler_mod$__CompileProjectResult_Clone, __CompileProjectResult_Ord as compiler_mod$__CompileProjectResult_Ord, __CompileProjectResult_Debug as compiler_mod$__CompileProjectResult_Debug, __EsmCompileResult_Eq as compiler_mod$__EsmCompileResult_Eq, __EsmCompileResult_Clone as compiler_mod$__EsmCompileResult_Clone, __EsmCompileResult_Ord as compiler_mod$__EsmCompileResult_Ord, __EsmCompileResult_Debug as compiler_mod$__EsmCompileResult_Debug, __LlvmCompileResult_Eq as compiler_mod$__LlvmCompileResult_Eq, __LlvmCompileResult_Clone as compiler_mod$__LlvmCompileResult_Clone, __LlvmCompileResult_Ord as compiler_mod$__LlvmCompileResult_Ord, __LlvmCompileResult_Debug as compiler_mod$__LlvmCompileResult_Debug, __RcProjectVerifyResult_Eq as compiler_mod$__RcProjectVerifyResult_Eq, __RcProjectVerifyResult_Clone as compiler_mod$__RcProjectVerifyResult_Clone, __RcProjectVerifyResult_Ord as compiler_mod$__RcProjectVerifyResult_Ord, __RcProjectVerifyResult_Debug as compiler_mod$__RcProjectVerifyResult_Debug } from "./compiler_mod.js";
+import { compile_project as compiler_mod$compile_project, compile_project_llvm as compiler_mod$compile_project_llvm, verify_project_rc as compiler_mod$verify_project_rc, CompileProjectResult as compiler_mod$CompileProjectResult, LlvmCompileResult as compiler_mod$LlvmCompileResult, RcProjectVerifyResult as compiler_mod$RcProjectVerifyResult, __CompileProjectResult_Eq as compiler_mod$__CompileProjectResult_Eq, __CompileProjectResult_Clone as compiler_mod$__CompileProjectResult_Clone, __CompileProjectResult_Ord as compiler_mod$__CompileProjectResult_Ord, __CompileProjectResult_Debug as compiler_mod$__CompileProjectResult_Debug, __LlvmCompileResult_Eq as compiler_mod$__LlvmCompileResult_Eq, __LlvmCompileResult_Clone as compiler_mod$__LlvmCompileResult_Clone, __LlvmCompileResult_Ord as compiler_mod$__LlvmCompileResult_Ord, __LlvmCompileResult_Debug as compiler_mod$__LlvmCompileResult_Debug, __RcProjectVerifyResult_Eq as compiler_mod$__RcProjectVerifyResult_Eq, __RcProjectVerifyResult_Clone as compiler_mod$__RcProjectVerifyResult_Clone, __RcProjectVerifyResult_Ord as compiler_mod$__RcProjectVerifyResult_Ord, __RcProjectVerifyResult_Debug as compiler_mod$__RcProjectVerifyResult_Debug } from "./compiler_mod.js";
 import { PREC_ADD_SUB as parser$PREC_ADD_SUB, PREC_CATCH as parser$PREC_CATCH, PREC_COMPARE as parser$PREC_COMPARE, PREC_EQUALITY as parser$PREC_EQUALITY, PREC_LOGIC_AND as parser$PREC_LOGIC_AND, PREC_LOGIC_OR as parser$PREC_LOGIC_OR, PREC_MUL_DIV as parser$PREC_MUL_DIV, PREC_NONE as parser$PREC_NONE, PREC_POSTFIX as parser$PREC_POSTFIX, PREC_RANGE as parser$PREC_RANGE, PREC_UNARY as parser$PREC_UNARY, expr_span as parser$expr_span, infix_precedence as parser$infix_precedence, new_parser as parser$new_parser, parse as parser$parse, pattern_span as parser$pattern_span, type_expr_span as parser$type_expr_span, Parser as parser$Parser, __Parser_Clone as parser$__Parser_Clone, __Parser_Debug as parser$__Parser_Debug, Parser_peek as parser$Parser_peek, Parser_peek_at as parser$Parser_peek_at, Parser_advance as parser$Parser_advance, Parser_check as parser$Parser_check, Parser_try_consume as parser$Parser_try_consume, Parser_expect as parser$Parser_expect, Parser_at_end as parser$Parser_at_end, Parser_skip_to_recovery_point as parser$Parser_skip_to_recovery_point, Parser_current_span_start as parser$Parser_current_span_start, Parser_make_span as parser$Parser_make_span, Parser_report_error as parser$Parser_report_error, Parser_error as parser$Parser_error, Parser_parse_program as parser$Parser_parse_program, Parser_parse_stmt as parser$Parser_parse_stmt, Parser_parse_while_stmt as parser$Parser_parse_while_stmt, Parser_parse_loop_stmt as parser$Parser_parse_loop_stmt, Parser_parse_for_in_stmt as parser$Parser_parse_for_in_stmt, Parser_parse_break_stmt as parser$Parser_parse_break_stmt, Parser_parse_continue_stmt as parser$Parser_parse_continue_stmt, Parser_parse_if_let_stmt as parser$Parser_parse_if_let_stmt, Parser_parse_binding_stmt as parser$Parser_parse_binding_stmt, Parser_parse_binding_body as parser$Parser_parse_binding_body, Parser_parse_return_stmt as parser$Parser_parse_return_stmt, Parser_parse_return_expr as parser$Parser_parse_return_expr, Parser_parse_block_expr as parser$Parser_parse_block_expr, Parser_parse_use_decl as parser$Parser_parse_use_decl, Parser_parse_mod_block as parser$Parser_parse_mod_block, Parser_parse_decl as parser$Parser_parse_decl, Parser_parse_effect_list as parser$Parser_parse_effect_list, Parser_parse_effect_annotation as parser$Parser_parse_effect_annotation, Parser_parse_fn_decl as parser$Parser_parse_fn_decl, Parser_parse_const_decl as parser$Parser_parse_const_decl, Parser_parse_sig_block as parser$Parser_parse_sig_block, Parser_parse_extern_decl as parser$Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body as parser$Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body as parser$Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl as parser$Parser_parse_type_alias_decl, Parser_parse_struct_decl as parser$Parser_parse_struct_decl, Parser_parse_enum_decl as parser$Parser_parse_enum_decl, Parser_parse_impl_decl as parser$Parser_parse_impl_decl, Parser_parse_effect_alias_decl as parser$Parser_parse_effect_alias_decl, Parser_parse_effect_decl as parser$Parser_parse_effect_decl, Parser_parse_test_decl as parser$Parser_parse_test_decl, Parser_parse_assoc_type_decl as parser$Parser_parse_assoc_type_decl, Parser_parse_trait_decl as parser$Parser_parse_trait_decl, Parser_parse_expr as parser$Parser_parse_expr, Parser_parse_expr_no_struct as parser$Parser_parse_expr_no_struct, Parser_parse_expr_bp as parser$Parser_parse_expr_bp, Parser_parse_prefix as parser$Parser_parse_prefix, Parser_parse_dot_expr as parser$Parser_parse_dot_expr, Parser_parse_index_expr as parser$Parser_parse_index_expr, Parser_parse_call_expr as parser$Parser_parse_call_expr, Parser_parse_arg_list as parser$Parser_parse_arg_list, Parser_parse_catch_expr as parser$Parser_parse_catch_expr, Parser_parse_string_interp as parser$Parser_parse_string_interp, Parser_parse_if_expr as parser$Parser_parse_if_expr, Parser_parse_match_expr as parser$Parser_parse_match_expr, Parser_parse_match_arm as parser$Parser_parse_match_arm, Parser_parse_pattern as parser$Parser_parse_pattern, Parser_parse_handle_expr as parser$Parser_parse_handle_expr, Parser_parse_effect_handler as parser$Parser_parse_effect_handler, Parser_parse_lambda_expr as parser$Parser_parse_lambda_expr, Parser_parse_struct_literal as parser$Parser_parse_struct_literal, Parser_try_parse_type_args as parser$Parser_try_parse_type_args, Parser_parse_type_expr as parser$Parser_parse_type_expr, Parser_parse_record_type_expr as parser$Parser_parse_record_type_expr, Parser_parse_qualified_ident as parser$Parser_parse_qualified_ident, Parser_validate_target_type_args as parser$Parser_validate_target_type_args, Parser_parse_type_params as parser$Parser_parse_type_params, Parser_parse_type_bound as parser$Parser_parse_type_bound, Parser_parse_params as parser$Parser_parse_params, Parser_parse_param as parser$Parser_parse_param } from "./parser.js";
 import { expr_diverges as perceus$expr_diverges, is_scalar_type as perceus$is_scalar_type, is_str_index as perceus$is_str_index, is_unresolved_var_type as perceus$is_unresolved_var_type, is_variant_constructor_call as perceus$is_variant_constructor_call, perceus_transform as perceus$perceus_transform, perceus_transform_mutated as perceus$perceus_transform_mutated, rc_name_skippable as perceus$rc_name_skippable, sink_arg_indices as perceus$sink_arg_indices, stmt_diverges as perceus$stmt_diverges } from "./perceus.js";
 import { format_rc_findings as verify_rc$format_rc_findings, rc_fatal_count as verify_rc$rc_fatal_count, rc_verify_boundary_note as verify_rc$rc_verify_boundary_note, verify_rc_program as verify_rc$verify_rc_program, RcFinding as verify_rc$RcFinding, __RcFinding_Eq as verify_rc$__RcFinding_Eq, __RcFinding_Clone as verify_rc$__RcFinding_Clone, __RcFinding_Ord as verify_rc$__RcFinding_Ord, __RcFinding_Debug as verify_rc$__RcFinding_Debug } from "./verify_rc.js";
@@ -266,7 +265,7 @@ function parse_cli_args(args) {
   let debug = false;
   let error_format = "human";
   let out_dir = "dist";
-  let target = "js";
+  let target = "llvm";
   let verify_rc = false;
   let verify_strict = false;
   let rc_mutate = "";
@@ -343,8 +342,7 @@ function usage(__ring_ev_io) {
   print("Ring-lang compiler v0.1.0 (Ring bootstrap)", __ring_ev_io);
   print("", __ring_ev_io);
   print("Usage:", __ring_ev_io);
-  print("  ring build <file.ring>    Compile to .js file(s)", __ring_ev_io);
-  print("  ring run <file.ring>      Compile and execute with Node.js", __ring_ev_io);
+  print("  ring build <file.ring>    Compile to native .o file", __ring_ev_io);
   print("  ring check <file.ring>    Type-check only", __ring_ev_io);
   print("  ring help                 Show this help", __ring_ev_io);
   print("", __ring_ev_io);
@@ -352,7 +350,6 @@ function usage(__ring_ev_io) {
   print("  --debug                   Print intermediate info", __ring_ev_io);
   print("  --error-format=human|llm  Error output format (default: human)", __ring_ev_io);
   print("  --out-dir=<path>          Output directory (default: dist)", __ring_ev_io);
-  print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
   print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR", __ring_ev_io);
   return print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail", __ring_ev_io);
 }
@@ -409,32 +406,6 @@ function cli_main(__ring_ev_fail, __ring_ev_io) {
       }
       return;
     }
-    if ((parsed.target === "llvm")) {
-      if ((parsed.command === "check")) {
-        const result = compiler_mod$compile_project(file_path, parsed.error_format, __ring_ev_fail);
-        if (result.success) {
-          print("OK", __ring_ev_io);
-        } else {
-          eprintln("Compilation failed");
-          exit_process(1);
-        }
-      } else {
-        if ((parsed.command === "build")) {
-          const out_dir = path_resolve(parsed.out_dir);
-          const out_path = path_join(out_dir, Str_replace(path_basename(file_path), ".ring", ".o"));
-          const result = compiler_mod$compile_project_llvm(file_path, out_path, parsed.error_format, __ring_ev_fail, __ring_ev_io);
-          if (result.success) {
-          } else {
-            eprintln("Compilation failed");
-            exit_process(1);
-          }
-        } else {
-          eprintln("LLVM target only supports 'build' and 'check' commands");
-          exit_process(1);
-        }
-      }
-      return;
-    }
     if ((parsed.command === "check")) {
       const result = compiler_mod$compile_project(file_path, parsed.error_format, __ring_ev_fail);
       if (result.success) {
@@ -446,28 +417,16 @@ function cli_main(__ring_ev_fail, __ring_ev_io) {
     } else {
       if ((parsed.command === "build")) {
         const out_dir = path_resolve(parsed.out_dir);
-        const result = compiler_mod$compile_project_esm(file_path, out_dir, parsed.error_format, __ring_ev_fail);
+        const out_path = path_join(out_dir, Str_replace(path_basename(file_path), ".ring", ".o"));
+        const result = compiler_mod$compile_project_llvm(file_path, out_path, parsed.error_format, __ring_ev_fail, __ring_ev_io);
         if (result.success) {
-          print(`Compiled: ${out_dir}/`, __ring_ev_io);
         } else {
           eprintln("Compilation failed");
           exit_process(1);
         }
       } else {
-        if ((parsed.command === "run")) {
-          const tmp_dir = path_join(path_dirname(file_path), ".ring_tmp");
-          const result = compiler_mod$compile_project_esm(file_path, tmp_dir, parsed.error_format, __ring_ev_fail);
-          if (result.success) {
-            eprintln("Multi-file run not yet implemented in Ring bootstrap");
-            exit_process(1);
-          } else {
-            eprintln("Compilation failed");
-            exit_process(1);
-          }
-        } else {
-          eprintln(`Unknown command: ${parsed.command}`);
-          exit_process(1);
-        }
+        eprintln("Only 'build' and 'check' commands are supported");
+        exit_process(1);
       }
     }
     return;
@@ -519,43 +478,16 @@ function cli_main(__ring_ev_fail, __ring_ev_io) {
     }
     return;
   }
-  if ((parsed.target === "llvm")) {
-    if ((parsed.command === "check")) {
-      print("OK", __ring_ev_io);
-    } else {
-      if ((parsed.command === "build")) {
-        const out_path = Str_replace(file_path, ".ring", ".o");
-        const rc_program = perceus$perceus_transform(check_result.program);
-        codegen_llvm$generate_llvm(rc_program, out_path, __ring_ev_io);
-      } else {
-        eprintln("LLVM target only supports 'build' and 'check' commands");
-        exit_process(1);
-      }
-    }
-    return;
-  }
-  const js = codegen$generate(check_result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
   if ((parsed.command === "check")) {
     return print("OK", __ring_ev_io);
   } else {
     if ((parsed.command === "build")) {
-      const out_path = Str_replace(file_path, ".ring", ".js");
-      write_file(out_path, js);
-      return print(`Compiled: ${out_path}`, __ring_ev_io);
+      const out_path = Str_replace(file_path, ".ring", ".o");
+      const rc_program = perceus$perceus_transform(check_result.program);
+      return codegen_llvm$generate_llvm(rc_program, out_path, __ring_ev_io);
     } else {
-      if ((parsed.command === "run")) {
-        const basename = Str_replace(path_basename(file_path), ".ring", "");
-        const tmp_file = path_join(path_dirname(file_path), `.${basename}.ring_tmp.js`);
-        write_file(tmp_file, js);
-        const code = exec_sync("node", [tmp_file]);
-        delete_file(tmp_file);
-        if ((code !== 0)) {
-          return exit_process(code);
-        }
-      } else {
-        eprintln(`Unknown command: ${parsed.command}`);
-        return exit_process(1);
-      }
+      eprintln("Only 'build' and 'check' commands are supported");
+      return exit_process(1);
     }
   }
 }
