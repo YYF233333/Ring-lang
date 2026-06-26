@@ -1330,10 +1330,11 @@ fn emit_drop_registrations(mut ctx: LlvmCtx) {
 }
 
 // ============================================================
-// emit_c_main — generate C main() wrapper that calls Ring main
+// emit_c_main_common — shared C main() body for single-file
+// and multi-module entry points (#201)
 // ============================================================
 
-fn emit_c_main(mut ctx: LlvmCtx) {
+fn emit_c_main_common(mut ctx: LlvmCtx, ring_main_name: Str, warn_no_main: Bool) {
     let i32_ty = ctx.i32_type
     let ptr = ctx.ptr_type
 
@@ -1387,7 +1388,6 @@ fn emit_c_main(mut ctx: LlvmCtx) {
     build_default_evidence_all(ctx)
 
     // Call ring_main() — find it in our functions map
-    let ring_main_name = llvm_mangle_fn("main")
     match ctx.functions.get(ring_main_name) {
         some(ring_main_fn) => {
             // Check if ring_main needs evidence params (io, etc.)
@@ -1409,12 +1409,15 @@ fn emit_c_main(mut ctx: LlvmCtx) {
             }
             let ring_main_ty = match ctx.fn_types.get(ring_main_name) {
                 some(t) => t,
-                none => panic("LLVM codegen: ring_main fn type not found"),
+                none => panic("LLVM codegen: ring_main fn type not found: ${ring_main_name}"),
             }
             discard(LLVMBuildCall2(ctx.builder, ring_main_ty, ring_main_fn, call_args, ""))
         },
         none => {
-            // No main function — that's OK for library modules
+            if warn_no_main {
+                eprintln("Warning: no main function found in entry module")
+            }
+            // Single-file mode: no main function is OK for library modules
         },
     }
 
@@ -1424,6 +1427,15 @@ fn emit_c_main(mut ctx: LlvmCtx) {
     // return 0
     let zero = LLVMConstInt(i32_ty, 0, 0)
     discard(LLVMBuildRet(ctx.builder, zero))
+}
+
+// ============================================================
+// emit_c_main — generate C main() wrapper that calls Ring main
+// ============================================================
+
+fn emit_c_main(mut ctx: LlvmCtx) {
+    let ring_main_name = llvm_mangle_fn("main")
+    emit_c_main_common(ctx, ring_main_name, false)
 }
 
 // ============================================================
@@ -1706,74 +1718,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
 // ============================================================
 
 fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
-    let i32_ty = ctx.i32_type
-    let ptr = ctx.ptr_type
-
-    let main_params: List<LLVMTypeRef> = [i32_ty, ptr]
-    let main_ty = LLVMFunctionType(i32_ty, main_params, 0)
-    let main_fn = LLVMAddFunction(ctx.module, "main", main_ty)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, main_fn, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    // Call ring_runtime_init(argc, argv) to set up process args
-    let argc_val = LLVMGetParam(main_fn, 0)
-    let argv_val = LLVMGetParam(main_fn, 1)
-    let init_name = "ring_runtime_init"
-    let init_params: List<LLVMTypeRef> = [i32_ty, ptr]
-    let init_ty = LLVMFunctionType(ctx.void_type, init_params, 0)
-    let init_fn = LLVMAddFunction(ctx.module, init_name, init_ty)
-    discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [argc_val, argv_val], ""))
-
-    // Register per-type drop functions with RC runtime
-    emit_drop_registrations(ctx)
-
-    // B-100 Fix 2: pre-populate derived dict globals (project mode)
-    for ddb in ctx.derived_dict_builds {
-        let (dict_global, dfn, dfn_ty) = ddb
-        let built = LLVMBuildCall2(ctx.builder, dfn_ty, dfn, [], "ddb")
-        discard(LLVMBuildStore(ctx.builder, built, dict_global))
-    }
-
-    // B-097: build default evidence structs (needs a function context for gen_lambda)
-    ctx.current_fn = some(main_fn)
-    ctx.current_fn_name = "main"
-    build_default_evidence_all(ctx)
-
-    // Look for ring_<prefix>$_main
     let ring_main_name = llvm_mangle_fn_with_prefix(entry_prefix, "main")
-    match ctx.functions.get(ring_main_name) {
-        some(ring_main_fn) => {
-            let mut call_args: List<LLVMValueRef> = []
-            match ctx.fn_evidence_params.get(ring_main_name) {
-                some(ev_params) => {
-                    // B-097: pass default evidence for effects that have it
-                    for ep in ev_params {
-                        let effect_name = ep.slice(10, ep.len())
-                        match ctx.default_evidence.get(effect_name) {
-                            some(def_ev) => call_args.push(def_ev),
-                            none => call_args.push(LLVMConstPointerNull(ptr)),
-                        }
-                    }
-                },
-                none => {},
-            }
-            let ring_main_ty = match ctx.fn_types.get(ring_main_name) {
-                some(t) => t,
-                none => panic("LLVM codegen: ring_main fn type not found (project mode)"),
-            }
-            discard(LLVMBuildCall2(ctx.builder, ring_main_ty, ring_main_fn, call_args, ""))
-        },
-        none => {
-            eprintln("Warning: no main function found in entry module")
-        },
-    }
-
-    ctx.current_fn = none
-    ctx.current_fn_name = ""
-
-    let zero = LLVMConstInt(i32_ty, 0, 0)
-    discard(LLVMBuildRet(ctx.builder, zero))
+    emit_c_main_common(ctx, ring_main_name, true)
 }
 
 // ============================================================
