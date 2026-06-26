@@ -729,6 +729,7 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     ctx.fn_types.insert(build_fn_name, build_fn_ty)
 
     let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
     ctx.current_fn = some(build_fn)
     let entry = LLVMAppendBasicBlockInContext(ctx.context, build_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
@@ -775,6 +776,9 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     // resolve_static_dict_by_name finds the SINGLETON, not a fresh build.
     let getter = emit_memoised_dict_getter(ctx, dict_name, build_fn, build_fn_ty)
     ctx.dict_globals.insert(dict_name, getter)
+
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
 }
 
 fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, alloc_fn: LLVMValueRef, alloc_ty: LLVMTypeRef, slot_idx: Int) {
@@ -1278,15 +1282,7 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
 
     if !any_fields {
         // All variants are field-less — tag comparison is sufficient
-        let result = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, self_tag, other_tag, fresh_name(ctx, "eq"))
-        // Convert i1 to i64 for box_bool
-        let ext = LLVMBuildSub(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "z"))
-        let _ = ext  // unused
-        // Tags are i64, box the comparison result
-        let tags_equal = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, self_tag, other_tag, fresh_name(ctx, "te"))
-        // Convert i1 to i64: zext
-        let as_i64 = LLVMBuildSub(ctx.builder, LLVMConstInt(ctx.i64_type, 1, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "one"))
-        // We need to select: if tags_equal then 1 else 0
+        // We need to select: if tags_eq then 1 else 0
         // Use a branch + phi since we don't have LLVMBuildSelect declared
         let true_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.true")
         let false_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.false")

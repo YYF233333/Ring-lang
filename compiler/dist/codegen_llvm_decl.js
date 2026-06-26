@@ -1606,11 +1606,6 @@ function emit_enum_eq_fn(ctx, type_name, variants, bounds) {
     }
   }
   if ((!any_fields)) {
-    const result = LLVMBuildICmp(ctx.builder, codegen_llvm_ctx$LLVM_INT_EQ, self_tag, other_tag, codegen_llvm_ctx$fresh_name(ctx, "eq"));
-    const ext = LLVMBuildSub(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), LLVMConstInt(ctx.i64_type, 0, 0), codegen_llvm_ctx$fresh_name(ctx, "z"));
-    const _ = ext;
-    const tags_equal = LLVMBuildICmp(ctx.builder, codegen_llvm_ctx$LLVM_INT_EQ, self_tag, other_tag, codegen_llvm_ctx$fresh_name(ctx, "te"));
-    const as_i64 = LLVMBuildSub(ctx.builder, LLVMConstInt(ctx.i64_type, 1, 0), LLVMConstInt(ctx.i64_type, 0, 0), codegen_llvm_ctx$fresh_name(ctx, "one"));
     const true_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.true");
     const false_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.false");
     const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.merge");
@@ -2713,6 +2708,7 @@ function emit_trait_dict(ctx, target_type, trait_name, methods) {
   _Map_insert(ctx.functions, build_fn_name, build_fn);
   _Map_insert(ctx.fn_types, build_fn_name, build_fn_ty);
   const saved_fn = ctx.current_fn;
+  const saved_bb = LLVMGetInsertBlock(ctx.builder);
   ctx.current_fn = Option_some(build_fn);
   const entry = LLVMAppendBasicBlockInContext(ctx.context, build_fn, "entry");
   LLVMPositionBuilderAtEnd(ctx.builder, entry);
@@ -2749,7 +2745,9 @@ function emit_trait_dict(ctx, target_type, trait_name, methods) {
   LLVMBuildRet(ctx.builder, dict_ptr);
   ctx.current_fn = saved_fn;
   const getter = codegen_llvm_expr$emit_memoised_dict_getter(ctx, dict_name, build_fn, build_fn_ty);
-  return _Map_insert(ctx.dict_globals, dict_name, getter);
+  _Map_insert(ctx.dict_globals, dict_name, getter);
+  ctx.current_fn = saved_fn;
+  return LLVMPositionBuilderAtEnd(ctx.builder, saved_bb);
 }
 
 function emit_llvm_decl(ctx, decl) {
