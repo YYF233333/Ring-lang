@@ -415,6 +415,28 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
                                 found_qualified = true
                             }
                         },
+                        // #211: GenericType wraps a base type with type args
+                        // (e.g. GenericType { base: StructType { name: "List" }, args: [IntType] }).
+                        // Extract the base type name for qualified lookup.
+                        Type::GenericType { base, .. } => {
+                            match base {
+                                Type::StructType { name: tn, .. } => {
+                                    let qn = "${tn}_${field}"
+                                    if local_names.contains(qn) {
+                                        out.insert(qn)
+                                        found_qualified = true
+                                    }
+                                },
+                                Type::EnumType { name: tn, .. } => {
+                                    let qn = "${tn}_${field}"
+                                    if local_names.contains(qn) {
+                                        out.insert(qn)
+                                        found_qualified = true
+                                    }
+                                },
+                                _ => {},
+                            }
+                        },
                         _ => {},
                     }
                     if !found_qualified {

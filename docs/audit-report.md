@@ -16,7 +16,7 @@
 ## LLVM Codegen
 
 
-### #207 JS 后端 catch arm guard 中 pattern binding 在 guard 之后才 emit [low] [mechanical] [open]
+### #207 JS 后端 catch arm guard 中 pattern binding 在 guard 之后才 emit [low] [mechanical] [doing]
 
 `codegen_expr.ring`：JS 后端的 catch arm codegen 中，pattern bindings（`const x = __ring_err;`）在 guard 条件检查之后才 emit，导致 guard 中引用绑定变量时 ReferenceError（如 `catch { x if x > 10 => ... }`）。match arm guard 不受影响（bindings 在 guard 之前 emit）。
 
@@ -47,7 +47,7 @@
 
 发现者：DS
 
-### #203 discard 函数在 4 个 codegen 文件中重复定义 [low] [mechanical] [open]
+### #203 discard 函数在 4 个 codegen 文件中重复定义 [low] [mechanical] [doing]
 
 `codegen_llvm.ring:90-92`、`codegen_llvm_stmt.ring:54-56`、`codegen_llvm_decl.ring:2619`、`codegen_llvm_expr.ring:3226-3228`：相同的空函数定义了 4 次。应提取到共享模块。
 
@@ -59,15 +59,9 @@
 
 发现者：DS
 
-### #210 exports.ring fn_mut_params 跨模块 key 不匹配 [low] [mechanical] [open]
+### #210 exports.ring fn_mut_params 跨模块 key 不匹配 [low] [mechanical] [doing]
 
 `infer_decl.ring:1599` 用未限定名 `name` 插入 `fn_mut_params`，`exports.ring:139` 用限定名 `"${target_type}_${mname}"` 查找。导致 impl method 的 mut 参数标记跨模块导出失效（auto-boxing 不生效）。
-
-发现者：Opus（qualified name 全仓库审计）
-
-### #211 collect_local_calls TypeVar/generic 接收者 unqualified fallback [low] [judgment] [open]
-
-`codegen.ring:collect_local_calls` 修复后优先用 qualified name，但当 `hexpr_type(recv)` 返回 TypeVar/AppliedType（泛型方法调用）时，qualified 路径不触发，仍 fallback 到 unqualified name 插入 callee set。可能与同名顶层函数碰撞导致错误 effect 传播。实际触发条件苛刻（需要泛型方法名恰好与带 effect 的顶层函数同名）。
 
 发现者：Opus（qualified name 全仓库审计）
 
