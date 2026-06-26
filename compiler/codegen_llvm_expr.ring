@@ -4267,9 +4267,15 @@ fn find_enum_by_variant(ctx: LlvmCtx, variant_name: Str, qualifier: Str?) -> Enu
         },
         none => {},
     }
-    // Try variant name as enum name (for enum types where variant name = type name)
+    // Try variant name as enum name (for single-variant enums where variant = type)
+    // Verify the enum actually contains this variant to avoid name collisions
+    // (e.g. Expr::BinOp vs enum BinOp)
     match ctx.enum_types.get(variant_name) {
-        some(ei) => { return some(ei) },
+        some(ei) => {
+            if ei.variants.get(variant_name).is_some() {
+                return some(ei)
+            }
+        },
         none => {},
     }
     // Search all registered enums for this variant

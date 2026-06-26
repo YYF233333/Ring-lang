@@ -341,9 +341,7 @@ function collect_local_calls(expr, local_names, out) {
         }
         if (__ring_m10._tag === "FieldAccess") {
           const recv = __ring_m10.receiver; const field = __ring_m10.field;
-          if (_Set_contains(local_names, field, __Str_Eq)) {
-            _Set_insert(out, field);
-          }
+          let found_qualified = false;
           __ring_match11: {
             const __ring_m11 = hir$hexpr_type(recv);
             if (__ring_m11._tag === "StructType") {
@@ -351,6 +349,7 @@ function collect_local_calls(expr, local_names, out) {
               const qn = `${tn}_${field}`;
               if (_Set_contains(local_names, qn, __Str_Eq)) {
                 _Set_insert(out, qn);
+                found_qualified = true;
               }
               break __ring_match11;
             }
@@ -359,10 +358,16 @@ function collect_local_calls(expr, local_names, out) {
               const qn = `${tn}_${field}`;
               if (_Set_contains(local_names, qn, __Str_Eq)) {
                 _Set_insert(out, qn);
+                found_qualified = true;
               }
               break __ring_match11;
             }
             break __ring_match11;
+          }
+          if ((!found_qualified)) {
+            if (_Set_contains(local_names, field, __Str_Eq)) {
+              _Set_insert(out, field);
+            }
           }
           break __ring_match10;
         }

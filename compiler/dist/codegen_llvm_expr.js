@@ -343,7 +343,9 @@ function find_enum_by_variant(ctx, variant_name, qualifier) {
     const __ring_m8 = _Map_get(ctx.enum_types, variant_name);
     if (__ring_m8._tag === "some") {
       const ei = __ring_m8._0;
-      return Option_some(ei);
+      if (Option_is_some(_Map_get(ei.variants, variant_name))) {
+        return Option_some(ei);
+      }
       break __ring_match8;
     }
     if (__ring_m8._tag === "none") {

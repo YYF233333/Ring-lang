@@ -395,19 +395,30 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
                     if local_names.contains(name) { out.insert(name) }
                 },
                 HExpr::FieldAccess { receiver: recv, field, .. } => {
-                    if local_names.contains(field) { out.insert(field) }
-                    // Also try qualified name for impl methods (LLVM backend
-                    // registers impl methods as "TypeName_method" in local_names)
+                    // Try qualified name first for impl methods (LLVM backend
+                    // registers impl methods as "TypeName_method" in local_names).
+                    // Only fall back to unqualified name when no qualified match
+                    // is found — prevents collisions with same-named top-level fns.
+                    let mut found_qualified = false
                     match hexpr_type(recv) {
                         Type::StructType { name: tn, .. } => {
                             let qn = "${tn}_${field}"
-                            if local_names.contains(qn) { out.insert(qn) }
+                            if local_names.contains(qn) {
+                                out.insert(qn)
+                                found_qualified = true
+                            }
                         },
                         Type::EnumType { name: tn, .. } => {
                             let qn = "${tn}_${field}"
-                            if local_names.contains(qn) { out.insert(qn) }
+                            if local_names.contains(qn) {
+                                out.insert(qn)
+                                found_qualified = true
+                            }
                         },
                         _ => {},
+                    }
+                    if !found_qualified {
+                        if local_names.contains(field) { out.insert(field) }
                     }
                 },
                 _ => {},
