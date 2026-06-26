@@ -13,7 +13,8 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     LLVM_INT_EQ, LLVM_INT_NE, LLVM_INT_SGT, LLVM_INT_SGE, LLVM_INT_SLT, LLVM_INT_SLE,
     LLVM_REAL_OEQ, LLVM_REAL_OGT, LLVM_REAL_OLT}
 use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_const_body,
-    box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name}
+    box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name,
+    discard}
 use codegen_ctx::{extract_effect_names}
 
 // Collect all transitive supertraits for a given trait. Local copy to avoid
@@ -2699,5 +2700,4 @@ fn llvm_and(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValue
     LLVMBuildAnd(ctx.builder, lhs, rhs, fresh_name(ctx, "and"))
 }
 
-// Discard an LLVMValueRef (avoid unused warnings)
-fn discard(v: LLVMValueRef) {}
+

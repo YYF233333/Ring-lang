@@ -11,6 +11,7 @@ import { box_bool as codegen_llvm_expr$box_bool } from "./codegen_llvm_expr.js";
 import { is_boxed_def as codegen_llvm_expr$is_boxed_def } from "./codegen_llvm_expr.js";
 import { build_cell_alloc as codegen_llvm_expr$build_cell_alloc } from "./codegen_llvm_expr.js";
 import { build_cell_store as codegen_llvm_expr$build_cell_store } from "./codegen_llvm_expr.js";
+import { discard as codegen_llvm_expr$discard } from "./codegen_llvm_expr.js";
 
 
 
@@ -287,8 +288,6 @@ function to_result(f) {
 
 
 
-function discard(v) {
-}
 
 function emit_assign(ctx, target, value) {
   const val = codegen_llvm_expr$gen_llvm_expr(ctx, value);
@@ -320,7 +319,7 @@ function emit_assign(ctx, target, value) {
             const cell_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, codegen_llvm_ctx$fresh_name(ctx, "cellp"));
             return codegen_llvm_expr$build_cell_store(ctx, cell_ptr, val);
           } else {
-            return discard(LLVMBuildStore(ctx.builder, val, alloca));
+            return codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, val, alloca));
           }
           break __ring_match8;
         }
@@ -333,7 +332,7 @@ function emit_assign(ctx, target, value) {
                 const cell_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, codegen_llvm_ctx$fresh_name(ctx, "cellp"));
                 return codegen_llvm_expr$build_cell_store(ctx, cell_ptr, val);
               } else {
-                return discard(LLVMBuildStore(ctx.builder, val, alloca));
+                return codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, val, alloca));
               }
               break __ring_match9;
             }
@@ -380,7 +379,7 @@ function emit_assign(ctx, target, value) {
             panic(`LLVM codegen: field '${field}' not found in struct '${type_name}'`);
           }
           const field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, recv_val, field_idx, codegen_llvm_ctx$fresh_name(ctx, "fp"));
-          return discard(LLVMBuildStore(ctx.builder, val, field_ptr));
+          return codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, val, field_ptr));
           break __ring_match11;
         }
         if (__ring_m11._tag === "none") {
@@ -401,7 +400,7 @@ function emit_break(ctx) {
     const __ring_m12 = ctx.loop_break_bb;
     if (__ring_m12._tag === "some") {
       const bb = __ring_m12._0;
-      discard(LLVMBuildBr(ctx.builder, bb));
+      codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, bb));
       let __ring_blk2;
       __ring_match13: {
         const __ring_m13 = ctx.current_fn;
@@ -433,7 +432,7 @@ function emit_continue(ctx) {
     const __ring_m14 = ctx.loop_continue_bb;
     if (__ring_m14._tag === "some") {
       const bb = __ring_m14._0;
-      discard(LLVMBuildBr(ctx.builder, bb));
+      codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, bb));
       let __ring_blk3;
       __ring_match15: {
         const __ring_m15 = ctx.current_fn;
@@ -463,7 +462,7 @@ function emit_continue(ctx) {
 function emit_drop_value(ctx, val) {
   const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
   const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
-  return discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
+  return codegen_llvm_expr$discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
 }
 
 function emit_for_in_list(ctx, binding, destructure, iterable, body) {
@@ -535,16 +534,16 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
   const list_len = LLVMBuildCall2(ctx.builder, len_ty, len_fn, [list_val], codegen_llvm_ctx$fresh_name(ctx, "len"));
   const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "idx"));
   const zero = LLVMConstInt(ctx.i64_type, 0, 0);
-  discard(LLVMBuildStore(ctx.builder, zero, counter_alloca));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, zero, counter_alloca));
   const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.cond");
   const body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.body");
   const incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.incr");
   const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.merge");
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, cond_bb);
   const current_idx = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
   const cond = LLVMBuildICmp(ctx.builder, codegen_llvm_ctx$LLVM_INT_SLT, current_idx, list_len, codegen_llvm_ctx$fresh_name(ctx, "cmp"));
-  discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
+  codegen_llvm_expr$discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
   const saved_break = ctx.loop_break_bb;
   const saved_continue = ctx.loop_continue_bb;
   ctx.loop_break_bb = Option_some(merge_bb);
@@ -567,7 +566,7 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
               const idx_val = LLVMConstInt(ctx.i64_type, i, 0);
               const sub_elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [elem, idx_val], codegen_llvm_ctx$fresh_name(ctx, "de"));
               const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, d.name);
-              discard(LLVMBuildStore(ctx.builder, sub_elem, alloca));
+              codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, sub_elem, alloca));
               _Map_insert(ctx.named_values, d.name, alloca);
               break __ring_match21;
             }
@@ -579,27 +578,27 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
         }
       } else {
         const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
-        discard(LLVMBuildStore(ctx.builder, elem, alloca));
+        codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, elem, alloca));
         _Map_insert(ctx.named_values, binding, alloca);
       }
       break __ring_match20;
     }
     if (__ring_m20._tag === "none") {
       const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
-      discard(LLVMBuildStore(ctx.builder, elem, alloca));
+      codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, elem, alloca));
       _Map_insert(ctx.named_values, binding, alloca);
       break __ring_match20;
     }
     __match_fail(__ring_m20);
   }
-  discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
-  discard(LLVMBuildBr(ctx.builder, incr_bb));
+  codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, incr_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, incr_bb);
   const current_idx2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
   const one = LLVMConstInt(ctx.i64_type, 1, 0);
   const next_idx = LLVMBuildAdd(ctx.builder, current_idx2, one, codegen_llvm_ctx$fresh_name(ctx, "ni"));
-  discard(LLVMBuildStore(ctx.builder, next_idx, counter_alloca));
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, next_idx, counter_alloca));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   ctx.loop_break_bb = saved_break;
   ctx.loop_continue_bb = saved_continue;
   LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
@@ -636,17 +635,17 @@ function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
   emit_drop_value(ctx, start_val);
   emit_drop_value(ctx, end_val);
   const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "i"));
-  discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca));
   const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "for.cond");
   const body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "for.body");
   const incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "for.incr");
   const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "for.merge");
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, cond_bb);
   const current_i = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
   const predicate = (inclusive ? codegen_llvm_ctx$LLVM_INT_SLE : codegen_llvm_ctx$LLVM_INT_SLT);
   const cond = LLVMBuildICmp(ctx.builder, predicate, current_i, end_raw, codegen_llvm_ctx$fresh_name(ctx, "cmp"));
-  discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
+  codegen_llvm_expr$discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
   const saved_break = ctx.loop_break_bb;
   const saved_continue = ctx.loop_continue_bb;
   ctx.loop_break_bb = Option_some(merge_bb);
@@ -654,17 +653,17 @@ function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
   LLVMPositionBuilderAtEnd(ctx.builder, body_bb);
   const boxed_i = codegen_llvm_expr$box_int(ctx, current_i);
   const binding_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
-  discard(LLVMBuildStore(ctx.builder, boxed_i, binding_alloca));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, boxed_i, binding_alloca));
   _Map_insert(ctx.named_values, binding, binding_alloca);
-  discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
-  discard(LLVMBuildBr(ctx.builder, incr_bb));
+  codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, incr_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, incr_bb);
   emit_range_counter_drop(ctx, binding_alloca);
   const current_i2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
   const one = LLVMConstInt(ctx.i64_type, 1, 0);
   const next_i = LLVMBuildAdd(ctx.builder, current_i2, one, codegen_llvm_ctx$fresh_name(ctx, "ni"));
-  discard(LLVMBuildStore(ctx.builder, next_i, counter_alloca));
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, next_i, counter_alloca));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   ctx.loop_break_bb = saved_break;
   ctx.loop_continue_bb = saved_continue;
   return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
@@ -701,16 +700,16 @@ function emit_for_in_range_var(ctx, binding, iterable, body) {
   const one_minus_incl = LLVMBuildSub(ctx.builder, one, incl_raw, codegen_llvm_ctx$fresh_name(ctx, "omi"));
   const end_bound = LLVMBuildSub(ctx.builder, end_raw, one_minus_incl, codegen_llvm_ctx$fresh_name(ctx, "eb2"));
   const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "i"));
-  discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca));
   const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.cond");
   const body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.body");
   const incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.incr");
   const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.merge");
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, cond_bb);
   const current_i = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
   const cond = LLVMBuildICmp(ctx.builder, codegen_llvm_ctx$LLVM_INT_SLE, current_i, end_bound, codegen_llvm_ctx$fresh_name(ctx, "cmp"));
-  discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
+  codegen_llvm_expr$discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
   const saved_break = ctx.loop_break_bb;
   const saved_continue = ctx.loop_continue_bb;
   ctx.loop_break_bb = Option_some(merge_bb);
@@ -718,16 +717,16 @@ function emit_for_in_range_var(ctx, binding, iterable, body) {
   LLVMPositionBuilderAtEnd(ctx.builder, body_bb);
   const boxed_i = codegen_llvm_expr$box_int(ctx, current_i);
   const binding_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
-  discard(LLVMBuildStore(ctx.builder, boxed_i, binding_alloca));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, boxed_i, binding_alloca));
   _Map_insert(ctx.named_values, binding, binding_alloca);
-  discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
-  discard(LLVMBuildBr(ctx.builder, incr_bb));
+  codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, incr_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, incr_bb);
   emit_range_counter_drop(ctx, binding_alloca);
   const current_i2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
   const next_i = LLVMBuildAdd(ctx.builder, current_i2, one, codegen_llvm_ctx$fresh_name(ctx, "ni"));
-  discard(LLVMBuildStore(ctx.builder, next_i, counter_alloca));
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, next_i, counter_alloca));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   ctx.loop_break_bb = saved_break;
   ctx.loop_continue_bb = saved_continue;
   return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
@@ -828,7 +827,7 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
               const tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, codegen_llvm_ctx$fresh_name(ctx, "tag"));
               const expected_tag = LLVMConstInt(ctx.i64_type, vi.tag, 0);
               const cond = LLVMBuildICmp(ctx.builder, codegen_llvm_ctx$LLVM_INT_EQ, tag_val, expected_tag, codegen_llvm_ctx$fresh_name(ctx, "eq"));
-              discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb));
+              codegen_llvm_expr$discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
               const __ring_end4 = List_len(fields);
               for (let i = 0; i < __ring_end4; i++) {
@@ -843,7 +842,7 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
                         const field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, (i + 1), codegen_llvm_ctx$fresh_name(ctx, "ef"));
                         const field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, codegen_llvm_ctx$fresh_name(ctx, bname));
                         const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, bname);
-                        discard(LLVMBuildStore(ctx.builder, field_val, alloca));
+                        codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, field_val, alloca));
                         _Map_insert(ctx.named_values, bname, alloca);
                         break __ring_match33;
                       }
@@ -857,14 +856,14 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
                   __match_fail(__ring_m32);
                 }
               }
-              discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
               __ring_match34: {
                 const __ring_m34 = else_block;
                 if (__ring_m34._tag === "some") {
                   const eb = __ring_m34._0;
-                  discard(codegen_llvm_expr$gen_llvm_expr(ctx, eb));
+                  codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, eb));
                   break __ring_match34;
                 }
                 if (__ring_m34._tag === "none") {
@@ -872,17 +871,17 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
                 }
                 __match_fail(__ring_m34);
               }
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
               break __ring_match31;
             }
             if (__ring_m31._tag === "none") {
-              discard(LLVMBuildBr(ctx.builder, then_bb));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, then_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
-              discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
               break __ring_match31;
             }
@@ -891,12 +890,12 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
           break __ring_match30;
         }
         if (__ring_m30._tag === "none") {
-          discard(LLVMBuildBr(ctx.builder, then_bb));
+          codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, then_bb));
           LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
-          discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
-          discard(LLVMBuildBr(ctx.builder, merge_bb));
+          codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
+          codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
           LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
-          discard(LLVMBuildBr(ctx.builder, merge_bb));
+          codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
           return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
           break __ring_match30;
         }
@@ -930,7 +929,7 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
               const tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, codegen_llvm_ctx$fresh_name(ctx, "tag"));
               const expected_tag = LLVMConstInt(ctx.i64_type, vi.tag, 0);
               const cond = LLVMBuildICmp(ctx.builder, codegen_llvm_ctx$LLVM_INT_EQ, tag_val, expected_tag, codegen_llvm_ctx$fresh_name(ctx, "eq"));
-              discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb));
+              codegen_llvm_expr$discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
               const __ring_end5 = List_len(nfields);
               for (let i = 0; i < __ring_end5; i++) {
@@ -952,7 +951,7 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
                         const field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, (field_idx + 1), codegen_llvm_ctx$fresh_name(ctx, "ef"));
                         const field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, codegen_llvm_ctx$fresh_name(ctx, bname));
                         const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, bname);
-                        discard(LLVMBuildStore(ctx.builder, field_val, alloca));
+                        codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, field_val, alloca));
                         _Map_insert(ctx.named_values, bname, alloca);
                         break __ring_match39;
                       }
@@ -966,14 +965,14 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
                   __match_fail(__ring_m38);
                 }
               }
-              discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
               __ring_match40: {
                 const __ring_m40 = else_block;
                 if (__ring_m40._tag === "some") {
                   const eb = __ring_m40._0;
-                  discard(codegen_llvm_expr$gen_llvm_expr(ctx, eb));
+                  codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, eb));
                   break __ring_match40;
                 }
                 if (__ring_m40._tag === "none") {
@@ -981,17 +980,17 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
                 }
                 __match_fail(__ring_m40);
               }
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
               break __ring_match37;
             }
             if (__ring_m37._tag === "none") {
-              discard(LLVMBuildBr(ctx.builder, then_bb));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, then_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
-              discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
-              discard(LLVMBuildBr(ctx.builder, merge_bb));
+              codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
               return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
               break __ring_match37;
             }
@@ -1000,12 +999,12 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
           break __ring_match36;
         }
         if (__ring_m36._tag === "none") {
-          discard(LLVMBuildBr(ctx.builder, then_bb));
+          codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, then_bb));
           LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
-          discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
-          discard(LLVMBuildBr(ctx.builder, merge_bb));
+          codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
+          codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
           LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
-          discard(LLVMBuildBr(ctx.builder, merge_bb));
+          codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
           return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
           break __ring_match36;
         }
@@ -1014,27 +1013,27 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
       break __ring_match28;
     }
     if ((__ring_m28._tag === "Binding") || (__ring_m28._tag === "Wildcard")) {
-      discard(LLVMBuildBr(ctx.builder, then_bb));
+      codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, then_bb));
       LLVMPositionBuilderAtEnd(ctx.builder, then_bb);
       __ring_match41: {
         const __ring_m41 = pattern;
         if (__ring_m41._tag === "Binding") {
           const bname = __ring_m41.name;
           const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, bname);
-          discard(LLVMBuildStore(ctx.builder, scrut_val, alloca));
+          codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, scrut_val, alloca));
           _Map_insert(ctx.named_values, bname, alloca);
           break __ring_match41;
         }
         break __ring_match41;
       }
-      discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
-      discard(LLVMBuildBr(ctx.builder, merge_bb));
+      codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, then_block));
+      codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
       LLVMPositionBuilderAtEnd(ctx.builder, else_bb);
       __ring_match42: {
         const __ring_m42 = else_block;
         if (__ring_m42._tag === "some") {
           const eb = __ring_m42._0;
-          discard(codegen_llvm_expr$gen_llvm_expr(ctx, eb));
+          codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, eb));
           break __ring_match42;
         }
         if (__ring_m42._tag === "none") {
@@ -1042,7 +1041,7 @@ function emit_if_let(ctx, pattern, expr, then_block, else_block) {
         }
         __match_fail(__ring_m42);
       }
-      discard(LLVMBuildBr(ctx.builder, merge_bb));
+      codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, merge_bb));
       return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
       break __ring_match28;
     }
@@ -1065,7 +1064,7 @@ function emit_let_destructure(ctx, bindings, init) {
           const idx = LLVMConstInt(ctx.i64_type, i, 0);
           const elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [val, idx], codegen_llvm_ctx$fresh_name(ctx, "dt"));
           const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, b.name);
-          discard(LLVMBuildStore(ctx.builder, elem, alloca));
+          codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, elem, alloca));
           _Map_insert(ctx.named_values, b.name, alloca);
         }
         break __ring_match43;
@@ -1088,7 +1087,7 @@ function emit_return(ctx, value) {
         if (cleanup.needs_catch_pop) {
           const pop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type);
           const pop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_catch_pop");
-          discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""));
+          codegen_llvm_expr$discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""));
         }
         if ((List_len(cleanup.ev_drop_allocas) > 0)) {
           const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
@@ -1099,7 +1098,7 @@ function emit_return(ctx, value) {
             if (__ring_next_8._tag === "none") break;
             const alloca = __ring_next_8._0;
             const ev_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, codegen_llvm_ctx$fresh_name(ctx, "ev_ret_drop"));
-            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [ev_ptr], ""));
+            codegen_llvm_expr$discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [ev_ptr], ""));
           }
         }
         break __ring_match44;
@@ -1116,12 +1115,12 @@ function emit_return(ctx, value) {
     if (__ring_m45._tag === "some") {
       const v = __ring_m45._0;
       const val = codegen_llvm_expr$gen_llvm_expr(ctx, v);
-      discard(LLVMBuildRet(ctx.builder, val));
+      codegen_llvm_expr$discard(LLVMBuildRet(ctx.builder, val));
       break __ring_match45;
     }
     if (__ring_m45._tag === "none") {
       const _null = LLVMConstPointerNull(ctx.ptr_type);
-      discard(LLVMBuildRet(ctx.builder, _null));
+      codegen_llvm_expr$discard(LLVMBuildRet(ctx.builder, _null));
       break __ring_match45;
     }
     __match_fail(__ring_m45);
@@ -1160,21 +1159,21 @@ function emit_while(ctx, condition, body) {
   const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "while.cond");
   const body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "while.body");
   const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "while.merge");
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, cond_bb);
   const cond_val = codegen_llvm_expr$gen_llvm_expr(ctx, condition);
   const cond_i1 = codegen_llvm_expr$unbox_to_i1(ctx, cond_val);
   if (hir$is_fresh_owned_bool_value(condition)) {
     emit_drop_value(ctx, cond_val);
   }
-  discard(LLVMBuildCondBr(ctx.builder, cond_i1, body_bb, merge_bb));
+  codegen_llvm_expr$discard(LLVMBuildCondBr(ctx.builder, cond_i1, body_bb, merge_bb));
   const saved_break = ctx.loop_break_bb;
   const saved_continue = ctx.loop_continue_bb;
   ctx.loop_break_bb = Option_some(merge_bb);
   ctx.loop_continue_bb = Option_some(cond_bb);
   LLVMPositionBuilderAtEnd(ctx.builder, body_bb);
-  discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
+  codegen_llvm_expr$discard(LLVMBuildBr(ctx.builder, cond_bb));
   ctx.loop_break_bb = saved_break;
   ctx.loop_continue_bb = saved_continue;
   return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
@@ -1187,7 +1186,7 @@ function emit_llvm_stmt(ctx, stmt) {
       const name = __ring_m48.name; const init = __ring_m48.init;
       const val = codegen_llvm_expr$gen_llvm_expr(ctx, init);
       const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, name);
-      discard(LLVMBuildStore(ctx.builder, val, alloca));
+      codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, val, alloca));
       return _Map_insert(ctx.named_values, name, alloca);
       break __ring_match48;
     }
@@ -1196,7 +1195,7 @@ function emit_llvm_stmt(ctx, stmt) {
       const val = codegen_llvm_expr$gen_llvm_expr(ctx, init);
       const stored = (codegen_llvm_expr$is_boxed_def(ctx, def_id) ? codegen_llvm_expr$build_cell_alloc(ctx, val) : val);
       const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, name);
-      discard(LLVMBuildStore(ctx.builder, stored, alloca));
+      codegen_llvm_expr$discard(LLVMBuildStore(ctx.builder, stored, alloca));
       return _Map_insert(ctx.named_values, name, alloca);
       break __ring_match48;
     }
@@ -1207,7 +1206,7 @@ function emit_llvm_stmt(ctx, stmt) {
     }
     if (__ring_m48._tag === "ExprStmt") {
       const expr = __ring_m48.expr;
-      return discard(codegen_llvm_expr$gen_llvm_expr(ctx, expr));
+      return codegen_llvm_expr$discard(codegen_llvm_expr$gen_llvm_expr(ctx, expr));
       break __ring_match48;
     }
     if (__ring_m48._tag === "Return") {
@@ -1252,7 +1251,7 @@ function emit_llvm_stmt(ctx, stmt) {
           const val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, codegen_llvm_ctx$fresh_name(ctx, "drop_val"));
           const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
           const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
-          return discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
+          return codegen_llvm_expr$discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
           break __ring_match49;
         }
         if (__ring_m49._tag === "none") {
@@ -1272,7 +1271,7 @@ function emit_llvm_stmt(ctx, stmt) {
           const val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, codegen_llvm_ctx$fresh_name(ctx, "dup_val"));
           const dup_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type);
           const dup_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_dup");
-          return discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""));
+          return codegen_llvm_expr$discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""));
           break __ring_match50;
         }
         if (__ring_m50._tag === "none") {

@@ -49,11 +49,10 @@ extern fn box_bool(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef
 extern fn is_boxed_def(ctx: LlvmCtx, def_id: Int?) -> Bool
 extern fn build_cell_alloc(mut ctx: LlvmCtx, init_val: LLVMValueRef) -> LLVMValueRef
 extern fn build_cell_store(mut ctx: LlvmCtx, cell_ptr: LLVMValueRef, new_val: LLVMValueRef) -> Unit
+// Forward declaration: discard is defined in codegen_llvm_expr
+extern fn discard(v: LLVMValueRef) -> Unit
 
-// Discard an LLVMValueRef (to avoid type mismatch in Unit-returning match arms)
-fn discard(v: LLVMValueRef) {
-    // intentionally empty — just consume the value
-}
+
 
 // ============================================================
 // Statement dispatch

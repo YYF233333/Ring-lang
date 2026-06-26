@@ -9,7 +9,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid}
-use codegen_llvm_expr::{gen_llvm_expr, build_default_evidence_all}
+use codegen_llvm_expr::{gen_llvm_expr, build_default_evidence_all, discard}
 use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info, emit_derived_impls_llvm, emit_builtin_derived_impls}
 use codegen_ctx::{extract_effect_names}
 use codegen::{collect_fn_callees}
@@ -86,10 +86,7 @@ extern fn LLVMAddAttributeAtIndex(fn_val: LLVMValueRef, attr_index: Int, attr: L
 extern fn LLVMGetEnumAttributeKindForName(name: Str, s_len: Int) -> Int
 extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -> LLVMAttributeRef
 
-// Discard an LLVMValueRef (to avoid type mismatch in Unit-returning contexts)
-fn discard(v: LLVMValueRef) {
-    // intentionally empty
-}
+
 
 // ============================================================
 // compute_evidence_params — compute evidence params for a function

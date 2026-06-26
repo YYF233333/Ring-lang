@@ -3243,7 +3243,7 @@ pub fn unbox_int(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
 }
 
 // Discard an LLVMValueRef (to avoid type mismatch in Unit-returning match arms)
-fn discard(v: LLVMValueRef) {
+pub fn discard(v: LLVMValueRef) {
     // intentionally empty — just consume the value
 }
 
