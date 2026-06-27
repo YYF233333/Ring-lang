@@ -9,6 +9,7 @@ pub const BUILTIN_SET: Str = "Set"
 pub const BUILTIN_OPTION: Str = "Option"
 pub const BUILTIN_CELL: Str = "Cell"
 pub const BUILTIN_STRING_BUILDER: Str = "StringBuilder"
+pub const BUILTIN_PTR: Str = "Ptr"
 
 pub struct StructField {
     pub name: Str,
@@ -43,6 +44,7 @@ pub enum Type {
     RecordType { fields: List<RecordField>, tail: Int?, tail_name: Str? },
     EffectRowType { effects: List<Effect>, tail: Int? },
     TupleType { elements: List<Type> },
+    PtrType { pointee: Type },
     ErrorType
 }
 
@@ -118,6 +120,7 @@ pub fn type_to_builtin_name(t: Type) -> Str? {
         Type::StrType => some(BUILTIN_STR),
         Type::BoolType => some(BUILTIN_BOOL),
         Type::UnitType => some("Unit"),
+        Type::PtrType { .. } => some(BUILTIN_PTR),
         Type::StructType { name, .. } => some(name),
         Type::EnumType { name, .. } => some(name),
         Type::ErrorType => none,
@@ -355,6 +358,10 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
         Type::TupleType { elements: ea } => match b {
             Type::TupleType { elements: eb } => type_lists_equal(ea, eb),
             _ => false
+        },
+        Type::PtrType { pointee: pa } => match b {
+            Type::PtrType { pointee: pb } => types_equal(pa, pb),
+            _ => false
         }
     }
 }
@@ -411,6 +418,8 @@ pub fn type_to_string(t: Type) -> Str {
         },
         Type::TupleType { elements } =>
             "(${elements.map(fn(e) { type_to_string(e) }).join(", ")})",
+        Type::PtrType { pointee } =>
+            "Ptr<${type_to_string(pointee)}>",
         Type::ErrorType => "<error>"
     }
 }

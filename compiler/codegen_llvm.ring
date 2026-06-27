@@ -345,6 +345,11 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_Option_is_none", [ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_Option_map", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_Option_unwrap_or_else", [ptr, ptr], ptr)
+
+    // B-125: Ptr<T> raw memory primitives
+    get_or_declare_runtime_fn(ctx, "ring_raw_alloc", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_raw_dealloc", [ptr, ptr], void)
+    get_or_declare_runtime_fn(ctx, "ring_ptr_copy", [ptr, ptr, ptr], void)
 }
 
 // ============================================================

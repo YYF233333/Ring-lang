@@ -454,6 +454,8 @@ pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
         },
         Type::TupleType { elements } =>
             Type::TupleType { elements: elements.map(fn(e) { apply_subst_map(subst, e) }) },
+        Type::PtrType { pointee } =>
+            Type::PtrType { pointee: apply_subst_map(subst, pointee) },
         Type::ErrorType => Type::ErrorType
     }
 }
@@ -581,6 +583,8 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
         },
         Type::TupleType { elements } =>
             Type::TupleType { elements: elements.map(fn(e) { apply_subst(subst, e) }) },
+        Type::PtrType { pointee } =>
+            Type::PtrType { pointee: apply_subst(subst, pointee) },
         Type::ErrorType => Type::ErrorType
     }
 }

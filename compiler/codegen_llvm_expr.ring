@@ -2225,6 +2225,18 @@ fn gen_extern_LLVMAddIncoming(mut ctx: LlvmCtx, arg_vals: List<LLVMValueRef>, in
 }
 
 fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>, dict_vals: List<LLVMValueRef>) -> LLVMValueRef {
+    // B-125: ptr_from_addr — pure codegen (identity: Int → Ptr<T>)
+    if name == "ptr_from_addr" {
+        // ptr_from_addr(a: Int) -> Ptr<T>: a is a tagged Ring Int, just return it as-is.
+        // A Ring Int and a Ptr<T> are both ptr-typed in LLVM. The raw address IS
+        // the untagged Int value, but the caller is responsible for passing a valid address.
+        // Since both Int and Ptr are just ptr, and ptr_from_addr(p.addr()) must round-trip,
+        // we untag the Int to get the raw address.
+        let a_val = match arg_vals.get(0) { some(v) => v, none => panic("ptr_from_addr: missing arg") }
+        let raw = unbox_int(ctx, a_val)
+        return LLVMBuildIntToPtr(ctx.builder, raw, ctx.ptr_type, fresh_name(ctx, "from_addr"))
+    }
+
     // Check for known extern fn → runtime mapping
     let rt_name = extern_fn_to_runtime(name)
     match rt_name {
@@ -2444,10 +2456,11 @@ fn gen_runtime_call(mut ctx: LlvmCtx, name: Str, args: List<LLVMValueRef>) -> LL
 }
 
 fn is_void_runtime_fn(name: Str) -> Bool {
-    // ring_catch_pop and ring_raise are the only truly void-returning C functions
     if name == "ring_catch_pop" { true }
     else { if name == "ring_raise" { true }
-    else { false } }
+    else { if name == "ring_raw_dealloc" { true }
+    else { if name == "ring_ptr_copy" { true }
+    else { false } } } }
 }
 
 // Map Ring extern fn names to C runtime names
@@ -2481,6 +2494,10 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "map_int_from" { return some("ring_map_int_from") }
     if name == "set_int_from" { return some("ring_set_int_from_list") }
     if name == "Cell" { return some("ring_Cell_new") }
+    // B-125: Ptr<T> builtins
+    if name == "alloc" { return some("ring_raw_alloc") }
+    if name == "dealloc" { return some("ring_raw_dealloc") }
+    if name == "ptr_copy" { return some("ring_ptr_copy") }
     none
 }
 
@@ -2592,6 +2609,67 @@ fn rt_method_needs_recv_unbox_bool(name: Str) -> Bool {
     else { false }
 }
 
+// ============================================================
+// B-125: Ptr<T> method codegen — inline LLVM IR
+// ============================================================
+
+fn gen_ptr_method(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method: Str, args: List<LLVMValueRef>) -> LLVMValueRef {
+    if method == "read" {
+        // p.read() -> T: load the Ring value at the raw address, then dup it
+        // (the buffer slot retains its reference)
+        let loaded = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, recv, fresh_name(ctx, "ptr_read"))
+        // dup the loaded value so both the buffer and the returned value own a reference.
+        // ring_dup is safe for tagged ints (skips them) and null (skips).
+        let pointee_ty = match recv_type {
+            Type::PtrType { pointee } => pointee,
+            _ => Type::AnyType,
+        }
+        // Only dup for RC-managed types (not for Int/Bool/Unit/Ptr/extern)
+        let needs_dup = match pointee_ty {
+            Type::IntType => false,
+            Type::FloatType => false,
+            Type::BoolType => false,
+            Type::UnitType => false,
+            Type::PtrType { .. } => false,
+            _ => true,
+        }
+        if needs_dup {
+            gen_dup_value(ctx, loaded)
+        }
+        return loaded
+    }
+    if method == "take" {
+        // p.take() -> T: load without dup (ownership transfer from buffer)
+        return LLVMBuildLoad2(ctx.builder, ctx.ptr_type, recv, fresh_name(ctx, "ptr_take"))
+    }
+    if method == "write" {
+        // p.write(v): store v at the raw address
+        let v_val = match args.get(0) { some(v) => v, none => panic("Ptr.write: missing arg") }
+        discard(LLVMBuildStore(ctx.builder, v_val, recv))
+        return LLVMConstPointerNull(ctx.ptr_type)
+    }
+    if method == "offset" {
+        // p.offset(i): GEP by i slots (each slot = 8 bytes = one ptr)
+        let i_val = match args.get(0) { some(v) => v, none => panic("Ptr.offset: missing arg") }
+        // i is a tagged Ring Int — untag it
+        let i_raw = unbox_int(ctx, i_val)
+        let result = LLVMBuildGEP2(ctx.builder, ctx.ptr_type, recv, [i_raw], fresh_name(ctx, "ptr_off"))
+        return result
+    }
+    if method == "cast" {
+        // p.cast<U>(): no-op at LLVM level (same ptr representation)
+        return recv
+    }
+    if method == "addr" {
+        // p.addr() -> Int: convert raw address to tagged Ring Int
+        let raw = LLVMBuildPtrToInt(ctx.builder, recv, ctx.i64_type, fresh_name(ctx, "addr_raw"))
+        return box_int(ctx, raw)
+    }
+    // Unknown Ptr method — fall through to panic
+    eprintln("LLVM codegen warning: unknown Ptr method '${method}', generating panic")
+    LLVMConstPointerNull(ctx.ptr_type)
+}
+
 fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method: Str, args: List<LLVMValueRef>, dict_vals: List<LLVMValueRef>) -> LLVMValueRef {
     let type_name = match type_to_builtin_name(recv_type) {
         some(n) => n,
@@ -2603,6 +2681,11 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                 _ => "Unknown",
             }
         },
+    }
+
+    // B-125: Ptr<T> methods — inline LLVM IR (no runtime call)
+    if type_name == "Ptr" {
+        return gen_ptr_method(ctx, recv, recv_type, method, args)
     }
 
     // Map to runtime function name

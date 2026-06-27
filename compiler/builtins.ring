@@ -76,6 +76,7 @@ pub fn register_builtins(mut env: TypeEnv) {
     register_debug_trait(env)
     register_option_debug(env)
     register_mut_methods(env)
+    register_ptr_builtins(env)
 }
 
 // ============================================================
@@ -891,6 +892,133 @@ fn register_option_hof(mut env: TypeEnv) {
     methods.insert("unwrap_or_else", TypeScheme {
         ty: Type::FnType { params: [make_option_type(t), cb], return_type: t, effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
+        bounds: [],
+        def_id: none
+    })
+}
+
+// ============================================================
+// B-125: register Ptr<T> builtin functions and methods
+// ============================================================
+
+fn register_ptr_builtins(mut env: TypeEnv) {
+    let unsafe_row = EffectRow { effects: [Effect::UnsafeEffect], tail: none }
+
+    // ---- Top-level builtin functions ----
+
+    // alloc(count: Int) -> Ptr<T> / unsafe
+    let alloc_t_id = env.fresh_var_id()
+    let alloc_t = Type::TypeVar { id: alloc_t_id, name: none }
+    let alloc_ptr = Type::PtrType { pointee: alloc_t }
+    env.bind("alloc", TypeScheme {
+        ty: Type::FnType { params: [INT], return_type: alloc_ptr, effects: unsafe_row },
+        type_vars: [alloc_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // dealloc(p: Ptr<T>, count: Int) -> () / unsafe
+    let dealloc_t_id = env.fresh_var_id()
+    let dealloc_t = Type::TypeVar { id: dealloc_t_id, name: none }
+    let dealloc_ptr = Type::PtrType { pointee: dealloc_t }
+    env.bind("dealloc", TypeScheme {
+        ty: Type::FnType { params: [dealloc_ptr, INT], return_type: UNIT, effects: unsafe_row },
+        type_vars: [dealloc_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // ptr_copy(src: Ptr<T>, dst: Ptr<T>, count: Int) -> () / unsafe
+    let copy_t_id = env.fresh_var_id()
+    let copy_t = Type::TypeVar { id: copy_t_id, name: none }
+    let copy_ptr = Type::PtrType { pointee: copy_t }
+    env.bind("ptr_copy", TypeScheme {
+        ty: Type::FnType { params: [copy_ptr, copy_ptr, INT], return_type: UNIT, effects: unsafe_row },
+        type_vars: [copy_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // ptr_from_addr(a: Int) -> Ptr<T> (safe)
+    let from_t_id = env.fresh_var_id()
+    let from_t = Type::TypeVar { id: from_t_id, name: none }
+    let from_ptr = Type::PtrType { pointee: from_t }
+    env.bind("ptr_from_addr", TypeScheme {
+        ty: Type::FnType { params: [INT], return_type: from_ptr, effects: EMPTY_ROW },
+        type_vars: [from_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // ---- Ptr<T> methods ----
+
+    let mut methods = get_or_create_methods(env, "Ptr")
+
+    // read: (Ptr<T>) -> T / unsafe
+    let read_t_id = env.fresh_var_id()
+    let read_t = Type::TypeVar { id: read_t_id, name: none }
+    let read_ptr = Type::PtrType { pointee: read_t }
+    methods.insert("read", TypeScheme {
+        ty: Type::FnType { params: [read_ptr], return_type: read_t, effects: unsafe_row },
+        type_vars: [read_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // take: (Ptr<T>) -> T / unsafe
+    let take_t_id = env.fresh_var_id()
+    let take_t = Type::TypeVar { id: take_t_id, name: none }
+    let take_ptr = Type::PtrType { pointee: take_t }
+    methods.insert("take", TypeScheme {
+        ty: Type::FnType { params: [take_ptr], return_type: take_t, effects: unsafe_row },
+        type_vars: [take_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // write: (Ptr<T>, T) -> () / unsafe
+    let write_t_id = env.fresh_var_id()
+    let write_t = Type::TypeVar { id: write_t_id, name: none }
+    let write_ptr = Type::PtrType { pointee: write_t }
+    methods.insert("write", TypeScheme {
+        ty: Type::FnType { params: [write_ptr, write_t], return_type: UNIT, effects: unsafe_row },
+        type_vars: [write_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // offset: (Ptr<T>, Int) -> Ptr<T> / unsafe
+    let off_t_id = env.fresh_var_id()
+    let off_t = Type::TypeVar { id: off_t_id, name: none }
+    let off_ptr = Type::PtrType { pointee: off_t }
+    methods.insert("offset", TypeScheme {
+        ty: Type::FnType { params: [off_ptr, INT], return_type: off_ptr, effects: unsafe_row },
+        type_vars: [off_t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // cast: (Ptr<T>) -> Ptr<U> (safe)
+    let cast_t_id = env.fresh_var_id()
+    let cast_t = Type::TypeVar { id: cast_t_id, name: none }
+    let cast_u_id = env.fresh_var_id()
+    let cast_u = Type::TypeVar { id: cast_u_id, name: none }
+    let cast_ptr_t = Type::PtrType { pointee: cast_t }
+    let cast_ptr_u = Type::PtrType { pointee: cast_u }
+    methods.insert("cast", TypeScheme {
+        ty: Type::FnType { params: [cast_ptr_t], return_type: cast_ptr_u, effects: EMPTY_ROW },
+        type_vars: [cast_t_id, cast_u_id],
+        bounds: [],
+        def_id: none
+    })
+
+    // addr: (Ptr<T>) -> Int (safe)
+    let addr_t_id = env.fresh_var_id()
+    let addr_t = Type::TypeVar { id: addr_t_id, name: none }
+    let addr_ptr = Type::PtrType { pointee: addr_t }
+    methods.insert("addr", TypeScheme {
+        ty: Type::FnType { params: [addr_ptr], return_type: INT, effects: EMPTY_ROW },
+        type_vars: [addr_t_id],
         bounds: [],
         def_id: none
     })

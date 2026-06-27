@@ -69,7 +69,9 @@ pub fn occurs_in(var_id: Int, t: Type, subst: UnionFind) -> Bool {
         Type::EffectRowType { effects, tail } =>
             occurs_in_row(var_id, EffectRow { effects: effects, tail: tail }, subst),
         Type::TupleType { elements } =>
-            elements.any(fn(e) { occurs_in(var_id, e, subst) })
+            elements.any(fn(e) { occurs_in(var_id, e, subst) }),
+        Type::PtrType { pointee } =>
+            occurs_in(var_id, pointee, subst)
     }
 }
 
@@ -590,6 +592,10 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, mut env: TypeEnv) -> UnionFin
             }
             s
         },
+
+        // Ptr types
+        (Type::PtrType { pointee: pa }, Type::PtrType { pointee: pb }) =>
+            unify(pa, pb, subst, env),
 
         // Struct satisfies record constraint (one-direction coercion)
         (Type::StructType { .. }, Type::RecordType { .. }) =>
