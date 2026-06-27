@@ -28,7 +28,7 @@ pub fn extract_effect_names(effects: EffectRow) -> List<Str> {
 }
 
 // ============================================================
-// Callee collection (from codegen.ring)
+// Callee collection
 // ============================================================
 
 pub fn collect_fn_callees(decls: List<HDecl>, local_names: Set<Str>, mut fn_callees: Map<Str, Set<Str>>) {

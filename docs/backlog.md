@@ -7,51 +7,11 @@
 > 反馈分支：`doing` → `waiting-feedback`（Worker 遇到设计问题）→ Discussion 处理后 → `queued`（重新排队）
 > 工作流规范见 `docs/workflow.md`
 
-## Phase C 执行计划 （2026-05-23 确定）
+## 层 3 排序（2026-06-05 Discussion 定，native + JS 退役全部完成后启动）
 
-**目标**：基础设施特性 + 中等特性全部完成，为层 3 重型特性铺路。
+B-002 Drop/RAII(L2) → async(B-007) → Refinement(B-001, 需 Z3 + B-070 const generics)；M 项（B-072 Union / B-070 固定数组）当 XL 间换气穿插；P3 研究（GADTs/dyn/GATs）最后。
 
-**已完成（2026-05-23→06-05，明细见 git）**：层 1（B-034/B-005/B-037/B-008）+ 层 2（B-004/B-036/B-010）+ 设计验证（B-043/B-044；B-042 吸收——设计在 design.md §7.9 定案 `Weak<T>`，实现归 B-002 L2）+ 关键路径 B-011 LLVM → B-012 RC L0 → B-082 RC 诊断 → B-081 dup 架构迁移 全部落地。
-
-**现状 / 未完成项**：
-- **Native 自举 + JS 退役全部完成 ✅**（B-089 三门全绿 + B-100 Phase 1+2 完成，2026-06-27）
-- B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（✅）**；B-068 缩减为用户面（lv2 标注：`x: mut T` / `x: move T` / `[mut capture]` 闭包捕获列表 / pub 签名规则），仍 deferred、不阻塞 native（**无独立条目**——模型见 design.md §7.2-7.8（2026-06-24 版），B-110 落地后再立项）。**值类型 auto-box 待讨论（2026-06-25）**：`x: mut Int` 需要 auto-box 语义（传 Cell 间接引用）才能让 callee 修改回传——B-068 立项时需覆盖此设计（#181 审计发现触发）
-- **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏）。借用推断引擎（B-098）被提前到 native-working 之前并已落地
-- B-033 GADTs 推迟至 native 自举之后（无下游依赖）
-- 层 3 在 native 自举 + 归档后启动。**排序（2026-06-05 Discussion 定）**：B-002 Drop/RAII(L2) → **async(B-007) 先**（设计已锁、自包含、风险低、宣发价值大）→ Refinement(B-001) 随后（需 Z3 + 先做 B-070 const generics）；M 项（B-072 Union / B-069 默认参数 / B-070 固定数组）当 XL 间换气穿插；P3 研究（GADTs/dyn/GATs）最后。B-002 的 abort-unwind 子集可能因 G-a 内存提前（B-104 ✅，G-a 终态已达；abort 路径泄漏已入 D2 豁免类，design-accepted）
-- **JS 后端已归档** ✅（B-100，2026-06-27）
-
-### Native 自举路线图（2026-06-03 规划，2026-06-13 更新）
-
-三个验收门：
-- **G-a 内存** ✅：B-104 完整 Perceus RC 落地（2026-06-13），leak 88%→1.2%，native 自编译跑通
-- **G-b 双 bootstrap 一致** ✅：inline setjmp + Windows _setjmp ABI 修复（2026-06-16），44/44 文件字节一致
-- **G-c 双后端 parity** ✅：llvm_diff 86/86 + native E2E 3/3（2026-06-16）
-
-**Level 1 完成（2026-06-16）。当前关键路径**：B-099（Level 2，Node 消除）→ B-100（JS 退役）。
-
----
-
-## ⭐ native on-par → JS 退役 统一路线（2026-06-08 定，2026-06-13 更新）
-
-> **现状（2026-06-16）**：**Level 1 完成**——B-089 三门全绿（G-a/G-b/G-c ✅，2026-06-16）。P0/P1/P2a/P2b 阶段完成。
-
-**Level 定义**：
-- **Level 1** = B-089（B-122 ✅）：native ring.exe 的前端 + JS 后端与 node 版对等，三门全绿。
-- **Level 2** = B-099：native 自产 .o、Node 从工具链消除。
-- **JS 退役** = B-100：parity 认证 + golden 快照 + 删 JS 后端。层 3 之前完成。
-
-**执行序（2026-06-13 Discussion 拍板）**：
-
-| 阶段 | 内容 | item | 并行 |
-|------|------|------|------|
-| **✅ P0+P1** | 完整 Perceus RC + 标记指针 | B-104 ✅ + B-080 ✅ | — |
-| **✅ P2a checker 健全** | 顶层推断改 SCC 拓扑序 | **B-122** ✅ | — |
-| **✅ P2b 三门终验** | G-a/G-b/G-c 全绿（2026-06-16） | **B-089** ✅ | B-097 [P2/M] + B-096 [P3/L] 待消化 |
-| **✅ P3 Node 消除** | LLVM-C marshalling + link libLLVM | **B-099** ✅ | 单独 |
-| **✅ P4 JS 退役** | parity 认证门 + golden 快照 + 删除 | **B-100** ✅（2026-06-27） | 单独 |
-
-**纪律**：每阶段验收全绿才进下一阶段。B-097/B-096 不阻塞主链路但是 B-100 Phase 1 前置，与 B-089 并行消化。
+> B-068 用户面（`x: mut T` / `x: move T` / 闭包捕获列表 / pub 签名规则）在 B-110 落地后再立项——模型见 design.md §7.2-7.8。值类型 auto-box 待讨论（#181 审计发现触发）。
 
 ---
 

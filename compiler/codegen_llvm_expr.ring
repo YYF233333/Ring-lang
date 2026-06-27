@@ -1556,8 +1556,7 @@ fn get_or_create_static_dict_getter(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef
 // that loads the inner dicts captured in env and calls the real method
 //   ring_<Type>_<m>(a0..aK, inner0..innerM).
 // The wrapper dict has the count-prefixed dict layout { i64 count, ptr-per-method },
-// each method slot a { thunk, env } closure. Mirrors codegen_expr.ring's
-// dict_ref_to_js wrapper.
+// each method slot a { thunk, env } closure.
 //
 // B-104 D4 RC honesty: the per-method thunk envs hold the inner dicts with
 // count=inner_count and a ring_dup per slot — so a DYNAMIC wrapped dict

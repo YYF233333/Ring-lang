@@ -1221,7 +1221,7 @@ fn register_effect_ops_llvm(decls: List<HDecl>, mut effect_ops: Map<Str, List<HE
 
 // A value type (Int/Float/Bool/Str) is the only kind a `mut` param boxes into a CELL.
 // Reference types (List/Map/Set/struct/enum) already share via the ptr, so a mut on
-// them needs no cell. Mirrors codegen.ring's is_codegen_value_type.
+// them needs no cell.
 fn llvm_is_value_type(t: Type) -> Bool {
     match t {
         Type::IntType => true,
@@ -1749,7 +1749,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // gen_effect_op share the evidence-struct slot layout via effect_op_slot.
     register_effect_ops_llvm(program.decls, ctx.effect_ops)
 
-    // Compute transitive effect closure (B-089 G-b: mirrors codegen.ring:108-151)
+    // Compute transitive effect closure (B-089 G-b)
     compute_transitive_effect_closure(program.decls, ctx.local_fn_effects)
 
     // Declare runtime functions

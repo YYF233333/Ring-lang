@@ -1336,8 +1336,8 @@ fn v_check_loop_exit(mut ctx: VCtx, span: Span, what: Str) {
 }
 
 // ============================================================
-// Pattern binding collection (mirrors codegen_stmt.collect_binding_names:
-// OR-patterns bind through their first alternative)
+// Pattern binding collection
+// (OR-patterns bind through their first alternative)
 // ============================================================
 
 fn v_pattern_bindings(pat: Pattern, mut out: List<Str>) {
