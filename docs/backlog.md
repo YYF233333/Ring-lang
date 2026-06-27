@@ -721,9 +721,9 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 4. **全部通过 ✅**（2026-06-26）：llvm_diff ×3 209/209 ✅ + native E2E ✅（test:native-only 4/4 + test:native 3/3）+ 双 bootstrap ✅（45/45 文件字节一致）。修复：#208 emit_fn_body effect key qualified 化 + #209 find_enum_by_variant 名称碰撞。
 
 **Phase 2 — golden 快照 + 删除**（认证通过后）：
-1. 把 parity 认证的 llvm_diff 语料**快照成 golden 输出**，存为回归基准（取代 JS-oracle 的活对照）。
-2. 删 JS 后端：`codegen.ring` / `codegen_expr.ring` / `codegen_stmt.ring` / `runtime.ring`（JS runtime 拼接）+ llvm-addon 残留 + `--target=js` 路径 + llvm_diff 的 JS-oracle 执行（改 golden 对照）。
-3. `CLAUDE.md` / `design.md` 更新：JS 后端标归档；测试策略改 golden + 手写 E2E 期望值。
+1. ✅ 把 parity 认证的 llvm_diff 语料**快照成 golden 输出**，存为回归基准（取代 JS-oracle 的活对照）。
+2. ✅ 删 JS 后端：7 个 .ring 源文件 + 7 个 dist/ .js 文件删除（净减 ~15,000 行）；`cli.ring` 默认 target 改 `llvm`；`run` 子命令移除。
+3. `CLAUDE.md` / `design.md` 更新：JS 后端标归档；测试策略改 golden + 手写 E2E 期望值。**dist/ 决策（2026-06-27 拍板）：(C) 保留标 frozen——dist/ JS 作为紧急 stage 0 回退，不再 rebuild；有 CI 后再切 (B) 删除**。
 4. Web playground 若仍需 JS/WASM，单独评估（已排除 WasmGC，Web 由 LLVM→WASM 覆盖）。
 
 **验收标准**：
