@@ -1,11 +1,15 @@
-use utils::{parseInt, parseFloat, parse_and_double}
+use utils::{parse_int, parse_float, parse_and_double}
 
 fn main() {
-    let x = parseInt("100")
-    let y = parseFloat("2.5")
+    match parse_int("100") {
+        some(x) => print(x),
+        none => print("error"),
+    }
+    match parse_float("2.5") {
+        some(y) => print(y),
+        none => print("error"),
+    }
     let z = parse_and_double("21")
-    print(x)
-    print(y)
     print(z)
 }
 
