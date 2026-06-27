@@ -466,6 +466,9 @@ pub fn collect_free_vars(t: Type, mut result: Set<Int>) {
         Type::TupleType { elements } => {
             for e in elements { collect_free_vars(e, result) }
         },
+        Type::PtrType { pointee } => {
+            collect_free_vars(pointee, result)
+        },
         Type::EffectRowType { effects, tail } => {
             match tail { some(t_id) => { result.insert(t_id) }, none => {} }
             for e in effects {
@@ -1141,6 +1144,19 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
         match type_args.get(0) {
             some(arg) => { return make_option_type(resolve_type_expr(ctx, arg)) },
             none => {}
+        }
+    }
+
+    // Ptr<T>
+    if name == "Ptr" {
+        if type_args.len() == 1 {
+            match type_args.get(0) {
+                some(arg) => { return Type::PtrType { pointee: resolve_type_expr(ctx, arg) } },
+                none => {}
+            }
+        }
+        if type_args.len() == 0 {
+            return Type::PtrType { pointee: ctx.env.fresh_var() }
         }
     }
 

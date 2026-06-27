@@ -87,6 +87,8 @@ fn label_vars(names: Map<Int, Str>, t: Type) -> Type {
             },
         Type::TupleType { elements } =>
             Type::TupleType { elements: elements.map(fn(e) { label_vars(names, e) }) },
+        Type::PtrType { pointee } =>
+            Type::PtrType { pointee: label_vars(names, pointee) },
         Type::IntType => t,
         Type::FloatType => t,
         Type::StrType => t,

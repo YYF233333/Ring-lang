@@ -3346,3 +3346,31 @@ extern "C" void* ring_list_join(void* list, void* sep) {
     }
     return data;
 }
+
+// ============================================================
+// B-125: Raw memory primitives for Ptr<T>
+// These allocate/free raw memory WITHOUT RC headers.
+// Each "slot" is 8 bytes (uniform boxing: every Ring value is void*).
+// Int arguments arrive as tagged Ring Ints and are untagged here.
+// ============================================================
+
+extern "C" void* ring_raw_alloc(int64_t tagged_count) {
+    int64_t count = tagged_count >> 1;  // untag Ring Int
+    void* p = malloc((size_t)count * 8);
+    if (!p) {
+        fprintf(stderr, "ring_raw_alloc: out of memory (count=%lld)\n", (long long)count);
+        exit(1);
+    }
+    memset(p, 0, (size_t)count * 8);
+    return p;
+}
+
+extern "C" void ring_raw_dealloc(void* ptr, int64_t tagged_count) {
+    (void)tagged_count;  // count kept for API symmetry (sized-dealloc future)
+    free(ptr);
+}
+
+extern "C" void ring_ptr_copy(void* src, void* dst, int64_t tagged_count) {
+    int64_t count = tagged_count >> 1;  // untag Ring Int
+    memmove(dst, src, (size_t)count * 8);
+}

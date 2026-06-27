@@ -529,6 +529,7 @@ pub fn is_extern_handle_type(ty: Type, externs: Set<Str>) -> Bool {
 pub fn is_rc_excluded_type(ty: Type, externs: Set<Str>) -> Bool {
     match ty {
         Type::UnitType => true,
+        Type::PtrType { .. } => true,
         _ => is_extern_handle_type(ty, externs),
     }
 }
