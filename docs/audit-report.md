@@ -15,6 +15,49 @@
 
 ## LLVM Codegen
 
+### #218 default effect handler dispatch：sibling op 调用走错路径 [medium] [judgment] [open]
+
+`default_effect_sibling_op.ring` runtime assertion 失败："increment default should call overridden get"。default effect handler 的 sibling op 调用未正确 dispatch 到 override handler，走了 default 路径。
+
+**LLVM_SKIP**：`default_effect_sibling_op.ring`（e2e）、`default_effect_sibling.ring`（llvm golden）。修好后移除。
+
+发现者：B-151 CI
+
+### #219 effect handler 交互：custom effect + fail 组合 runtime crash [medium] [judgment] [open]
+
+`effect_custom_and_fail.ring`（"fail on bad port"）和 `effect_custom_multi_effect.ring`（"log called twice"）runtime assertion 失败。custom effect handler 与 fail effect 交互时 evidence 传递或 handler 栈有误。
+
+**LLVM_SKIP**：`effect_custom_and_fail.ring`、`effect_custom_multi_effect.ring`。修好后移除。
+
+发现者：B-151 CI
+
+### #220 exhaustive match + generic payload runtime crash [medium] [judgment] [open]
+
+`exhaustive_generic_payload.ring` runtime assertion "some-false" 失败。泛型 enum payload 在穷尽 match 的某个分支 codegen 有误（可能是 tag 比较或 payload 提取问题）。
+
+**LLVM_SKIP**：`exhaustive_generic_payload.ring`。修好后移除。
+
+发现者：B-151 CI
+
+### #221 struct match pattern + tuple eq dispatch runtime crash [medium] [judgment] [open]
+
+三个用例 runtime assertion 失败：`struct_match_pattern.ring`（"y-axis"）、`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。struct 的 match pattern 和 tuple 的 eq 比较在 LLVM 后端有 codegen 问题。
+
+**LLVM_SKIP**：`struct_match_pattern.ring`、`tuple_eq.ring`、`tuple_eq_struct.ring`。修好后移除。
+
+发现者：B-151 CI
+
+### #222 ring.exe check 行为与 in-process checker 不一致（2 个负向用例）[low] [judgment] [open]
+
+- `error_occurs_check.ring`：ring.exe check 无输出（预期 E0302），in-process checker 正确报错
+- `error_tuple_oob.ring`：ring.exe check panic（"unreachable: tuple index bounds already checked"）而非报 E0304
+
+两者均为 frozen dist-llvm 编译的 ring.exe 与最新 checker 源码的行为差异。可能在下次 dist-llvm rebuild 后自然修复。
+
+**LLVM_SKIP**：`error_occurs_check.ring`、`error_tuple_oob.ring`。修好后移除。
+
+发现者：B-151 CI
+
 ### #217 Perceus 未对 block-expr / IIFE 临时值插入 HIR 层 drop [low] [judgment] [open]
 
 block 表达式作为 if/match 条件（`if { let v = 5; v > 3 } { ... }`）和 IIFE（`(fn(x) { x * x })(5)`）产出的 owned 临时值在 HIR 层无显式 drop。codegen 层正确处理（unbox 后丢弃 / 调用后释放闭包），运行时无泄漏，但 verify_rc 静态检查报 `leak-temp`。
