@@ -84,10 +84,12 @@ trait Drop {
 **涉及修改**：
 5. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
 6. **`Weak<T>`（子项）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
+7. **try/catch codegen 改用栈分配 catch frame**：当前 codegen（`codegen_llvm_expr.ring`）使用 `ring_catch_push`/`ring_catch_pop`（每次 try/catch 堆分配+释放 RingCatchFrame）；`ring_runtime.cpp` 已有 `ring_try`（栈分配 RingCatchFrame，零堆开销）但未被使用。unwind 重写时一并切换到栈分配方案（2026-06-27 审计观察 #1 并入）
 
 **Phase 2 验收标准**：
 - abort 路径（fail.raise 穿越含 Drop 局部的函数）→ 所有 Drop 正确执行（invoke/landingpad）
 - `Rc<T>` 共享 Drop 类型 → 最后一个 Rc 消亡时 Drop 触发
+- try/catch 不再堆分配 CatchFrame
 - 全部 E2E + llvm_diff 通过；自举一致
 
 - **后续**：B-110（非 Drop 类型别名追踪）在 B-002 Phase 2 之后落地
