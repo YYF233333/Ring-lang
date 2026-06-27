@@ -48,7 +48,8 @@ pub fn lower_andor(program: HProgram) -> HProgram {
         derived_impls: program.derived_impls,
         boxed_vars: program.boxed_vars,
         static_dicts: program.static_dicts,
-        extern_type_names: program.extern_type_names
+        extern_type_names: program.extern_type_names,
+        drop_types: program.drop_types
     }
 }
 

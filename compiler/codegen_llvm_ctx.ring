@@ -241,7 +241,11 @@ pub struct LlvmCtx {
     // When no fn main() exists, C main calls these test functions in order.
     pub test_fns: List<Str>,
     // #215: counter for test body emission (indexes into test_fns)
-    pub test_emit_idx: Int
+    pub test_emit_idx: Int,
+
+    // B-002p1: types with user `impl Drop` — emit_drop_functions calls the user
+    // drop body before recursive field drops.
+    pub drop_types: Set<Str>
 }
 
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).

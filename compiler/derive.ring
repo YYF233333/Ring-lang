@@ -102,6 +102,8 @@ fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mu
         changed = false
         for ut in all_types {
             if known.contains(ut.name) { } else {
+                // B-002p1: Drop types cannot auto-derive Clone (mutual exclusion)
+                if trait_name == "Clone" && has_impl(env.trait_reg, ut.name, "Drop") { } else {
                 if has_manual_impl(env, ut.name, trait_name) { } else {
                     let result = try_derive(env, ut, trait_name, known)
                     match result {
@@ -113,6 +115,7 @@ fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mu
                         },
                         none => {},
                     }
+                }
                 }
             }
         }

@@ -66,6 +66,11 @@ pub const E0705: Str = "E0705"
 pub const E0706: Str = "E0706"
 pub const E0707: Str = "E0707"
 
+// E08xx = Ownership errors
+pub const E0801: Str = "E0801"
+pub const E0802: Str = "E0802"
+pub const E0803: Str = "E0803"
+
 pub const W0001: Str = "W0001"
 pub const W0002: Str = "W0002"
 
@@ -124,6 +129,9 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0705" { return "Relative path out of scope" }
     if code == "E0706" { return "Use declaration must appear before other declarations" }
     if code == "E0707" { return "Ambiguous import" }
+    if code == "E0801" { return "Use of moved value" }
+    if code == "E0802" { return "Drop-Clone conflict" }
+    if code == "E0803" { return "Drop method must not fail" }
     if code == "W0001" { return "Catch on expression with no fail effect" }
     if code == "W0002" { return "Refinement where clause not enforced" }
     "Unknown error"
@@ -137,6 +145,7 @@ pub fn error_category(code: Str) -> Str {
     if code.starts_with("E05") { return "trait" }
     if code.starts_with("E06") { return "pattern" }
     if code.starts_with("E07") { return "module" }
+    if code.starts_with("E08") { return "ownership" }
     if code.starts_with("W") { return "warning" }
     "unknown"
 }

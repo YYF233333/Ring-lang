@@ -144,7 +144,8 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                             derived_impls: hir.derived_impls,
                             boxed_vars: hir.boxed_vars,
                             static_dicts: hir.static_dicts,
-                            extern_type_names: filtered
+                            extern_type_names: filtered,
+                            drop_types: hir.drop_types
                         })
                     },
                     _ => {},

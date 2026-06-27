@@ -67,7 +67,9 @@ pub struct InferCtx {
     // fn_min_arity: function name -> minimum number of required (non-default) params
     pub fn_min_arity: Map<Str, Int>,
     // B-125: whether the current module context allows unsafe blocks
-    pub mod_unsafe_allowed: Bool
+    pub mod_unsafe_allowed: Bool,
+    // B-002p1: types with user `impl Drop` — collected during impl checking
+    pub drop_types: Set<Str>
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -90,7 +92,8 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
         fn_min_arity: map_new(),
-        mod_unsafe_allowed: false
+        mod_unsafe_allowed: false,
+        drop_types: set_new()
     }
 }
 

@@ -290,7 +290,10 @@ pub struct HProgram {
     // B-144: global set of extern type names, collected at checker phase across
     // all modules.  perceus / codegen_llvm / verify_rc read this instead of
     // re-collecting per-module (which misses use-imported extern types).
-    pub extern_type_names: Set<Str>
+    pub extern_type_names: Set<Str>,
+    // B-002p1: types with user `impl Drop` — perceus skips dup (move semantics),
+    // codegen calls user drop body in ring_drop_T, move checker prevents UAM.
+    pub drop_types: Set<Str>
 }
 
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case
@@ -531,6 +534,15 @@ pub fn is_rc_excluded_type(ty: Type, externs: Set<Str>) -> Bool {
         Type::UnitType => true,
         Type::PtrType { .. } => true,
         _ => is_extern_handle_type(ty, externs),
+    }
+}
+
+// B-002p1: check whether a type has user `impl Drop` (move semantics, no dup).
+pub fn is_user_drop_type(ty: Type, drop_types: Set<Str>) -> Bool {
+    match ty {
+        Type::StructType { name, .. } => drop_types.contains(name),
+        Type::EnumType { name, .. } => drop_types.contains(name),
+        _ => false
     }
 }
 

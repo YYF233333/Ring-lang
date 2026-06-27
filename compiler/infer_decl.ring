@@ -6,10 +6,10 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
     collect_extern_type_names, compare_by_first}
-use env::{TypeScheme, apply_subst, find_impl}
+use env::{TypeScheme, apply_subst, find_impl, has_impl}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705, E0707}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705, E0707, E0802, E0803}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
@@ -732,6 +732,51 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
             Decl::AssocType { .. } => {},  // Already handled above
             _ => {}
         }
+    }
+
+    // B-002p1: impl Drop validation
+    match trait_name {
+        some(tn) => {
+            if tn == "Drop" {
+                // Drop + Clone conflict: a Drop type cannot also impl Clone
+                if has_impl(ctx.env.trait_reg, target_type, "Clone") {
+                    let _ = type_error(ctx.sink, E0802,
+                        "type '${target_type}' cannot implement both Drop and Clone",
+                        span, DiagnosticContext::TraitError { detail: "Drop and Clone are mutually exclusive" })
+                }
+                // Drop method must not have fail effect
+                for hm in hmethods {
+                    match hm {
+                        HDecl::Fn { name: mname, effects: meff, span: mspan, .. } => {
+                            if mname == "drop" {
+                                for eff in meff.effects {
+                                    match eff {
+                                        Effect::FailEffect { .. } => {
+                                            let _ = type_error(ctx.sink, E0803,
+                                                "Drop::drop must not have fail effect",
+                                                mspan, DiagnosticContext::TraitError { detail: "drop must not fail" })
+                                        },
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+                // Register this type as a Drop type
+                ctx.drop_types.insert(target_type)
+            }
+            // Reverse check: Clone impl on a Drop type
+            if tn == "Clone" {
+                if has_impl(ctx.env.trait_reg, target_type, "Drop") || ctx.drop_types.contains(target_type) {
+                    let _ = type_error(ctx.sink, E0802,
+                        "type '${target_type}' cannot implement both Drop and Clone",
+                        span, DiagnosticContext::TraitError { detail: "Drop and Clone are mutually exclusive" })
+                }
+            }
+        },
+        none => {}
     }
 
     ctx.current_fn_bounds = saved_impl_bounds
@@ -2132,7 +2177,7 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     // static_dicts is populated by dict_lower (checker pipeline) — empty here.
     // B-144: collect extern type names from this module's HIR decls.
     let extern_names = collect_extern_type_names(hdecls)
-    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars, static_dicts: [], extern_type_names: extern_names }
+    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars, static_dicts: [], extern_type_names: extern_names, drop_types: ctx.drop_types }
 }
 
 pub fn resolve_type_expr_public(mut ctx: InferCtx, texpr: TypeExpr) -> Type {

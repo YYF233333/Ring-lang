@@ -72,6 +72,7 @@ pub fn register_builtins(mut env: TypeEnv) {
     register_option_eq(env)
     register_clone_trait(env)
     register_option_clone(env)
+    register_drop_trait(env)
     register_ord_trait(env)
     register_debug_trait(env)
     register_option_debug(env)
@@ -418,6 +419,30 @@ fn register_clone_trait(mut env: TypeEnv) {
             assoc_types: map_new()
         })
     }
+}
+
+// ============================================================
+// register_drop_trait: Drop trait (B-002p1)
+// ============================================================
+
+fn register_drop_trait(mut env: TypeEnv) {
+    let self_var_id = env.fresh_var_id()
+    let self_var = Type::TypeVar { id: self_var_id, name: none }
+
+    // drop(self) -> Unit, with {io} effect (allows flush/log/close)
+    let io_row = EffectRow { effects: [Effect::IoEffect], tail: none }
+    let drop_fn = Type::FnType { params: [self_var], return_type: UNIT, effects: io_row }
+
+    env.trait_reg.traits.insert("Drop", TraitDef {
+        name: "Drop",
+        type_params: [],
+        type_param_vars: [self_var_id],
+        methods: [
+            TraitMethodDef { name: "drop", ty: drop_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
+        ],
+        supertraits: [],
+        assoc_types: []
+    })
 }
 
 // ============================================================

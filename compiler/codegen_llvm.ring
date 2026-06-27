@@ -1312,6 +1312,30 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
 
                 let data_ptr = LLVMGetParam(fn_val, 0)
 
+                // B-002p1: if this type has user `impl Drop`, call the user
+                // drop body BEFORE recursive field drops (user can access
+                // fields for cleanup; compiler drops fields after).
+                if ctx.drop_types.contains(sname) {
+                    let user_drop_name = llvm_mangle_method(sname, "drop")
+                    match ctx.functions.get(user_drop_name) {
+                        some(user_fn) => {
+                            match ctx.fn_types.get(user_drop_name) {
+                                some(user_fn_ty) => {
+                                    discard(LLVMBuildCall2(ctx.builder, user_fn_ty, user_fn, [data_ptr], ""))
+                                },
+                                none => {
+                                    // Fallback: construct fn type (ptr) -> void
+                                    let fallback_ty = LLVMFunctionType(void, [ptr], 0)
+                                    discard(LLVMBuildCall2(ctx.builder, fallback_ty, user_fn, [data_ptr], ""))
+                                }
+                            }
+                        },
+                        none => {
+                            eprintln("[drop-warn] user drop method '${user_drop_name}' not found for Drop type '${sname}'")
+                        }
+                    }
+                }
+
                 // For each field, GEP + load + ring_drop.
                 // B-104 D1 rule ① (audit #139): skip fields whose Ring type is
                 // (or transitively contains) an extern handle — ring_drop on a
@@ -1680,7 +1704,8 @@ fn init_llvm_context(module_name: Str) -> LlvmCtx {
         extern_fn_infos: map_new(),
         handle_cleanup_stack: [],
         test_fns: [],
-        test_emit_idx: 0
+        test_emit_idx: 0,
+        drop_types: set_new()
     }
 }
 
@@ -1739,6 +1764,9 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
 
     // B-144: use program-level extern type names (global set, covers use-imports).
     for en in program.extern_type_names { ctx.extern_types.insert(en) }
+
+    // B-002p1: types with user impl Drop
+    for dt in program.drop_types { ctx.drop_types.insert(dt) }
 
     // B-104 D4: static dict singleton definitions (resolve_static_dict_by_name
     // builds wrapped instances from these).
@@ -1810,6 +1838,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         register_effect_ops_llvm(program.decls, ctx.effect_ops)
         // B-144: use program-level extern type names (global set, covers use-imports).
         for en in program.extern_type_names { ctx.extern_types.insert(en) }
+        // B-002p1: types with user impl Drop (union across modules).
+        for dt in program.drop_types { ctx.drop_types.insert(dt) }
         // B-104 D4: union of all modules' static dict singleton definitions.
         // Instance names deterministically encode their structure
         // (dict_instance_name), so same-name entries from different modules are

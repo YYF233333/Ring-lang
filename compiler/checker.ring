@@ -1,16 +1,18 @@
 use types::{Type, UNIT}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
-use hir::{HDecl, HProgram, compare_by_first}
+use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
+    HStringInterpPart, HEffectHandler,
+    compare_by_first, is_user_drop_type, hexpr_type}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_prelude_decl}
 use dict_lower::{lower_dicts}
 use andor_lower::{lower_andor}
-use infer_ctx::{InferCtx}
+use infer_ctx::{InferCtx, type_error}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
-use codes::{E0702, E0703, E0705, E0707}
+use codes::{E0702, E0703, E0705, E0707, E0801}
 use parser::{parse}
 use union_find::{UnionFind}
 use unify::{empty_subst}
@@ -140,7 +142,8 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
         fn_min_arity: map_new(),
-        mod_unsafe_allowed: false
+        mod_unsafe_allowed: false,
+        drop_types: set_new()
     }
 }
 
@@ -154,7 +157,11 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     // B-104 D7: lower `&&`/`||` to if-else (andor_lower), then B-104 D4:
     // first-class the dict evidence (static singleton set + local
     // constructions for dynamic wrapped dicts) — both before perceus/codegen.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names }
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types }
+    // B-002p1: check for use-after-move on Drop types (before lowering)
+    if assembled.drop_types.len() > 0 {
+        check_drop_moves(assembled, ctx.sink)
+    }
     CheckResult {
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
@@ -172,7 +179,11 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
     // B-104 D7 + D4: see check() above.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names }
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types }
+    // B-002p1: check for use-after-move on Drop types (before lowering)
+    if assembled.drop_types.len() > 0 {
+        check_drop_moves(assembled, ctx.sink)
+    }
     CheckResult {
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
@@ -415,5 +426,239 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                 }
             },
         }
+    }
+}
+
+// ============================================================
+// B-002p1: Move checker for Drop types
+// Walks HIR in program order to detect use-after-move.
+// Phase 1 simplification: no branch/loop analysis — any move
+// in any branch marks the variable as consumed for all
+// subsequent uses in the same function scope.
+// ============================================================
+
+fn check_drop_moves(program: HProgram, mut sink: CollectingSink) {
+    for decl in program.decls {
+        match decl {
+            HDecl::Fn { body, .. } => {
+                let mut consumed: Map<Str, Span> = map_new()
+                check_moves_expr(body, consumed, program.drop_types, sink)
+            },
+            HDecl::Impl { methods, .. } => {
+                for m in methods {
+                    match m {
+                        HDecl::Fn { body, .. } => {
+                            let mut consumed: Map<Str, Span> = map_new()
+                            check_moves_expr(body, consumed, program.drop_types, sink)
+                        },
+                        _ => {}
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
+fn check_consumed(name: Str, ty: Type, span: Span, consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
+    if is_user_drop_type(ty, drop_types) {
+        match consumed.get(name) {
+            some(_) => {
+                let _ = type_error(sink, E0801,
+                    "use of moved value: '${name}'",
+                    span, DiagnosticContext::OtherContext { detail: some("value was previously moved") })
+            },
+            none => {}
+        }
+    }
+}
+
+fn try_consume_ident(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>) {
+    match expr {
+        HExpr::Ident { name, ty, span, .. } => {
+            if is_user_drop_type(ty, drop_types) {
+                consumed.insert(name, span)
+            }
+        },
+        _ => {}
+    }
+}
+
+fn check_moves_expr(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
+    match expr {
+        HExpr::Ident { name, ty, span, .. } => {
+            check_consumed(name, ty, span, consumed, drop_types, sink)
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for s in stmts {
+                check_moves_stmt(s, consumed, drop_types, sink)
+            }
+            match tail {
+                some(t) => check_moves_expr(t, consumed, drop_types, sink),
+                none => {}
+            }
+        },
+        HExpr::Call { callee, args, .. } => {
+            check_moves_expr(callee, consumed, drop_types, sink)
+            for arg in args {
+                check_moves_expr(arg, consumed, drop_types, sink)
+                // After using a Drop-type arg, consume it (move into callee)
+                try_consume_ident(arg, consumed, drop_types)
+            }
+        },
+        HExpr::FieldAccess { receiver, .. } => {
+            check_moves_expr(receiver, consumed, drop_types, sink)
+        },
+        HExpr::BinOp { left, right, .. } => {
+            check_moves_expr(left, consumed, drop_types, sink)
+            check_moves_expr(right, consumed, drop_types, sink)
+        },
+        HExpr::UnaryOp { operand, .. } => {
+            check_moves_expr(operand, consumed, drop_types, sink)
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            check_moves_expr(condition, consumed, drop_types, sink)
+            check_moves_expr(then_branch, consumed, drop_types, sink)
+            match else_branch {
+                some(eb) => check_moves_expr(eb, consumed, drop_types, sink),
+                none => {}
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            check_moves_expr(scrutinee, consumed, drop_types, sink)
+            for arm in arms {
+                match arm.guard {
+                    some(g) => check_moves_expr(g, consumed, drop_types, sink),
+                    none => {}
+                }
+                check_moves_expr(arm.body, consumed, drop_types, sink)
+            }
+        },
+        HExpr::StructLit { fields, spread, .. } => {
+            for f in fields {
+                check_moves_expr(f.value, consumed, drop_types, sink)
+            }
+            match spread {
+                some(s) => check_moves_expr(s, consumed, drop_types, sink),
+                none => {}
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for f in fields {
+                check_moves_expr(f.value, consumed, drop_types, sink)
+            }
+            match spread {
+                some(s) => check_moves_expr(s, consumed, drop_types, sink),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for p in parts {
+                match p {
+                    HStringInterpPart::Expression(e) => check_moves_expr(e, consumed, drop_types, sink),
+                    HStringInterpPart::Literal(_) => {}
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            check_moves_expr(body, consumed, drop_types, sink)
+            for arm in arms {
+                check_moves_expr(arm.body, consumed, drop_types, sink)
+            }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            check_moves_expr(body, consumed, drop_types, sink)
+            for h in handlers {
+                check_moves_expr(h.body, consumed, drop_types, sink)
+            }
+        },
+        HExpr::Lambda { body, .. } => {
+            check_moves_expr(body, consumed, drop_types, sink)
+        },
+        HExpr::EffectOp { args, .. } => {
+            for a in args { check_moves_expr(a, consumed, drop_types, sink) }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            check_moves_expr(start, consumed, drop_types, sink)
+            check_moves_expr(end, consumed, drop_types, sink)
+        },
+        HExpr::ListLit { elements, .. } => {
+            for e in elements { check_moves_expr(e, consumed, drop_types, sink) }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for e in elements { check_moves_expr(e, consumed, drop_types, sink) }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            check_moves_expr(receiver, consumed, drop_types, sink)
+            check_moves_expr(index, consumed, drop_types, sink)
+        },
+        HExpr::ReturnExpr { value, .. } => {
+            match value {
+                some(v) => check_moves_expr(v, consumed, drop_types, sink),
+                none => {}
+            }
+        },
+        HExpr::Clone { inner, .. } => {
+            check_moves_expr(inner, consumed, drop_types, sink)
+        },
+        HExpr::UnsafeBlock { body, .. } => {
+            check_moves_expr(body, consumed, drop_types, sink)
+        },
+        HExpr::DictConstruct { .. } => {},
+        // Literals — no sub-expressions
+        HExpr::IntLit { .. } => {},
+        HExpr::FloatLit { .. } => {},
+        HExpr::StrLit { .. } => {},
+        HExpr::BoolLit { .. } => {},
+    }
+}
+
+fn check_moves_stmt(stmt: HStmt, mut consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
+    match stmt {
+        HStmt::Let { init, .. } => {
+            check_moves_expr(init, consumed, drop_types, sink)
+            // If init is a bare Ident of Drop type, consume the source
+            try_consume_ident(init, consumed, drop_types)
+        },
+        HStmt::Var { init, .. } => {
+            check_moves_expr(init, consumed, drop_types, sink)
+            try_consume_ident(init, consumed, drop_types)
+        },
+        HStmt::Assign { target, value, .. } => {
+            check_moves_expr(target, consumed, drop_types, sink)
+            check_moves_expr(value, consumed, drop_types, sink)
+        },
+        HStmt::ExprStmt { expr, .. } => {
+            check_moves_expr(expr, consumed, drop_types, sink)
+        },
+        HStmt::Return { value, .. } => {
+            match value {
+                some(v) => check_moves_expr(v, consumed, drop_types, sink),
+                none => {}
+            }
+        },
+        HStmt::While { condition, body, .. } => {
+            check_moves_expr(condition, consumed, drop_types, sink)
+            check_moves_expr(body, consumed, drop_types, sink)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            check_moves_expr(iterable, consumed, drop_types, sink)
+            check_moves_expr(body, consumed, drop_types, sink)
+        },
+        HStmt::Break { .. } => {},
+        HStmt::Continue { .. } => {},
+        HStmt::LetDestructure { init, .. } => {
+            check_moves_expr(init, consumed, drop_types, sink)
+        },
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            check_moves_expr(expr, consumed, drop_types, sink)
+            check_moves_expr(then_block, consumed, drop_types, sink)
+            match else_block {
+                some(eb) => check_moves_expr(eb, consumed, drop_types, sink),
+                none => {}
+            }
+        },
+        HStmt::Drop { .. } => {},
+        HStmt::Dup { .. } => {},
     }
 }
