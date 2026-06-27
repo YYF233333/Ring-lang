@@ -764,6 +764,49 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 多 .o 链接产出与单 Module 行为一致
 - 全部 E2E + llvm_diff 通过；自举一致
 
+### B-155 自编译 IR 非确定性：字符串常量含堆地址 [bugfix] [P2] [L] [judgment] [queued] [deferred: B-152]
+
+> 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。
+
+**现象**：`ring.exe build compiler/main.ring --target=llvm` 两次编译产出的 LLVM IR 不一致。84 个字符串常量（64 个 109 字节 + 20 个 1409 字节）包含编译进程的堆地址，每次运行不同。代码段（反汇编）完全一致，差异仅在 `.rdata` 常量池。
+
+**已排除**：
+- Map 迭代顺序：IR 差异不是函数/声明顺序问题，而是字符串常量内容差异
+- LLVM O2 非确定性：差异在 Ring 产出的 IR 层，不在 LLVM 优化层
+- extern fn marshalling 错误：编译后 IR 确认 `ring_str_to_cstr` 被正确调用
+
+**根因线索**：
+- 所有受影响常量由 `LLVMBuildGlobalStringPtr` 创建（经 `ring_str_to_cstr` 提取 `const char*`）
+- 可见文本长度 24-31 字符，但常量分别是 109/1409 字节——`std::string` 内容超出可见文本，含二进制数据（堆指针）
+- 简单程序（`tests/cases/`）不受影响，仅自编译（大代码量）时出现
+- 疑似 `std::string` 操作中的内存越界读取或内容污染，与 MSVC STL 内部表示相关
+
+**涉及修改**：
+1. 定位哪个代码路径导致 `std::string` 内容被污染（可能需 ASan 或 valgrind 辅助）
+2. 修复 `ring_runtime.cpp` 或编译器 codegen 中的相关 bug
+
+**验收标准**：
+- `ring.exe build compiler/main.ring --target=llvm` 两次编译产出字节一致的 `ring_output.ll`
+- CI bootstrap（self-compile ×3 一致性检查）通过
+
+---
+
+### B-154 CLI arg parser：支持 `--flag value` 空格分隔形式 [bugfix] [P3] [S] [mechanical] [queued]
+
+> 2026-06-27 立项（Discussion，B-151 CI Worker 通知）。
+
+**现状**：`ring.exe` 的 `--out-dir` 等参数只接受 `--out-dir=<path>`（等号形式），不接受 `--out-dir <path>`（空格分隔）。空格分隔是绝大多数 CLI 工具的标准行为，当前行为违反用户预期。
+
+**涉及修改**：
+1. `compiler/main.ring`（或 arg parsing 所在模块）：解析 `--flag` 时检查下一个 argv 元素作为值
+
+**验收标准**：
+- `ring.exe build foo.ring --out-dir=path` 和 `ring.exe build foo.ring --out-dir path` 行为一致
+- 所有接受值的 flag（`--out-dir`, `--target`, `--error-format` 等）均支持两种形式
+- 现有等号形式不受影响
+
+---
+
 ## 架构：后端策略（2026-06-27 更新）
 
 **LLVM 是唯一后端。** JS codegen 后端已归档（B-100 Phase 2，commit `5df6c99`，2026-06-27）。dist/ JS 编译产出冻结作 stage 0 回退。

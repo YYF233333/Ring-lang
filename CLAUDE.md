@@ -104,7 +104,7 @@ Ring-lang/
 
 ### 基础设施
 
-- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows。Linux CI 待后续
+- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows（check + test 两阶段；bootstrap 因 B-155 IR 非确定性暂禁用）。Linux CI 待后续
 - 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
 - Checker 多错误恢复是 declaration 级（同一函数内停于首错）
 - LSP 暂不可用（TS 实现未移植）
