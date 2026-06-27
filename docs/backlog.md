@@ -359,53 +359,22 @@ fn test_fetch() {
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
-### B-125 unsafe effect + `Ptr<T>` 原语全链路 [feature] [P1] [XL] [judgment] [doing]
+### B-156 extern fn 声明处 `requires {unsafe}` 签字检查 [feature] [P2] [M] [judgment] [queued]
 
-> 2026-06-13 立项（Discussion，B-106 design-probe 正文拍定后的实现项）。2026-06-27 P3→P1 提升 + 实施规划（Discussion，路线图重定 + read/take 拆分决策 + 4-wave 实施计划）。**设计真值 = design.md §7.12**（三栏总账 + unsafe effect 两级 discharge + `Ptr<T>` 形态 + 原语集 v1 + extern fn 声明处签字 + 跨界三件套）。**前置 B-104 已完成。B-151 CI 之后立即启动。**
+> 2026-06-27 从 B-125 拆出。B-125 core 完成但 extern fn 签字检查推迟——当前无文件级 `requires` 语法（327 个 extern fn 声明分布在 19 个文件顶层，无 `mod` 块包装），需先设计文件级 `requires` 语法。
 
-**2026-06-27 Discussion 决策摘要**：
-- **Ptr<T> 注册方式**：新增内建类型 variant `PtrType { pointee: Type }`（与 ListType/OptionType 同级），不复用 extern type
-- **原语实现形式**：`alloc<T>` / `dealloc<T>` / `copy` 为顶层 builtin；`read` / `take` / `write` / `offset` / `cast` / `addr` 为 `Ptr<T>` 方法；`from_addr<T>` 为静态构造
-- **read/take 拆分**：原 `read`（move out）拆为 `read`（peek + dup/RC+1）+ `take`（move out 不 dup）。动机：RIIR 容器 `get()` 是最高频操作，read=move 需三步（read+dup+write_back），拆分后一行完成
-- **命名**：`alloc` / `dealloc`（对称，不用 `free`）
-- **extern fn safe 覆盖**：B-125 不做，全部 extern fn 一律 unsafe，后续单独加 `extern safe fn`
+**前置**：文件级 `requires` 语法设计
 
-**4-Wave 实施计划**：
-
-**Wave 1：语言骨架**（纯类型+effect 管道，无原语）
-1. Lexer：`TkUnsafe` 关键字
-2. Parser：`unsafe { expr }` 块表达式 → AST `UnsafeBlock` 节点
-3. HIR：`UnsafeBlock` lowering
-4. Effect 枚举：`UnsafeEffect` variant + 全部 match 分支（types.ring ~6 处）
-5. Checker：`unsafe {}` 块 discharge unsafe effect；模块级 `requires {unsafe}` 检查（激活已解析但未 enforce 的路径）
-6. 负面测试：未 discharge / 模块未 requires → 编译错误
-
-**Wave 2：Ptr<T> 类型 + 核心原语**
-1. 内建类型 `PtrType { pointee: Type }`：注册到类型系统，RC 排除（复用 `is_rc_excluded_type` 模式）
-2. unsafe 原语（产生 unsafe effect）：`alloc<T>(count)` / `dealloc<T>(p, count)` / `p.read()` / `p.take()` / `p.write(v)` / `p.offset(i)` / `copy(src, dst, count)`
-3. safe 原语：`p.cast<U>()` / `p.addr()` / `Ptr::from_addr<T>(a)`
-4. runtime：`ring_raw_alloc` / `ring_raw_dealloc` / `ring_ptr_read` / `ring_ptr_take` / `ring_ptr_write` / `ring_ptr_offset` / `ring_ptr_copy`（裸内存操作，不含 RC header）
-5. Codegen LLVM：原语映射（`alloc` → `malloc`，`read` → load+dup，`take` → load，`write` → store，`offset` → `getelementptr inbounds`）
-
-**Wave 3：extern fn 签字 + Perceus 验证**
-1. extern fn 声明处 `requires {unsafe}` 检查
-2. std/ 批量迁移（extern 声明模块加 `mod requires {unsafe}`）
-3. Perceus/verify_rc：验证 read/take/write 落入既有 return-mode 分类（零特殊化）
-4. E2E + llvm_diff 全量 ×3 + ASan-clean
-
-**Wave 4：工具 + 收尾**
-1. `ring audit unsafe` 子命令
-2. 安全封装 demo：Ptr buffer + len/cap 的容器原型（内部 unsafe、pub 签名纯净）
-3. 字段投影（`@repr(C)` 门票，可后置子项）
-4. per-type 三件套 demo（List/Str 的 as_ptr/from_raw_parts/into_raw_parts）
+**涉及修改**：
+1. Parser：文件级 `requires { effects }` 语法（文件开头，声明之前）
+2. Checker：extern fn 声明所在模块必须有 `requires {unsafe}`
+3. 19 个文件批量迁移（加文件级 `requires {unsafe}`）
+4. `ring audit unsafe` 子命令（列全代码库 discharge 点 + extern 声明点）
 
 **验收标准**：
-- 未 discharge 使用原语 = 编译错误（负面测试两类：无 unsafe 块 / 模块未 requires）
-- 安全封装成立：Ptr buffer + len/cap 容器 demo 内部 unsafe、pub 签名纯净，E2E 行为正确
-- read（peek）可重复调用不破坏 buffer slot；take（move out）后重复 take = double-free（签字内容）
-- read/take/write 所有权语义过 verify_rc 三判据；llvm_diff 全量 ×3（动 RC 纪律）+ ASan-clean
-- `ring audit unsafe` 输出全部 discharge 点
-- per-type 三件套（List/Str 的 as_ptr/from_raw_parts/into_raw_parts）可用且 E2E 覆盖
+- 无 `requires {unsafe}` 的文件中 extern fn 声明 → 编译错误
+- 现有 std/ + compiler/ extern fn 全部通过（迁移后）
+- 自举一致
 
 ## RIIR
 

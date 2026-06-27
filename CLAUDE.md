@@ -86,6 +86,7 @@ Ring-lang/
 - **Handler 只支持 tail-resumptive + abort**：非 abort effect 的 handler 返回值即 resume 值；`fail.raise` 为 abort。Full AE（post-resume / multi-resume）不计划实现
 - **Trait dictionary dispatch 的 evidence 转发已基本修复**（#77），delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）。**Default trait method + custom effect 的 evidence 转发已修复**（B-139，2026-06-24）；**default trait methods 已支持**（B-141，2026-06-24）
 - **`catch` 总是消除 fail effect**：完整捕获点，catch arms 经穷尽性检查。需要部分处理时在 catch 内部 match + re-raise
+- **`unsafe` effect + `Ptr<T>` 已实现**（B-125 ✅）：`unsafe { expr }` discharge 块 + `mod requires {unsafe}` 两级许可 + `Ptr<T>` 内建类型（RC 排除）+ 原语集 v1（alloc/dealloc/read/take/write/offset/cast/addr/from_addr/ptr_copy）。`read` = peek+dup，`take` = move out。extern fn 声明处签字检查推迟（B-156，需文件级 `requires` 语法）
 
 ### 类型系统
 
@@ -114,7 +115,7 @@ Ring-lang/
 
 **当前**：**B-100 JS 退役完成 ✅**——Phase 1 ✅（P1.1 覆盖矩阵 → P1.2 gap 修复 → P1.3 对抗 review → P1.4 全部通过）+ **Phase 2 ✅**（golden .expected 快照建立 210+ 文件 + JS codegen 删除 `5df6c99` + 文档更新）。里程碑：B-099 ✅ B-089 ✅ B-104 ✅ B-080 ✅ B-122 ✅ B-138 ✅。测试状态以 `npm test` / `npm run test:llvm` 实跑为准，不在此记录具体计数。
 
-**后续**：B-151 CI ✅ → B-125 unsafe/Ptr<T> → B-002p1 精简 Drop → B-152 RIIR std → B-002p2 unwind 补全；后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
+**后续**：B-151 CI ✅ → B-125 unsafe/Ptr<T> ✅ → **B-002p1 精简 Drop** → B-152 RIIR std → B-002p2 unwind 补全；后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
 
 **基础设施**：B-151 CI 重设计 ✅（Python runner + GitHub Actions Windows CI，零 Node 依赖）
 

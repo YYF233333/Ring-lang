@@ -26,3 +26,7 @@ alloc/dealloc/copy 走 runtime 函数（涉及 malloc/free/memmove），read/tak
 ### 4. [通知] 1 个 pre-existing flaky test
 
 `impl_bounds.ring` 间歇性 runtime crash。与 Ptr 改动无关，多次跑约 1/3 出现。
+
+### 5. [通知] Wave 3 extern fn 签字推迟（用户拍板 C）
+
+所有 327 个 extern fn 声明分布在 19 个文件顶层，无 `mod` 块包装。当前无文件级 `requires` 语法，强行迁移需 (A) 加 parser 语法 或 (B) 包装全部文件——工作量/风险不匹配。用户拍板推迟，extern fn 签字检查不进 B-125 scope，后续单独立项（需先设计文件级 `requires` 语法）。
