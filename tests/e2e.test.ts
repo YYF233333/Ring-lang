@@ -70,12 +70,7 @@ const LLVM_SKIP = new Set([
 ]);
 
 // Module dirs not supported by LLVM backend.
-// extern_type: bootstrap-only extern fns (parseFloat/parseInt → FloatBox) have no
-// runtime mapping; extern types require foreign (non-RC) pointers that can't be
-// fabricated from the ring_runtime API.  The mechanism itself works (see
-// tests/cases/llvm/extern_handle_rc_exclusion.ring for compile-time coverage).
 const LLVM_MODULE_SKIP = new Set([
-  "extern_type",
 ]);
 
 // ============================================================
