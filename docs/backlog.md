@@ -7,11 +7,14 @@
 > 反馈分支：`doing` → `waiting-feedback`（Worker 遇到设计问题）→ Discussion 处理后 → `queued`（重新排队）
 > 工作流规范见 `docs/workflow.md`
 
-## 层 3 排序（2026-06-05 Discussion 定，native + JS 退役全部完成后启动）
+## 层 3 排序（2026-06-27 Discussion 重定，JS 退役完成后启动）
 
-B-002 Drop/RAII(L2) → async(B-007) → Refinement(B-001, 需 Z3 + B-070 const generics)；M 项（B-072 Union / B-070 固定数组）当 XL 间换气穿插；P3 研究（GADTs/dyn/GATs）最后。
+B-151 CI → B-125 unsafe/Ptr<T> (XL) → B-002p1 精简 Drop (L) → B-152 RIIR std (XL) → B-002p2 unwind 补全 (L)；后续 B-110 别名追踪 → B-068 用户面。async 线（B-116 probe → B-007）和类型系统线（B-001 Refinement 需 B-070）在 RIIR 之后。M 项当 XL 间换气穿插；P3 研究最后。
 
-> B-068 用户面（`x: mut T` / `x: move T` / 闭包捕获列表 / pub 签名规则）在 B-110 落地后再立项——模型见 design.md §7.2-7.8。值类型 auto-box 待讨论（#181 审计发现触发）。
+> **战略**：unsafe + Ptr<T> → 精简 Drop → RIIR 标准库，让 Ring 拥有自己的底层，消除 C++ STL 依赖。
+> B-002 拆两阶段：Phase 1 精简版（scope-end Drop，够 RIIR 用）先行；Phase 2 unwind（invoke/landingpad）RIIR 之后补。
+> B-111 LLM eval harness 在开发进入正轨后再排。
+> B-068 用户面在 B-110 落地后再立项——模型见 design.md §7.2-7.8。
 
 ---
 
@@ -35,9 +38,11 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 - **可判定片段条款（2026-06-12 D-5 拍板，公理⑤做实）**：SMT 查询限于**具名可判定片段**（QF_LIA + enum/bool 等式类，Liquid-style；具体片段定义 = lang-design §10 TODO「Refinement types 的可判定片段定义」，实现前必须完成）；超出片段 = 编译错误，要求显式 runtime check 兜底。**禁止 timeout 语义**——SMT timeout 即「耗时不可预期」，违反公理⑤
 - **含 const generic 参数谓词**（2026-05-25，原 B-003 吸收）：refinement predicates 作用于 const generic 参数（如 `where N > 0`）归入本 item 的 SSA 约束传播。详见 design.md 1.3
 
-### B-002 Drop / RAII [feature] [P2] [XL] [judgment] [queued]
+### B-002 Drop / RAII [feature] [P1] [XL] [judgment] [queued]
 
-> 2026-06-24 重新设计（Discussion，资源管理模型重构）。**真值源 = design.md §7.6（2026-06-24 版）**。Perceus 分层 L2——在 L0/L1 RC 核心之上实现用户 `impl Drop` + 全路径 RAII。
+> 2026-06-24 重新设计（Discussion，资源管理模型重构）。2026-06-27 拆两阶段（Discussion，路线图重定）。**真值源 = design.md §7.6（2026-06-24 版）**。Perceus 分层 L2——在 L0/L1 RC 核心之上实现用户 `impl Drop` + 全路径 RAII。
+
+**拆分决策（2026-06-27）**：Phase 1 精简版（scope-end Drop + move checker，够 RIIR 用）先行，不含 unwind；Phase 2 补 invoke/landingpad unwind，B-152 RIIR 之后。
 
 **Drop trait**：
 
@@ -57,26 +62,35 @@ trait Drop {
 - 容器持有 Drop 值 → 容器 drop 时自动 drop 所有元素
 - 非 Drop 类型的 RC 环泄漏：接受（同 Koka），编译器对可能自引用的类型定义发 warning 并建议 arena+index 或 Weak
 
+#### Phase 1: 精简版 Drop [P1] [L] — B-125 之后、B-152 RIIR 之前
+
+**前置**：B-125（unsafe/Ptr<T>，RIIR 容器的 Drop 需要 dealloc 原语）
+
 **涉及修改**：
 1. **checker**：`impl Drop` 注册 + `impl Drop` 禁 `impl Clone` 检查 + Drop 方法 effect 约束（禁 fail）
 2. **checker：简单 move checker（consumed-flag）**——Drop 类型 `let y = x` 标记 x 为 consumed，后续使用 x 报编译错误（E07xx）。纯变量级线性扫描，不需要别名追踪/mutation 推断/NLL。`--error-format=llm` 提示 "x was moved to y"
 3. **codegen_llvm**：Drop glue 生成——per-type `drop_T` 函数（用户 `impl Drop` body + 字段递归 drop）；复合类型自动 derive
-4. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
-5. **perceus**：Drop 类型的 RC 行为——auto-move 不 dup（由 sub-item 2 的 checker 保证），scope-end drop 恒释放
-6. **`Weak<T>`（子项，后续）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
+4. **perceus**：Drop 类型的 RC 行为——auto-move 不 dup（由 sub-item 2 的 checker 保证），scope-end drop 恒释放
 
-**验收标准**：
+**Phase 1 验收标准**：
 - `impl Drop for T` 可编译，scope-end 触发 Drop
 - Drop 内 `fail.raise` → 编译错误
-- abort 路径（fail.raise 穿越含 Drop 局部的函数）→ 所有 Drop 正确执行（invoke/landingpad）
 - struct 含 Drop 字段 → 自动 Drop 按字段声明序
 - Drop 类型 auto-move：`let g = f`（Drop）→ 后续使用 f 编译错误
+- 全部 E2E + llvm_diff 通过；自举一致
+
+#### Phase 2: Unwind 补全 [P2] [L] [deferred: B-152]
+
+**涉及修改**：
+5. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
+6. **`Weak<T>`（子项）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
+
+**Phase 2 验收标准**：
+- abort 路径（fail.raise 穿越含 Drop 局部的函数）→ 所有 Drop 正确执行（invoke/landingpad）
 - `Rc<T>` 共享 Drop 类型 → 最后一个 Rc 消亡时 Drop 触发
 - 全部 E2E + llvm_diff 通过；自举一致
 
-- **后续**：B-110（非 Drop 类型别名追踪）在 B-002 之后落地。两者都完成后再做整体优化
-- **复杂度**：XL（abort-unwind 改 LLVM invoke/landingpad 是最重的部分）
-- **优先级**：P2，层 3 前完成
+- **后续**：B-110（非 Drop 类型别名追踪）在 B-002 Phase 2 之后落地
 
 
 
@@ -343,9 +357,9 @@ fn test_fetch() {
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
-### B-125 unsafe effect + `Ptr<T>` 原语全链路 [feature] [P3] [XL] [judgment] [queued]
+### B-125 unsafe effect + `Ptr<T>` 原语全链路 [feature] [P1] [XL] [judgment] [queued]
 
-> 2026-06-13 立项（Discussion，B-106 design-probe 正文拍定后的实现项，用户拍板 P3）。**设计真值 = design.md §7.12**（三栏总账 + unsafe effect 两级 discharge + `Ptr<T>` 形态 + 原语集 v1 + extern fn 声明处签字 + 跨界三件套）。**时序：B-104 落地后**（动 checker/effect/双后端 codegen，避免与 milestone 并发；同 B-117/B-118/B-121 约定）。
+> 2026-06-13 立项（Discussion，B-106 design-probe 正文拍定后的实现项）。2026-06-27 P3→P1 提升（Discussion，路线图重定：unsafe 是 RIIR 前置）。**设计真值 = design.md §7.12**（三栏总账 + unsafe effect 两级 discharge + `Ptr<T>` 形态 + 原语集 v1 + extern fn 声明处签字 + 跨界三件套）。**前置 B-104 已完成。B-151 CI 之后立即启动。**
 
 **涉及修改**：
 1. Lexer/Parser：`unsafe { ... }` 块、`mod name requires {unsafe}`（复用 mod capability 语法）。
@@ -364,6 +378,47 @@ fn test_fetch() {
 - `ring audit unsafe` 输出全部 discharge 点
 - per-type 三件套（List/Str 的 as_ptr/from_raw_parts/into_raw_parts）可用且 E2E 覆盖
 
+## RIIR
+
+### B-152 RIIR 标准库（纯 Ring 重写 ring_runtime.cpp）[feature] [P1] [XL] [judgment] [queued] [deferred: B-002p1]
+
+> 2026-06-27 立项（Discussion，路线图重定）。消除 C++ STL 依赖，让 Ring 真正拥有自己的底层。容器（Str/List/Map/Set）全部用纯 Ring + `Ptr<T>` + Drop 重写。
+
+**前置**：B-125（unsafe/Ptr<T> 原语）+ B-002 Phase 1（精简版 Drop）
+
+**分阶段实施**（各阶段可独立提交）：
+
+| 阶段 | 内容 | 量 |
+|------|------|----|
+| P1 | Str — `Ptr<U8>` + len + cap，替换 std::string | L |
+| P2 | List\<T\> — `Ptr<T>` + len + cap，替换 std::vector\<void*\> | L |
+| P3 | Map\<K,V\> — 开放寻址哈希表，替换 std::unordered_map（吸收 B-107 Hash trait） | XL |
+| P4 | Set\<K\> — 复用 Map 实现 | M |
+| P5 | 清理 ring_runtime.cpp（保留 RC 核心 + IO + FFI glue） | M |
+
+**每阶段模式**：
+1. 在 `std/` 中用纯 Ring 实现新类型（`unsafe {}` 块内使用 `Ptr<T>` 原语）
+2. `impl Drop`（dealloc backing buffer）
+3. 逐个替换 ring_runtime.cpp 中的 extern fn → 纯 Ring 方法
+4. 保持 E2E + llvm_diff 全绿 + 自举一致
+
+**Str 实施细节**（P1，最先做——编译器自身最高频使用的类型）：
+- 内部表示：`struct Str { buf: Ptr<U8>, len: Int, cap: Int }`
+- UTF-8 字节串语义（design.md §1.7.1 已拍板）
+- `impl Drop for Str { fn drop(self) { dealloc(self.buf) } }`
+- 小字符串优化（SSO）可后续加，首版不做
+- 替换 ring_runtime.cpp 中 ~30 个 ring_str_* 函数
+
+**吸收 B-107**：P3（Map）自然包含 Hash trait + derive，不再需要单独做 B-107。
+
+**验收标准**：
+- 各阶段：替换的容器类型 E2E 行为与 C++ 版一致
+- ring_runtime.cpp 中被替换的函数全部删除
+- 编译器自举一致（double bootstrap）
+- 全部 E2E + llvm_diff ×3 通过
+- ASan clean（至少 gating 档）
+- 最终：ring_runtime.cpp 只剩 RC 核心 + IO + 进程管理
+
 ## 迭代与集合
 
 ### B-095 List.enumerate 方法 [feature] [P3] [M] [judgment] [queued]
@@ -375,15 +430,14 @@ fn test_fetch() {
 **涉及修改**：
 1. `compiler/builtins.ring`：注册 `List.enumerate` 方法签名 `(self) -> List<(Int, T)>`
 2. `ring_runtime.cpp`：实现 `ring_list_enumerate`（构造 `(Int, T)` tuple 列表）
-3. `compiler/codegen.ring`：JS 后端映射
-4. `compiler/codegen_llvm_expr.ring`：LLVM 映射（恢复 B-094 删除的行）
-5. `tests/cases/llvm/`：差分用例
+3. `compiler/codegen_llvm_expr.ring`：LLVM 映射（恢复 B-094 删除的行）
+4. `tests/cases/llvm/`：差分用例
 
 **验收标准**：
-- `for (i, x) in xs.enumerate()` 两后端可用且行为一致
+- `for (i, x) in xs.enumerate()` 可用且行为正确
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-107 泛型 Map key（Hash trait + derive）[feature] [P2] [L] [judgment] [queued]
+### B-107 泛型 Map key（Hash trait + derive）[feature] [P2] [L] [judgment] [absorbed: B-152p3]
 
 > 2026-06-07 立项（Discussion）。**类型系统说谎的缺口**：`std/map.ring` 的 `Map<K,V>` 类型层全泛型（`get(key:K)`/`insert(key:K,..)` 用类型变量 K），类型检查器放行 `Map<Int,T>`/`Map<MyEnum,T>`，但 runtime（LLVM `unordered_map<std::string,void*>`、JS 同样 Str-key）只兑现 Str key。非 Str key 静默错误，**两后端皆有，LLVM 上具体化**。bootstrap 阶段编译器自身的 Map 几乎全是 `Map<Str,...>` 故未暴露（migration diary 记录的简化）。
 

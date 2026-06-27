@@ -17,26 +17,6 @@
 
 
 
-### #212 ring_assert Bool unbox ✅ [medium] [judgment] [fixed 2026-06-27]
-
-`gen_runtime_call` fallback 路径对 `ring_assert` 的 Bool 参数加 `unbox_to_i1` → `zext i1 to i64`。解锁 9 个 E2E 用例。
-
-### #213 Map&lt;Int&gt; HOF 运行时崩溃 ✅ [medium] [judgment] [fixed 2026-06-27]
-
-添加 `ring_map_int_filter`/`ring_map_int_any`/`ring_map_int_map_values` 到 runtime + codegen dispatch。解锁 map_ufcs_bug / map_hof。
-
-### #214 泛型函数赋值 wrapper dict 漏传 ✅ [low] [judgment] [fixed 2026-06-27]
-
-双层修复：checker 防止有 bounds 的 fn ident 泛化 + codegen `gen_dict_closure_wrapper` 添加 `fn_trait_bounds`/`fn_original_param_types` fallback。**E2E 测试仍在 LLVM_SKIP**——frozen dist/ bootstrap 编译器缺 checker 修复，需 E2E runner 切到 native ring.exe 后验证。
-
-### #215 LLVM 后端 test block ✅ [low] [judgment] [fixed 2026-06-27]
-
-实现 `HDecl::Test` 的 forward-declare + body emission + C main 调用。**E2E 测试仍在 LLVM_SKIP**——同上，frozen dist/ 缺实现。
-
-### #216 extern_fn 测试重写 ✅ [low] [mechanical] [fixed 2026-06-27]
-
-重写 extern_fn 模块测试用 `parse_int`/`parse_float`（native-compatible）。extern_type 保留 skip（JS-specific opaque type 无 native 等价）。
-
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
 可移植性问题。
