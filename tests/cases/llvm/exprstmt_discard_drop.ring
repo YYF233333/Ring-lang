@@ -6,8 +6,8 @@
 //     `xs.get(i)`, a constructor, an interp string) previously leaked (no
 //     owner); now they get a __anf binding + scope-end drop.  A wrong drop of
 //     a still-live value (e.g. treating a borrow-returning result as fresh)
-//     would free shared state → native crash / divergence; the JS oracle pins
-//     all outputs and the post-discard re-reads prove nothing live was freed.
+//     would free shared state → native crash / divergence; the golden .expected
+//     pins all outputs and the post-discard re-reads prove nothing live was freed.
 //   * Unit-typed calls (print/push/insert/remove, rule 2) stay
 //     un-materialised — their ABI receiver-return must never be dropped.
 //   * mutation-then-discard ordering: the discarded op's side effect must be

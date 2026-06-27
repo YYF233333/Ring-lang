@@ -9,8 +9,8 @@
 // THE UAF RISK THIS PINS: the loop-exit drops must release ONLY loop-scoped
 // bindings, exactly once per path.  Wrong sets (enclosing bindings dropped /
 // double drop with the block-end drops / outer-loop locals dropped by an
-// inner break) over-free values the continuation still uses — the JS oracle
-// pins the surviving values (escaped results, shared dups, outer locals).
+// inner break) over-free values the continuation still uses — the golden
+// .expected pins the surviving values (escaped results, shared dups, outer locals).
 
 // continue + break in a for loop; escaped value must survive the drops.
 fn collect_long(names: List<Str>, min_len: Int) -> List<Str> {

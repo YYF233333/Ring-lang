@@ -4,7 +4,7 @@ use types::{Type, Effect, EffectRow,
     type_to_builtin_name}
 use ast::{Expr, Pattern, Span, NamedPatternField}
 use hir::{HExpr, HStmt, TraitDispatch, DictRef,
-    variant_js_name, trait_dict_name, trait_bound_param_name,
+    variant_ctor_name, trait_dict_name, trait_bound_param_name,
     hexpr_type, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
 use codes::{E0201, E0205, E0208, E0303, E0307, E0308, E0504, E0705}
@@ -385,7 +385,7 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                 none => { enum_name = ctx.env.types.variant_to_enum.get(name) }
             }
             match enum_name {
-                some(en) => { resolved_name = some(variant_js_name(en, name)) },
+                some(en) => { resolved_name = some(variant_ctor_name(en, name)) },
                 none => {}
             }
             InferResult {

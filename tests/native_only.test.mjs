@@ -1,9 +1,9 @@
 // Native-only semantic tests (oracle-blind).
 //
-// These test cases exercise native (LLVM) behaviour that CANNOT be validated by
-// the JS backend (the JS oracle is wrong in these corners).  Each .ring file is
-// compiled with --target=llvm, linked, and executed; the stdout is compared
-// against a hand-written .expected file.
+// These test cases exercise native (LLVM) behaviour where the golden .expected
+// file is hand-written (not generated).  Each .ring file is compiled with
+// --target=llvm, linked, and executed; the stdout is compared against the
+// .expected file.
 //
 // Special mode:  If the first non-blank line of the .expected file is exactly
 // "// EXPECT_PANIC", the harness asserts a non-zero exit code instead of

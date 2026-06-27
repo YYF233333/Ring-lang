@@ -1,7 +1,7 @@
 // User-defined Result enum (Ok/Err) constructed, matched, and threaded through
 // helper functions WITHOUT passing closures as arguments (direct match-based
 // chaining). Locks user-enum construct + match-payload parity on the LLVM
-// backend. JS backend is the oracle.
+// backend.
 //
 // NOTE: the higher-order combinator form (and_then/map_ok taking `fn(v) {...}`
 // closures) intermittently crashes/double-frees on LLVM — recorded under B-087 in

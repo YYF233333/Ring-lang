@@ -11,7 +11,7 @@
 //     leak only, so it would not corrupt output — but the per-iteration logic
 //     must still dup exactly once per closure for the refcounts to balance.
 //
-// JS backend is the oracle.
+// Output must match golden .expected file.
 
 fn call0(f: fn() -> Str) -> Str { f() }
 

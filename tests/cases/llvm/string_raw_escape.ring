@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: raw strings, escape sequences, multiline strings —
 // r"..." raw strings, \n \t \\ \" escapes, multiline string literals.
-// JS backend is oracle. Avoids non-ASCII per spec.
+// Avoids non-ASCII per spec.
 
 fn main() {
     // Basic escape sequences

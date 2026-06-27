@@ -1,7 +1,7 @@
 // B-100 P1.3: adversarial — multi-layer effect handler + delegate.
 // Handler A handles one effect, delegates to handler B for another.
 // Tests that evidence threading through multiple handler layers and
-// resume value propagation are consistent between JS and LLVM.
+// resume value propagation are correct.
 
 effect Config {
     fn get(key: Str) -> Str

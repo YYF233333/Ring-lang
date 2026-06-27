@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: string builder — StringBuilder API: add, line,
-// add_int, to_str, len. JS backend is oracle.
+// add_int, to_str, len.
 
 fn main() {
     // Basic string builder

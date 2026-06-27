@@ -7,7 +7,7 @@ fn main() {
     assert(joined == "hello, world, ring", "join with comma")
     assert(["a", "b"].join("") == "ab", "join empty sep")
 
-    // sort (in-place, default JS lexicographic)
+    // sort (in-place, default lexicographic)
     let mut nums = ["c", "a", "b"]
     nums.sort()
     assert(nums.join(",") == "a,b,c", "sort strings")

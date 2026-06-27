@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: for-range variants — exclusive range, inclusive range,
-// for-in with continue, for over map with destructuring. JS backend is oracle.
+// for-in with continue, for over map with destructuring.
 
 fn main() {
     // Exclusive range 0..5

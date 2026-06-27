@@ -1,7 +1,6 @@
 // String interpolation in varied positions: nested interpolation, inside match
 // arms (with guards), around expressions with method calls / collection access,
-// and folding interpolated fragments while iterating. Locks interpolation parity
-// across the LLVM backend. JS backend is the oracle.
+// and folding interpolated fragments while iterating.
 //
 // NOTE: effect-driven evaluation-order coverage of interpolation holes is NOT
 // here because custom-effect handlers themselves diverge on LLVM (recorded under

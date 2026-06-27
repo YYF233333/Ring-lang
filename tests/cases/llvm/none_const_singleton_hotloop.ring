@@ -1,6 +1,6 @@
 // B-104 D6 验收 (#153/#154): none + const-Str singleton hot-loop differential
 // regression, fixed in the dict_singleton_hotloop.ring mould.  Pre-D6 the LLVM
-// backend deviated from the JS oracle's module-level singletons in two
+// backend deviated from the expected module-level singletons in two
 // systematic ways (both #151-isomorphic):
 //   #153 — every `none` evaluation called the codegen-emitted ring_Option_none,
 //          which ring_alloc'd a fresh tag-1 OPTION per call; nothing ever drops

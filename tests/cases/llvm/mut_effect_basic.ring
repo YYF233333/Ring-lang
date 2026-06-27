@@ -1,7 +1,7 @@
 // B-100 P1.1: mut effect system — mut parameter value-type writeback.
 // Tests that mut parameter reassignment is visible to the caller, and that
 // mut interacts correctly with other language features. Verifies parity
-// between JS and LLVM backends for mut cell mechanics.
+// for mut cell mechanics.
 
 fn increment(mut x: Int) {
     x = x + 1

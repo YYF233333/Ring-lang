@@ -6,7 +6,7 @@
 //   * `let (a, b) = make_pair()` — the fresh tuple gets an owned __anf binding
 //     (dropped at scope end); a/b are ring_list_get borrow projections.  A
 //     wrong EARLY drop would free the slots a/b still read → native crash /
-//     divergence (JS oracle pins values).
+//     divergence (expected output pins values).
 //   * `let (a, b) = pair` (named init) — processed as a BORROW: no anonymous
 //     Clone pin; pair stays valid and is reused AFTER the destructure (a wrong
 //     ownership transfer would free pair under the later read).

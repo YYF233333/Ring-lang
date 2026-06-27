@@ -10,8 +10,8 @@
 // pair-list (rc 2 = pair's ref + map's dup → the drop steps back to 1, never
 // to 0).  A wrong impl (dropping the pair's account, or dropping without having
 // dup'd) frees a value the entries list still holds → native UAF when the
-// entries binding is read after map_from or scope-end-dropped.  JS oracle
-// (`new Map(entries)`: later entry wins, entries array untouched) pins both the
+// entries binding is read after map_from or scope-end-dropped.  Expected output
+// (later entry wins, entries list untouched) pins both the
 // winner and the entries' surviving contents.
 
 fn dup_key_str() -> Str {

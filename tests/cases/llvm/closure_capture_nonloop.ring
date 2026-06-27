@@ -3,7 +3,7 @@
 // captured variable at closure construction (the LLVM codegen stores the bare
 // pointer into the env without a dup).  If the dup is missing, the env holds a
 // dangling pointer once the original binding is later consumed/dropped → UAF or
-// corrupted output under the LLVM backend.  JS backend is the oracle.
+// corrupted output under the LLVM backend.
 
 fn run(f: fn() -> Str) -> Str {
     f()

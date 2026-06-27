@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: mutual recursive types — two enum types that reference
-// each other, construction and pattern matching. JS backend is oracle.
+// each other, construction and pattern matching.
 
 enum Ty {
     TyInt,

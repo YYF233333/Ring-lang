@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: supertrait multi-level + default methods — multi-level
 // supertrait chains (Base -> Mid -> Top), supertrait default method bodies
-// calling supertrait methods. JS backend is oracle.
+// calling supertrait methods.
 
 // --- Multi-level supertrait chain ---
 

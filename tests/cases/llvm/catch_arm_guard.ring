@@ -1,8 +1,8 @@
 // #206 regression: catch arm guards must be evaluated in LLVM backend.
-// Diff test: JS backend is oracle — output must match.
-// NOTE: guards referencing catch-bound variables (e.g. `x if x > 10`) are
-// broken in the JS backend (binding emitted after guard eval) — tracked
-// separately. Tests use outer variables in guards to avoid that JS bug.
+// Diff test: output must match golden .expected file.
+// NOTE: guards referencing catch-bound variables (e.g. `x if x > 10`)
+// have a known binding-order issue — tracked separately.
+// Tests use outer variables in guards to avoid that bug.
 
 fn risky(n: Int) -> Str {
     fail.raise(n)

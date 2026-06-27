@@ -55,7 +55,7 @@ Ring-lang/
 ## 开发约定
 
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
-- 编译器各阶段共享约定放 `hir.ring`（如 `variant_js_name`），不允许跨阶段硬编码字符串契约
+- 编译器各阶段共享约定放 `hir.ring`（如 `variant_ctor_name`），不允许跨阶段硬编码字符串契约
 - **dist/ 已冻结（B-100 Phase 2）**：dist/ 保留作紧急 stage 0 回退，不再 rebuild。修改编译器后只需重编 dist-llvm/：`node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。
 - 注释语法 `//`，无 pipe 运算符，`.method()` 是唯一链式调用方式（`::` 模块路径和 `.method()` 方法调用是两个不互通的范畴，无 UFCS）
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源

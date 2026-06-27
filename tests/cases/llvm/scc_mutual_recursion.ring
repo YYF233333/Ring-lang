@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: SCC mutual recursion — mutually recursive functions
-// with inferred return types, forward references. JS backend is oracle.
+// with inferred return types, forward references.
 
 fn is_even(n: Int) -> Bool {
     if n == 0 { true } else { is_odd(n - 1) }

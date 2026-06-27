@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: set operations — union, intersect, difference,
-// to_list, contains, len. JS backend is oracle.
+// to_list, contains, len.
 
 fn main() {
     let a = set_from([1, 2, 3, 4, 5])

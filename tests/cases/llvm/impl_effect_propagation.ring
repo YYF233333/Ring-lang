@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: impl effect propagation — cross-order (caller defined
 // before impl block), intra-impl (caller before callee in same block),
-// basic impl method fail propagation. JS backend is oracle.
+// basic impl method fail propagation.
 
 // --- Cross-order: caller defined before impl ---
 

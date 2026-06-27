@@ -14,7 +14,7 @@ struct Ctor {
 
 // ============================================================
 // B-132 Performance: Using Map<Str, _> instead of Set<Str> for O(1)
-// string lookups (Set<Str> uses __ring_deep_eq linear scan in JS backend).
+// string lookups (Set<Str> uses __ring_deep_eq linear scan — O(n) per lookup).
 // Memoize caches are threaded through function parameters.
 // ============================================================
 
@@ -139,7 +139,7 @@ fn type_is_recursive(env: TypeEnv, ty: Type, key: Str, mut cache: ExhCache) -> B
 }
 
 // Use Map<Str, Bool> instead of Set<Str> for O(1) string lookups.
-// Set<Str> in the JS backend uses __ring_deep_eq linear scan — O(n) per lookup.
+// Set<Str> uses __ring_deep_eq linear scan — O(n) per lookup.
 fn type_contains_key(env: TypeEnv, ty: Type, key: Str, mut visited: Map<Str, Bool>) -> Bool {
     let ty_str = type_to_string(ty)
     if ty_str == key { return true }
@@ -581,7 +581,7 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
 }
 
 // B-132: expanding uses Map<Str, Bool> for O(1) string lookups instead of
-// Set<Str> which uses __ring_deep_eq linear scan in the JS backend.
+// Set<Str> which uses __ring_deep_eq linear scan.
 // cache is threaded through for memoizing finite_type_ctors and type_is_recursive.
 fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFind, expanding: Map<Str, Bool>, mut cache: ExhCache) -> List<Str>? {
     if col_types.len() == 0 {

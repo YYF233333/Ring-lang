@@ -7,7 +7,7 @@
 //     release (or dropping while body borrows are live) crashes natively;
 //   * element ESCAPES out of the loop (push into an outer list) are
 //     Clone-wrapped and must survive the merge-point drop — the escaped
-//     values are re-read after the loop (JS oracle pins them);
+//     values are re-read after the loop (the expected output pins them);
 //   * `break` routes through merge (the drop still runs — no crash on
 //     re-iteration);
 //   * both Str sets and Int sets (the two conversion paths).

@@ -2,7 +2,6 @@
 // discarded (match only projects scalar payload, does not consume the outer
 // shell).  The perceus scope-end-drop must reclaim the enum each iteration.
 // verify_rc (self-verify gate) proves the Drop is emitted at the HIR level.
-// JS backend is the oracle.
 
 enum Color {
     Red,

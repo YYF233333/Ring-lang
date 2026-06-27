@@ -12,7 +12,7 @@
 // The helpers below exercise every exclusion site AT COMPILE TIME (perceus +
 // codegen run over them; the generated drop_Holder must skip the handle field).
 // They are never CALLED at runtime — a handle cannot be fabricated without the
-// foreign API, and `make_handle` is a panic-stub on native / undefined on JS.
+// foreign API, and `make_handle` is a panic-stub on native.
 // The run output only proves the program compiles on both backends and the
 // runtime path is unperturbed.  IR-level assertions (no ring_dup/ring_drop on
 // handle values in these functions) were verified manually via ring_output.ll —

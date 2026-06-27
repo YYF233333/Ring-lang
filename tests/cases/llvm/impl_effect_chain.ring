@@ -1,7 +1,7 @@
 // B-100 P1.1: impl method effect propagation — fail effect raised in one
 // impl method propagates through another impl method that calls it, and
 // can be caught at the call site. Tests B-138 impl SCC ordering parity
-// between JS and LLVM backends.
+// correctly.
 
 struct ParseError { msg: Str }
 

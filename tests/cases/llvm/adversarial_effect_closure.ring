@@ -1,6 +1,6 @@
 // B-100 P1.3: adversarial — effect operations inside/through closures.
 // Tests that closures capturing variables interact correctly with
-// fail/catch and custom effects between JS and LLVM backends.
+// fail/catch and custom effects.
 
 enum E { NotFound { key: Str } }
 

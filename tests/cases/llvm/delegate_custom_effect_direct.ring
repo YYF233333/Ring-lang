@@ -1,7 +1,6 @@
 // B-139: delegate with custom effect — evidence forwarding for explicit methods
 // Tests that delegate stubs correctly forward custom effect evidence parameters.
-// Note: default method + custom effect is JS-only until LLVM backend supports
-// default trait methods (pre-existing limitation).
+// Note: default method + custom effect + LLVM backend is now supported (B-141).
 
 effect Config {
     fn get_value() -> Str

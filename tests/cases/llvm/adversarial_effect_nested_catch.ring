@@ -1,7 +1,6 @@
 // B-100 P1.3: adversarial — nested catch blocks.
 // Inner catch handles one error, outer catch handles another.
-// Tests that nested setjmp/longjmp frames (LLVM) interact correctly
-// with nested try/catch (JS).
+// Tests that nested setjmp/longjmp frames interact correctly.
 
 enum Inner { InnerErr }
 enum Outer { OuterErr }

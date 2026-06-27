@@ -2,7 +2,7 @@
 // `none.to_fail(err)` raises the fail effect with `err`. The LLVM backend lowers
 // fail.raise to a direct ring_raise (longjmp into the enclosing ring_try set up by
 // catch), and Option.to_fail now maps to the runtime ring_Option_to_fail, which
-// raises on the None branch without threading the fail evidence. JS is the oracle.
+// raises on the None branch without threading the fail evidence.
 
 fn get_opt(id: Int) -> Option<Int> {
     if id == 1 { some(100) }

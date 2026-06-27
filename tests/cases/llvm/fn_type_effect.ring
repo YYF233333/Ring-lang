@@ -1,6 +1,6 @@
 // B-100 P1.1: function type with effect annotation — passing functions with
 // effect annotations as arguments, calling them, and verifying that the
-// evidence threading is consistent between JS and LLVM backends.
+// evidence threading is correct.
 
 fn apply_io(f: fn(Int) -> Str with {io}, x: Int) -> Str with {io} {
     f(x)

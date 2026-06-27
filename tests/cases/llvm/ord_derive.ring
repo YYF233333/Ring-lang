@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: Ord derive for enum + struct — derived ordering on
-// enum variants and struct fields, comparison operators. JS backend is oracle.
+// enum variants and struct fields, comparison operators.
 
 enum Priority {
     Low,

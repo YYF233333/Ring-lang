@@ -1,7 +1,7 @@
 // B-100 P1.1: effect annotation + evidence passing — functions with explicit
 // `with {io}`, `with {fail<T>}`, and multi-effect `with {io, fail<Str>}`
 // annotations. Tests that the compiler-generated evidence threading is
-// consistent between JS and LLVM backends.
+// consistent.
 
 fn greet(name: Str) -> Unit with {io} {
     print("hello ${name}")

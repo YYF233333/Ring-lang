@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: if/else-if/return — if-else-if chains as expressions,
-// early return, return inside expression blocks. JS backend is oracle.
+// early return, return inside expression blocks.
 
 fn grade(score: Int) -> Str {
     if score >= 90 {

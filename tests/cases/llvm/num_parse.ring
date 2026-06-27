@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: numeric parsing and formatting.
-// parse_int, parse_float, Int.to_str, Float.to_str. JS backend is the oracle.
+// parse_int, parse_float, Int.to_str, Float.to_str.
 
 fn main() {
     // parse_int — valid

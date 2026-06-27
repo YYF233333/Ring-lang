@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: index expressions — list[i], map[key], str[i],
-// nested indexing, expression as index. JS backend is oracle.
+// nested indexing, expression as index.
 
 fn main() {
     // List index

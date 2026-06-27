@@ -7,7 +7,7 @@
 //     Clone-wrapped, so the op's resume value is an independent dup.  The
 //     materialised arg's scope-end drop releases the original; a missing dup
 //     (or a wrong early drop) double-frees / UAFs → native crash, while the
-//     JS oracle pins the values.
+//     golden .expected pins the values.
 //   * handler arms COMBINING / storing args exercise the handler-side escape
 //     Clones.
 //   * the ABORT path (fail.raise with a constructed payload): the raise

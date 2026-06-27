@@ -1,4 +1,4 @@
-// Regression: C1 — == must compile to JS === (strict equality)
+// Regression: C1 — == must use strict equality
 fn main() {
     print(1 == 1)
     print(1 != 2)

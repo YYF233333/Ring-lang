@@ -1,4 +1,4 @@
-// Regression test for #70: auto-derive generates invalid JS identifiers
+// Regression test for #70: auto-derive generates invalid identifiers
 // for mod-qualified field types (e.g. shapes::Circle produces __shapes::Circle_Eq
 // instead of __shapes$Circle_Eq)
 

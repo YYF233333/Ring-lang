@@ -189,29 +189,28 @@ pub struct LlvmCtx {
     pub type_to_typeid: Map<Str, Int>, // type name -> typeid mapping
 
     // B-091: def_ids of `let mut` variables auto-boxed into heap mut-cells because
-    // a closure writes through them.  Mirrors the JS backend's `{value: ...}` cell.
-    // Such a var's alloca holds the CELL pointer; reads/writes go through field 0;
+    // a closure writes through them.  The cell is a single-field struct {value: T};
+    // the var's alloca holds the CELL pointer; reads/writes go through field 0;
     // closures capture the (shared) cell pointer so write-through is observed.
     pub boxed_vars: Set<Int>,
 
     // #B-087 gap 5 (#103): per-function list of param mutability flags. A flag is
     // true only for params that are `mut` AND value-type (Int/Float/Bool/Str) — the
-    // ones the callee receives as a CELL pointer and the caller must box. Mirrors the
-    // JS backend's CodegenCtx.fn_mut_params (scan_fn_mut_params). Keyed by both the
-    // bare fn name and the UFCS method name (Type_method) for method-call lookup.
+    // ones the callee receives as a CELL pointer and the caller must box. Keyed by
+    // both the bare fn name and the UFCS method name (Type_method) for method-call
+    // lookup.
     pub fn_mut_params: Map<Str, List<Bool>>,
 
     // B-090: effect declaration registry, keyed by effect name → ops in
     // declaration order. gen_handle_expr lays the evidence struct out in this
     // order; gen_effect_op dispatches via effect_op_slot (hir.ring) using the
-    // same registry. Mirrors the JS backend's CodegenCtx.effect_ops.
+    // same registry.
     pub effect_ops: Map<Str, List<HEffectOp>>,
 
     // B-097: pre-built default evidence structs for effects whose ops all have
     // default bodies. Keyed by effect name → LLVMValueRef (LLVM global or
     // function-level alloca holding the evidence struct pointer). lookup_evidence
-    // falls back here when no handler is in scope. Mirrors JS backend's
-    // default_evidence_effects + emit_effect_decl.
+    // falls back here when no handler is in scope.
     pub default_evidence: Map<Str, LLVMValueRef>,
 
     // B-100 Fix 2: derived dict build functions to call at startup.

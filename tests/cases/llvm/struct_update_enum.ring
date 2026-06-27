@@ -2,7 +2,7 @@
 // spread from a function-call expression, plus complex enum variants with named
 // fields, mixed positional/recursive payloads, and matching that rebuilds
 // variants. Exercises record-copy lowering and enum variant construction/field
-// ordering on the LLVM backend. JS backend is the oracle.
+// ordering.
 
 struct Point { x: Int, y: Int }
 struct Rect { origin: Point, w: Int, h: Int }

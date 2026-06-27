@@ -17,8 +17,8 @@
 // and user methods sharing the names are no longer misclassified.
 //
 // Every helper binds a mutator result, lets it go out of scope, and the caller
-// keeps using the container afterwards.  JS backend (mutator returns undefined)
-// is the oracle; LLVM output must match byte-for-byte and not corrupt the heap.
+// keeps using the container afterwards.  Output must match the .expected
+// snapshot byte-for-byte and not corrupt the heap.
 
 fn bind_push(mut xs: List<Str>) -> Int {
     let r = xs.push("d")

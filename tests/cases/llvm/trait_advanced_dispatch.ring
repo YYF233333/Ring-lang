@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: trait advanced dispatch — trait bound in fn-type param,
 // higher-order trait passing (fn value with trait bound), multi-bound
-// constraints (T: A + B). JS backend is oracle.
+// constraints (T: A + B).
 
 // --- Trait bound in fn-type parameter ---
 

@@ -4,7 +4,7 @@
 // backend never boxed (the closure captured a copy of the value, writes were lost)
 // AND the Perceus pass `ring_drop`-ed the captured pointer on every write, freeing
 // the shared value while the outer scope still referenced it (deterministic UAF —
-// the original symptom was a `(null)` / crash on `print`).  JS backend is the oracle.
+// the original symptom was a `(null)` / crash on `print`).
 
 fn main() {
     let mut c = 0

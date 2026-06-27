@@ -7,7 +7,6 @@
 // runtime drop_closure_env ring_drops each owned capture exactly once.  Two Str
 // captures here; both are dup'd at capture (non-last-use, used again below) and
 // the closure env's drop must balance those dups without double-free.
-// JS backend is the oracle.
 
 fn main() {
     let a = "alpha"

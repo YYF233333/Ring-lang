@@ -4,7 +4,7 @@
 //     fresh container was read by the loop and never dropped.  Loop bindings
 //     borrow the materialised __anf's elements; element escapes Clone-wrap;
 //     __anf drops after the loop.  A wrong early drop → elements freed while
-//     the loop reads them → native crash / divergence vs the JS oracle.
+//     the loop reads them → native crash / divergence vs the golden .expected.
 //   * RangeExpr iterable EXEMPT (stays inline): the direct counting-loop
 //     lowering (emit_for_in_range_direct) + its B-104b drops must keep seeing
 //     the literal RangeExpr form.

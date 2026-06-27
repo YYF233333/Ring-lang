@@ -1,5 +1,5 @@
 // B-100 P1.3 adversarial: Map iteration — carefully avoids order-dependence.
-// C++ unordered_map vs JS Map have different iteration orders. B-089 G-b sorted
+// C++ std::map has deterministic (sorted) iteration. B-089 G-b sorted
 // iteration should ensure determinism, but we test with order-independent assertions.
 // Also tests Map<Int, Str> and Map<Str, Int> variants.
 

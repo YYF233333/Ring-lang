@@ -483,8 +483,7 @@ fn emit_default_method_stubs(mut ctx: LlvmCtx, target_type: Str, trait_name: Str
 // the const getter to a `ring_<Enum>_<Variant>()` constructor call; matching on
 // the init HExpr shape is therefore unreliable, so we key off the value type.
 // An enum const is an IMMUTABLE module-level value (const semantics) — sharing
-// one process-wide singleton is always correct (the JS backend already does, as
-// a module `const`).  The compiler's enum consts are exactly the 7 `Type`
+// one process-wide singleton is always correct.  The compiler's enum consts are exactly the 7 `Type`
 // scalar consts (UNIT/INT/STR/BOOL/FLOAT/NEVER/ANY = Type::UnitType/IntType/…),
 // all zero-field; payload-bearing enum consts (none in the compiler) would also
 // be safe — the bounded one-per-const payload simply stays immortal, same as
@@ -505,8 +504,7 @@ fn emit_const_body(mut ctx: LlvmCtx, name: Str, init: HExpr) {
     match ctx.functions.get(const_fn_name) {
         some(fn_val) => {
             // B-104 D6 (#154): a Str const's getter is a lazy memoised
-            // SINGLETON (never-drop typeid via ring_const_intern) — the LLVM
-            // mirror of the JS backend's module-level `const`.  Use sites
+            // SINGLETON (never-drop typeid via ring_const_intern).  Use sites
             // already borrow (perceus treats const Idents as owner-bearing
             // borrows; pre-D6 the per-access fresh re-evaluation is what
             // leaked).  Non-Str consts keep the per-access form: scalar boxes
@@ -520,7 +518,7 @@ fn emit_const_body(mut ctx: LlvmCtx, name: Str, init: HExpr) {
             // consts UNIT/INT/STR/BOOL/FLOAT/NEVER/ANY = Type::UnitType/IntType/…)
             // is a heap value that pre-D9 was re-constructed fresh on EVERY
             // access — and never dropped, because use sites borrow it like a
-            // module-level value (JS-backend `const` semantics).  D8 attributed
+            // module-level value (module-scoped `const` semantics).  D8 attributed
             // Type::UnitType ≈22.7M live @2.382B self-compile (98.7% pure leak;
             // the recursive `unwrap_or(UNIT)` leaves in type_to_string).
             // Singletonise it the same way as D6 Str consts: a lazy memoised
@@ -1006,11 +1004,6 @@ fn emit_default_method_thunk(mut ctx: LlvmCtx, default_fn_name: Str, default_fn:
 // B-100 Fix 2: LLVM codegen for auto-derived trait impls
 // ============================================================
 //
-// The JS backend processes program.derived_impls via codegen_derive.ring to
-// emit JS eq/ne/clone/debug/cmp functions and their dicts. The LLVM backend
-// was missing this — derived-impl dicts fell through to
-// ring_get_builtin_dict's tag-only comparison, breaking multi-field struct Eq.
-//
 // This pass emits LLVM IR for each DerivedImpl, generating the method
 // functions + trait dict (reusing the existing emit_trait_dict infrastructure).
 
@@ -1029,9 +1022,7 @@ pub fn emit_derived_impls_llvm(mut ctx: LlvmCtx, derived_impls: List<DerivedImpl
 // ── Builtin enum derived impls (Option) ───────────────────────
 //
 // Option is a builtin enum excluded from derive.ring's collect_user_types
-// (BUILTIN_TYPES set). The JS backend provides its trait dicts in
-// runtime.ring as hardcoded JS functions. The LLVM backend has no
-// equivalent — ring_get_builtin_dict in C++ only handles primitives.
+// (BUILTIN_TYPES set). ring_get_builtin_dict in C++ only handles primitives.
 //
 // This function synthesises DerivedImpl entries for Option and feeds them
 // through the existing derive machinery so the LLVM module contains

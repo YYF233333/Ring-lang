@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: match on literals — match on Int, Str, Bool literals,
-// deep enum patterns. JS backend is oracle.
+// deep enum patterns.
 
 fn classify_int(n: Int) -> Str {
     match n {

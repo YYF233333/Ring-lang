@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: collection structural equality — List.contains with structs,
-// Set operations, nested collection equality. JS backend is the oracle.
+// Set operations, nested collection equality.
 
 struct Item { id: Int, name: Str }
 

@@ -6,8 +6,8 @@
 // guard's use of `xs` as a last-use and MOVE it, freeing the List before the
 // later arm reads it -> use-after-free / wrong output under the native backend.
 // The fix keeps `xs` alive across the guard fork (dup, not move) so the later
-// arm still sees a valid List. The JS oracle (which ignores RC) pins the
-// expected output; the native backend must match it.
+// arm still sees a valid List. The golden .expected pins the expected output;
+// the native backend must match it.
 fn sum(xs: List<Int>) -> Int {
     let mut total = 0
     for x in xs { total = total + x }

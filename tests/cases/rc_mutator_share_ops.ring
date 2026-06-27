@@ -3,8 +3,7 @@
 // flat_map/map_from) must leave the source containers fully usable after the
 // bindings go out of scope.  Semantic twin of the LLVM differential cases
 // mutator_result_binding.ring + list_share_ops_rc.ring (which additionally lock
-// the native RC behaviour); this one locks the language-level semantics on the
-// JS backend.
+// the native RC behaviour); this one locks the language-level semantics.
 
 fn bind_push(mut xs: List<Str>) -> Int {
     let r = xs.push("d")

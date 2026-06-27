@@ -1,6 +1,6 @@
 // B-086: List.find_index on the LLVM backend dispatches to ring_list_find_index,
 // which returns Some(boxed index) of the first element satisfying the predicate,
-// else None. JS backend is the oracle (Array.findIndex wrapped in Option).
+// else None.
 
 fn main() {
     let xs = [10, 20, 30, 40]

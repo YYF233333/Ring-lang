@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: Cell.update — callback-style mutation on Cell,
 // Cell with different types, multiple updates in sequence.
-// JS backend is oracle.
+// Output must match golden .expected file.
 
 fn main() {
     // Basic Cell update

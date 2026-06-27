@@ -4,7 +4,7 @@
 // value type is an enum (the compiler's `Type` scalar consts UNIT/INT/STR/
 // BOOL/... = Type::UnitType/IntType/...) the getter ring_alloc'd a fresh enum
 // box per access that nothing ever dropped — HIR/perceus correctly treat a const
-// access as a borrow of a module-level value (JS-backend `const` semantics), so
+// access as a borrow of a module-level value (`const` semantics), so
 // live=born=100%.  D8 attributed Type::UnitType ≈22.7M live @2.382B self-compile
 // (98.7% pure leak), dominated by the recursive `unwrap_or(UNIT)` leaves in
 // type_to_string.

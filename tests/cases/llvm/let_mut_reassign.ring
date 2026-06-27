@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: let mut + variable mutability — basic let mut
 // reassignment, struct field mutation, mut self method calls, compound
-// assignment in loops. JS backend is oracle.
+// assignment in loops.
 
 struct Counter { value: Int }
 

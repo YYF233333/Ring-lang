@@ -7,8 +7,8 @@
 //     would UAF and crash the native binary (llvm_diff catches via exit code).
 //   * escape positions MOVE the fresh char (no Clone): binding, list push,
 //     struct field, return — each sink becomes the sole owner, released
-//     exactly once.  Double-free here would crash; the JS oracle pins output.
-// JS backend is the oracle: outputs must match byte-for-byte.
+//     exactly once.  Double-free here would crash; the expected output pins this.
+// Outputs must match the golden .expected snapshot byte-for-byte.
 
 struct Wrap {
     ch: Str,

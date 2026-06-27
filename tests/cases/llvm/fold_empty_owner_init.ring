@@ -4,7 +4,7 @@
 // co-own one box, and both scope-end drops freed the same allocation
 // (double-free / heap corruption).  ring_list_fold now dups on the empty path
 // so the fold result is owned on EVERY path, and fold's args materialise like
-// any other call args (anf_arg retired).  JS backend is oracle.
+// any other call args (anf_arg retired).
 
 fn main() {
     // Owner-bearing init: a heap Str bound to a named owner, passed as a bare

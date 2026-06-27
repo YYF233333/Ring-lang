@@ -1,8 +1,7 @@
 // B-086: generic Ord dispatch on the LLVM backend. A `T: Ord` comparison
 // (`a > b`, `a < b`) lowers to a builtin Ord dict (__Int_Ord / __Str_Ord / ...)
 // whose single `cmp` closure (slot 0) returns -1/0/1; the runtime now constructs
-// these dicts via ring_get_builtin_dict (previously only Eq dicts existed). JS
-// backend is the oracle.
+// these dicts via ring_get_builtin_dict (previously only Eq dicts existed).
 
 fn larger<T: Ord>(a: T, b: T) -> T {
     if a > b { a } else { b }

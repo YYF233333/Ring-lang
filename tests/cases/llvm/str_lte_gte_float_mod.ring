@@ -1,5 +1,4 @@
-// #161 Str lte/gte + #168 Float mod — LLVM codegen regression test
-// JS backend is the oracle.
+// #161 Str lte/gte + #168 Float mod — codegen regression test.
 
 fn main() {
     // --- Str <= (Lte) ---

@@ -6,7 +6,7 @@
 // ring_drop BOTH slots — the cell via RC (decrement, the outer scope still holds a
 // share, so it must NOT free yet) and the Str via RC.  A naive raw-free of the cell
 // would double-free against the outer scope's drop; the fix relies on ring_drop's
-// RC so the two paths balance.  JS backend is the oracle.
+// RC so the two paths balance.
 
 fn main() {
     let mut count = 0

@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: impl bounds + qualified path — impl with trait bounds
 // on type parameters, impl for qualified (module-scoped) types, impl Trait
-// for qualified types. JS backend is oracle.
+// for qualified types.
 
 // --- impl with trait bounds ---
 

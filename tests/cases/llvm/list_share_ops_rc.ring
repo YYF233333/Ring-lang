@@ -10,7 +10,7 @@
 //
 // Each helper builds a derived container, lets it drop at scope end, and the
 // caller keeps reading the source afterwards; main's own scope end then drops the
-// sources too (the double-free arm).  JS backend is the oracle.
+// sources too (the double-free arm).
 
 fn drop_filtered(xs: List<Str>) -> Int {
     let ys = xs.filter(fn(x) { x != "b" })

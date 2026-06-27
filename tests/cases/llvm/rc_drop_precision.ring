@@ -16,8 +16,8 @@
 //       `unify_at` (both `expr catch { e => ... }`), which produced most of the 96
 //       warnings. Fixed by making collect_captures treat a Drop/Dup target as a use.
 //
-// A *wrong* fix would over-drop (double-free) and abort at runtime; the JS oracle
-// pins the expected output and the native run must both match it AND not crash.
+// A *wrong* fix would over-drop (double-free) and abort at runtime; the .expected
+// snapshot pins the correct output and the native run must match it AND not crash.
 
 enum Color { Red, Green, Blue }
 

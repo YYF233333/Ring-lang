@@ -1,6 +1,6 @@
 // B-086: List.flat_map on the LLVM backend dispatches to ring_list_flat_map,
 // which applies the closure (returning a List) to each element and concatenates
-// the results. JS backend is the oracle. Self-contained: avoids find_index/fold,
+// the results. Self-contained: avoids find_index/fold,
 // which are separate unmapped runtime gaps (out of B-086 scope).
 
 fn main() {

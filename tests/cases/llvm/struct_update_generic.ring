@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: struct update with generic types — generic struct spread
-// syntax, generic enum variant spread. JS backend is oracle.
+// syntax, generic enum variant spread.
 
 struct Pair<A, B> {
     first: A,

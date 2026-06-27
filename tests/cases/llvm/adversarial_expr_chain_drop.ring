@@ -1,10 +1,10 @@
 // B-100 P1.3 adversarial: chained method calls — intermediate temporary drop timing.
 //
 // In `list.filter(f).map(g)`, the filter() result is an intermediate temporary
-// that is consumed by map(). The key question: does the LLVM backend drop the
-// intermediate List at the same time as the JS backend? If the intermediate
-// is dropped too early (before map reads it) => native crash; too late (never
-// dropped) => leak divergence won't show in output but RC imbalance accumulates.
+// that is consumed by map(). The key question: does the backend drop the
+// intermediate List at the right time? If the intermediate is dropped too early
+// (before map reads it) => native crash; too late (never dropped) => leak
+// divergence won't show in output but RC imbalance accumulates.
 //
 // This test exercises:
 //   * Simple 2-step chain: filter then map

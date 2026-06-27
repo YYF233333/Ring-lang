@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: string methods full coverage (ASCII-safe only).
-// Non-ASCII is oracle-blind (JS and native differ). JS backend is the oracle.
+// Non-ASCII edge cases may differ across platforms. Outputs must match the golden .expected.
 
 fn main() {
     let s = "Hello, World!"

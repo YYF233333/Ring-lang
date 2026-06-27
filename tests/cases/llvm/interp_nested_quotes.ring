@@ -1,7 +1,7 @@
 // B-115: nested quotes inside string interpolation across both backends.
 // Inner string literals (incl. escaped quotes / braces), chained calls with
 // string args, double-nested interpolation, raw strings inside interpolation,
-// and `}` handling at interpolation brace depth > 0. JS backend is the oracle.
+// and `}` handling at interpolation brace depth > 0.
 
 fn wrap(s: Str) -> Str {
     "<${s}>"

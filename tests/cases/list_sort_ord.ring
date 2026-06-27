@@ -1,4 +1,4 @@
-// B-130: List.sort() requires T: Ord and uses Ord dispatch (not JS < operator)
+// B-130: List.sort() requires T: Ord and uses Ord dispatch (not bare < operator)
 
 fn main() {
     // sort integers

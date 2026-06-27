@@ -7,7 +7,7 @@
 // must not double-drop the payload nor the closure env.
 //
 // Intermittently double-freed / crashed in str_from_cstr on the LLVM backend
-// before the fix (~2/200 standalone, ~1/3 full-suite). JS backend is the oracle.
+// before the fix (~2/200 standalone, ~1/3 full-suite).
 
 enum Res { Ok(Int), Err(Str) }
 

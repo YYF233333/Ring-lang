@@ -1,6 +1,7 @@
 // B-100 P1.1 parity: generic basics — unbounded generics (identity, first),
 // generic struct, generic enum, generic functions with multiple type params.
-// JS backend is oracle.
+
+
 
 fn identity<T>(x: T) -> T {
     x

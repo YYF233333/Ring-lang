@@ -6,7 +6,7 @@
 //   - a handler arm that captures an outer-scope variable (`base`)
 //   - return-value ops whose results feed back into the body
 // Before B-090 the LLVM backend returned null for every op → wrong arithmetic /
-// crash. JS oracle.
+// crash.
 
 effect Calc {
     fn add(a: Int, b: Int) -> Int

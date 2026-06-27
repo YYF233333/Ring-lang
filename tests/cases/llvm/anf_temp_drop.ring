@@ -13,8 +13,8 @@
 // RHS is a BORROW (a struct field / list element read), materialising the `&&` and
 // scope-dropping the binding over-frees a value owned elsewhere -> native UAF
 // (originally caught by ASan: register_impl_method freeing parse_param's is_mutable
-// Bool, reached via `if first_p.name == "self" && first_p.is_mutable`).  The JS
-// oracle pins the output; the native build must match AND not crash (over-free
+// Bool, reached via `if first_p.name == "self" && first_p.is_mutable`).  The
+// golden .expected pins the output; the native build must match AND not crash (over-free
 // aborts under RC).  A *wrong* fix (materialising And/Or, or making `let x = a && b`
 // droppable) double-frees the RHS borrow.
 

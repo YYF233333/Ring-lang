@@ -9,12 +9,12 @@
 //
 // THE UAF RISK THIS PINS (rc>1 sharing): the old value may be co-owned —
 //   * `let saved = xs[i]` / `let saved = m[k]` escape-Clones the element (rc 2):
-//     the overwrite drop must DECREMENT, not free — the JS oracle pins saved's
+//     the overwrite drop must DECREMENT, not free — the golden .expected pins saved's
 //     surviving content;
 //   * self-assign `xs.set(0, xs[0])`: the sink arg arrives with its own call-site
 //     dup (rc 2), so store-then-drop nets rc back to 1 with the slot still valid.
 // A wrong impl (dropping an account the container never held, or drop-before-
-// store) frees live values → native UAF; ASan + the JS diff catch it.
+// store) frees live values → native UAF; ASan + the golden diff catch it.
 
 fn list_set_basic() -> Str {
     let mut xs = ["a", "b", "c"]

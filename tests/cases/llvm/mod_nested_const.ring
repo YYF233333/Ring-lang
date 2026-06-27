@@ -1,6 +1,7 @@
 // B-100 P1.1 parity: module variants — nested modules, const in module,
 // trait in module, struct pattern matching in module scope.
-// JS backend is oracle.
+
+
 
 // --- Nested module ---
 

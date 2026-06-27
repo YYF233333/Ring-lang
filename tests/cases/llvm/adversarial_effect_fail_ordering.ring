@@ -1,7 +1,7 @@
 // B-100 P1.3: adversarial — print ordering around fail.raise.
 // Verifies that statements before fail.raise execute and print,
 // while statements after fail.raise do NOT execute. Critical for
-// longjmp (LLVM) vs throw (JS) parity.
+// longjmp (LLVM) semantics.
 
 enum E { Boom }
 

@@ -1,7 +1,7 @@
 // String-keyed Map dispatch: insert / get / contains_key / entries / values over
 // Map<Str, Struct>, including struct field access on looked-up values and folding
 // over entries. Hash/eq dispatch on Str keys must agree across backends. Locks
-// Map<Str,_> parity on the LLVM backend. JS backend is the oracle.
+// Map<Str,_> parity on the LLVM backend.
 //
 // NOTE: generic trait-method dispatch through a type parameter (`fn f<T: Trait>`)
 // and generic Ord dispatch (`fn f<T: Ord>`) are NOT covered here — both crash on

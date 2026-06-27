@@ -9,8 +9,8 @@
 // balanced. A *wrong* implementation that treated the bound read as a bare borrow
 // and still scope-end-dropped it (or, conversely, dropped the container's element
 // twice) would over-free -> native abort/garbage; a wrong implementation that
-// cloned-but-never-dropped would leak (no crash, but wasteful). The JS backend is
-// the oracle; the native run must match it byte-for-byte AND not crash.
+// cloned-but-never-dropped would leak (no crash, but wasteful). The native run
+// must match the .expected snapshot byte-for-byte AND not crash.
 //
 // This pins the exact code shapes flagged by the B-101 diagnostics:
 //   - `let x = list[i]`         (IndexExpr read, then x used + dropped)

@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: explicit clone API for structs and enums.
-// Verifies clone produces independent copies. JS backend is the oracle.
+// Verifies clone produces independent copies.
 
 struct Point { x: Int, y: Int }
 

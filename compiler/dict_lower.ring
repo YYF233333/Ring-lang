@@ -4,7 +4,7 @@
 //
 // Runs once per module at the end of checking (checker.ring), BEFORE perceus
 // and BOTH backends, so dict construction and lifetime are visible to the RC
-// pass / verifier and lowered identically by JS and LLVM codegen.
+// pass / verifier and lowered identically by codegen.
 //
 // Input invariant (established by infer / infer_ctx at DictRef creation):
 //   * DictRef::Static(name)  — a plain static dict (trait_dict_name sites).
@@ -32,8 +32,7 @@
 //     extra_dicts (List<Str>) — name-based references; the LLVM resolver's
 //     name chain returns memoised singletons for static names, params resolve
 //     from scope.  No per-use construction remains after D4's LLVM side.
-//   * BinOp dispatch extra_dicts with a DYNAMIC inner stay Wrapped: the JS
-//     backend builds the wrapper inline (GC reclaims); the LLVM backend
+//   * BinOp dispatch extra_dicts with a DYNAMIC inner stay Wrapped: codegen
 //     ignores extra_dicts in Eq/Ord dispatch (pre-existing functional gap,
 //     reported — nothing is constructed, so nothing leaks).
 

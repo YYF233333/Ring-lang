@@ -409,9 +409,8 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
             HDecl::Trait { name: trait_name, methods: trait_methods, .. } => {
                 // B-141: forward-declare LLVM functions for default trait method bodies.
                 // Each default body becomes __<Trait>_<method>(self_dict, ...supertrait_dicts, ...params, ...evidence).
-                // Supertrait dict params mirror the JS backend's emit_trait_decl: the
-                // body may call supertrait methods via __ring_self_<Supertrait>, so we
-                // pass those dicts as extra parameters after self_dict.
+                // The body may call supertrait methods via __ring_self_<Supertrait>,
+                // so we pass those dicts as extra parameters after self_dict.
                 let all_supers = collect_all_supertraits_llvm(ctx, trait_name)
                 for tm in trait_methods {
                     if tm.has_default {
@@ -983,7 +982,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     // Option_none: () -> ptr
     // B-104 D6 (#153): DECLARATION ONLY — the body lives in ring_runtime.cpp,
     // which returns the lazy memoised none SINGLETON (never-drop typeid
-    // OPTION_NONE), mirroring the JS backend's frozen module-level Option_none.
+    // OPTION_NONE) — a process-wide singleton, never dropped.
     // Pre-D6 a body was emitted here that ring_alloc'd a fresh tag-1 OPTION per
     // call — D5 measured it at 64.2M live=born=100% @2.382B self-compile
     // (nothing ever drops a none: HIR/perceus treat `none` as a borrow of a
@@ -1050,7 +1049,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
 
 // ============================================================
 // compute_transitive_effect_closure — propagate effects through call graph
-// B-089 G-b: mirrors codegen.ring:108-151 (JS backend had this, LLVM didn't)
+// B-089 G-b: propagate effects through the call graph
 // ============================================================
 
 fn compute_transitive_effect_closure(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRow>) {
@@ -1171,9 +1170,8 @@ fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<St
     }
 }
 
-// Collect all transitive supertraits for a given trait. Mirrors the JS
-// backend's collect_all_supertraits_codegen: if Top: Mid and Mid: Base,
-// returns ["Mid", "Base"] for "Top".
+// Collect all transitive supertraits for a given trait: if Top: Mid and
+// Mid: Base, returns ["Mid", "Base"] for "Top".
 pub fn collect_all_supertraits_llvm(ctx: LlvmCtx, trait_name: Str) -> List<Str> {
     let mut result: List<Str> = []
     let mut visited: Set<Str> = set_new()
@@ -1201,8 +1199,7 @@ pub fn collect_all_supertraits_llvm(ctx: LlvmCtx, trait_name: Str) -> List<Str> 
 
 // B-090: collect each effect's ops in declaration order into the registry so
 // gen_handle_expr (evidence-struct construction) and gen_effect_op (dispatch)
-// agree on slot layout via effect_op_slot. Mirrors the JS backend's
-// emit_effect_decl(ctx.effect_ops.insert). Recurses into ModBlocks like the
+// agree on slot layout via effect_op_slot. Recurses into ModBlocks like the
 // other scan passes.
 fn register_effect_ops_llvm(decls: List<HDecl>, mut effect_ops: Map<Str, List<HEffectOp>>) {
     for decl in decls {

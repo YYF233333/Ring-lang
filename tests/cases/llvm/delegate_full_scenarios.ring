@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: delegate full scenarios — delegate with assoc type,
 // delegate with default method, delegate with mut self, delegate with
-// supertrait bound. JS backend is oracle.
+// supertrait bound.
 
 // --- 1. Delegate with associated type ---
 

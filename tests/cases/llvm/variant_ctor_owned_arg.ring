@@ -11,7 +11,7 @@
 // whole std prelude silently failed to load.  The earlier option_methods.ring used
 // only LITERAL payloads (`some("alice")`), which never triggered the bug.
 //
-// JS backend is the oracle; the LLVM backend must reproduce its output byte-for-byte.
+// Output must match the .expected snapshot byte-for-byte.
 
 enum Wrap {
     W { v: Str }

@@ -1,8 +1,4 @@
-// effect_analysis.ring — shared effect/callee analysis functions
-// used by both JS and LLVM backends.
-//
-// Extracted from codegen.ring and codegen_ctx.ring during B-100 Phase 2
-// so that the JS backend files can be deleted without losing these utilities.
+// effect_analysis.ring — shared effect/callee analysis functions used by codegen.
 
 use types::{Type, Effect, EffectRow, effect_kind_name}
 use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,

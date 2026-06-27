@@ -4,7 +4,7 @@
 // read back in the outer scope. The B-091 mechanism must box the `let mut` into
 // a shared heap cell so every per-element write lands in the same container, and
 // the Perceus pass must NOT drop the captured cell across the HOF call boundary
-// (that would be a UAF / lost write). JS backend is the oracle.
+// (that would be a UAF / lost write).
 
 fn main() {
     // inline lambda passed to .map(): accumulate through the captured cell

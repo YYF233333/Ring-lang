@@ -1,6 +1,6 @@
 // B-100 P1.1: multi-arm + typed catch — catch blocks with multiple pattern
 // arms matching different enum variants. Tests that catch dispatch, pattern
-// matching, and value extraction are consistent between JS and LLVM backends.
+// matching, and value extraction work correctly.
 
 enum AppError {
     NotFound { key: Str },

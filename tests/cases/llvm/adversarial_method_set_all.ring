@@ -1,5 +1,5 @@
 // B-100 Phase 1.3 adversarial: Set.all — no method_to_runtime mapping,
-// JS backend inlines via for-of; LLVM path falls to user-impl lookup.
+// uses user-impl lookup (no method_to_runtime fast path).
 fn main() {
     let mut s: Set<Int> = set_new()
     s.insert(2)

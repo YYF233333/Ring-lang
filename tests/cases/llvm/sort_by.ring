@@ -1,6 +1,5 @@
 // B-100 P1.1 parity: sort_by — custom comparator sorting via sort_by,
 // ascending/descending. sort_by takes (T, T) -> Int comparator.
-// JS backend is oracle.
 
 struct Item { name: Str, value: Int }
 

@@ -1,6 +1,6 @@
 // Regression test: mod-qualified effect names must sanitize :: to $
-// in evidence_param_name / default_evidence_name to produce valid JS identifiers.
-// Without the fix, `const __ring_default_ev_fx::Greeter = ...` is a JS SyntaxError.
+// in evidence_param_name / default_evidence_name to produce valid identifiers.
+// Without the fix, `const __ring_default_ev_fx::Greeter = ...` is a SyntaxError.
 
 mod fx {
     pub effect Greeter {

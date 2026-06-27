@@ -541,8 +541,8 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
                 LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "s2l"))
             } else { if name == "Map" && type_params.len() == 2 {
                 // Map for-in: convert to List of (key, value) entry pairs via
-                // ring_map_entries / ring_map_int_entries, mirroring the JS
-                // backend's iterator protocol.  The fresh entries list is dropped
+                // ring_map_entries / ring_map_int_entries (converts to entry-pair
+                // list for iteration).  The fresh entries list is dropped
                 // at loop exit (same pattern as Set conversion above).
                 let is_int_key = match type_params[0] {
                     Type::IntType => true,

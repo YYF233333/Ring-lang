@@ -28,10 +28,10 @@
 //     posture — exactly the old And/Or leak-direction conservatism, now with
 //     no bespoke machinery.
 //
-// The JS backend emits its existing IfExpr lowering (ternary / statement-if):
-// output SHAPE changes, behavior does not (`a && b` on Ring Bools ≡
-// `a ? b : false`).  No HIR node kinds are added or removed — BinOp::And/Or
-// simply no longer occur downstream of the checker (downstream arms panic).
+// Codegen emits IfExpr lowering for these: output SHAPE changes, behavior
+// does not (`a && b` on Ring Bools ≡ `a ? b : false`).  No HIR node kinds
+// are added or removed — BinOp::And/Or simply no longer occur downstream of
+// the checker (downstream arms panic).
 
 use ast::{Span, BinOp}
 use types::{Type, EffectRow, EMPTY_ROW}

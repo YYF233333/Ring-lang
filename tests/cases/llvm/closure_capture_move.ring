@@ -3,8 +3,6 @@
 // the closure with NO dup.  The closure must then be the sole owner; using it
 // must produce the right value, and there must be no double-free (the enclosing
 // scope must NOT also drop the moved-out binding).
-//
-// JS backend is the oracle.
 
 fn invoke(f: fn() -> Str) -> Str { f() }
 

@@ -1,6 +1,5 @@
 // B-100 P1.1 parity: row types — structural subtyping with row polymorphism,
 // passing structs with extra fields to row-typed parameters.
-// JS backend is oracle.
 
 fn greet(person: {name: Str}) -> Str {
     "hello ${person.name}"

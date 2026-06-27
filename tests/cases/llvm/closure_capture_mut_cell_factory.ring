@@ -3,7 +3,6 @@
 // (it is moved into the returned closure as its sole owner — Perceus last-use
 // move is correct here) and accumulate across invocations.  Two independent
 // counters must not share state (each `make_counter` allocates its own cell).
-// JS backend is the oracle.
 
 fn make_counter() -> fn() -> Int {
     let mut n = 0

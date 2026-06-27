@@ -1,6 +1,6 @@
 // B-100 P1.3: adversarial — return from functions that use catch.
 // Tests that catch results feed into subsequent control flow (return,
-// match, if) correctly in both JS and LLVM backends.
+// match, if) correctly.
 
 enum E { Err { code: Int } }
 

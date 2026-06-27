@@ -1,9 +1,8 @@
 // B-129 Map/Set HOF llvm_diff coverage.
 // Map/Set HOF methods (fold, filter, any, all, map_values) iterate via
-// ring_map_for_each / ring_set_for_each in the LLVM backend and via JS
-// for-of in the JS backend.  B-089 G-b sorted iteration determinism
-// ensures both backends iterate in the same order — this test pins that
-// the outputs match.  Callbacks include heap-allocated intermediates to
+// ring_map_for_each / ring_set_for_each.  B-089 G-b sorted iteration
+// determinism ensures deterministic order — this test pins that the
+// outputs match.  Callbacks include heap-allocated intermediates to
 // exercise the #152 HOF drop fix.
 
 fn main() {

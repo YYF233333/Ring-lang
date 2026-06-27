@@ -1,7 +1,6 @@
 // Basic match guards on a non-enum (Int) scrutinee: an arm matches iff its
 // pattern matches AND its guard is true; a false guard falls through to the
-// next arm. The LLVM backend must re-test pattern+guard on fall-through exactly
-// like the JS oracle.
+// next arm. The LLVM backend must re-test pattern+guard on fall-through.
 fn classify(n: Int) -> Str {
     match n {
         x if x > 100 => "huge",

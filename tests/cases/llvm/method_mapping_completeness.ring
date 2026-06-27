@@ -2,8 +2,7 @@
 //
 // Exercises method mappings that were previously either dead (mapped to
 // non-existent runtime symbols) or missing (panic-stub fallback).  Each
-// call must produce the same output under both JS and LLVM backends
-// (differential test via llvm_diff).
+// call must produce the correct output (verified via golden .expected snapshot).
 
 fn test_map_is_empty() -> Str {
     let mut m = map_new()

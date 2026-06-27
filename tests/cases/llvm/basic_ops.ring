@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: basic operations — integer division, compound assignment,
-// unary ops, const declarations. JS backend is the oracle.
+// unary ops, const declarations.
 
 const MAX_VAL: Int = 100
 const LABEL = "result"

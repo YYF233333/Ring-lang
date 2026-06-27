@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: tuple field access + tuple functions — .0/.1 field
 // access, nested tuple access, functions returning tuples, tuple
-// destructuring. JS backend is oracle.
+// destructuring.
 
 fn swap(t: (Int, Str)) -> (Str, Int) {
     let (a, b) = t

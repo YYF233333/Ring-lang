@@ -1,7 +1,7 @@
-// B-087 gap 6 (#132): print() of non-Str arguments must stringify like JS.
-// JS `print(x)` stringifies any type; LLVM's ring_print expected its argument to
-// already be a Str. print(intExpr) thus diverged (LLVM printed garbage / wrong).
-// Fix: LLVM print lowering inserts to_string for non-Str args (Int/Float/Bool).
+// B-087 gap 6 (#132): print() of non-Str arguments must stringify.
+// ring_print expected its argument to already be a Str. print(intExpr) thus
+// diverged (printed garbage / wrong).
+// Fix: print lowering inserts to_string for non-Str args (Int/Float/Bool).
 
 fn main() {
     print(42)
@@ -20,7 +20,7 @@ fn main() {
     print(true)
     print(false)
     print("str ok")
-    // Float.to_str() must also be JS-parity (string interp shares ring_float_to_str)
+    // Float.to_str() must match expected output (string interp shares ring_float_to_str)
     let f = 2.75
     print("interp ${f}")
 }

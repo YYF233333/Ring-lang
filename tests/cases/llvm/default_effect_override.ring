@@ -1,7 +1,7 @@
 // B-100 P1.1: default effect override — effects with default bodies can be
 // used without handle...with (using the default), or overridden partially
 // or fully with an explicit handler. Tests that default evidence construction
-// and override dispatch are consistent between JS and LLVM backends.
+// and override dispatch work correctly.
 
 effect Logger {
     fn log(msg: Str) -> Unit {

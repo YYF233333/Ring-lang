@@ -1,6 +1,6 @@
 // B-100 P1.1: effect alias — define aliases, use them in annotations, handle
 // the aliased effects. Tests that effect alias expansion is consistent across
-// JS and LLVM backends at runtime (not just type-check time).
+// at runtime (not just type-check time).
 
 effect Logger {
     fn log(msg: Str) -> Unit

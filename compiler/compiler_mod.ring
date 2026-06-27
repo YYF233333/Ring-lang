@@ -13,7 +13,6 @@ use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{RcFinding, verify_rc_program, rc_fatal_count, format_rc_findings}
 
 pub struct CompileProjectResult {
-    pub js: Str,
     pub success: Bool
 }
 
@@ -168,8 +167,8 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
 
 pub fn compile_project(entry_file: Str, error_format: Str) -> CompileProjectResult {
     match compile_phases(entry_file, error_format) {
-        none => CompileProjectResult { js: "", success: false },
-        some(_) => CompileProjectResult { js: "", success: true },
+        none => CompileProjectResult { success: false },
+        some(_) => CompileProjectResult { success: true },
     }
 }
 

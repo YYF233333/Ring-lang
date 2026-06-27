@@ -9,12 +9,12 @@
 // are value-inlined (std::string / int64 copies, no RC pointer stored — the
 // #135 ring_set_clone conclusion).  Set.clear is NOT exercised here: the LLVM
 // method_to_runtime has no "Set"/"clear" mapping (pre-existing native
-// panic-stub, found by this case's first run — see audit-report); JS-side
+// panic-stub, found by this case's first run — see audit-report);
 // behaviour is covered by tests/cases/collection_clear.ring.
 //
 // THE UAF RISK THIS PINS (rc>1 sharing): a `let saved = m[k]` / `xs[i]`
 // escape-Clone co-owns the value (rc 2); the remove/clear drop must DECREMENT,
-// not free — the JS oracle pins saved's surviving content, ASan the liveness.
+// not free — the expected output pins saved's surviving content, ASan the liveness.
 // Containers must stay alive and reusable after clear (insert/push again).
 
 fn map_remove_shared() -> Str {

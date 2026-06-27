@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: block expressions as values.
 // Block expressions in let bindings, function arguments, nested blocks.
-// JS backend is the oracle.
+// Output must match golden .expected file.
 
 fn show(x: Int) -> Str {
     "val=${x}"

@@ -1,7 +1,7 @@
 // B-100 P1.3 adversarial: short-circuit evaluation side effects.
 //
 // `a() && b()` / `a() || b()` — does b()'s side effect happen (or not happen)
-// consistently between LLVM and JS? Since &&/|| are lowered to if-else before
+// consistently? Since &&/|| are lowered to if-else before
 // Perceus, the lowered form is `if a() { b() } else { false }` for &&, and
 // `if a() { true } else { b() }` for ||.
 //

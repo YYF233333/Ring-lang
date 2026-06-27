@@ -3,7 +3,7 @@
 struct Point { x: Int, y: Int }
 
 fn main() {
-    // Tuple with struct elements: should use deep equality, not JS ===
+    // Tuple with struct elements: should use deep equality, not ===
     let t1 = (Point { x: 1, y: 2 }, 10)
     let t2 = (Point { x: 1, y: 2 }, 10)
     assert(t1 == t2, "tuples with equal structs should be equal")

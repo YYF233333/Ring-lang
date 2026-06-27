@@ -1,7 +1,7 @@
 // delegate forwarding a trait method that carries an io effect, with args, and a
 // delegated method calling a sibling trait method. The forwarded calls must thread
 // io evidence through the generated delegate stub on the LLVM backend, preserving
-// stdout side-effect ordering. JS backend is the oracle.
+// stdout side-effect ordering.
 //
 // NOTE: forwarding a *custom* effect through a delegate (raised inside the
 // delegated method, intercepted by a handler around the outer call) diverges on

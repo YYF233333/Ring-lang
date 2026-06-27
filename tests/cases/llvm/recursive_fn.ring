@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: recursive functions — factorial, fibonacci, recursive
-// with Option, recursive accumulator. JS backend is oracle.
+// with Option, recursive accumulator.
 
 fn factorial(n: Int) -> Int {
     if n <= 1 { 1 }

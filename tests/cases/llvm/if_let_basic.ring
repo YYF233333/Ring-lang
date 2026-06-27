@@ -1,5 +1,6 @@
 // B-100 P1.1 parity: if-let destructuring on Option and custom enums.
-// JS backend is the oracle.
+
+
 
 enum MyOption { Some(Int), None }
 

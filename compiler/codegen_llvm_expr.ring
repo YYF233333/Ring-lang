@@ -316,7 +316,7 @@ fn gen_bool_lit(mut ctx: LlvmCtx, value: Bool) -> LLVMValueRef {
 // `{ ptr value }` so the outer scope and the captured closure env share one
 // mutable container.  The variable's alloca holds the CELL pointer; reads load
 // `cell.value`, writes store into it, and closures capture the (shared) cell
-// pointer.  Mirrors the JS backend's `let c = {value: init}` + `c.value`.
+// pointer.
 
 pub fn is_boxed_def(ctx: LlvmCtx, def_id: Int?) -> Bool {
     match def_id {
@@ -366,7 +366,7 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dic
     // function value would be called through the uniform closure ABI fn(env, args)
     // without supplying the dicts. So we build a real closure {fn_ptr, env_ptr} whose
     // fn_ptr is a thunk that drops env and forwards (args, captured dicts) to the real
-    // function. Mirrors the JS backend's `(p0..) => fn(p0.., dict..)` wrapper.
+    // function.
     match dict_closure_dicts {
         some(dicts) => {
             if dicts.len() > 0 {
@@ -473,8 +473,7 @@ fn call_zero_arg_or_return(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str)
 // stores the resolved dicts as OWNED counted slots (ring_dup'd; static singletons
 // are never-drop no-ops, a dynamic dict-param-backed dict gets a real reference
 // released by drop_closure_env) followed by UNcounted evidence slots (handler-
-// scoped lifetime, B-096). Mirrors the JS backend's
-// `(p0..) => fn(p0.., dict.., ev..)` wrapper (codegen_expr.ring:38-62).
+// scoped lifetime, B-096).
 fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> LLVMValueRef {
     // Resolve the real function.
     let mangled = llvm_resolve_fn(ctx, lookup_name)
@@ -1146,9 +1145,8 @@ fn lookup_call_mut_flags(ctx: LlvmCtx, callee: HExpr) -> List<Bool>? {
 // an Ident whose def is already auto-boxed (boxed_vars — a `let mut` written through
 // by a closure), its alloca already holds the shared cell; pass that cell directly so
 // the callee's writes are observed by the caller. Otherwise wrap the evaluated value
-// in a fresh cell (mirrors the JS backend's `{value: expr}` temporary box: a fresh
-// cell still gives correct in-callee mutation semantics; write-back to a non-boxed
-// caller var is not expected, matching JS).
+// in a fresh cell (a fresh cell still gives correct in-callee mutation semantics;
+// write-back to a non-boxed caller var is not expected).
 fn gen_mut_arg_llvm(mut ctx: LlvmCtx, arg: HExpr) -> LLVMValueRef {
     match arg {
         HExpr::Ident { name, resolved_name, def_id, .. } => {
@@ -1231,8 +1229,8 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
                 some(rn) => rn,
                 none => name,
             }
-            // #132 print parity: `print<T>` accepts any type and the JS oracle
-            // stringifies it (console.log). The runtime ring_print expects its arg
+            // #132 print parity: `print<T>` accepts any type. The runtime
+            // ring_print expects its arg
             // to already be a Str (casts to std::string*), so a boxed Int/Float/Bool
             // would crash / mis-print. Coerce a non-Str arg to its Str rendering via
             // the same convert_to_str path string interpolation uses. (resolved_name
@@ -1428,8 +1426,8 @@ pub fn emit_memoised_dict_getter(mut ctx: LlvmCtx, name: Str, build_fn: LLVMValu
 // (D4 dict-getter shape).  Pre-D6 the zero-arg const fn re-evaluated its
 // initialiser on EVERY access (ring_str_from_cstr fresh alloc; D5 measured the
 // BUILTIN_* getters at ≈29.6M live @2.382B self-compile — call sites correctly
-// treat a const access as a borrow of a module-level value, mirroring the JS
-// backend's module-level `const`, so nobody ever dropped the fresh copies).
+// treat a const access as a borrow of a module-level value — module-scoped
+// `const` semantics — so nobody ever dropped the fresh copies).
 // Getter shape:
 //   entry: %c = load @__ring_constg_<fn> ; br (%c == null), build, done
 //   build: %v = ring_const_intern(<init expr>) ; store %v, @g ; br done
@@ -1902,7 +1900,7 @@ fn trait_name_from_static_dict(mut ctx: LlvmCtx, dict_param: Str) -> Str? {
     best_match
 }
 
-// Fallback ordering for built-in traits (alphabetical, matching JS backend):
+// Fallback ordering for built-in traits (alphabetical):
 // Eq: eq=0, ne=1; Clone: clone=0; Ord: compare=0; Debug: debug=0.
 fn get_builtin_method_index(method: Str) -> Int {
     if method == "eq" { 0 }
@@ -3352,7 +3350,7 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
     // the NEXT arm, which may share the same constructor/tag. So any match that
     // contains a guarded arm — enum or not — is lowered via the if-else chain
     // (gen_match_if_else), which emits explicit tag tests and re-tests each arm's
-    // pattern+guard on fall-through, exactly matching the JS oracle. The switch is
+    // pattern+guard on fall-through. The switch is
     // kept purely as an optimization for guard-free enum matches.
     //
     // Also incompatible with the switch: duplicate constructor tags. A match like
@@ -3738,7 +3736,7 @@ fn check_nested_ctor_tags(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern, fai
 // success. The builder must already be positioned at the block where the
 // pattern matched and its variables are bound. When the arm has a guard, the
 // guard is evaluated here; a false guard falls through to next_bb (re-testing
-// the following arm's pattern+guard), mirroring the JS oracle. Arms without a
+// the following arm's pattern+guard). Arms without a
 // guard branch unconditionally to the body, preserving prior behavior.
 fn emit_match_arm_body(mut ctx: LlvmCtx, arm: HMatchArm, merge_bb: LLVMBasicBlockRef, next_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
     match arm.guard {
@@ -4536,11 +4534,11 @@ fn gen_list_lit(mut ctx: LlvmCtx, elements: List<HExpr>) -> LLVMValueRef {
 }
 
 // ============================================================
-// Tuple literal (represented as List, same as JS backend)
+// Tuple literal (represented as List)
 // ============================================================
 
 fn gen_tuple_lit(mut ctx: LlvmCtx, elements: List<HExpr>) -> LLVMValueRef {
-    // Tuples are represented as Lists (same as JS backend)
+    // Tuples are represented as Lists
     gen_list_lit(ctx, elements)
 }
 
@@ -5784,7 +5782,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         } else {
             // B-090 (D1): build the real N-slot evidence struct. N = number of ops
             // declared on this effect (effect_op_slot). Slot k holds op k's
-            // {fn_ptr, env} closure (mirrors JS oracle's `{op: closure}`).
+            // {fn_ptr, env} closure.
             let ev_struct = build_handler_evidence(ctx, effect_name, hs)
             let alloca = build_entry_alloca(ctx, ctx.ptr_type, ev_name)
             discard(LLVMBuildStore(ctx.builder, ev_struct, alloca))
@@ -5903,7 +5901,7 @@ fn emit_evidence_drops(mut ctx: LlvmCtx, ev_allocas: List<LLVMValueRef>) {
 // Slot k = the {fn_ptr, env} closure for op k (op order = declaration order,
 // via effect_op_slot). Each handler arm becomes a closure built by gen_lambda
 // (params = arm params, body = arm body), so it captures the surrounding scope
-// exactly like the JS oracle's `(params) => (body)`. Tail-resumptive: the arm's
+// exactly like a lambda `(params) => (body)`. Tail-resumptive: the arm's
 // return value IS the resume value, so gen_effect_op returns the closure call
 // result directly.
 //
@@ -5967,7 +5965,7 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
         discard(LLVMBuildStore(ctx.builder, arm_closure, slot))
     }
 
-    // B-097: merge default bodies for unhandled ops (mirrors JS gen_handle #72).
+    // B-097: merge default bodies for unhandled ops.
     // If the effect declares ops with default bodies that weren't explicitly
     // handled, inject their default body closures into the evidence struct.
     match ctx.effect_ops.get(effect_name) {

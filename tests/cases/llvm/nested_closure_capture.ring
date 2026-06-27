@@ -1,7 +1,7 @@
 // B-127: nested closure capture regression test
 // codegen_llvm_expr.ring's collect_captures descends into inner lambdas and
 // gen_lambda independently looks up captures — correct in theory but had zero
-// test coverage for closure-in-closure patterns.  JS backend is the oracle.
+// test coverage for closure-in-closure patterns.
 
 // --- Helper to invoke a closure ---
 fn call_thunk(f: fn() -> Str) -> Str { f() }

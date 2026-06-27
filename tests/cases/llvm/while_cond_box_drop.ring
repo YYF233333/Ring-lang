@@ -7,7 +7,7 @@
 // literals).  What this pins:
 //   * a WRONG drop of a BORROWED condition (`while flag` reads the mut var's
 //     box; `opt.unwrap()` reads the Option payload) would free a live value →
-//     re-reading it after the loop diverges/crashes vs the JS oracle.
+//     re-reading it after the loop diverges/crashes from expected output.
 //   * the FRESH cases must drop exactly once per evaluation — a double drop
 //     corrupts the heap on the very next iteration (native crash).
 //   * guards on both the taken edge AND the fall-through edge release the box

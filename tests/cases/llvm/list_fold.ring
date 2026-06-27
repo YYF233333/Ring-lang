@@ -1,6 +1,6 @@
 // B-086: List.fold on the LLVM backend dispatches to ring_list_fold, a left fold
 // with an explicit initial accumulator. The closure is binary fn(acc, elem) -> acc,
-// matching the JS backend's `list.reduce(cb, init)` lowering. JS backend is oracle.
+// with an explicit initial accumulator and binary fn(acc, elem) -> acc closure.
 
 fn main() {
     let xs = [1, 2, 3, 4, 5]

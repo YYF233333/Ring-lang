@@ -9,7 +9,7 @@
 // `x = x + 1` drops the OLD x box — that must DECREMENT (rc 2→1), leaving y valid, not
 // free it.  A wrong impl (dropping without the dup, or treating the old value as
 // unshared/owned-once) frees y's value → native UAF (over-free aborts under RC); the
-// JS oracle pins y's surviving value.  Also pins the order: the RHS must be evaluated
+// Expected output pins y's surviving value.  Also pins the order: the RHS must be evaluated
 // BEFORE the old-value drop (self-read `x = x + 1` reads the old box), else UAF.
 
 // Plain counter: every `i = i + 1` / `acc = acc + i` drops the old box (W4 reclaim).

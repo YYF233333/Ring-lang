@@ -35,8 +35,8 @@ pub struct HParam {
 //                   use site: all-static → Static(instance); any dynamic inner
 //                   → a local `let __ring_dictlocal_N = HExpr::DictConstruct`
 //                   + Simple(local).  After dict_lower, Wrapped survives ONLY
-//                   in BinOp eq/ord_dispatch extra_dicts (JS-only consumption;
-//                   the LLVM backend ignores extra_dicts — pre-existing gap).
+//                   in BinOp eq/ord_dispatch extra_dicts (legacy; codegen
+//                   ignores extra_dicts — pre-existing gap).
 pub enum DictRef {
     Simple(Str),
     Wrapped { dict: Str, trait_name: Str, inner_dicts: List<DictRef> },
@@ -45,16 +45,16 @@ pub enum DictRef {
 
 // B-104 D4: a module-level static dict singleton definition (HProgram.static_dicts).
 //   inner == []  — a PLAIN static dict (impl dict or builtin primitive dict).
-//                  Its definition already exists (JS: impl const / runtime
-//                  preamble; LLVM: ring_dict_init_* / runtime builtin synthesis);
-//                  the entry records the module's static-dict footprint and the
-//                  LLVM backend memoises the named singleton on first use.
+//                  Its definition already exists (ring_dict_init_* / runtime
+//                  builtin synthesis); the entry records the module's
+//                  static-dict footprint and codegen memoises the named
+//                  singleton on first use.
 //                  trait_name may be "" (not recoverable from the name alone —
 //                  backends do not need it for plain dicts).
 //   inner != [] — a fully-static WRAPPED INSTANCE: base_dict's trait methods
-//                  partially applied with the inner singletons.  Both backends
-//                  emit ONE module-level definition (JS: const; LLVM: lazy
-//                  memoised getter) and use sites borrow it via DictRef::Static.
+//                  partially applied with the inner singletons.  Codegen emits
+//                  ONE module-level definition (lazy memoised getter) and use
+//                  sites borrow it via DictRef::Static.
 pub struct HDictDef {
     pub name: Str,
     pub base_dict: Str,
@@ -63,8 +63,8 @@ pub struct HDictDef {
 }
 
 // Naming convention for a fully-static wrapped dict instance (cross-stage
-// contract: dict_lower mints it, both backends define/reference it).  `$` is
-// legal in JS identifiers and LLVM symbols, and cannot appear in user type
+// contract: dict_lower mints it, codegen defines/references it).  `$` is
+// legal in LLVM symbols (and JS identifiers in dist/), and cannot appear in user type
 // names, so the encoding is collision-free and deterministic.
 pub fn dict_instance_name(base_dict: Str, inner: List<Str>) -> Str {
     if inner.len() == 0 {
@@ -300,8 +300,8 @@ pub struct HProgram {
 // balanced by the deep recursive drop), and the working-set is reclaimed at
 // scope end.  See design.md §7.11 "Type-DAG 内存回收：pure Perceus RC".
 
-// JS codegen naming conventions
-pub fn variant_js_name(enum_name: Str, variant_name: Str) -> Str {
+// Codegen naming conventions
+pub fn variant_ctor_name(enum_name: Str, variant_name: Str) -> Str {
     "${enum_name}_${variant_name}"
 }
 
@@ -325,7 +325,7 @@ pub fn default_evidence_name(effect_name: Str) -> Str {
 // cross-phase contract between gen_handle_expr (which lays out the N-slot
 // evidence struct, slot k = op k's {fn_ptr, env} closure) and gen_effect_op
 // (which GEPs to this slot to dispatch). Slot order = op order in the effect
-// declaration. Property is identical to variant_js_name: a naming/layout
+// declaration. Property is identical to variant_ctor_name: a naming/layout
 // convention shared across codegen phases that must never be hardcoded per-site.
 // Returns -1 if the op is not found (well-typed code never hits this — the
 // checker rejects ops not declared on the effect).
@@ -518,7 +518,7 @@ pub fn is_extern_handle_type(ty: Type, externs: Set<Str>) -> Bool {
 // B-104 D1 rule ② (Unit) + rule ① (direct extern): a value of this type must
 // never be Clone'd, never be Drop'ed, never enter the owned set, and never be
 // materialised.  UnitType: the checker guarantees Unit has no value semantics
-// (JS backend yields undefined); at the LLVM ABI a Unit-typed call may
+// (Unit has no value semantics); at the ABI level a Unit-typed call may
 // accidentally return a live pointer (the receiver-returning mutators —
 // `return list;` etc., see perceus.ring's B-103 classification table), so
 // dup/drop bookkeeping on it is at best a pin-leak and at worst a UAF.

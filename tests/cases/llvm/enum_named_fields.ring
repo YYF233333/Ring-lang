@@ -1,6 +1,6 @@
 // B-100 P1.1 parity: enum named fields — declaration, construction, pattern
 // matching with punning, explicit binding, partial match (..), and mixed
-// positional + named field variants. JS backend is oracle.
+// positional + named field variants.
 
 enum Shape {
     Circle { radius: Int },

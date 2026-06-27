@@ -1,7 +1,7 @@
 // B-091 regression (cross-call boundary): a closure that writes through a captured
 // `let mut` is passed as an argument to another function, invoked there, then
 // invoked again in the original scope.  The shared cell must survive being passed
-// across the call boundary and accumulate every write.  JS backend is the oracle.
+// across the call boundary and accumulate every write.
 
 fn apply_twice(f: fn() -> Int) -> Int {
     let a = f()

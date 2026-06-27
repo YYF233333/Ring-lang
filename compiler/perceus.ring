@@ -263,8 +263,8 @@ fn anf_fn_body(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr 
 // When adding a NEW HExpr variant, update BOTH functions.
 fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
-    //   ② a Unit-typed expression has no value semantics (checker-guaranteed; JS
-    //     backend yields undefined).  At the LLVM ABI a Unit-typed builtin call
+    //   ② a Unit-typed expression has no value semantics (checker-guaranteed).
+    //     At the ABI level a Unit-typed builtin call
     //     may accidentally return a live pointer (the receiver-returning
     //     mutators — `return list;` etc., classification table below), so
     //     binding + scope-end-dropping it would free the caller's container.
@@ -2487,7 +2487,7 @@ pub fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
 // (sink) positions, like StructLit / NamedVariantConstruct fields.
 //
 // Detection (no enum-registry access in perceus): the callee is a BARE Ident
-// (not a method / FieldAccess) whose `resolved_name` is the variant's JS name
+// (not a method / FieldAccess) whose `resolved_name` is the variant's ctor name
 // `${Enum}_${variant}` (set by infer when the call name resolves through
 // `variant_to_enum`), AND the call's result type is that EnumType.  Requiring
 // resolved_name to start with the result enum's `${name}_` distinguishes a

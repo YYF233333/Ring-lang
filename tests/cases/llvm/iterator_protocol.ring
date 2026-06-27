@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: iterator protocol — map, filter, any, all on List.
-// Includes chained HOF calls. JS backend is the oracle.
+// Includes chained HOF calls.
 
 fn main() {
     let xs = [1, 2, 3, 4, 5]

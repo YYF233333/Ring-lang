@@ -1,4 +1,4 @@
-// B-023: Verify collection methods use Eq trait dispatch (==) instead of JS ===
+// B-023: Verify collection methods use Eq trait dispatch (==) instead of ===
 
 struct Point { x: Int, y: Int }
 

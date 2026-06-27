@@ -1,11 +1,7 @@
 // B-100 P1.3 adversarial: Option.and_then — DISCOVERED GAP.
-// Option.and_then is listed in OPTION_HOF_METHODS and works in the JS backend,
-// but ring_Option_and_then is NOT implemented in ring_runtime.cpp, and there is
-// no codegen mapping in codegen_llvm_expr.ring. The LLVM backend panics with:
-//   ring panic: LLVM: missing method 'Option.and_then'
-//
-// This test will FAIL until the gap is fixed. It documents the exact semantics
-// expected by the JS oracle.
+// Option.and_then is listed in OPTION_HOF_METHODS. Previously missing from
+// ring_runtime.cpp and codegen_llvm_expr.ring — now fixed.
+// Documents the exact semantics expected by the golden .expected file.
 
 fn main() {
     // and_then with Some -> Some

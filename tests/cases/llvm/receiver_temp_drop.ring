@@ -14,7 +14,7 @@
 //      while-cond block drops its materialised scrutinee AFTER the match arm
 //      returned a projection of its solely-owned payload (`some(p) => p.flag`).
 //      The tail-escape invariant Clone-wraps the arm tail, so the condition
-//      value survives the block-end drop.  JS oracle pins the loop count.
+//      value survives the block-end drop.  Expected output pins the loop count.
 
 struct S { flag: Bool, pad: Str }
 struct Score { name: Str, val: Int }

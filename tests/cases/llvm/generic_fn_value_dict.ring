@@ -1,7 +1,7 @@
 // B-087 gap 1: a polymorphic function with a trait bound used as a FIRST-CLASS
 // value (passed to a higher-order fn). The checker tags the Ident with
-// dict_closure_dicts so the value carries the resolved trait dict. JS wraps it in
-// `(__ring_a0) => fn(__ring_a0, <dict>)`. The LLVM gen_ident dropped dict_closure_dicts
+// dict_closure_dicts so the value carries the resolved trait dict. The bootstrap
+// backend wraps it in `(__ring_a0) => fn(__ring_a0, <dict>)`. The LLVM gen_ident dropped dict_closure_dicts
 // (the `..` in its signature) so the function value had the wrong call signature.
 
 trait Describe { fn describe(self) -> Str }

@@ -1,6 +1,6 @@
 // B-100 P1.3: adversarial — fail in nested function call arguments.
 // f(g(h())) where h() fails — tests that argument evaluation order
-// and drop timing are consistent between JS (try/catch) and LLVM (setjmp/longjmp).
+// and drop timing are correct under LLVM (setjmp/longjmp).
 
 enum E { Boom }
 

@@ -1,6 +1,6 @@
 // Regression test for #69: supertrait default method body references undefined dict variable
 // When trait Greeter has supertrait Named and a default method calls Named.name(),
-// the generated JS for __Greeter_greet must receive __ring_self_Named as a parameter.
+// the generated code for __Greeter_greet must receive __ring_self_Named as a parameter.
 
 trait Named {
     fn name(self) -> Str

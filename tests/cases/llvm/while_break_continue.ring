@@ -1,5 +1,5 @@
 // B-100 P1.1 parity: while/break/continue — basic while loops, nested while,
-// break exits inner loop only, continue skips iteration. JS backend is oracle.
+// break exits inner loop only, continue skips iteration.
 
 fn main() {
     // Basic while loop

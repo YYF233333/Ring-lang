@@ -1,7 +1,7 @@
 // B-100 P1.1: effect row types with runtime handle — partial effect handling
 // where a handler eliminates one effect but remaining effects propagate to
 // the outer scope. Tests that effect row resolution and evidence threading
-// are consistent between JS and LLVM backends.
+// are correct.
 
 effect Config {
     fn get(key: Str) -> Str

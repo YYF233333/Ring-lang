@@ -1,5 +1,5 @@
 // Regression test for C1: match with wildcard + constructor patterns
-// Previously generated duplicate default: in JS switch, causing SyntaxError
+// Previously generated duplicate default: in switch, causing SyntaxError
 
 enum Animal {
     cat,
