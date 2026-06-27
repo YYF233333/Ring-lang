@@ -26,6 +26,7 @@ fn label_effect(names: Map<Int, Str>, e: Effect) -> Effect {
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { label_vars(names, a) }) },
         Effect::IoEffect => e,
+        Effect::UnsafeEffect => e,
     }
 }
 
@@ -328,6 +329,9 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             some(v) => HExpr::ReturnExpr { value: some(zonk_expr(ctx, v)), ty: z_ty, effects: z_eff, span: z_span },
             none => HExpr::ReturnExpr { value: none, ty: z_ty, effects: z_eff, span: z_span },
         },
+        // B-125: unsafe block — zonk the body
+        HExpr::UnsafeBlock { body, .. } =>
+            HExpr::UnsafeBlock { body: zonk_expr(ctx, body), ty: z_ty, effects: z_eff, span: z_span },
     }
 }
 

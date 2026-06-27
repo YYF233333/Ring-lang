@@ -1026,6 +1026,9 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             },
             none => HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span },
         },
+        // B-125: unsafe block — transparent, normalise the body
+        HExpr::UnsafeBlock { body, ty, effects, span } =>
+            HExpr::UnsafeBlock { body: anf_block_expr(body, externs, counter), ty: ty, effects: effects, span: span },
     }
 }
 
@@ -2431,6 +2434,11 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
                 HExpr::Block { stmts: out, tail: some(ret_expr),
                     ty: ty, effects: effects, span: span }
             }
+        },
+        // B-125: unsafe block — transparent, recurse into body
+        HExpr::UnsafeBlock { body, ty, effects, span } => {
+            let new_body = rc_block_root(body, escape, owned, boxed, externs, gensym, loop_base)
+            HExpr::UnsafeBlock { body: new_body, ty: ty, effects: effects, span: span }
         },
     }
 }

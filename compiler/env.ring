@@ -466,7 +466,8 @@ pub fn apply_subst_effect_map(subst: Map<Int, Type>, e: Effect) -> Effect {
             Effect::MutEffect { state_type: apply_subst_map(subst, state_type) },
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { apply_subst_map(subst, a) }) },
-        Effect::IoEffect => Effect::IoEffect
+        Effect::IoEffect => Effect::IoEffect,
+        Effect::UnsafeEffect => Effect::UnsafeEffect
     }
 }
 
@@ -592,7 +593,8 @@ fn apply_subst_effect(subst: UnionFind, e: Effect) -> Effect {
             Effect::MutEffect { state_type: apply_subst(subst, state_type) },
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { apply_subst(subst, a) }) },
-        Effect::IoEffect => Effect::IoEffect
+        Effect::IoEffect => Effect::IoEffect,
+        Effect::UnsafeEffect => Effect::UnsafeEffect
     }
 }
 

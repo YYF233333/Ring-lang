@@ -12,9 +12,10 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
 pub fn extract_effect_names(effects: EffectRow) -> List<Str> {
     let mut names: List<Str> = []
     for e in effects.effects {
-        // Skip MutEffect — it is a compile-time marker with zero runtime cost
+        // Skip MutEffect and UnsafeEffect — compile-time markers with zero runtime cost
         match e {
             Effect::MutEffect { .. } => {},
+            Effect::UnsafeEffect => {},
             _ => {
                 let n = effect_kind_name(e)
                 if names.contains(n) == false {
@@ -221,6 +222,10 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
         },
         HExpr::Clone { inner, .. } => {
             collect_local_calls(inner, local_names, out)
+        },
+        // B-125: unsafe block — recurse into body
+        HExpr::UnsafeBlock { body, .. } => {
+            collect_local_calls(body, local_names, out)
         },
         _ => {},
     }

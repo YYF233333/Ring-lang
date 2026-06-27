@@ -50,7 +50,8 @@ pub enum Effect {
     IoEffect,
     FailEffect { error_type: Type },
     MutEffect { state_type: Type },
-    CustomEffect { name: Str, type_args: List<Type> }
+    CustomEffect { name: Str, type_args: List<Type> },
+    UnsafeEffect
 }
 
 pub struct EffectRow {
@@ -78,7 +79,8 @@ pub fn effect_kind_name(e: Effect) -> Str {
         Effect::IoEffect => "io",
         Effect::MutEffect { .. } => "mut",
         Effect::FailEffect { .. } => "fail",
-        Effect::CustomEffect { name, .. } => name
+        Effect::CustomEffect { name, .. } => name,
+        Effect::UnsafeEffect => "unsafe"
     }
 }
 
@@ -104,7 +106,8 @@ pub fn effects_match_kind(a: Effect, b: Effect) -> Bool {
         Effect::CustomEffect { name: na, .. } => match b {
             Effect::CustomEffect { name: nb, .. } => na == nb,
             _ => false
-        }
+        },
+        Effect::UnsafeEffect => match b { Effect::UnsafeEffect => true, _ => false }
     }
 }
 
@@ -207,7 +210,8 @@ pub fn effects_same_kind(a: Effect, b: Effect) -> Bool {
         Effect::CustomEffect { name: na, .. } => match b {
             Effect::CustomEffect { name: nb, .. } => na == nb,
             _ => false
-        }
+        },
+        Effect::UnsafeEffect => match b { Effect::UnsafeEffect => true, _ => false }
     }
 }
 
@@ -283,7 +287,8 @@ pub fn effects_equal(a: Effect, b: Effect) -> Bool {
             Effect::CustomEffect { name: nb, type_args: args_b } =>
                 na == nb && type_lists_equal(args_a, args_b),
             _ => false
-        }
+        },
+        Effect::UnsafeEffect => match b { Effect::UnsafeEffect => true, _ => false }
     }
 }
 
@@ -418,7 +423,8 @@ pub fn effect_to_string(e: Effect) -> Str {
         Effect::CustomEffect { name, type_args } => {
             if type_args.len() == 0 { name }
             else { "${name}<${type_args.map(fn(a) { type_to_string(a) }).join(", ")}>" }
-        }
+        },
+        Effect::UnsafeEffect => "unsafe"
     }
 }
 

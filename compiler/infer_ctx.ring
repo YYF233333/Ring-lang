@@ -65,7 +65,9 @@ pub struct InferCtx {
     // fn_defaults: function name -> list of default-value HExprs (one per default param, in order)
     pub fn_defaults: Map<Str, List<HExpr>>,
     // fn_min_arity: function name -> minimum number of required (non-default) params
-    pub fn_min_arity: Map<Str, Int>
+    pub fn_min_arity: Map<Str, Int>,
+    // B-125: whether the current module context allows unsafe blocks
+    pub mod_unsafe_allowed: Bool
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -87,7 +89,8 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
-        fn_min_arity: map_new()
+        fn_min_arity: map_new(),
+        mod_unsafe_allowed: false
     }
 }
 
@@ -1075,6 +1078,7 @@ fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, 
 
 pub fn resolve_effect_expr(mut ctx: InferCtx, eff: EffectExpr) -> Effect {
     if eff.name == "io" { return Effect::IoEffect }
+    if eff.name == "unsafe" { return Effect::UnsafeEffect }
     if eff.name == "mut" {
         let mut_state = if eff.type_args.len() > 0 {
             match eff.type_args.first() {

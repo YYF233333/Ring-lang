@@ -311,7 +311,9 @@ fn walk_expr_callees(expr: Expr, mode: CalleeMode, mut callees: Set<Str>) {
         Expr::ReturnExpr { value, .. } => match value {
             some(v) => walk_expr_callees(v, mode, callees),
             none => {}
-        }
+        },
+        // B-125: unsafe block — walk the body
+        Expr::UnsafeBlock { body, .. } => walk_expr_callees(body, mode, callees)
     }
 }
 

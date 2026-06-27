@@ -580,6 +580,7 @@ fn body_contains_try_or_handle(expr: HExpr) -> Bool {
             }
         },
         HExpr::Clone { inner, .. } => body_contains_try_or_handle(inner),
+        HExpr::UnsafeBlock { body, .. } => body_contains_try_or_handle(body),
         _ => false,
     }
 }

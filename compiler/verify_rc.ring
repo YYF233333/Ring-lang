@@ -826,6 +826,12 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             }
             CLS_EXCLUDED
         },
+
+        // B-125: unsafe block — transparent wrapper, verify the body
+        HExpr::UnsafeBlock { body, ty, .. } => {
+            v_cf_branch(body, mode, ctx)
+            if v_type_excluded(ty, ctx.externs) { CLS_EXCLUDED } else { CLS_OPAQUE }
+        },
     }
 }
 
