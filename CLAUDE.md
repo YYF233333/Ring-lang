@@ -18,7 +18,7 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 
 - **编译器**：Ring 自举。Bootstrap 经 dist/（冻结的 JS 产出，运行于 Node/V8）；目标后端 LLVM native（codegen_llvm* 5 模块）
 - **LLVM codegen**：codegen_llvm*.ring（5 个模块），通过 N-API addon 桥接 LLVM-C 22 API。native ring.exe 可自编译
-- **测试**：node:test，零外部依赖
+- **测试**：Python test runner（`tests/run_tests.py`），零外部依赖；Node-based runner（`tests/e2e.test.ts` 等）保留作参考
 - **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
 - **历史**：TS 原始实现归档于 git tag `ts-compiler-final`；JS codegen 后端归档于 `5df6c99`（B-100 Phase 2）
 
@@ -103,7 +103,7 @@ Ring-lang/
 
 ### 基础设施
 
-- CI 重设计中（B-151）：目标清退 Node，Python 测试运行器 + ring.exe + clang，Windows 先行
+- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows。Linux CI 待后续
 - 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
 - Checker 多错误恢复是 declaration 级（同一函数内停于首错）
 - LSP 暂不可用（TS 实现未移植）
@@ -113,9 +113,9 @@ Ring-lang/
 
 **当前**：**B-100 JS 退役完成 ✅**——Phase 1 ✅（P1.1 覆盖矩阵 → P1.2 gap 修复 → P1.3 对抗 review → P1.4 全部通过）+ **Phase 2 ✅**（golden .expected 快照建立 210+ 文件 + JS codegen 删除 `5df6c99` + 文档更新）。里程碑：B-099 ✅ B-089 ✅ B-104 ✅ B-080 ✅ B-122 ✅ B-138 ✅。测试状态以 `npm test` / `npm run test:llvm` 实跑为准，不在此记录具体计数。
 
-**后续**：L1 用户面（B-068）/ L2 Drop/RAII（B-002，含简单 move checker）→ L1.5 别名追踪（B-110，非 Drop 类型 mutation 安全）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+**后续**：B-151 CI ✅ → B-125 unsafe/Ptr<T> → B-002p1 精简 Drop → B-152 RIIR std → B-002p2 unwind 补全；后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
 
-**基础设施**：B-151 CI 重设计 + Node 清退（Python 过渡 → ring.exe 内建测试）
+**基础设施**：B-151 CI 重设计 ✅（Python runner + GitHub Actions Windows CI，零 Node 依赖）
 
 **遗留**：LSP 移植、技术债清理（见 `docs/audit-report.md`）
 
@@ -131,10 +131,26 @@ node compiler/dist/main.js check examples/effects.ring
 # LLM 格式错误输出
 node compiler/dist/main.js check --error-format=llm examples/effects.ring
 
-# E2E 测试
-cd compiler && npm test
+# E2E 测试（Python runner，推荐）
+python tests/run_tests.py --suite e2e
 
 # Golden 回归测试（需 clang）
+python tests/run_tests.py --suite llvm
+
+# RC verify
+python tests/run_tests.py --suite rc
+
+# 自编译 ×3
+python tests/run_tests.py --suite self-compile
+
+# 全量测试
+python tests/run_tests.py
+
+# 重新生成 golden 快照
+python tests/run_tests.py --update-golden
+
+# 旧 Node runner（仍可用，保留作参考）
+cd compiler && npm test
 cd compiler && npm run test:llvm
 
 # 重新编译编译器自身（dist-llvm/）
