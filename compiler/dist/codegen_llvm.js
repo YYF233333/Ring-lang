@@ -1042,6 +1042,9 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_from", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_clear", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_fold", [ptr, ptr, ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_filter", [ptr, ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_any", [ptr, ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_map_values", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_new", [], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_add", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_has", [ptr, ptr], i64);

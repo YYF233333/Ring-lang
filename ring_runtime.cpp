@@ -1754,6 +1754,60 @@ extern "C" void* ring_map_int_fold(void* map, void* init, void* closure) {
     return acc;
 }
 
+// filter: returns a new Map<Int> containing only entries where predicate returns true.
+// Closure is binary: fn(env, key, value) -> Bool.
+extern "C" void* ring_map_int_filter(void* map, void* closure) {
+    RingMapInt* m = (RingMapInt*)map;
+    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
+    auto* result = new (data) RingMapInt();
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    for (auto& kv : *m) {
+        void* kb = ring_box_int(kv.first);
+        void* r = fn(cls->env_ptr, kb, kv.second);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // drop predicate Bool box
+        ring_drop(kb);  // drop synthesized INT key box
+        if (match) {
+            ring_dup(kv.second);  // fresh map co-owns the value
+            result->emplace(kv.first, kv.second);
+        }
+    }
+    return data;
+}
+
+// any: returns true if any entry satisfies the predicate.
+// Closure is binary: fn(env, key, value) -> Bool.
+extern "C" int64_t ring_map_int_any(void* map, void* closure) {
+    RingMapInt* m = (RingMapInt*)map;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    for (auto& kv : *m) {
+        void* kb = ring_box_int(kv.first);
+        void* r = fn(cls->env_ptr, kb, kv.second);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // drop predicate Bool box
+        ring_drop(kb);  // drop synthesized INT key box
+        if (match) return 1;
+    }
+    return 0;
+}
+
+// map_values: returns a new Map<Int> with the same keys but values transformed.
+// Closure is unary: fn(env, value) -> new_value.
+extern "C" void* ring_map_int_map_values(void* map, void* closure) {
+    RingMapInt* m = (RingMapInt*)map;
+    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
+    auto* result = new (data) RingMapInt();
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& kv : *m) {
+        void* new_val = fn(cls->env_ptr, kv.second);
+        result->emplace(kv.first, new_val);
+    }
+    return data;
+}
+
 extern "C" void* ring_map_int_clone(void* map) {
     RingMapInt* m = (RingMapInt*)map;
     void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);

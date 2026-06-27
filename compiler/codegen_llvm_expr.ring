@@ -2454,6 +2454,7 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     if name == "ring_map_int_is_empty" { return true }
     if name == "ring_set_int_is_empty" { return true }
     if name == "ring_map_any" { return true }
+    if name == "ring_map_int_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2481,6 +2482,7 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
     if name == "ring_map_any" { return true }
+    if name == "ring_map_int_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2565,6 +2567,9 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                     "clone" => "ring_map_int_clone",
                     "is_empty" => "ring_map_int_is_empty",
                     "fold" => "ring_map_int_fold",
+                    "filter" => "ring_map_int_filter",
+                    "any" => "ring_map_int_any",
+                    "map_values" => "ring_map_int_map_values",
                     _ => base_rt_name,
                 }
             } else { if is_int_set(recv_type) {
