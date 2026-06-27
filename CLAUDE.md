@@ -103,7 +103,7 @@ Ring-lang/
 
 ### 基础设施
 
-- 无 CI（test 手动执行）
+- CI 重设计中（B-151）：目标清退 Node，Python 测试运行器 + ring.exe + clang，Windows 先行
 - 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
 - Checker 多错误恢复是 declaration 级（同一函数内停于首错）
 - LSP 暂不可用（TS 实现未移植）
@@ -114,6 +114,8 @@ Ring-lang/
 **当前**：**B-100 JS 退役完成 ✅**——Phase 1 ✅（P1.1 覆盖矩阵 → P1.2 gap 修复 → P1.3 对抗 review → P1.4 全部通过）+ **Phase 2 ✅**（golden .expected 快照建立 210+ 文件 + JS codegen 删除 `5df6c99` + 文档更新）。里程碑：B-099 ✅ B-089 ✅ B-104 ✅ B-080 ✅ B-122 ✅ B-138 ✅。测试状态以 `npm test` / `npm run test:llvm` 实跑为准，不在此记录具体计数。
 
 **后续**：L1 用户面（B-068）/ L2 Drop/RAII（B-002，含简单 move checker）→ L1.5 别名追踪（B-110，非 Drop 类型 mutation 安全）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+
+**基础设施**：B-151 CI 重设计 + Node 清退（Python 过渡 → ring.exe 内建测试）
 
 **遗留**：LSP 移植、技术债清理（见 `docs/audit-report.md`）
 

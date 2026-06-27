@@ -14,12 +14,12 @@
 **已完成（2026-05-23→06-05，明细见 git）**：层 1（B-034/B-005/B-037/B-008）+ 层 2（B-004/B-036/B-010）+ 设计验证（B-043/B-044；B-042 吸收——设计在 design.md §7.9 定案 `Weak<T>`，实现归 B-002 L2）+ 关键路径 B-011 LLVM → B-012 RC L0 → B-082 RC 诊断 → B-081 dup 架构迁移 全部落地。
 
 **现状 / 未完成项**：
-- **当前目标：native 自举 + E2E + 双后端行为对比全过**（见下「Native 自举路线图」与「⭐ native on-par 统一规划」）
+- **Native 自举 + JS 退役全部完成 ✅**（B-089 三门全绿 + B-100 Phase 1+2 完成，2026-06-27）
 - B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（✅）**；B-068 缩减为用户面（lv2 标注：`x: mut T` / `x: move T` / `[mut capture]` 闭包捕获列表 / pub 签名规则），仍 deferred、不阻塞 native（**无独立条目**——模型见 design.md §7.2-7.8（2026-06-24 版），B-110 落地后再立项）。**值类型 auto-box 待讨论（2026-06-25）**：`x: mut Int` 需要 auto-box 语义（传 Cell 间接引用）才能让 callee 修改回传——B-068 立项时需覆盖此设计（#181 审计发现触发）
 - **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏）。借用推断引擎（B-098）被提前到 native-working 之前并已落地
 - B-033 GADTs 推迟至 native 自举之后（无下游依赖）
 - 层 3 在 native 自举 + 归档后启动。**排序（2026-06-05 Discussion 定）**：B-002 Drop/RAII(L2) → **async(B-007) 先**（设计已锁、自包含、风险低、宣发价值大）→ Refinement(B-001) 随后（需 Z3 + 先做 B-070 const generics）；M 项（B-072 Union / B-069 默认参数 / B-070 固定数组）当 XL 间换气穿插；P3 研究（GADTs/dyn/GATs）最后。B-002 的 abort-unwind 子集可能因 G-a 内存提前（B-104 ✅，G-a 终态已达；abort 路径泄漏已入 D2 豁免类，design-accepted）
-- **LLVM 落地后 JS 后端归档**（策略见 B-100，非简单废弃——先证 parity + golden 快照）
+- **JS 后端已归档** ✅（B-100，2026-06-27）
 
 ### Native 自举路线图（2026-06-03 规划，2026-06-13 更新）
 
@@ -639,6 +639,112 @@ source-map 支持 + 断点调试。
 
 ## 语法增强
 
+## 基础设施
+
+### B-151 CI 重设计 + Node 清退（Python 测试运行器过渡）[infra] [P1] [L] [judgment] [queued]
+
+> 2026-06-27 立项（Discussion）。B-100 JS 退役完成后，清退 dist/ 需要 CI 先就位。现有 CI（`.github/workflows/test.yml`）仅 `npm test`，无 LLVM/clang，所有 LLVM 相关测试 auto-skip，等于没跑。目标：**彻底清退 Node 依赖**，CI 和测试全链路基于 ring.exe + Python + clang。
+
+**现状问题**：
+1. CI 没装 LLVM/clang — llvm_diff / native_only / native_selfcompile 全跳过
+2. 没编译 ring_runtime.o — 即使有 clang 也跑不了
+3. llvm-addon N-API 路径硬编码本地 Scoop 路径
+4. linker flags 全硬编码 Windows（`-lmsvcrt`、`/STACK`、`/MANIFESTUAC`）
+5. 全部测试套件依赖 Node（node:test 框架 + `node dist/main.js` bootstrap）
+6. `package.json` description 仍写 "transpiles to JavaScript"
+
+**设计决策（2026-06-27 Discussion）**：
+- **Python 过渡**：用 Python 脚本替代 node:test 运行器，后续考虑 ring.exe 内建测试指令
+- **ring.exe 已支持 `--verify-rc`**：`ring.exe check <file> --verify-rc` / `--verify-rc-strict` 已实现，无需改编译器
+- **CI 先上 Windows**：Linux 需改 linker flags 做平台判断，后续再加
+
+**Bootstrap 路径（无 Node）**：
+```
+dist-llvm/*.o (git tracked) → clang link → ring.exe → ring.exe 编译/测试
+```
+
+**分阶段实施**：
+
+| 阶段 | 内容 | 量 |
+|------|------|----|
+| P1 提取 | 从 e2e.test.ts 提取 expected output 到独立文件 | ~180 个 `.expected` + ~87 个 `.error` + 17+6 个 module `.expected`/`.error` |
+| P2 Python runner | `tests/run_tests.py`：测试发现 → ring.exe 编译 → clang 链接 → 运行 → 比对 | 替代所有 node:test |
+| P3 CI | 新 `.github/workflows/test.yml`：Windows + Python + LLVM/clang | 每次 push/PR |
+| P4 清理 | 删 Node 测试文件、更新 package.json / CLAUDE.md | — |
+
+**P1 expected output 提取规约**：
+- 正向用例：`tests/cases/foo.ring` → `tests/cases/foo.expected`（内容 = 程序 stdout）
+- 负向用例：`tests/cases/foo.ring` → `tests/cases/foo.error`（内容 = error pattern，如 `E0301`）
+- 模块用例：`tests/cases/modules/<dir>/main.expected` 或 `main.error`
+- 与 `tests/cases/llvm/*.expected` 已有 convention 对齐
+
+**P2 Python runner 功能**：
+- `--suite e2e|llvm|rc|self-compile|all`（默认 all）
+- 正向：`ring.exe build <file> --target=llvm` → clang link → run → diff stdout vs `.expected`
+- 负向：`ring.exe check <file>` → assert 退出码非零 + stderr 包含 `.error` 中的 pattern
+- RC：`ring.exe check <file> --verify-rc` 全量 sweep（编译器自身 + 测试用例）
+- Golden 快照：编译运行 `tests/cases/llvm/*.ring`，比对 `.expected`
+- Self-compile：`ring.exe build compiler/main.ring --target=llvm` ×3
+- `--update-golden`：重新生成 `.expected` 文件
+- 报告：pass/fail/skip 计数 + 失败详情 + 非零退出码
+- CRLF 归一化（Windows 环境）
+
+**P3 CI workflow 结构**：
+```yaml
+# Job 1: check（快）— ring.exe check + RC verify
+# Job 2: llvm（中）— ring.exe build + clang link + 全部正向/负向/golden 测试
+# Job 3: bootstrap（重，仅 main）— 构建 ring.exe + self-compile ×3
+```
+- LLVM 安装：`KyleMayes/install-llvm-action` 或 `choco install llvm`
+- Python：`actions/setup-python@v5`（3.11+）
+- ring.exe 构建：从 dist-llvm/*.o + ring_runtime.cpp + clang 链接
+
+**暂不迁移（需编译器功能支持，详细列表供后续修复参考）**：
+
+1. **Recovery 测试（3 个）**——断言 `ast.decls.length >= min_decls`（解析器错误恢复后存活的声明数量），纯内部 AST 结构，CLI 无等效输出：
+   - `error_recovery_match.ring`：`min_decls: 2`，`error_patterns: ["E0103", "E0301"]`
+   - `error_recovery_handle.ring`：`min_decls: 2`，`error_patterns: ["E0103", "E0301"]`
+   - `error_recovery_if.ring`：`min_decls: 2`，`error_patterns: ["E0103", "E0301"]`
+   - **迁移条件**：ring.exe 增加 `--recovery-stats` 输出（声明计数 + 错误恢复点），或内建测试指令
+
+2. **In-process sink.items 结构测试（2 个）**——断言诊断对象内部字段（`d.severity._tag === "SevWarning"`、`d.category._tag === "some"`、`w.span.start.line`），虽然 `--error-format=llm` JSON 暴露了大部分信息（category、severity、suggestions、notes），但 span 精确行号和 tag 判等需要 JSON 输出覆盖这些字段：
+   - W0001 in-process 测试：`catch_pure_expr.ring` — 检查 `sink.items` 有 `SevWarning` + code `W0001`
+   - W0002 span 行号测试：`where_clause_warning.ring` — 检查 `w.span.start.line === 11`
+   - **迁移条件**：确认 `--error-format=llm` JSON 包含完整 span（line/column）+ severity 字段。如已包含，可直接迁移；如未包含，需补 ring.exe 的 LLM 格式输出字段
+
+3. **Diagnostic quality in-process 测试（8 个）**——多数可通过 `ring.exe check --error-format=llm` 等效迁移（category、suggestions、notes 均在 JSON 输出中），但以下需验证 JSON 输出完整性后才能确认：
+   - `error_with_suggestion.ring`：4 个测试（category=type / suggestions 含 parse_int / notes ≥ 2 / format_human 含 help: + note:）
+   - `error_diagnostic_notes.ring`：1 个测试（notes 含 return type + body）
+   - `error_empty_list_suggestion.ring`：2 个测试（suggestions 含 type annotation / replacement 非空）
+   - `error_effect_suggestion.ring`：2 个测试（notes 含 Logger / suggestions 含 handle + Logger / replacement 含 handle）
+   - **迁移条件**：验证 `ring.exe check --error-format=llm` 的 JSON 输出包含 `category`、`suggestions[].message`、`suggestions[].replacement`、`notes[].message` 字段。**大概率可直接迁移**（现有 CLI 测试已验证部分字段），P2 阶段实施时逐个验证
+
+**已有 CLI 等效测试（可直接迁移）**：
+- W0002 CLI human format 测试：`ring.exe check` → stderr 含 `warning[W0002]`
+- W0002 CLI LLM format 测试：`ring.exe check --error-format=llm` → JSON 含 `W0002` + `severity: "warning"`
+- `--error-format=llm` JSON validity 测试（parse errors / type errors / multi-module errors）
+
+**涉及修改**：
+1. `tests/run_tests.py`（新）：Python 测试运行器
+2. `tests/extract_expected.py`（新，一次性）：从 e2e.test.ts 提取 expected output
+3. `tests/cases/*.expected`、`tests/cases/*.error`（新，~267 个）：提取的期望输出
+4. `tests/cases/modules/*/main.expected`、`main.error`（新，~23 个）：模块用例期望输出
+5. `.github/workflows/test.yml`：重写为 Python + clang 流程
+6. `compiler/package.json`：更新 description，移除 Node 测试 scripts
+7. `CLAUDE.md`：更新测试策略、常用命令、基础设施限制
+
+**验收标准**：
+- CI 在 GitHub Actions Windows runner 上全绿（check + llvm + bootstrap）
+- Python runner 覆盖现有 node:test 全部可迁移用例（正向 ~180 + 负向 ~87 + 模块 23 + llvm golden 210+ + RC verify + self-compile）
+- CI 流程零 Node 依赖（不 `setup-node`、不 `npm test`）
+- `--update-golden` 可重新生成快照
+- 暂不迁移项有明确的迁移条件和追踪
+
+**后续**：
+- Linux CI（需改 linker flags 平台条件逻辑）
+- ring.exe 内建测试指令（`ring test`），替代 Python runner
+- dist/ 清退（CI 稳定后推进）
+
 ## 已知 Bug / 技术债
 
 
@@ -726,20 +832,14 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 多 .o 链接产出与单 Module 行为一致
 - 全部 E2E + llvm_diff 通过；自举一致
 
-## 架构：后端策略（2026-05-23 更新）
+## 架构：后端策略（2026-06-27 更新）
 
-**JS 后端定位为 bootstrap 后端，LLVM 为目标后端。**
+**LLVM 是唯一后端。** JS codegen 后端已归档（B-100 Phase 2，commit `5df6c99`，2026-06-27）。dist/ JS 编译产出冻结作 stage 0 回退。
 
-| 后端 | 定位 | 生命周期 |
-|------|------|---------|
-| **JS (V8)** | Bootstrap + 差分 oracle | 当前唯一后端，支撑自举 + 当 LLVM codegen 的差分 oracle。归档走 B-100（(Z) 证明 parity → golden 快照 → 删除），不是简单废弃 |
-| **LLVM** | 目标后端 | Ring 语言特性（linear types、Perceus RC、full AE）的完整实现平台 |
-
-### JS 后端归档策略（2026-06-04 确定，B-100）
-
-JS 后端不只是 bootstrap，还是 **LLVM codegen 的差分 oracle**（llvm_diff 用 JS 输出当真值）。因此「归档」≠ 随手删——简单删会摧毁这个 oracle，而层 3（async/unwind/refinement）恰是 codegen 最复杂处。
-
-**策略 (Z)**：删除前先**证明**两后端 feature 完全一致且零 bug（parity 认证门：穷举覆盖矩阵 + 关 B-097/B-096 + 复数轮对抗 review，loop-until-dry），此时 oracle 对当前 feature 集已用尽；再把 llvm_diff 语料**快照成 golden**保留存量回归网，然后删 JS 后端。删除点 = **层 3 之前**——层 3 新 codegen 靠手写 E2E 期望值 + golden 回归（接受失去活 oracle，因 JS 实现层 3 亦可能有 bug 且双实现成本过高）。详见 B-100。
+| 后端 | 定位 | 状态 |
+|------|------|------|
+| **LLVM** | 唯一后端 | Ring 语言特性（linear types、Perceus RC、full AE）的完整实现平台 |
+| **JS (V8)** | 已归档 | 原 bootstrap + 差分 oracle。经 B-100 parity 认证（(Z) 策略）后删除，golden 快照保留存量回归网 |
 
 ### 生态策略：RIIR（Rewrite It In Ring）
 
@@ -747,13 +847,13 @@ JS 后端不只是 bootstrap，还是 **LLVM codegen 的差分 oracle**（llvm_d
 
 **全部自己实现（2026-06-13 拍板）**：容器底层（vector/string/unordered_map）全部用纯 Ring + `Ptr<T>` 重写，不保留 C++ STL 依赖。标准库从 `extern fn` 包装 JS → 纯 Ring 实现。纯 Ring 代码天然跨后端——RIIR 进度 = 后端迁移就绪度。
 
-### LLVM 后端引入路径
+### LLVM 后端引入路径（已完成 ✅，2026-06-27）
 
-1. 语言特性完善（Phase C 层 1+2）
-2. Codegen 接口抽象化（从 JS 单体中提取共享 HIR 优化 pass）
-3. LLVM codegen 实现（HIR → LLVM IR）
-4. 标准库底层原语移植（extern fn JS → extern fn C ABI）
-5. 编译器自身 native 化（B-098 借用引擎 → B-089 自举三门 → B-099 native 自托管 LLVM / Node 消除 → B-100 parity 认证门 + golden 快照 + 删 JS 后端）
+1. ✅ 语言特性完善（Phase C 层 1+2）
+2. ✅ Codegen 接口抽象化（共享 HIR 优化 pass）
+3. ✅ LLVM codegen 实现（HIR → LLVM IR，codegen_llvm* 5 模块）
+4. ✅ 标准库底层原语移植（extern fn → C ABI ring_runtime.cpp）
+5. ✅ 编译器自身 native 化（B-098 → B-089 → B-099 → B-100）
 
 ### 已排除的后端
 
