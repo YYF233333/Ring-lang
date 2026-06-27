@@ -2496,8 +2496,13 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     if name == "ring_str_ends_with" { return true }
     if name == "ring_str_eq" { return true }
     if name == "ring_str_lt" { return true }
+    if name == "ring_str_is_empty" { return true }
     if name == "ring_list_len" { return true }
     if name == "ring_list_is_empty" { return true }
+    if name == "ring_list_any" { return true }
+    if name == "ring_list_all" { return true }
+    if name == "ring_Option_is_some" { return true }
+    if name == "ring_Option_is_none" { return true }
     if name == "ring_map_has" { return true }
     if name == "ring_map_len" { return true }
     if name == "ring_set_has" { return true }
@@ -2525,6 +2530,8 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     if name == "ring_str_contains" { return true }
     if name == "ring_str_starts_with" { return true }
     if name == "ring_str_ends_with" { return true }
+    if name == "ring_str_eq" { return true }
+    if name == "ring_str_lt" { return true }
     if name == "ring_list_is_empty" { return true }
     if name == "ring_map_has" { return true }
     if name == "ring_set_has" { return true }

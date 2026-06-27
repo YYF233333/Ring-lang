@@ -708,19 +708,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-150 Runtime 返回类型注册系统性扫描 [bugfix] [P3] [S] [mechanical] [doing]
-
-> 2026-06-27 立项（Discussion，#213 修复时发现）。
-
-**背景**：`ring_map_int_any` 需要同时注册到 `rt_method_returns_bool` 和 `rt_method_returns_i64` 才能正确工作。修复 #213 时 agent 在实现中才发现 `any()` 永远返回 false 的根因是缺少返回值 unbox。类似的 returns_bool/i64 遗漏可能存在于其他新增 runtime 函数中。
-
-**涉及修改**：
-1. `codegen_llvm*.ring`：扫描所有 `rt_method_returns_bool` / `rt_method_returns_i64` 注册列表，与 `ring_runtime.cpp` 中实际返回 Bool/Int 的函数交叉比对，补齐遗漏
-
-**验收标准**：
-- 所有 runtime 函数的返回类型注册与 `ring_runtime.cpp` 实际返回类型一致
-- 全部 E2E + llvm_diff 通过
-
 ### B-105 增量编译（per-module .o）[feature] [P3] [XL] [judgment] [queued] [deferred: native-primary]
 
 > 2026-06-07 立项（Discussion，从 migration diary 未登记债转入）。**deferred**——gate 在「native 成为主工具链（B-099 之后）+ 编译时间成实测痛点」。不阻塞 B-089/B-099/B-100。
