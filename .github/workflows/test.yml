@@ -22,7 +22,7 @@ jobs:
         run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
       - name: Link ring.exe
         run: |
-          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-LC:\Program Files\LLVM\lib" -lLLVM-C
+          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
       - name: Run check + RC suite
         run: python tests/run_tests.py --suite rc
 
@@ -42,7 +42,7 @@ jobs:
         run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
       - name: Link ring.exe
         run: |
-          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-LC:\Program Files\LLVM\lib" -lLLVM-C
+          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
       - name: Run e2e + llvm tests
         run: python tests/run_tests.py --suite e2e --suite llvm
 
@@ -63,6 +63,6 @@ jobs:
         run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
       - name: Link ring.exe
         run: |
-          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-LC:\Program Files\LLVM\lib" -lLLVM-C
+          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
       - name: Self-compile x3
         run: python tests/run_tests.py --suite self-compile
