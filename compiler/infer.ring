@@ -16,7 +16,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     hexpr_type, hexpr_effects, hexpr_span}
 use diagnostics::{DiagnosticContext, DiagnosticNote, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0206, E0301, E0303, E0304, E0305, E0306,
-    E0307, E0308, E0309, E0402, E0601, E0705, W0001}
+    E0307, E0308, E0309, E0402, E0411, E0601, E0705, W0001}
 use union_find::{UnionFind}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
@@ -793,6 +793,36 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
                     hexpr: HExpr::ReturnExpr { value: none, ty: NEVER, effects: EMPTY_ROW, span: span },
                     subst: s, effects: EMPTY_ROW
                 }
+            }
+        },
+        // B-125: unsafe block — discharge UnsafeEffect from body
+        Expr::UnsafeBlock { body, span } => {
+            // Check that the current module allows unsafe blocks
+            if !ctx.mod_unsafe_allowed {
+                let _ = type_error(ctx.sink, E0411,
+                    "unsafe block requires `mod ... requires {unsafe}` declaration",
+                    span,
+                    DiagnosticContext::OtherContext { detail: some("unsafe block without requires") })
+            }
+            // Infer body (which is a Block expr from parse_block_expr)
+            let body_r = infer_block(ctx, body, some(subst))
+            // Discharge: filter out UnsafeEffect from the body's effect row
+            let mut filtered: List<Effect> = []
+            for e in body_r.effects.effects {
+                match e {
+                    Effect::UnsafeEffect => {},
+                    _ => filtered.push(e)
+                }
+            }
+            let discharged_effects = EffectRow { effects: filtered, tail: body_r.effects.tail }
+            InferResult {
+                hexpr: HExpr::UnsafeBlock {
+                    body: body_r.hexpr,
+                    ty: hexpr_type(body_r.hexpr),
+                    effects: discharged_effects,
+                    span: span
+                },
+                subst: body_r.subst, effects: discharged_effects
             }
         }
     }
@@ -2295,7 +2325,9 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             Effect::IoEffect => !handled_effects.contains("io"),
             Effect::CustomEffect { name, .. } => !handled_effects.contains(name),
             Effect::FailEffect { .. } => !handled_effects.contains("fail"),
-            Effect::MutEffect { .. } => !handled_effects.contains("mut")
+            Effect::MutEffect { .. } => !handled_effects.contains("mut"),
+            // UnsafeEffect cannot be handled — only discharged by unsafe {}
+            Effect::UnsafeEffect => true
         }
         if should_keep { filtered_effects.push(e) }
     }

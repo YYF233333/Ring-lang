@@ -162,7 +162,8 @@ pub enum Expr {
     ListLit { elements: List<Expr>, span: Span },
     TupleLit { elements: List<Expr>, span: Span },
     IndexExpr { receiver: Expr, index: Expr, span: Span },
-    ReturnExpr { value: Expr?, span: Span }
+    ReturnExpr { value: Expr?, span: Span },
+    UnsafeBlock { body: Expr, span: Span }
 }
 
 // ============================================================

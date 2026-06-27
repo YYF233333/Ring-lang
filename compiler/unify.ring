@@ -87,7 +87,8 @@ fn occurs_in_effect(var_id: Int, e: Effect, subst: UnionFind) -> Bool {
         Effect::MutEffect { state_type } => occurs_in(var_id, state_type, subst),
         Effect::CustomEffect { type_args, .. } =>
             type_args.any(fn(a) { occurs_in(var_id, a, subst) }),
-        _ => false
+        Effect::IoEffect => false,
+        Effect::UnsafeEffect => false
     }
 }
 

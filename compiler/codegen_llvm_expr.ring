@@ -185,6 +185,9 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
             gen_index_expr(ctx, receiver, index, ty),
         HExpr::Clone { inner, .. } =>
             gen_clone(ctx, inner),
+        // B-125: unsafe block — transparent wrapper, just codegen the body
+        HExpr::UnsafeBlock { body, .. } =>
+            gen_llvm_expr(ctx, body),
         // B-113: return in match arm expression position — emit LLVM ret.
         // Same logic as emit_return in codegen_llvm_stmt.ring.
         HExpr::ReturnExpr { value, .. } => {
@@ -4735,6 +4738,7 @@ fn collect_extern_capture_names(expr: HExpr, captures: List<Str>, externs: Set<S
             some(v) => collect_extern_capture_names(v, captures, externs, out),
             none => {},
         },
+        HExpr::UnsafeBlock { body, .. } => collect_extern_capture_names(body, captures, externs, out),
         _ => {},
     }
 }
@@ -5163,6 +5167,8 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
             some(v) => collect_captures(ctx, v, params, captures),
             none => {},
         },
+        // B-125: unsafe block — recurse into body to collect captures.
+        HExpr::UnsafeBlock { body, .. } => collect_captures(ctx, body, params, captures),
         _ => {},
     }
 }

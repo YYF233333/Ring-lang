@@ -140,7 +140,8 @@ pub fn expr_span(e: Expr) -> Span {
         ListLit { span, .. } => span,
         TupleLit { span, .. } => span,
         IndexExpr { span, .. } => span,
-        ReturnExpr { span, .. } => span
+        ReturnExpr { span, .. } => span,
+        UnsafeBlock { span, .. } => span
     }
 }
 
@@ -672,6 +673,17 @@ impl Parser {
     }
 
     // ============================================================
+    // Unsafe block expression
+    // ============================================================
+
+    fn parse_unsafe_expr(mut self) -> Expr {
+        let start = self.current_span_start()
+        self.expect(TokenKind::TkUnsafe)
+        let body = self.parse_block_expr()
+        Expr::UnsafeBlock { body: body, span: self.make_span(start, expr_span(body).end) }
+    }
+
+    // ============================================================
     // Declarations
     // ============================================================
 
@@ -826,9 +838,11 @@ impl Parser {
         let mut effects: List<EffectExpr> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let estart = self.current_span_start()
-            // Accept 'mut' keyword as effect name (mut<T> parameterized effect)
+            // Accept 'mut' and 'unsafe' keywords as effect names
             let mut ename = ""
             if self.check(TokenKind::TkMut) {
+                ename = self.advance().value
+            } else if self.check(TokenKind::TkUnsafe) {
                 ename = self.advance().value
             } else {
                 ename = self.expect(TokenKind::TkIdent).value
@@ -1405,6 +1419,9 @@ if self.check(TokenKind::TkIntLit) {
         }
         if self.check(TokenKind::TkStringInterpStart) {
             return self.parse_string_interp()
+        }
+        if self.check(TokenKind::TkUnsafe) {
+            return self.parse_unsafe_expr()
         }
         if self.check(TokenKind::TkLBrace) {
             return self.parse_block_expr()

@@ -95,6 +95,19 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
         none => {}
     }
 
+    // B-125: set mod_unsafe_allowed based on whether unsafe is in required effects
+    let prev_unsafe_allowed = ctx.mod_unsafe_allowed
+    match cap_row {
+        some(cap) => {
+            ctx.mod_unsafe_allowed = cap.effects.any(fn(e) {
+                match e { Effect::UnsafeEffect => true, _ => false }
+            })
+        },
+        none => {
+            ctx.mod_unsafe_allowed = false
+        }
+    }
+
     let mut hdecls: List<HDecl> = []
     for decl in decls {
         let prefixed = prefix_decl_name(mod_name, decl)
@@ -144,6 +157,7 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
         }
     }
     ctx.mod_path_stack.pop()
+    ctx.mod_unsafe_allowed = prev_unsafe_allowed
     HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
 }
 
@@ -1908,7 +1922,8 @@ fn map_effect_row(row: EffectRow, mapping: Map<Int, Type>) -> EffectRow {
                 for a in type_args { mapped_args.push(apply_var_mapping(a, mapping)) }
                 mapped_effects.push(Effect::CustomEffect { name: name, type_args: mapped_args })
             },
-            Effect::IoEffect => mapped_effects.push(eff)
+            Effect::IoEffect => mapped_effects.push(eff),
+            Effect::UnsafeEffect => mapped_effects.push(eff)
         }
     }
     EffectRow { effects: mapped_effects, tail: row.tail }

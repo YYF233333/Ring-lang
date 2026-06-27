@@ -365,6 +365,9 @@ fn dl_expr(e: HExpr, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
             some(v) => HExpr::ReturnExpr { value: some(dl_expr(v, defs, seen, counter)), ty: ty, effects: effects, span: span },
             none => HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span },
         },
+        // B-125: unsafe block — recurse into body
+        HExpr::UnsafeBlock { body, ty, effects, span } =>
+            HExpr::UnsafeBlock { body: dl_expr(body, defs, seen, counter), ty: ty, effects: effects, span: span },
     }
 }
 

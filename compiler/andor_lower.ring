@@ -260,6 +260,9 @@ fn al_expr(e: HExpr) -> HExpr {
             some(v) => HExpr::ReturnExpr { value: some(al_expr(v)), ty: ty, effects: effects, span: span },
             none => HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span },
         },
+        // B-125: unsafe block — recurse into body
+        HExpr::UnsafeBlock { body, ty, effects, span } =>
+            HExpr::UnsafeBlock { body: al_expr(body), ty: ty, effects: effects, span: span },
     }
 }
 

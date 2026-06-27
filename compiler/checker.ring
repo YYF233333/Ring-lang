@@ -139,7 +139,8 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
-        fn_min_arity: map_new()
+        fn_min_arity: map_new(),
+        mod_unsafe_allowed: false
     }
 }
 
