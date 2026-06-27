@@ -2224,6 +2224,13 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
                     let rt_fallback = "ring_${name}"
                     match ctx.rt_fns.get(rt_fallback) {
                         some(_) => {
+                            if rt_fallback == "ring_assert" {
+                                let first = match arg_vals.get(0) { some(v) => v, none => panic("ring_assert: missing arg 0") }
+                                let second = match arg_vals.get(1) { some(v) => v, none => panic("ring_assert: missing arg 1") }
+                                let bool_i1 = unbox_to_i1(ctx, first)
+                                let bool_i64 = LLVMBuildZExt(ctx.builder, bool_i1, ctx.i64_type, fresh_name(ctx, "az"))
+                                arg_vals = [bool_i64, second]
+                            }
                             return gen_runtime_call(ctx, rt_fallback, arg_vals)
                         },
                         none => {},
