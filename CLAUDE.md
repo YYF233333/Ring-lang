@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-Ring-lang：不信任程序员的 native 编程语言——编译器是最终权威，不是程序员。写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。代数 effect system + HM 类型推断 + trait 多态，编译器全推断，零标注负担。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
+Ring-lang：不信任程序员的 native 编程语言——编译器是最终权威，不是程序员。写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。代数 effect system + HM 类型推断 + trait 多态，编译器全推断，零标注负担。编译到 LLVM native。JS bootstrap 后端已归档（B-100）。
 
 编译器已自举（Ring 写 Ring），完整设计文档见 `docs/design.md`。
 
@@ -16,19 +16,18 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 
 ## 技术栈
 
-- **编译器**：Ring 自举，编译为 JS 运行（bootstrap 后端）；LLVM native 后端开发中
-- **LLVM 后端**：codegen_llvm*.ring（5 个模块，~6400 行 Ring），通过 N-API addon 桥接 LLVM-C 22 API。native ring.exe 已能自编译
+- **编译器**：Ring 自举。Bootstrap 经 dist/（冻结的 JS 产出，运行于 Node/V8）；目标后端 LLVM native（codegen_llvm* 5 模块）
+- **LLVM codegen**：codegen_llvm*.ring（5 个模块），通过 N-API addon 桥接 LLVM-C 22 API。native ring.exe 可自编译
 - **测试**：node:test，零外部依赖
 - **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
-- **历史**：TS 原始实现归档于 git tag `ts-compiler-final`
+- **历史**：TS 原始实现归档于 git tag `ts-compiler-final`；JS codegen 后端归档于 `5df6c99`（B-100 Phase 2）
 
 ## 项目结构
 
 ```
 Ring-lang/
-├── compiler/          编译器源码（*.ring）+ dist/（JS 产出，入 git）+ dist-llvm/（.o 产出）
-│   ├── codegen*.ring      JS 后端 codegen
-│   ├── codegen_llvm*.ring LLVM 后端 codegen（5 个模块）
+├── compiler/          编译器源码（*.ring）+ dist/（冻结的 JS 产出，stage 0 回退）+ dist-llvm/（.o 产出）
+│   ├── codegen_llvm*.ring 唯一 codegen 后端（5 个模块）
 │   ├── llvm_ffi.ring      LLVM-C API 声明（91 extern fn + 13 extern type）
 │   └── llvm-addon/        N-API addon（本地构建，.gitignore）
 ├── ring_runtime.cpp   LLVM native backend 的 C ABI runtime（~2200 行 C++ STL wrapper）
@@ -42,8 +41,8 @@ Ring-lang/
 ## 编译器管线
 
 ```
-源码 (.ring) → Lexer → Parser → AST → Checker (HM + effects) → HIR → Codegen → JavaScript
-                                  ↓ (errors)                           ↘ Codegen LLVM → .o → native binary
+源码 (.ring) → Lexer → Parser → AST → Checker (HM + effects) → HIR → Codegen LLVM → .o → native binary
+                                  ↓ (errors)
                            DiagnosticSink → format_human / format_llm
 ```
 
@@ -51,17 +50,14 @@ Ring-lang/
 - **HIR**：独立数据结构，每个表达式带推断的 Type + EffectRow，语法糖已展开
 - **DiagnosticSink**：Lexer/Parser/Checker 错误统一收集，支持多错误报告
 - HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
-- **Perceus RC pass**（`perceus.ring`，仅 `--target=llvm`）：HIR → [escape-clone/drop 插入] → RC 标注 HIR → Codegen LLVM。L1 借用引擎 clone-all-escape（Koka POPL'21）。post-RC HIR 经 `verify_rc.ring` 静态 LEAK/UAF/BALANCE 检查（随 npm test 强制）。见 design.md §7.11
-- **双后端**：`--target=js`（默认，bootstrap）和 `--target=llvm`（native，开发中）共享同一 HIR
+- **Perceus RC pass**（`perceus.ring`）：HIR → [escape-clone/drop 插入] → RC 标注 HIR → Codegen LLVM。L1 借用引擎 clone-all-escape（Koka POPL'21）。post-RC HIR 经 `verify_rc.ring` 静态 LEAK/UAF/BALANCE 检查（随 npm test 强制）。见 design.md §7.11
 
 ## 开发约定
 
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_js_name`），不允许跨阶段硬编码字符串契约
-- **修改编译器后必须重新编译 dist/**：`node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist`，并提交更新后的 dist/ 文件。**Worktree merge 后的 rebuild 必须 amend 进 merge commit**——不允许 broken intermediate state（dist/ 失配）作为独立 commit 存在。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist 编译新源码的产出可能有引用错误，需先用 worktree 的 dist 做中间 bootstrap 再 double bootstrap。
-- **dist-llvm/ rebuild 纪律与 dist/ 同级**：动编译器（含 lexer/parser 等任何前端阶段）或 RC/LLVM 后端后同步重编 `node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm` 并提交；worktree merge 后的重建一并 amend 进 merge commit（背景：维护 wave `b19c85b` 改 lexer 后未重建 dist-llvm）。
+- **dist/ 已冻结（B-100 Phase 2）**：dist/ 保留作紧急 stage 0 回退，不再 rebuild。修改编译器后只需重编 dist-llvm/：`node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。
 - 注释语法 `//`，无 pipe 运算符，`.method()` 是唯一链式调用方式（`::` 模块路径和 `.method()` 方法调用是两个不互通的范畴，无 UFCS）
-- 生成的 JS 代码应可读——方便调试
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
 - 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）
 - 每个 PR 至少包含一个 e2e 测试，合入前必须通过 `npm test`（从 `compiler/` 目录运行）
@@ -76,9 +72,9 @@ Ring-lang/
 
 - **E2E 语义测试**（`tests/cases/*.ring`）：语言规范的可执行版本，每个特性一个文件
 - **负面测试**（期望编译错误）：定义类型系统边界，含 pending 测试标记未来特性
-- **回归测试写 E2E 层**：不写 "第 X 行生成的 JS 应该是 Y"——codegen 实现可变
+- **回归测试写 E2E 层**：不写 "第 X 行生成的代码应该是 Y"——codegen 实现可变
 - **度量语义覆盖**，不度量代码行覆盖
-- **LLVM golden 回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例用 LLVM 后端编译运行，断言输出与 `.expected` golden 快照一致。锁定历次 LLVM codegen/RC/effect-handler 修复——用例即规约，修复明细在 git history。需本地 clang，无则自动 skip。重新生成快照：`node --test ../tests/llvm_diff.test.mjs --update-golden`。**动 RC 的改动必须 ×3 跑全套**（间歇性堆损坏单跑约 1/3 命中，单跑假绿）。
+- **Golden 回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例编译运行，断言输出与 `.expected` golden 快照一致。锁定历次 codegen/RC/effect-handler 修复——用例即规约，修复明细在 git history。需本地 clang，无则自动 skip。重新生成快照：`node --test ../tests/llvm_diff.test.mjs --update-golden`。**动 RC 的改动必须 ×3 跑全套**（间歇性堆损坏单跑约 1/3 命中，单跑假绿）。
 - **RC 静态 verifier 套件**（`tests/verify_rc.test.mjs`，随 `npm test`）：post-RC HIR 线性检查（LEAK/UAF/BALANCE 三判据）——self-verify 门（编译器自身 0 errors）+ llvm 用例 in-process sweep + 负面套件。见 design.md §7.11 D2
 - **Agent 测试纪律**：测试耗时长（E2E 含 LLVM 编译链接 ~2-3 分钟），agent 不得因 grep 遗漏反复重跑。规则：① 测试输出**完整重定向到临时文件**（`npm test 2>&1 > test_output.txt`），后续从文件中 grep 分析，不丢失任何信息；② **结果无变动不重跑**——只有代码改动后才重跑测试，仅读代码/grep/分析阶段不触发测试；③ 编译失败先修再跑测试，不要"跑一下看看"
 
@@ -87,7 +83,7 @@ Ring-lang/
 ### Effect / Codegen
 
 - **Handler 只支持 tail-resumptive + abort**：非 abort effect 的 handler 返回值即 resume 值；`fail.raise` 为 abort。Full AE（post-resume / multi-resume）不计划实现
-- **Trait dictionary dispatch 的 evidence 转发已基本修复**（#77），delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）。**Default trait method + custom effect 的 evidence 转发已修复**（B-139，2026-06-24）；**LLVM 后端 default trait methods 已支持**（B-141，2026-06-24）
+- **Trait dictionary dispatch 的 evidence 转发已基本修复**（#77），delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）。**Default trait method + custom effect 的 evidence 转发已修复**（B-139，2026-06-24）；**default trait methods 已支持**（B-141，2026-06-24）
 - **`catch` 总是消除 fail effect**：完整捕获点，catch arms 经穷尽性检查。需要部分处理时在 catch 内部 match + re-raise
 
 ### 类型系统
@@ -97,7 +93,7 @@ Ring-lang/
 - 不支持 `dyn Trait` 动态分发、GATs
 - `pub` 可见性在单文件模式不强制（向后兼容）
 - 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证
-- `Map` key 查找仍用 JS `===`（追踪于 B-107；List 方法已全部通过 trait dict dispatch）
+- `Map` key 类型限于 Str（native 后端 std::map<std::string>）；泛型 key 需 Hash trait（追踪于 B-107；List 方法已全部通过 trait dict dispatch）
 
 ### 语法
 
@@ -115,19 +111,16 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：**B-100 JS 退役 Phase 1 完成 ✅**——P1.1 覆盖矩阵 ✅ → P1.2 gap 修复 ✅ → P1.3 对抗 review ✅（R4+R5）→ **P1.4 全部通过 ✅**（llvm_diff ×3 209/209 + native E2E 4/4+3/3 + 双 bootstrap 45/45 字节一致，2026-06-26）。里程碑：B-099 ✅ B-089 ✅ B-104 ✅ B-080 ✅ B-122 ✅ B-138 ✅。测试状态以 `npm test` / `npm run test:llvm` 实跑为准，不在此记录具体计数。
+**当前**：**B-100 JS 退役完成 ✅**——Phase 1 ✅（P1.1 覆盖矩阵 → P1.2 gap 修复 → P1.3 对抗 review → P1.4 全部通过）+ **Phase 2 ✅**（golden .expected 快照建立 210+ 文件 + JS codegen 删除 `5df6c99` + 文档更新）。里程碑：B-099 ✅ B-089 ✅ B-104 ✅ B-080 ✅ B-122 ✅ B-138 ✅。测试状态以 `npm test` / `npm run test:llvm` 实跑为准，不在此记录具体计数。
 
-**后续**：B-100 P1.4 → Phase 2（golden 快照 + 删 JS 后端）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002，含简单 move checker）→ L1.5 别名追踪（B-110，非 Drop 类型 mutation 安全）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+**后续**：L1 用户面（B-068）/ L2 Drop/RAII（B-002，含简单 move checker）→ L1.5 别名追踪（B-110，非 Drop 类型 mutation 安全）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：LSP 移植、技术债清理（见 `docs/audit-report.md`）
 
 ## 常用命令
 
 ```bash
-# 运行单文件
-node compiler/dist/main.js run examples/hello.ring
-
-# 编译为 JS
+# 编译单文件为 native .o
 node compiler/dist/main.js build examples/hello.ring
 
 # 类型检查
@@ -136,22 +129,13 @@ node compiler/dist/main.js check examples/effects.ring
 # LLM 格式错误输出
 node compiler/dist/main.js check --error-format=llm examples/effects.ring
 
-# E2E 测试（JS 后端）
+# E2E 测试
 cd compiler && npm test
 
-# LLVM 后端差分回归测试（需 clang）
+# Golden 回归测试（需 clang）
 cd compiler && npm run test:llvm
 
-# 重新编译编译器自身
-node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
-
-# 调试模式（多文件入口）
-node compiler/dist/main.js run --debug <project-entry>.ring
-
-# LLVM 后端：编译为 native .o
-node compiler/dist/main.js build examples/hello.ring --target=llvm
-
-# LLVM 后端：编译编译器自身（多文件）
+# 重新编译编译器自身（dist-llvm/）
 node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
 
 # Native 构建（需 clang）

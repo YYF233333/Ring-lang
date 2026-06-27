@@ -48,8 +48,8 @@
 | **✅ P0+P1** | 完整 Perceus RC + 标记指针 | B-104 ✅ + B-080 ✅ | — |
 | **✅ P2a checker 健全** | 顶层推断改 SCC 拓扑序 | **B-122** ✅ | — |
 | **✅ P2b 三门终验** | G-a/G-b/G-c 全绿（2026-06-16） | **B-089** ✅ | B-097 [P2/M] + B-096 [P3/L] 待消化 |
-| **P3 Node 消除** | LLVM-C marshalling + link libLLVM | **B-099** [P2/XL, deferred:B-089] | 单独 |
-| **P4 JS 退役** | parity 认证门 + golden 快照 + 删除 | **B-100** [P3/L, deferred:B-099] | 单独 |
+| **✅ P3 Node 消除** | LLVM-C marshalling + link libLLVM | **B-099** ✅ | 单独 |
+| **✅ P4 JS 退役** | parity 认证门 + golden 快照 + 删除 | **B-100** ✅（2026-06-27） | 单独 |
 
 **纪律**：每阶段验收全绿才进下一阶段。B-097/B-096 不阻塞主链路但是 B-100 Phase 1 前置，与 B-089 并行消化。
 
@@ -707,33 +707,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 **复杂度**：M（Parser + Checker const generic + Codegen）
 
 ## LLVM 后端质量
-
-### B-100 JS 后端归档（parity 认证门 + golden 快照 + 删除）[feature] [P3] [L] [judgment] [doing]
-
-> 2026-06-04 立项（Discussion）。**deferred——排在 B-099 之后**，删 JS 前提是 native 工具链已自立。**归档策略 = (Z) 证明 parity → 快照 golden → 删除**。核心论点：差分 oracle 价值 = 抓两后端发散；一旦两后端被**证明** feature 完全一致且零 bug，oracle 对当前 feature 集已用尽，删除不损失测试价值。**删除点选「层 3 之前」**：golden 快照保存量回归网，层 3 新 codegen（async generator / Drop unwind / refinement 运行时检查）靠手写 E2E 期望值（无活 oracle——可接受，JS 后端实现层 3 也可能有 bug，oracle 非真值，且为层 3 维护两遍 codegen 成本过高）。
-
-**前置**：B-099（native 自托管，Node 消除）+ B-097（custom-effect handler parity）+ B-096（闭包 RC 收口）——即「两后端 feature 完全一致」的剩余工作。
-
-**Phase 1 — parity 认证门**（删除前置，可验收）：
-1. **feature 覆盖矩阵** ✅：穷举语言面，每个特性 ≥1 个 llvm_diff 用例断言两后端输出一致（不抽样）。补齐当前 llvm_diff 未覆盖的特性。
-2. **关闭残留 G-c gap** ✅：B-097（custom-abort / default / delegate / nesting）+ B-096（闭包 RC 泄漏）全绿。
-3. **复数轮对抗 review** ✅（2026-06-26，R4+R5）：`/full-audit` 多轮交叉验证（Claude + DS 双模型），修复 #193-#206 后收敛。P1.3 通过。
-4. **全部通过 ✅**（2026-06-26）：llvm_diff ×3 209/209 ✅ + native E2E ✅（test:native-only 4/4 + test:native 3/3）+ 双 bootstrap ✅（45/45 文件字节一致）。修复：#208 emit_fn_body effect key qualified 化 + #209 find_enum_by_variant 名称碰撞。
-
-**Phase 2 — golden 快照 + 删除**（认证通过后）：
-1. ✅ 把 parity 认证的 llvm_diff 语料**快照成 golden 输出**，存为回归基准（取代 JS-oracle 的活对照）。
-2. ✅ 删 JS 后端：7 个 .ring 源文件 + 7 个 dist/ .js 文件删除（净减 ~15,000 行）；`cli.ring` 默认 target 改 `llvm`；`run` 子命令移除。
-3. `CLAUDE.md` / `design.md` 更新：JS 后端标归档；测试策略改 golden + 手写 E2E 期望值。**dist/ 决策（2026-06-27 拍板）：(C) 保留标 frozen——dist/ JS 作为紧急 stage 0 回退，不再 rebuild；有 CI 后再切 (B) 删除**。
-4. Web playground 若仍需 JS/WASM，单独评估（已排除 WasmGC，Web 由 LLVM→WASM 覆盖）。
-
-**验收标准**：
-- parity 认证门 4 条全过（穷举矩阵 + G-c gap 清零 + 复数轮零新发散 + ×3 零失配）
-- golden 快照建立；删 JS 后端后全测试套件仍通过（对照 golden）
-- native 工具链无 JS/Node 依赖
-- 删除点 = 层 3 启动之前
-- **oracle 盲区 native-only 语义测试（2026-06-11 增）**：归档前为已知差异角落补 native 侧手写期望值测试——I64 全宽度（±2^63 边界）/ 整数溢出（debug panic / release 回绕）/ 整数除零 panic / UTF-8 code point 索引 + `byte_len`。这些角落 JS oracle 本身失真（±2^53 / 静默 float / Infinity / UTF-16），差分测不了，归档后再无任何安全网
-
-**已知取舍**：层 3 codegen 失去活差分 oracle，靠手写 E2E 期望值 + golden 回归验证（(Z) 策略的代价，已确认接受）。
 
 ### B-150 Runtime 返回类型注册系统性扫描 [bugfix] [P3] [S] [mechanical] [doing]
 
