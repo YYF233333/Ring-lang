@@ -36,3 +36,21 @@
 **现状**：全编译器中 `get_*` 18+ 处、`find_*` 12+ 处、`lookup_*` 5+ 处、`resolve_*` 31+ 处，无统一语义边界。
 **为什么值得注意**：不影响正确性但增加阅读认知负担。建议约定：get = 必得（panic if missing）、find = 返回 Option、resolve = 可失败+有副作用、废弃 lookup。
 
+## B-125 Wave 1 执行报告（2026-06-27）
+
+### 1. [通知] Wave 1 实施——requires 机制已 enforce，非"解析未检查"
+
+**实施前假设**：Discussion 和 codebase scan 认为 `mod requires` 是"已解析但未检查"。实际 `infer_decl.ring:73-147` 的 `check_mod_decl` 已完整 enforce `required_effects`（`check_capability` 函数，E0405 错误码）。Wave 1 只需加 `UnsafeEffect` variant + `ctx.mod_unsafe_allowed` flag，现有 capability 机制自动生效。代价比预期小。
+
+### 2. [通知] unsafe 不可被 handle 的实现方式
+
+`infer.ring:2325` 在 handle-expr 的 effect 过滤中，`UnsafeEffect => true`（始终保留 = 不被任何 handler 消除）。这保证了 unsafe 只能被 `unsafe {}` 块 discharge，不能被 `handle` 绕过。如果未来需要改变这一行为（极不可能），改这一行即可。
+
+### 3. [通知] e2e 测试发现两个 pre-existing Map runtime crash
+
+`map_hof.ring` 和 `map_ufcs_bug.ring` 在 ring.exe 下 access violation（exit 3221225477）。非本次改动引起——已加入 LLVM_SKIP。可能与 Map 的 std::unordered_map 交互有关，B-152 RIIR 会重写 Map 底层。
+
+### 4. [通知] fixpoint rebuild 需要两次编译
+
+merge 后首次 rebuild dist-llvm/ 产出与 worktree 带来的版本不同（符合预期——worktree 基于旧 base 编译，main 上多了 B-154 cli.ring 变更）。第二次 rebuild 与第一次 0 diff = 收敛。B-155 IR 非确定性（ring.exe 自编译）不影响 JS 编译器 rebuild。
+
