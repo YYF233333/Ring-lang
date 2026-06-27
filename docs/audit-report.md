@@ -15,7 +15,15 @@
 
 ## LLVM Codegen
 
+### #217 Perceus 未对 block-expr / IIFE 临时值插入 HIR 层 drop [low] [judgment] [open]
 
+block 表达式作为 if/match 条件（`if { let v = 5; v > 3 } { ... }`）和 IIFE（`(fn(x) { x * x })(5)`）产出的 owned 临时值在 HIR 层无显式 drop。codegen 层正确处理（unbox 后丢弃 / 调用后释放闭包），运行时无泄漏，但 verify_rc 静态检查报 `leak-temp`。
+
+**触发用例**：`expr_block.ring:13,17`、`lambda_closure_effect.ring:26`
+
+**修复方向**：Perceus RC pass 对这两类位置插入显式 `HDrop`——block-expr 在条件位置的结果值、IIFE 的闭包对象。修复后 verify_rc 的 `leak-temp` skip 列表可缩小。
+
+发现者：B-151 CI（Python runner RC sweep 首次全量覆盖暴露）
 
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
