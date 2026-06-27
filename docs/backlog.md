@@ -357,7 +357,7 @@ fn test_fetch() {
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
-### B-125 unsafe effect + `Ptr<T>` 原语全链路 [feature] [P1] [XL] [judgment] [queued]
+### B-125 unsafe effect + `Ptr<T>` 原语全链路 [feature] [P1] [XL] [judgment] [doing]
 
 > 2026-06-13 立项（Discussion，B-106 design-probe 正文拍定后的实现项）。2026-06-27 P3→P1 提升 + 实施规划（Discussion，路线图重定 + read/take 拆分决策 + 4-wave 实施计划）。**设计真值 = design.md §7.12**（三栏总账 + unsafe effect 两级 discharge + `Ptr<T>` 形态 + 原语集 v1 + extern fn 声明处签字 + 跨界三件套）。**前置 B-104 已完成。B-151 CI 之后立即启动。**
 
@@ -817,20 +817,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - CI bootstrap（self-compile ×3 一致性检查）通过
 
 ---
-
-### B-154 CLI arg parser：支持 `--flag value` 空格分隔形式 [bugfix] [P3] [S] [mechanical] [queued]
-
-> 2026-06-27 立项（Discussion，B-151 CI Worker 通知）。
-
-**现状**：`ring.exe` 的 `--out-dir` 等参数只接受 `--out-dir=<path>`（等号形式），不接受 `--out-dir <path>`（空格分隔）。空格分隔是绝大多数 CLI 工具的标准行为，当前行为违反用户预期。
-
-**涉及修改**：
-1. `compiler/main.ring`（或 arg parsing 所在模块）：解析 `--flag` 时检查下一个 argv 元素作为值
-
-**验收标准**：
-- `ring.exe build foo.ring --out-dir=path` 和 `ring.exe build foo.ring --out-dir path` 行为一致
-- 所有接受值的 flag（`--out-dir`, `--target`, `--error-format` 等）均支持两种形式
-- 现有等号形式不受影响
 
 ---
 
