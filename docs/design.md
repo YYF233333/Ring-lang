@@ -1819,14 +1819,22 @@ D9 两 part 落地后 re-measure @2.382B：leak 88%→1.2%（live 27.96M），SB
 |---|---|---|---|
 | alloc | `alloc<T>(count: Int) -> Ptr<T>` | unsafe | 返回**未初始化**内存 |
 | dealloc | `dealloc<T>(p: Ptr<T>, count: Int)` | unsafe | 带 count：对齐正确性 + sized-dealloc 留门 |
-| read | `p.read() -> T` | unsafe | 按位 move out，**不动 RC**，返回 fresh owned |
-| write | `p.write(v: T)` | unsafe | 按位 move in，**不动 RC**，不 drop 旧值 |
-| offset | `p.offset(i: Int) -> Ptr<T>` | unsafe | **inbounds 语义**（同 allocation 作者承诺 → `getelementptr inbounds`，换别名分析/向量化） |
+| read | `p.read() -> T` | unsafe | 读出 + **dup（RC+1）**，buffer slot 不受影响（peek 语义） |
+| take | `p.take() -> T` | unsafe | 读出**不 dup**，buffer slot 作废（move out 语义） |
+| write | `p.write(v: T)` | unsafe | 按位 move in，**不 drop 旧值**，v 从 RC 世界移出 |
+| offset | `p.offset(i: Int) -> Ptr<T>` | unsafe | **inbounds 语义**（程序员承诺 → `getelementptr inbounds`，换别名分析/向量化） |
 | cast | `p.cast<U>() -> Ptr<U>` | safe | 造值不炸，deref 才炸 |
 | copy | `copy(src: Ptr<T>, dst: Ptr<T>, count: Int)` | unsafe | memmove 语义；nonoverlapping 变体按实测需求后加 |
 | addr / from_addr | `p.addr() -> Int` / `Ptr::from_addr<T>(a: Int)` | safe | 对齐计算/tagged pointer；危险链条被 deref（unsafe）卡死 |
 
-**read/write 所有权语义 = Perceus 接口承重墙**：read 产 fresh owned、write 耗 owned，RC pass 视作普通「产 owned / 吃 owned」函数——落进 B-103 return-mode 既有分类，**零特殊化**。buffer 内的值 = RC 世界之外、所有权由封装作者人工记账（RIIR vector：push = `data.offset(len).write(v)` 移入，pop = `data.offset(len-1).read()` 移回；重复 read 同位 = double-free，签字内容，等价 Rust `ptr::read` 契约）。
+**read/take/write 所有权语义 = Perceus 接口承重墙**（2026-06-27 Discussion 拍板 read/take 拆分）：
+
+- **`read`（peek）**：读出值 + `ring_dup`（RC+1），buffer slot 保持有效。可重复读。Perceus 视为「产 owned」——落进 B-103 return-mode 既有分类，零特殊化。RIIR 容器 `get()` = `self.data.offset(i).read()`，一行搞定。
+- **`take`（move out）**：读出值、不 dup。buffer slot 作废（重复 take 同位 = double-free，签字内容）。等价 Rust `ptr::read` 契约。RIIR 容器 `pop()` = `self.data.offset(self.len-1).take()`、`drop` 清理 = 逐元素 take。
+- **`write`（move in）**：v 按位写入裸内存，不 drop 旧值（旧值可能未初始化）。v 从 RC 世界移出。RIIR 容器 `push()` = `self.data.offset(self.len).write(v)`。
+- **`replace` = `take` + `write`**：RIIR 容器 `set(i, v)` = `self.data.offset(i).take(); self.data.offset(i).write(v)`——take 旧值（scope-end drop）+ write 新值，两步显式。
+
+buffer 内的值 = RC 世界之外、所有权由封装作者人工记账。拆分 read/take 的设计动机：Rust 的 `ptr::read`（= Ring 的 `take`）是 move 语义，但 RIIR 容器的 `get()`（非破坏性读取）是最高频操作——如果 "read" 是 move，get 需要 read+dup+write_back 三步，啰嗦且易错；拆为 read（peek）+ take（move）后，高频路径一行完成，低频路径（pop/drop）用 take 同样清晰。
 
 **相对 Rust 的三处简化（明确不做）**：① 无 `MaybeUninit`——Rust 需要它是因为 safe 区要能持有未初始化值，Ring 的未初始化内存只活在 Ptr 后面、永不以值形态进安全区，「read 前已 init」即签字内容；② 无泛型 `transmute`——99% 用例 = 指针 reinterpret（走 cast）+ 标量 bits 互转（具体 intrinsic 按需提供），最危险的门开最窄；③ v1 无 volatile/atomic——§8 并发定型后随 B-007 系再议。
 

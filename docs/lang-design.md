@@ -939,11 +939,12 @@ Ring 编译器是一个重度分配的工作负载（自编译 ~10.42B allocs）
 **源 1：编译器内建原语（闭集）**
 
 ```
-ptr_alloc      ptr_free       ptr_read       ptr_write
-ptr_offset     ptr_cast       ptr_copy       ptr_from_addr   ptr_addr
+alloc<T>       dealloc<T>     p.read()       p.take()       p.write(v)
+p.offset(i)    p.cast<U>()    copy(src,dst,n)
+p.addr()       Ptr::from_addr<T>(a)
 ```
 
-~10 条，编译器硬编码。每个签名自动带 `with {unsafe}`。闭集之外不存在 unsafe 产生路径。
+~10 条，编译器硬编码。unsafe 原语（alloc/dealloc/read/take/write/offset/copy）签名自动带 `with {unsafe}`；safe 原语（cast/addr/from_addr）不产生 unsafe effect。read = peek（dup/RC+1，buffer slot 不受影响）；take = move out（不 dup，buffer slot 作废）。2026-06-27 Discussion 拍板 read/take 拆分。闭集之外不存在 unsafe 产生路径。
 
 **源 2：`extern fn` 声明（默认 unsafe）**
 
