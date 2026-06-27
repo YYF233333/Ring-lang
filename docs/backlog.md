@@ -42,7 +42,7 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 
 > 2026-06-24 重新设计（Discussion，资源管理模型重构）。2026-06-27 拆两阶段（Discussion，路线图重定）。**真值源 = design.md §7.6（2026-06-24 版）**。Perceus 分层 L2——在 L0/L1 RC 核心之上实现用户 `impl Drop` + 全路径 RAII。
 
-**拆分决策（2026-06-27）**：Phase 1 精简版（scope-end Drop + move checker，够 RIIR 用）先行，不含 unwind；Phase 2 补 invoke/landingpad unwind，B-152 RIIR 之后。
+**拆分决策（2026-06-27）**：Phase 1 精简版（scope-end Drop + move checker，够 RIIR 用）先行，不含 unwind；Phase 2 补 invoke/landingpad unwind，B-152 RIIR 之后。**升级条件**：如果实现过程中 setjmp/longjmp 路径出 bug，Phase 2 立即上调优先级先做。
 
 **Drop trait**：
 
