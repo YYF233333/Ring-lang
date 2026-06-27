@@ -1,0 +1,2 @@
+DEFAULT: Hello, default!
+CUSTOM: Hello, override!
