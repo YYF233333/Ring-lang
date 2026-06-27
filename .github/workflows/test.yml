@@ -5,9 +5,13 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
-    # Fast job: ring.exe check + RC verify
+    # Fast: ring.exe check + RC verify
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +31,8 @@ jobs:
         run: python tests/run_tests.py --suite rc
 
   test:
-    # Medium job: e2e + llvm golden full suite
+    # Medium: e2e + llvm golden full suite
+    needs: check
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +52,8 @@ jobs:
         run: python tests/run_tests.py --suite e2e --suite llvm
 
   bootstrap:
-    # Heavy job: self-compile x3, main branch only
+    # Heavy: self-compile x3, main branch only
+    needs: test
     runs-on: windows-latest
     if: github.ref == 'refs/heads/main'
     steps:
