@@ -17,47 +17,25 @@
 
 
 
-### #212 ring_assert 调用签名不匹配：Bool 未 unbox 到 i64（9 个 E2E segfault）[medium] [judgment] [open]
+### #212 ring_assert Bool unbox ✅ [medium] [judgment] [fixed 2026-06-27]
 
-`gen_runtime_call` fallback 路径直接传 boxed `ptr` 参数给 `ring_assert(i64, ptr)`，但第一参数应为 unboxed `i64`（Bool 值）。LLVM verify 报类型错误后仍 emit → 运行时 segfault。
+`gen_runtime_call` fallback 路径对 `ring_assert` 的 Bool 参数加 `unbox_to_i1` → `zext i1 to i64`。解锁 9 个 E2E 用例。
 
-**影响用例**：default_effect_body_io / default_effect_topo / mod_effect_evidence / api_clone / map_clone / iterator / map_iteration / set_struct_eq / set_ops_deep_eq（均因调用 `assert()` 触发）。
+### #213 Map&lt;Int&gt; HOF 运行时崩溃 ✅ [medium] [judgment] [fixed 2026-06-27]
 
-**修复方向**：在 fallback 路径对 Bool 参数加 `unbox_to_i1` → `zext i1 to i64`；或在 `ring_assert` 声明侧改为接受 `ptr`。
+添加 `ring_map_int_filter`/`ring_map_int_any`/`ring_map_int_map_values` 到 runtime + codegen dispatch。解锁 map_ufcs_bug / map_hof。
 
-发现者：B-100 P2 E2E 迁移根因调查
+### #214 泛型函数赋值 wrapper dict 漏传 ✅ [low] [judgment] [fixed 2026-06-27]
 
-### #213 Map HOF 运行时崩溃：map_values / filter / fold segfault [medium] [judgment] [open]
+双层修复：checker 防止有 bounds 的 fn ident 泛化 + codegen `gen_dict_closure_wrapper` 添加 `fn_trait_bounds`/`fn_original_param_types` fallback。**E2E 测试仍在 LLVM_SKIP**——frozen dist/ bootstrap 编译器缺 checker 修复，需 E2E runner 切到 native ring.exe 后验证。
 
-编译通过（LLVM verify 无错误），`map_values`/`filter`/`fold` 运行时 0xC0000005。可能是 dict-dispatch wrapper 调用约定不匹配或 runtime 函数内存访问越界。
+### #215 LLVM 后端 test block ✅ [low] [judgment] [fixed 2026-06-27]
 
-**影响用例**：map_ufcs_bug / map_hof。与 #138 同域但根因不同——#138 是方法映射缺失，这里是映射存在但运行时 crash。
+实现 `HDecl::Test` 的 forward-declare + body emission + C main 调用。**E2E 测试仍在 LLVM_SKIP**——同上，frozen dist/ 缺实现。
 
-发现者：B-100 P2 E2E 迁移根因调查
+### #216 extern_fn 测试重写 ✅ [low] [mechanical] [fixed 2026-06-27]
 
-### #214 泛型函数赋值 wrapper 漏传 dict 参数 [low] [judgment] [open]
-
-`let f = display` 将泛型函数赋值给变量时，wrapper 生成代码漏传 trait dict 参数。LLVM verify 报 "Incorrect number of arguments"。
-
-**影响用例**：trait_alias。
-
-发现者：B-100 P2 E2E 迁移根因调查
-
-### #215 LLVM 后端 test block 未实现 [low] [judgment] [open]
-
-`codegen_llvm_decl.ring:138` 跳过 `HDecl::Test`。仅含 `test` 块（无 `fn main()`）的文件在 LLVM 后端输出为空。
-
-**影响用例**：scc_mutual_recursion（测试内容在 `test` 块中）。
-
-发现者：B-100 P2 E2E 迁移根因调查
-
-### #216 ring_runtime.cpp 缺 parseInt / parseFloat [low] [mechanical] [open]
-
-`extern fn parseInt(s: Str) -> Int` 和 `parseFloat` 在 JS 后端由宿主引擎提供，ring_runtime.cpp 未实现。
-
-**影响用例**：modules/extern_fn / modules/extern_type。
-
-发现者：B-100 P2 E2E 迁移根因调查
+重写 extern_fn 模块测试用 `parse_int`/`parse_float`（native-compatible）。extern_type 保留 skip（JS-specific opaque type 无 native 等价）。
 
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
