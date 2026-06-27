@@ -230,7 +230,13 @@ pub struct LlvmCtx {
     // #173: cleanup stack for handle/try-catch scopes.  Pushed on entry to
     // gen_handle_expr (abort path) / gen_try_catch, popped on exit.
     // emit_return walks this stack innermost-first before LLVMBuildRet.
-    pub handle_cleanup_stack: List<HandleCleanup>
+    pub handle_cleanup_stack: List<HandleCleanup>,
+
+    // #215: test function names (populated by forward_declare, consumed by emit_c_main).
+    // When no fn main() exists, C main calls these test functions in order.
+    pub test_fns: List<Str>,
+    // #215: counter for test body emission (indexes into test_fns)
+    pub test_emit_idx: Int
 }
 
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).

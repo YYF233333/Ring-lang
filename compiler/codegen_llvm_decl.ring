@@ -135,8 +135,40 @@ pub fn emit_llvm_decl(mut ctx: LlvmCtx, decl: HDecl) {
         HDecl::Effect { .. } => {
             // Effect declarations don't generate code directly
         },
-        HDecl::Test { .. } => {
-            // Tests not compiled in LLVM mode
+        HDecl::Test { body, .. } => {
+            // #215: emit test function body
+            let test_name = ctx.test_fns[ctx.test_emit_idx]
+            ctx.test_emit_idx = ctx.test_emit_idx + 1
+
+            let fn_val = match ctx.functions.get(test_name) {
+                some(f) => f,
+                none => panic("LLVM codegen: test function '${test_name}' not forward-declared"),
+            }
+
+            // Save and set current function
+            let saved_fn = ctx.current_fn
+            ctx.current_fn = some(fn_val)
+            let saved_fn_name = ctx.current_fn_name
+            ctx.current_fn_name = test_name
+
+            // Save current named_values
+            let saved_named = ctx.named_values
+            ctx.named_values = map_new()
+
+            // Create entry basic block
+            let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+            LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+            // Generate body (no params, no evidence — lookup_evidence falls back to defaults)
+            let body_val = gen_llvm_expr(ctx, body)
+
+            // Return the body value
+            LLVMBuildRet(ctx.builder, body_val)
+
+            // Restore state
+            ctx.named_values = saved_named
+            ctx.current_fn = saved_fn
+            ctx.current_fn_name = saved_fn_name
         },
         HDecl::Trait { name: trait_name, methods: trait_methods, .. } => {
             // B-141: emit LLVM function bodies for default trait methods.
