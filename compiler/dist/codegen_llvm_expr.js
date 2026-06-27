@@ -4196,6 +4196,9 @@ function rt_method_returns_bool(name) {
   if ((name === "ring_map_any")) {
     return true;
   }
+  if ((name === "ring_map_int_any")) {
+    return true;
+  }
   if ((name === "ring_set_any")) {
     return true;
   }
@@ -4276,6 +4279,9 @@ function rt_method_returns_i64(name) {
     return true;
   }
   if ((name === "ring_map_any")) {
+    return true;
+  }
+  if ((name === "ring_map_int_any")) {
     return true;
   }
   if ((name === "ring_set_any")) {
@@ -4383,6 +4389,18 @@ function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
         }
         if (__ring_m146 === "fold") {
           __ring_blk35 = "ring_map_int_fold";
+          break __ring_match146;
+        }
+        if (__ring_m146 === "filter") {
+          __ring_blk35 = "ring_map_int_filter";
+          break __ring_match146;
+        }
+        if (__ring_m146 === "any") {
+          __ring_blk35 = "ring_map_int_any";
+          break __ring_match146;
+        }
+        if (__ring_m146 === "map_values") {
+          __ring_blk35 = "ring_map_int_map_values";
           break __ring_match146;
         }
         __ring_blk35 = base_rt_name;

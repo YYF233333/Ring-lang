@@ -61,8 +61,6 @@ const LLVM_SKIP = new Set([
   // Iterator / Map / Set runtime gaps
   "iterator.ring",
   "map_iteration.ring",
-  "map_ufcs_bug.ring",
-  "map_hof.ring",
   "set_struct_eq.ring",
   "set_ops_deep_eq.ring",
   // Other LLVM backend gaps

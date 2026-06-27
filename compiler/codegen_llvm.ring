@@ -215,6 +215,9 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_map_int_from", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_int_clear", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_int_fold", [ptr, ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_filter", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_any", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_map_values", [ptr, ptr], ptr)
 
     // Set
     get_or_declare_runtime_fn(ctx, "ring_set_new", [], ptr)
