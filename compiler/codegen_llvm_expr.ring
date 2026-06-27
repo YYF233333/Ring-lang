@@ -2,6 +2,7 @@ use types::{Type, Effect, EffectRow, effect_kind_name, type_to_builtin_name, typ
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler, HEffectOp, DictRef, DictDispatchInfo, TraitDispatch,
+    TraitBound,
     evidence_param_name, trait_dict_name, trait_bound_param_name, compare_by_first,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
@@ -498,6 +499,63 @@ fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_
     let mut dict_vals: List<LLVMValueRef> = []
     for dn in dict_names {
         dict_vals.push(resolve_dict_ref(ctx, DictRef::Simple(dn)))
+    }
+
+    // #214: if no dict names were provided (dict_closure_dicts was none — the checker
+    // does not resolve dicts for identifiers outside call arguments), compute the
+    // concrete dict names from the function's trait bounds + the instantiated FnType.
+    if dict_vals.len() == 0 {
+        match ctx.fn_trait_bounds.get(fn_info.fn_mangled) {
+            some(bounds) => {
+                if bounds.len() > 0 {
+                    let concrete_params = match ty {
+                        Type::FnType { params: fps, .. } => fps,
+                        _ => [],
+                    }
+                    let orig_types = match ctx.fn_original_param_types.get(fn_info.fn_mangled) {
+                        some(t) => t,
+                        none => [],
+                    }
+                    // Build type-var substitution: type_param_name → concrete type name
+                    let mut subst: Map<Str, Str> = map_new()
+                    let mut idx = 0
+                    for ot in orig_types {
+                        if idx < concrete_params.len() {
+                            match ot {
+                                Type::TypeVar { name: tv_name, .. } => {
+                                    match tv_name {
+                                        some(n) => {
+                                            match concrete_params.get(idx) {
+                                                some(cp) => {
+                                                    match type_to_builtin_name(cp) {
+                                                        some(cn) => { subst.insert(n, cn) },
+                                                        none => {},
+                                                    }
+                                                },
+                                                none => {},
+                                            }
+                                        },
+                                        none => {},
+                                    }
+                                },
+                                _ => {},
+                            }
+                        }
+                        idx = idx + 1
+                    }
+                    for b in bounds {
+                        match subst.get(b.type_param) {
+                            some(concrete_name) => {
+                                let dn = trait_dict_name(concrete_name, b.trait_name)
+                                dict_vals.push(resolve_dict_ref(ctx, DictRef::Simple(dn)))
+                            },
+                            none => {},
+                        }
+                    }
+                }
+            },
+            none => {},
+        }
     }
 
     // Evidence values for the function's effects (looked up in current scope).

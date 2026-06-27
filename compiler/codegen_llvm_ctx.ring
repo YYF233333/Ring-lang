@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
-use hir::{HEffectOp, HDictDef}
+use hir::{HEffectOp, HDictDef, TraitBound}
 
 // Re-declare LLVM opaque types to avoid cross-module ESM import issues.
 // These match the declarations in llvm_ffi.ring and unify to the same types.
@@ -136,6 +136,12 @@ pub struct LlvmCtx {
     // Compiler metadata
     pub local_fn_effects: Map<Str, EffectRow>,
     pub fn_evidence_params: Map<Str, List<Str>>,
+
+    // #214: per-function trait bounds and original param types — used by
+    // gen_dict_closure_wrapper to compute concrete dict names when a generic
+    // function is assigned to a variable (dict_closure_dicts is none).
+    pub fn_trait_bounds: Map<Str, List<TraitBound>>,
+    pub fn_original_param_types: Map<Str, List<Type>>,
 
     // Trait dict globals: maps dict name → LLVMValueRef (global ptr)
     pub dict_globals: Map<Str, LLVMValueRef>,

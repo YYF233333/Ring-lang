@@ -108,11 +108,26 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                 none => {}
             }
             let resolved = apply_subst(s, var_type)
+            // #214: if the init is a generic function with trait bounds, don't
+            // generalize — the LLVM dict-passing backend captures dicts in the
+            // closure wrapper at creation time, so the concrete type must be
+            // known (determined by later uses that unify the type variable).
+            // Without this, generalization makes the type variable a bound var
+            // that is never unified, and the codegen can't compute the dict.
+            let init_has_bounds = match init {
+                Expr::Ident { name: init_name, .. } => {
+                    match ctx.env.lookup(init_name) {
+                        some(init_scheme) => init_scheme.bounds.len() > 0,
+                        none => false,
+                    }
+                },
+                _ => false,
+            }
             // Optimization: skip the expensive free_type_vars_in_env scan when the resolved
             // type is ground (no type variables). Most function-local let bindings have ground
             // types, so this avoids a full env scan on each one.
             let ftv = free_type_vars(resolved, empty_subst())
-            let scheme = if ftv.len() == 0 {
+            let scheme = if ftv.len() == 0 || init_has_bounds {
                 mono(resolved)
             } else {
                 generalize(ctx.env, resolved, s)

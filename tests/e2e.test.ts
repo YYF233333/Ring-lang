@@ -63,7 +63,8 @@ const LLVM_SKIP = new Set([
   "map_iteration.ring",
   "set_struct_eq.ring",
   "set_ops_deep_eq.ring",
-  // Other LLVM backend gaps
+  // Other LLVM backend gaps — codegen fixed but frozen dist/ bootstrap compiler
+  // lacks checker fix (#214/#215), so these fail until E2E runner switches to native ring.exe
   "trait_alias.ring",
   "scc_mutual_recursion.ring",
 ]);

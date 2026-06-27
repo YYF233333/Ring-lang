@@ -656,6 +656,12 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
     // Store evidence param names for this function
     ctx.fn_evidence_params.insert(mangled, ev_params)
 
+    // #214: store trait bounds and original param types for dict closure wrapper fallback
+    ctx.fn_trait_bounds.insert(mangled, trait_bounds)
+    let mut orig_types: List<Type> = []
+    for p in params { orig_types.push(p.ty) }
+    ctx.fn_original_param_types.insert(mangled, orig_types)
+
     // Dedup: skip if already declared (multi-module imports can re-declare).
     // Map.insert drops old value, but LLVMValueRef is extern — ring_drop would
     // free a non-Ring pointer → heap corruption.
@@ -1643,6 +1649,8 @@ fn init_llvm_context(module_name: Str) -> LlvmCtx {
         rt_fn_types: map_new(),
         local_fn_effects: map_new(),
         fn_evidence_params: map_new(),
+        fn_trait_bounds: map_new(),
+        fn_original_param_types: map_new(),
         dict_globals: map_new(),
         static_dict_defs: map_new(),
         dict_singletons: map_new(),
