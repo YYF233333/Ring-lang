@@ -439,7 +439,17 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                     }
                 }
             },
-            HDecl::Test { .. } => {},
+            HDecl::Test { .. } => {
+                // #215: forward-declare test block as a zero-arg function
+                let test_name = "ring_test_${ctx.test_fns.len()}"
+                let fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+                let fn_val = LLVMAddFunction(ctx.module, test_name, fn_ty)
+                ctx.functions.insert(test_name, fn_val)
+                ctx.fn_types.insert(test_name, fn_ty)
+                let mut empty_ev: List<Str> = []
+                ctx.fn_evidence_params.insert(test_name, empty_ev)
+                ctx.test_fns.push(test_name)
+            },
             HDecl::Sig { .. } => {},
         }
     }
@@ -1530,10 +1540,23 @@ fn emit_c_main_common(mut ctx: LlvmCtx, ring_main_name: Str, warn_no_main: Bool)
             discard(LLVMBuildCall2(ctx.builder, ring_main_ty, ring_main_fn, call_args, ""))
         },
         none => {
-            if warn_no_main {
+            // #215: no main function — call test functions if any exist
+            if ctx.test_fns.len() > 0 {
+                for test_name in ctx.test_fns {
+                    match ctx.functions.get(test_name) {
+                        some(test_fn) => {
+                            let test_ty = match ctx.fn_types.get(test_name) {
+                                some(t) => t,
+                                none => panic("LLVM codegen: test fn type not found: ${test_name}"),
+                            }
+                            discard(LLVMBuildCall2(ctx.builder, test_ty, test_fn, [], ""))
+                        },
+                        none => panic("LLVM codegen: test function not found: ${test_name}"),
+                    }
+                }
+            } else if warn_no_main {
                 eprintln("Warning: no main function found in entry module")
             }
-            // Single-file mode: no main function is OK for library modules
         },
     }
 
@@ -1641,7 +1664,9 @@ fn init_llvm_context(module_name: Str) -> LlvmCtx {
         derived_dict_builds: [],
         extern_types: set_new(),
         extern_fn_infos: map_new(),
-        handle_cleanup_stack: []
+        handle_cleanup_stack: [],
+        test_fns: [],
+        test_emit_idx: 0
     }
 }
 
