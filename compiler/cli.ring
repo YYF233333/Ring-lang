@@ -175,7 +175,24 @@ struct CliArgs {
     rc_mutate: Str
 }
 
-fn parse_cli_args(args: List<Str>) -> CliArgs {
+fn normalize_cli_args(args: List<Str>) -> List<Str> {
+    let mut result: List<Str> = []
+    let mut i = 0
+    while i < args.len() {
+        let arg = args[i]
+        if (arg == "--error-format" || arg == "--out-dir" || arg == "--target" || arg == "--rc-mutate") && i + 1 < args.len() {
+            result.push("${arg}=${args[i + 1]}")
+            i = i + 2
+        } else {
+            result.push(arg)
+            i = i + 1
+        }
+    }
+    result
+}
+
+fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
+    let args = normalize_cli_args(raw_args)
     let mut debug = false
     let mut error_format = "human"
     let mut out_dir = "dist"
