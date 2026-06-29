@@ -54,13 +54,11 @@ pub fn string_builder() -> StringBuilder {
 }
 
 impl StringBuilder {
-    // NOTE: avoid `return ()` in prelude impl methods — triggers silent checker error (known bug)
     fn ensure_cap(mut self, needed: Int) {
-        if needed > self.cap {
-            let new_cap = if self.cap * 2 > needed { self.cap * 2 } else { needed }
-            self.buf = ring_buf_grow(self.buf, self.len, new_cap)
-            self.cap = new_cap
-        }
+        if needed <= self.cap { return () }
+        let new_cap = if self.cap * 2 > needed { self.cap * 2 } else { needed }
+        self.buf = ring_buf_grow(self.buf, self.len, new_cap)
+        self.cap = new_cap
     }
 
     pub fn add(mut self, s: Str) -> Unit {

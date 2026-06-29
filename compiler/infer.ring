@@ -724,6 +724,13 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
         Expr::ListLit { elements, span } =>
             infer_list_literal(ctx, elements, span, subst),
         Expr::TupleLit { elements, span } => {
+            // () — unit literal: 0-element tuple is Unit
+            if elements.len() == 0 {
+                return InferResult {
+                    hexpr: HExpr::TupleLit { elements: [], ty: UNIT, effects: EMPTY_ROW, span: span },
+                    subst: subst, effects: EMPTY_ROW
+                }
+            }
             let mut s = subst
             let mut helements: List<HExpr> = []
             let mut combined_effects: EffectRow = EMPTY_ROW

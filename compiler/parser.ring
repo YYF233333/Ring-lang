@@ -1454,6 +1454,11 @@ if self.check(TokenKind::TkIntLit) {
         }
         if self.check(TokenKind::TkLParen) {
             self.advance()
+            // () — unit literal (0-element tuple)
+            if self.check(TokenKind::TkRParen) {
+                let end_tok = self.advance()
+                return Expr::TupleLit { elements: [], span: self.make_span(start, end_tok.span.end) }
+            }
             let first = self.parse_expr()
             if self.check(TokenKind::TkComma) {
                 self.advance()
