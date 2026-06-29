@@ -388,7 +388,8 @@ fn test_fetch() {
 
 | 阶段 | 内容 | 量 |
 |------|------|----|
-| P1 | Str — `Ptr<U8>` + len + cap，替换 std::string | L |
+| P0 | StringBuilder — 管线验证 pilot（extern type → Ring struct + impl Drop + codegen 适配） | M |
+| P1 | Str — `Ptr<U8>` + len + cap，替换 std::string（P0 bridge 函数自然消失） | L |
 | P2 | List\<T\> — `Ptr<T>` + len + cap，替换 std::vector\<void*\> | L |
 | P3 | Map\<K,V\> — 开放寻址哈希表，替换 std::unordered_map（吸收 B-107 Hash trait） | XL |
 | P4 | Set\<K\> — 复用 Map 实现 | M |
@@ -397,15 +398,69 @@ fn test_fetch() {
 **每阶段模式**：
 1. 在 `std/` 中用纯 Ring 实现新类型（`unsafe {}` 块内使用 `Ptr<T>` 原语）
 2. `impl Drop`（dealloc backing buffer）
-3. 逐个替换 ring_runtime.cpp 中的 extern fn → 纯 Ring 方法
-4. 保持 E2E + llvm_diff 全绿 + 自举一致
+3. 删除 ring_runtime.cpp 中对应的 C++ 函数
+4. 更新 codegen 映射（`method_to_runtime` + 构造函数 + 特殊 codegen 路径）
+5. 保持 E2E + llvm_diff 全绿 + 自举一致
 
-**Str 实施细节**（P1，最先做——编译器自身最高频使用的类型）：
+#### P0: StringBuilder pilot（管线验证）
+
+> 2026-06-29 Discussion 拍板。目标：用最小的 extern type 验证完整 RIIR 管线（extern type → Ring struct + impl Drop + codegen 适配 + bootstrap），为后续 Str/List/Map/Set 铺路。
+
+**新 struct 定义**（`std/str.ring`，替换 `pub extern type StringBuilder`）：
+```ring
+pub struct StringBuilder {
+    buf: Ptr<U8>
+    len: Int
+    cap: Int
+}
+
+impl Drop for StringBuilder {
+    fn drop(self) with {io} {
+        unsafe { dealloc(self.buf, self.cap) }
+    }
+}
+```
+
+**Bridge 函数**（加在 ring_runtime.cpp，临时——P1 Str RIIR 后删除）：
+- `ring_str_as_ptr(s: Str) -> Ptr<U8>`：返回 Str 内部字节指针（借用 `std::string::data()`）
+- `ring_str_from_ptr(p: Ptr<U8>, len: Int) -> Str`：从 Ptr + len 构造新 Str（`new std::string(ptr, len)`）
+
+**方法实现**（全部纯 Ring + unsafe 块）：
+- `string_builder() -> StringBuilder`：初始 cap=64，`alloc<U8>(64)`
+- `add(self, s: Str)`：`ensure_cap` + `str_as_ptr` 读 Str 字节 + `ptr_copy` 追加
+- `to_str(self) -> Str`：调 bridge `str_from_ptr(self.buf, self.len)`
+- `len(self) -> Int`：直接返回 `self.len`
+- `add_int(self, n: Int)`：`self.add(n.to_str())`（首版不优化临时 Str 分配）
+- `line(self, s: Str)`：`self.add(s)` + 追加 `'\n'` 字节
+- `ensure_cap(self, needed: Int)`：cap 不够时 double（`max(cap*2, needed)`），alloc→copy→dealloc
+
+**Codegen 变更**：
+1. `codegen_llvm_expr.ring:2891-2896`：删除 5 行 StringBuilder `method_to_runtime` 映射
+2. `codegen_llvm_expr.ring:2473`：删除 `string_builder` → `ring_sb_new` 映射
+3. `codegen_llvm_expr.ring:~3282-3325`：字符串插值 IR 生成改用 Ring 编译符号名
+4. `codegen_llvm.ring:135-139,306-308`：删除 `ring_sb_*` runtime 函数声明
+5. `perceus.ring:2488-2495`：验证 StringBuilder 从特殊处理列表移除后 RC 推断正确
+
+**Runtime 删除**：`ring_sb_new`、`ring_sb_add`、`ring_sb_to_str`、`ring_sb_len`、`ring_sb_line`、`ring_sb_add_int`、`drop_sb`（7 个函数）+ `RING_TYPEID_SB` 不再使用
+
+**Bootstrap 策略**：旧编译器（dist-llvm/）编译新源码时，StringBuilder 已从 extern type 变为 struct——旧 codegen 的 `method_to_runtime` 映射查不到新 struct 的方法会走默认 Ring 函数调用路径（需验证）。如旧编译器无法编译 → 在 ring_runtime.cpp 保留 `ring_sb_*` 符号作 compatibility shim，double bootstrap 后删
+
+**P0 验收标准**：
+- StringBuilder 所有用法行为不变（构造 + add + line + add_int + to_str + len）
+- `impl Drop` 正确释放 buffer
+- 字符串插值行为不变
+- ring_runtime.cpp 中 7 个 `ring_sb_*` / `drop_sb` 函数删除
+- 全部 E2E + llvm_diff ×3 通过
+- 自举一致（double bootstrap）
+- ASan gating 档 clean
+
+**Str 实施细节**（P1，P0 之后——编译器自身最高频使用的类型）：
 - 内部表示：`struct Str { buf: Ptr<U8>, len: Int, cap: Int }`
 - UTF-8 字节串语义（design.md §1.7.1 已拍板）
 - `impl Drop for Str { fn drop(self) { dealloc(self.buf) } }`
 - 小字符串优化（SSO）可后续加，首版不做
 - 替换 ring_runtime.cpp 中 ~30 个 ring_str_* 函数
+- P0 的 bridge 函数（`ring_str_as_ptr`、`ring_str_from_ptr`）自然删除
 
 **吸收 B-107**：P3（Map）自然包含 Hash trait + derive，不再需要单独做 B-107。
 
