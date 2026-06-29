@@ -3,7 +3,7 @@
 
 fn main() {
     // Basic string builder
-    let sb = string_builder()
+    let mut sb = string_builder()
     sb.add("hello")
     sb.add(" ")
     sb.add("world")
@@ -11,7 +11,7 @@ fn main() {
     print("basic=${result}")
 
     // String builder with line
-    let sb2 = string_builder()
+    let mut sb2 = string_builder()
     sb2.add("line1")
     sb2.line("")
     sb2.add("line2")
@@ -20,17 +20,17 @@ fn main() {
     print("has_line2=${r2.contains("line2")}")
 
     // String builder with add_int
-    let sb3 = string_builder()
+    let mut sb3 = string_builder()
     sb3.add("val=")
     sb3.add_int(42)
     print("int=${sb3.to_str()}")
 
     // Empty string builder
-    let sb4 = string_builder()
+    let mut sb4 = string_builder()
     print("empty_len=${sb4.to_str().len()}")
 
     // Chain multiple operations
-    let sb5 = string_builder()
+    let mut sb5 = string_builder()
     sb5.add("a")
     sb5.add("b")
     sb5.add("c")

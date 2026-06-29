@@ -132,11 +132,20 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_str_split", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_str_replace", [ptr, ptr, ptr], ptr)
 
-    // StringBuilder
+    // StringBuilder (old ring_sb_* kept for Stage 0 dist-llvm/ compat)
     get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ptr)
     get_or_declare_runtime_fn(ctx, "ring_sb_add", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_sb_len", [ptr], i64)
+
+    // B-152: StringBuilder RIIR bridge functions
+    get_or_declare_runtime_fn(ctx, "ring_str_as_ptr", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_from_ptr", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_buf_alloc", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_buf_dealloc", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_buf_grow", [ptr, ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_buf_copy_at", [ptr, ptr, ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_buf_set_byte", [ptr, ptr, ptr], ptr)
 
     // Int/Float/Bool to Str — match C signatures: int64_t, double, ptr (boxed bool)
     get_or_declare_runtime_fn(ctx, "ring_int_to_str", [i64], ptr)

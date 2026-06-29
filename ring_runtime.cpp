@@ -2848,6 +2848,57 @@ extern "C" void* ring_sb_add_int(void* sb, int64_t n) {
 }
 
 // ============================================================================
+// B-152 RIIR bridge functions — StringBuilder struct in Ring, raw-memory ops in C
+// NOTE: Int args are B-080 tagged pointers: (val << 1) | 1.  Use ring_unbox_int.
+// ============================================================================
+
+extern "C" int64_t ring_unbox_int(void*);  // forward decl
+
+extern "C" void* ring_str_as_ptr(void* s) {
+    return (void*)((std::string*)s)->data();
+}
+
+extern "C" void* ring_str_from_ptr(void* ptr, void* len_tagged) {
+    int64_t len = ring_unbox_int(len_tagged);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string((const char*)ptr, (size_t)len);
+    return data;
+}
+
+extern "C" void* ring_buf_alloc(void* cap_tagged) {
+    int64_t cap = ring_unbox_int(cap_tagged);
+    return malloc((size_t)cap);
+}
+
+extern "C" void* ring_buf_dealloc(void* p) {
+    free(p);
+    return nullptr;
+}
+
+extern "C" void* ring_buf_grow(void* old, void* old_len_tagged, void* new_cap_tagged) {
+    int64_t old_len = ring_unbox_int(old_len_tagged);
+    int64_t new_cap = ring_unbox_int(new_cap_tagged);
+    void* new_buf = malloc((size_t)new_cap);
+    if (old_len > 0) memcpy(new_buf, old, (size_t)old_len);
+    free(old);
+    return new_buf;
+}
+
+extern "C" void* ring_buf_copy_at(void* dst, void* offset_tagged, void* src, void* len_tagged) {
+    int64_t offset = ring_unbox_int(offset_tagged);
+    int64_t len = ring_unbox_int(len_tagged);
+    if (len > 0) memcpy((char*)dst + offset, src, (size_t)len);
+    return nullptr;
+}
+
+extern "C" void* ring_buf_set_byte(void* p, void* offset_tagged, void* val_tagged) {
+    int64_t offset = ring_unbox_int(offset_tagged);
+    int64_t val = ring_unbox_int(val_tagged);
+    ((uint8_t*)p)[(size_t)offset] = (uint8_t)val;
+    return nullptr;
+}
+
+// ============================================================================
 // Parse functions
 // ============================================================================
 

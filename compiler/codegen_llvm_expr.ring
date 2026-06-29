@@ -2470,7 +2470,6 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "eprintln" { return some("ring_eprintln") }
     if name == "exit" || name == "exit_process" { return some("ring_exit") }
     if name == "argv" { return some("ring_args") }
-    if name == "string_builder" { return some("ring_sb_new") }
     if name == "map_new" { return some("ring_map_new") }
     if name == "set_new" { return some("ring_set_new") }
     if name == "read_file" { return some("ring_read_file") }
@@ -2498,6 +2497,14 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "alloc" { return some("ring_raw_alloc") }
     if name == "dealloc" { return some("ring_raw_dealloc") }
     if name == "ptr_copy" { return some("ring_ptr_copy") }
+    // B-152: StringBuilder RIIR bridge functions
+    if name == "ring_str_as_ptr" { return some("ring_str_as_ptr") }
+    if name == "ring_str_from_ptr" { return some("ring_str_from_ptr") }
+    if name == "ring_buf_alloc" { return some("ring_buf_alloc") }
+    if name == "ring_buf_dealloc" { return some("ring_buf_dealloc") }
+    if name == "ring_buf_grow" { return some("ring_buf_grow") }
+    if name == "ring_buf_copy_at" { return some("ring_buf_copy_at") }
+    if name == "ring_buf_set_byte" { return some("ring_buf_set_byte") }
     none
 }
 
@@ -2888,12 +2895,6 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     if type_name == "Float" && method == "to_str" { return some("ring_float_to_str") }
     // Bool methods
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
-    // StringBuilder methods
-    if type_name == "StringBuilder" && method == "add" { return some("ring_sb_add") }
-    if type_name == "StringBuilder" && method == "to_str" { return some("ring_sb_to_str") }
-    if type_name == "StringBuilder" && method == "len" { return some("ring_sb_len") }
-    if type_name == "StringBuilder" && method == "line" { return some("ring_sb_line") }
-    if type_name == "StringBuilder" && method == "add_int" { return some("ring_sb_add_int") }
     // List methods
     if type_name == "List" && method == "push" { return some("ring_list_push") }
     if type_name == "List" && method == "len" { return some("ring_list_len") }
@@ -3288,8 +3289,8 @@ fn gen_string_interp(mut ctx: LlvmCtx, parts: List<HStringInterpPart>) -> LLVMVa
     let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
 
     // B-104 D9 Part 1: codegen-level drop for interp temporaries.
-    // ring_sb_add copies content (*sb += *s) — str_val ownership stays with caller.
-    // ring_sb_to_str copies sb content to a new string — sb itself still alive.
+    // StringBuilder.add copies bytes — str_val ownership stays with caller.
+    // StringBuilder.to_str copies buffer to a new string — sb itself still alive.
     let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
     let drop_ty = get_rt_fn_type(ctx, "ring_drop")
 
