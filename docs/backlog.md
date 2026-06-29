@@ -378,7 +378,7 @@ fn test_fetch() {
 
 ## RIIR
 
-### B-152 RIIR 标准库（纯 Ring 重写 ring_runtime.cpp）[feature] [P1] [XL] [judgment] [queued] [deferred: B-002p1]
+### B-152 RIIR 标准库（纯 Ring 重写 ring_runtime.cpp）[feature] [P1] [XL] [judgment] [doing]
 
 > 2026-06-27 立项（Discussion，路线图重定）。消除 C++ STL 依赖，让 Ring 真正拥有自己的底层。容器（Str/List/Map/Set）全部用纯 Ring + `Ptr<T>` + Drop 重写。
 
