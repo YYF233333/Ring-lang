@@ -37,7 +37,7 @@ fn test_set_int_is_empty() -> Str {
 }
 
 fn test_sb_line() -> Str {
-    let sb = string_builder()
+    let mut sb = string_builder()
     sb.add("hello")
     sb.line(" world")
     sb.add("done")
@@ -45,7 +45,7 @@ fn test_sb_line() -> Str {
 }
 
 fn test_sb_add_int() -> Str {
-    let sb = string_builder()
+    let mut sb = string_builder()
     sb.add("n=")
     sb.add_int(42)
     sb.to_str()

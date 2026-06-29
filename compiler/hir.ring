@@ -572,6 +572,9 @@ pub fn type_contains_extern_handle(ty: Type, externs: Set<Str>) -> Bool {
 
 fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) -> Bool {
     match ty {
+        // B-152: Ptr<T> is RC-excluded (B-125); ring_drop on a raw pointer reads
+        // garbage headers.  Skip it in the field-drop loop, same as extern handles.
+        Type::PtrType { .. } => true,
         Type::StructType { name, type_params } => {
             if externs.contains(name) {
                 true
