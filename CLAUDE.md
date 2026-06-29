@@ -16,9 +16,9 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 
 ## 技术栈
 
-- **编译器**：Ring 自举。Bootstrap 经 dist/（冻结的 JS 产出，运行于 Node/V8）；目标后端 LLVM native（codegen_llvm* 5 模块）
-- **LLVM codegen**：codegen_llvm*.ring（5 个模块），通过 N-API addon 桥接 LLVM-C 22 API。native ring.exe 可自编译
-- **测试**：Python test runner（`tests/run_tests.py`），零外部依赖；Node-based runner（`tests/e2e.test.ts` 等）保留作参考
+- **编译器**：Ring 自举。ring.exe 自编译（dist-llvm/ .o 冻结产出 + ring_runtime.cpp → clang 链接）；dist/（冻结 JS 产出）保留作紧急 stage 0 回退
+- **LLVM codegen**：codegen_llvm*.ring（5 个模块），ring.exe 直接调用 LLVM-C 22 API
+- **测试**：Python test runner（`tests/run_tests.py`），零外部依赖
 - **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
 - **历史**：TS 原始实现归档于 git tag `ts-compiler-final`；JS codegen 后端归档于 `5df6c99`（B-100 Phase 2）
 
@@ -28,8 +28,7 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 Ring-lang/
 ├── compiler/          编译器源码（*.ring）+ dist/（冻结的 JS 产出，stage 0 回退）+ dist-llvm/（.o 产出）
 │   ├── codegen_llvm*.ring 唯一 codegen 后端（5 个模块）
-│   ├── llvm_ffi.ring      LLVM-C API 声明（91 extern fn + 13 extern type）
-│   └── llvm-addon/        N-API addon（本地构建，.gitignore）
+│   └── llvm_ffi.ring      LLVM-C API 声明（91 extern fn + 13 extern type）
 ├── ring_runtime.cpp   LLVM native backend 的 C ABI runtime（~2200 行 C++ STL wrapper）
 ├── std/               标准库（io/fs/path/process/str/num/list/map/set/result/iterator）
 ├── tests/             E2E 测试用例 + 测试运行器
@@ -56,11 +55,11 @@ Ring-lang/
 
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_ctor_name`），不允许跨阶段硬编码字符串契约
-- **dist/ 已冻结（B-100 Phase 2）**：dist/ 保留作紧急 stage 0 回退，不再 rebuild。修改编译器后只需重编 dist-llvm/：`node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。
+- **dist-llvm/ 重编**：修改编译器后用 ring.exe 重编：`ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。ring.exe 构建方式见「常用命令」。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。dist/ 保留作紧急 stage 0 回退（需 llvm_addon，不再日常使用）。
 - 注释语法 `//`，无 pipe 运算符，`.method()` 是唯一链式调用方式（`::` 模块路径和 `.method()` 方法调用是两个不互通的范畴，无 UFCS）
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
 - 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）
-- 每个 PR 至少包含一个 e2e 测试，合入前必须通过 `npm test`（从 `compiler/` 目录运行）
+- 每个 PR 至少包含一个 e2e 测试，合入前必须通过 `python tests/run_tests.py`
 - **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁。Worktree agent 启动后必须立即 `git log --oneline -1` 验证 base commit。**每次任务完成后必须清理 stale worktree**：`git worktree remove -f -f <path>`。
 - **决策必须讨论**：发现问题后不得自行决定修复方案，除非问题 trivial 且有唯一正确修复方式。不讨论就动手 = 错误。
 - **禁止忽略问题**：不能以"推迟"、"很难触发"等原因主动替用户忽略问题，必须上报由用户拍板。
@@ -77,7 +76,7 @@ Ring-lang/
 - **度量语义覆盖**，不度量代码行覆盖
 - **Golden 回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例编译运行，断言输出与 `.expected` golden 快照一致。锁定历次 codegen/RC/effect-handler 修复——用例即规约，修复明细在 git history。需本地 clang，无则自动 skip。重新生成快照：`node --test ../tests/llvm_diff.test.mjs --update-golden`。**动 RC 的改动必须 ×3 跑全套**（间歇性堆损坏单跑约 1/3 命中，单跑假绿）。
 - **RC 静态 verifier 套件**（`tests/verify_rc.test.mjs`，随 `npm test`）：post-RC HIR 线性检查（LEAK/UAF/BALANCE 三判据）——self-verify 门（编译器自身 0 errors）+ llvm 用例 in-process sweep + 负面套件。见 design.md §7.11 D2
-- **Agent 测试纪律**：测试耗时长（E2E 含 LLVM 编译链接 ~2-3 分钟），agent 不得因 grep 遗漏反复重跑。规则：① 测试输出**完整重定向到临时文件**（`npm test 2>&1 > test_output.txt`），后续从文件中 grep 分析，不丢失任何信息；② **结果无变动不重跑**——只有代码改动后才重跑测试，仅读代码/grep/分析阶段不触发测试；③ 编译失败先修再跑测试，不要"跑一下看看"
+- **Agent 测试纪律**：测试耗时长（E2E 含 LLVM 编译链接 ~2-3 分钟），agent 不得因 grep 遗漏反复重跑。规则：① 测试输出**完整重定向到临时文件**（`python tests/run_tests.py 2>&1 > test_output.txt`），后续从文件中 grep 分析，不丢失任何信息；② **结果无变动不重跑**——只有代码改动后才重跑测试，仅读代码/grep/分析阶段不触发测试；③ 编译失败先修再跑测试，不要"跑一下看看"
 
 ## 已知限制
 
@@ -125,16 +124,20 @@ Ring-lang/
 ## 常用命令
 
 ```bash
+# 构建 ring.exe（需 clang + LLVM）
+clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
+clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-L<LLVM_LIB_DIR>" -lLLVM-C
+
 # 编译单文件为 native .o
-node compiler/dist/main.js build examples/hello.ring
+ring.exe build examples/hello.ring
 
 # 类型检查
-node compiler/dist/main.js check examples/effects.ring
+ring.exe check examples/effects.ring
 
 # LLM 格式错误输出
-node compiler/dist/main.js check --error-format=llm examples/effects.ring
+ring.exe check --error-format=llm examples/effects.ring
 
-# E2E 测试（Python runner，推荐）
+# E2E 测试（Python runner）
 python tests/run_tests.py --suite e2e
 
 # Golden 回归测试（需 clang）
@@ -152,21 +155,8 @@ python tests/run_tests.py
 # 重新生成 golden 快照
 python tests/run_tests.py --update-golden
 
-# 旧 Node runner（仍可用，保留作参考）
-cd compiler && npm test
-cd compiler && npm run test:llvm
-
 # 重新编译编译器自身（dist-llvm/）
-node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
-
-# Native 构建（需 clang）
-powershell compiler/scripts/build_native.ps1
-
-# Native 构建（含 alloc 计数器）
-powershell compiler/scripts/build_native.ps1 -Stats
-
-# 全量测试（e2e + llvm + native，各阶段缺依赖自动 skip）
-cd compiler && npm run test:all
+ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
 ```
 
 ## ASan 跑法（两档，2026-06-11 定）
