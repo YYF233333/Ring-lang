@@ -102,17 +102,6 @@
 
 发现者：DS
 
-### #241 impl_bounds.ring 间歇性 runtime crash（~1/3 概率 access violation）[high] [judgment] [open]
-
-`tests/cases/impl_bounds.ring` E2E 运行约 1/3 概率触发 access violation。B-125 和 B-002p1 两次独立 worker session 均观察到，与两者改动无关（pre-existing）。疑似 trait dictionary dispatch 的间歇性内存问题（dict 指针悬空或 evidence 传递时堆损坏）。
-
-**复现**：多次跑 `python tests/run_tests.py --suite e2e`，impl_bounds.ring 约 1/3 失败。
-
-**修复方向**：ASan 构建跑 impl_bounds.ring 抓 first-fault 栈；或 `RING_RC_DEBUG` 追踪 dict/evidence 的 alloc/free 序列。
-
-发现者：B-125 Worker + B-002p1 Worker
-
----
 
 ## LLVM Codegen
 
