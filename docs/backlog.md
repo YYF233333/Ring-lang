@@ -833,7 +833,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - std/ impl 方法中 `return ()` 正常工作（不导致 impl 丢失）
 - 编译器自举一致
 
-### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [doing]
+### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [queued]
 
 > 2026-06-29 B-152 P0 worker 发现。
 
@@ -841,14 +841,16 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 **影响**：gen_string_interp 无法迁移到 Ring 编译符号（当前保留旧 ring_sb_* C++ 函数作为 workaround）。
 
+**2026-06-29 尝试记录**：用 `get_ring_fn`/`get_ring_toplevel_fn`（从 ctx.functions 查找）替代 `get_or_declare_runtime_fn`。单文件 e2e 通过，但 project mode 自编译 panic：`get_ring_toplevel_fn` 用当前模块前缀（如 `ring_parser$$_string_builder`）查找，但 `string_builder()` 定义在 `str` 模块（应为 `ring_str$$_string_builder`）。核心问题：prelude 函数跨模块查找在 project mode 下需要知道定义模块。已 revert。
+
 **涉及修改**：
-1. `codegen_llvm_expr.ring`：`get_or_declare_runtime_fn` 应先检查 module 中是否已有同名函数，有则直接使用（可能需要 bitcast 适配类型）
-2. 或 gen_string_interp 改为直接查找 Ring 编译函数（`LLVMGetNamedFunction`）而非 declare
+1. 需要解决 prelude 函数跨模块查找：codegen 在 project mode 下需要能找到其他模块（如 std/str）定义的函数的正确 mangled name
+2. 可能需要在 ctx 中维护 prelude 函数的 mangled name 映射，或在 forward-declare 阶段记录
 
 **验收标准**：
-- gen_string_interp 可使用 Ring 编译的 StringBuilder 函数
+- gen_string_interp 可使用 Ring 编译的 StringBuilder 函数（单文件 + project mode 均可）
 - 旧 ring_sb_* C++ 函数可删除
-- 全部 E2E 通过；自举一致
+- 全部 E2E 通过；**自编译通过**（project mode 验证）
 
 ### B-155 自编译 IR 非确定性：字符串常量含堆地址 [bugfix] [P2] [L] [judgment] [queued] [deferred: B-152]
 

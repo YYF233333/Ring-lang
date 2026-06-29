@@ -66,6 +66,7 @@ Ring-lang/
 - **文档时效性**：修改编译器功能后同步更新 CLAUDE.md 和 docs/design.md。已完成的 review/plan/spec 文件应删除。
 - **禁止 temp fix**：修复应提升项目健壮性，不增加技术债，即使工作量更大。
 - bug fix 后如果问题典型，补充 regression test。
+- **runtime 编译必须 -O2**：`clang++ -c ring_runtime.cpp` 必须带 `-O2`（不是 -O0）。-O0 下自编译耗时翻倍，不可接受。
 - **日常只 commit 不 push**：CI 单次 ~1h，跟不上 commit 速度。需要测试时再 `git push`，不要每个 commit 都推。
 
 ## 测试策略

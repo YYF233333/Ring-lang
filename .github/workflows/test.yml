@@ -23,7 +23,7 @@ jobs:
       - name: Add LLVM to PATH
         run: echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Build runtime
-        run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
+        run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
       - name: Link ring.exe
         run: |
           clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
@@ -44,7 +44,7 @@ jobs:
       - name: Add LLVM to PATH
         run: echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Build runtime
-        run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
+        run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
       - name: Link ring.exe
         run: |
           clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
@@ -68,7 +68,7 @@ jobs:
   #     - name: Add LLVM to PATH
   #       run: echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
   #     - name: Build runtime
-  #       run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
+  #       run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
   #     - name: Link ring.exe
   #       run: |
   #         clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
