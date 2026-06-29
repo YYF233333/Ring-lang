@@ -204,15 +204,18 @@ fn emit_return(mut ctx: LlvmCtx, value: HExpr?) {
     // innermost-first.  Each entry corresponds to an enclosing handle-expr or
     // try-catch whose catch frame must be popped and whose evidence must be
     // dropped — otherwise a `return` inside the body skips the normal-path
-    // cleanup epilogue (ring_catch_pop + emit_evidence_drops).
+    // cleanup epilogue (ring_catch_restore + emit_evidence_drops).
     let mut ci = ctx.handle_cleanup_stack.len() - 1
     while ci >= 0 {
         match ctx.handle_cleanup_stack.get(ci) {
             some(cleanup) => {
-                if cleanup.needs_catch_pop {
-                    let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
-                    let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
-                    discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+                match cleanup.catch_frame {
+                    some(cf) => {
+                        let restore_fn = get_or_declare_runtime_fn(ctx, "ring_catch_restore", [ctx.ptr_type], ctx.void_type)
+                        let restore_ty = get_rt_fn_type(ctx, "ring_catch_restore")
+                        discard(LLVMBuildCall2(ctx.builder, restore_ty, restore_fn, [cf], ""))
+                    },
+                    none => {},
                 }
                 if cleanup.ev_drop_allocas.len() > 0 {
                     let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
