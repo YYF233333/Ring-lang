@@ -82,10 +82,13 @@ LLVM_SKIP = {
 }
 
 # Windows-specific clang link flags.
+# /MANIFEST:EMBED + /MANIFESTUAC:asInvoker prevents Windows Installer Detection
+# from requiring elevation for test exes whose names contain "update"/"install"/etc.
 CLANG_LINK_FLAGS = [
     "-lmsvcrt",
     "-Wl,/STACK:536870912",
-    "-Wl,/MANIFEST:NO",
+    "-Wl,/MANIFEST:EMBED",
+    "-Wl,/MANIFESTUAC:level='asInvoker'",
 ]
 
 # ---------------------------------------------------------------------------
