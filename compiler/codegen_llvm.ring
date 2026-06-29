@@ -132,11 +132,8 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_str_split", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_str_replace", [ptr, ptr, ptr], ptr)
 
-    // StringBuilder (old ring_sb_* kept for Stage 0 dist-llvm/ compat)
-    get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_sb_add", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_sb_len", [ptr], i64)
+    // B-158: ring_sb_* removed — StringBuilder is now a Ring struct (B-152 RIIR).
+    // Codegen uses get_ring_fn("ring_string_builder") etc. instead.
 
     // B-152: StringBuilder RIIR bridge functions
     get_or_declare_runtime_fn(ctx, "ring_str_as_ptr", [ptr], ptr)
@@ -312,9 +309,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_str_char_code_at", [ptr, i64], ptr)
     get_or_declare_runtime_fn(ctx, "ring_str_join", [ptr, ptr], ptr)
 
-    // StringBuilder (additional)
-    get_or_declare_runtime_fn(ctx, "ring_sb_line", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_sb_add_int", [ptr, i64], ptr)
+    // B-158: ring_sb_line / ring_sb_add_int removed (StringBuilder RIIR'd)
 
     // Set (additional)
     get_or_declare_runtime_fn(ctx, "ring_set_union", [ptr, ptr], ptr)
