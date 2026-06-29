@@ -125,7 +125,7 @@ Ring-lang/
 
 ```bash
 # 构建 ring.exe（需 clang + LLVM）
-clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O0 -D_CRT_SECURE_NO_WARNINGS
+clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
 clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-L<LLVM_LIB_DIR>" -lLLVM-C
 
 # 编译单文件为 native .o
