@@ -2471,28 +2471,6 @@ extern "C" void ring_catch_pop() {
     delete frame;
 }
 
-// B-002p2 sub7: stack-allocated catch frame support
-// ring_catch_frame_size: returns sizeof(RingCatchFrame) so codegen can alloca
-extern "C" int64_t ring_catch_frame_size() {
-    return (int64_t)sizeof(RingCatchFrame);
-}
-
-// ring_catch_init: initialize a (stack-allocated) catch frame and push onto stack.
-// Codegen allocates 512 bytes; static_assert ensures the struct fits.
-extern "C" void ring_catch_init(void* frame) {
-    static_assert(sizeof(RingCatchFrame) <= 512,
-                  "RingCatchFrame exceeds 512-byte alloca buffer in codegen");
-    RingCatchFrame* f = (RingCatchFrame*)frame;
-    f->error_value = nullptr;
-    f->prev = ring_catch_stack;
-    ring_catch_stack = f;
-}
-
-// ring_catch_restore: pop catch frame without delete (frame lives on stack)
-extern "C" void ring_catch_restore(void* frame) {
-    ring_catch_stack = ((RingCatchFrame*)frame)->prev;
-}
-
 // ring_try: correct setjmp/longjmp scoping for `body catch { arms }`.
 // The catch frame and setjmp live in THIS function's stack frame, and the body
 // closure is invoked nested from here — so a longjmp (from a deeply-nested

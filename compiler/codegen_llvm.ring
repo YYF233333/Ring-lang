@@ -260,9 +260,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], void)
     get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_raise", [ptr], void)
-    // B-002p2 sub7: stack-allocated catch frame
-    get_or_declare_runtime_fn(ctx, "ring_catch_init", [ptr], void)
-    get_or_declare_runtime_fn(ctx, "ring_catch_restore", [ptr], void)
 
     // Args
     get_or_declare_runtime_fn(ctx, "ring_args", [], ptr)

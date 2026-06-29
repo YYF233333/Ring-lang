@@ -91,8 +91,6 @@ extern fn LLVMGetEnumAttributeKindForName(name: Str, s_len: Int) -> Int
 extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -> LLVMAttributeRef
 // B-148: needed for divzero guard — get the parent function of a basic block
 extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
-// B-002p2 sub7: array type for stack-allocated catch frame
-extern fn LLVMArrayType2(elem: LLVMTypeRef, count: Int) -> LLVMTypeRef
 
 // ============================================================
 // Type-aware map/set dispatch helpers
@@ -199,13 +197,10 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
             while ci >= 0 {
                 match ctx.handle_cleanup_stack.get(ci) {
                     some(cleanup) => {
-                        match cleanup.catch_frame {
-                            some(cf) => {
-                                let restore_fn = get_or_declare_runtime_fn(ctx, "ring_catch_restore", [ctx.ptr_type], ctx.void_type)
-                                let restore_ty = get_rt_fn_type(ctx, "ring_catch_restore")
-                                discard(LLVMBuildCall2(ctx.builder, restore_ty, restore_fn, [cf], ""))
-                            },
-                            none => {},
+                        if cleanup.needs_catch_pop {
+                            let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
+                            let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
+                            discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
                         }
                         if cleanup.ev_drop_allocas.len() > 0 {
                             let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
@@ -2462,12 +2457,10 @@ fn gen_runtime_call(mut ctx: LlvmCtx, name: Str, args: List<LLVMValueRef>) -> LL
 
 fn is_void_runtime_fn(name: Str) -> Bool {
     if name == "ring_catch_pop" { true }
-    else { if name == "ring_catch_init" { true }
-    else { if name == "ring_catch_restore" { true }
     else { if name == "ring_raise" { true }
     else { if name == "ring_raw_dealloc" { true }
     else { if name == "ring_ptr_copy" { true }
-    else { false } } } } } }
+    else { false } } } }
 }
 
 // Map Ring extern fn names to C runtime names
@@ -5381,14 +5374,10 @@ fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMVa
 
     let sj = get_or_declare_setjmp(ctx)
 
-    // B-002p2 sub7: stack-allocate the catch frame (zero heap alloc).
-    // 512 bytes is conservatively larger than sizeof(RingCatchFrame) on all
-    // supported platforms; ring_catch_init() has a static_assert guard.
-    let frame_ty = LLVMArrayType2(ctx.i8_type, 512)
-    let frame = build_entry_alloca(ctx, frame_ty, fresh_name(ctx, "catch_frame"))
-    let init_fn = get_or_declare_runtime_fn(ctx, "ring_catch_init", [ctx.ptr_type], ctx.void_type)
-    let init_ty = get_rt_fn_type(ctx, "ring_catch_init")
-    discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [frame], ""))
+    // ring_catch_push() -> frame ptr
+    let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
+    let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
+    let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
 
     // Get jmp_buf pointer from the catch frame
     let getbuf_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_buf", [ctx.ptr_type], ctx.ptr_type)
@@ -5411,24 +5400,24 @@ fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMVa
 
     discard(LLVMBuildCondBr(ctx.builder, cond, normal_bb, catch_bb))
 
-    // --- normal path: execute body inline, then restore frame ---
+    // --- normal path: execute body inline, then pop frame ---
     LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
-    // #173: push cleanup so a `return` inside the body restores the catch frame
-    ctx.handle_cleanup_stack.push(HandleCleanup { catch_frame: some(frame), ev_drop_allocas: [] })
+    // #173: push cleanup so a `return` inside the body pops the catch frame
+    ctx.handle_cleanup_stack.push(HandleCleanup { needs_catch_pop: true, ev_drop_allocas: [] })
     let body_val = gen_llvm_expr(ctx, body)
     let _ = ctx.handle_cleanup_stack.pop()
-    let restore_fn = get_or_declare_runtime_fn(ctx, "ring_catch_restore", [ctx.ptr_type], ctx.void_type)
-    let restore_ty = get_rt_fn_type(ctx, "ring_catch_restore")
-    discard(LLVMBuildCall2(ctx.builder, restore_ty, restore_fn, [frame], ""))
+    let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
+    let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
+    discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
     let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
     discard(LLVMBuildBr(ctx.builder, merge_bb))
 
-    // --- catch path: get error, restore frame, run catch arms inline ---
+    // --- catch path: get error, pop frame, run catch arms inline ---
     LLVMPositionBuilderAtEnd(ctx.builder, catch_bb)
     let get_err_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ctx.ptr_type], ctx.ptr_type)
     let get_err_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
     let error_val = LLVMBuildCall2(ctx.builder, get_err_ty, get_err_fn, [frame], fresh_name(ctx, "err"))
-    discard(LLVMBuildCall2(ctx.builder, restore_ty, restore_fn, [frame], ""))
+    discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
     let catch_val = gen_catch_arms(ctx, error_val, arms)
     let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
     discard(LLVMBuildBr(ctx.builder, merge_bb))
@@ -5901,12 +5890,9 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 
         let sj = get_or_declare_setjmp(ctx)
 
-        // B-002p2 sub7: stack-allocate the catch frame (zero heap alloc)
-        let frame_ty = LLVMArrayType2(ctx.i8_type, 512)
-        let frame = build_entry_alloca(ctx, frame_ty, fresh_name(ctx, "catch_frame"))
-        let init_fn = get_or_declare_runtime_fn(ctx, "ring_catch_init", [ctx.ptr_type], ctx.void_type)
-        let init_ty = get_rt_fn_type(ctx, "ring_catch_init")
-        discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [frame], ""))
+        let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
+        let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
+        let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
 
         let getbuf_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_buf", [ctx.ptr_type], ctx.ptr_type)
         let getbuf_ty = get_rt_fn_type(ctx, "ring_catch_get_buf")
@@ -5928,13 +5914,13 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 
         // --- normal path ---
         LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
-        // #173: push cleanup so a `return` inside the body restores catch + drops evidence
-        ctx.handle_cleanup_stack.push(HandleCleanup { catch_frame: some(frame), ev_drop_allocas: ev_drop_allocas })
+        // #173: push cleanup so a `return` inside the body pops catch + drops evidence
+        ctx.handle_cleanup_stack.push(HandleCleanup { needs_catch_pop: true, ev_drop_allocas: ev_drop_allocas })
         let body_val = gen_llvm_expr(ctx, body)
         let _ = ctx.handle_cleanup_stack.pop()
-        let restore_fn = get_or_declare_runtime_fn(ctx, "ring_catch_restore", [ctx.ptr_type], ctx.void_type)
-        let restore_ty = get_rt_fn_type(ctx, "ring_catch_restore")
-        discard(LLVMBuildCall2(ctx.builder, restore_ty, restore_fn, [frame], ""))
+        let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
+        let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
+        discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
         // B-096: drop non-abort evidence structs on the normal path.
         emit_evidence_drops(ctx, ev_drop_allocas)
         let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
@@ -5945,7 +5931,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         let get_err_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ctx.ptr_type], ctx.ptr_type)
         let get_err_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
         let error_val = LLVMBuildCall2(ctx.builder, get_err_ty, get_err_fn, [frame], fresh_name(ctx, "err"))
-        discard(LLVMBuildCall2(ctx.builder, restore_ty, restore_fn, [frame], ""))
+        discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
         // B-096: drop non-abort evidence structs on the catch path too.
         emit_evidence_drops(ctx, ev_drop_allocas)
         let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
@@ -5965,7 +5951,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     } else {
         // Non-abort handlers: just execute body with evidence set up
         // #173: push cleanup so a `return` inside the body drops evidence
-        ctx.handle_cleanup_stack.push(HandleCleanup { catch_frame: none, ev_drop_allocas: ev_drop_allocas })
+        ctx.handle_cleanup_stack.push(HandleCleanup { needs_catch_pop: false, ev_drop_allocas: ev_drop_allocas })
         let result = gen_llvm_expr(ctx, body)
         let _ = ctx.handle_cleanup_stack.pop()
         // B-096: drop evidence structs after the body completes.

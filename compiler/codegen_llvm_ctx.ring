@@ -101,9 +101,8 @@ pub struct ExternFnInfo {
 // ensuring catch frames are popped and evidence structs are dropped even when
 // the body exits via `return`.
 pub struct HandleCleanup {
-    // some(frame_alloca) → emit ring_catch_restore(frame) (handle-abort and try-catch)
-    // none → no catch frame to restore (non-abort handle-expr)
-    pub catch_frame: LLVMValueRef?,
+    // true → emit ring_catch_pop() (handle-abort and try-catch both push a catch frame)
+    pub needs_catch_pop: Bool,
     // non-abort evidence allocas that need ring_drop (handle-expr only; empty for try-catch)
     pub ev_drop_allocas: List<LLVMValueRef>
 }
