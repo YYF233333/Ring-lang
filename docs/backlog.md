@@ -454,13 +454,79 @@ impl Drop for StringBuilder {
 - 自举一致（double bootstrap）
 - ASan gating 档 clean
 
-**Str 实施细节**（P1，P0 之后——编译器自身最高频使用的类型）：
-- 内部表示：`struct Str { buf: Ptr<U8>, len: Int, cap: Int }`
-- UTF-8 字节串语义（design.md §1.7.1 已拍板）
-- `impl Drop for Str { fn drop(self) { dealloc(self.buf) } }`
-- 小字符串优化（SSO）可后续加，首版不做
-- 替换 ring_runtime.cpp 中 ~30 个 ring_str_* 函数
-- P0 的 bridge 函数（`ring_str_as_ptr`、`ring_str_from_ptr`）自然删除
+#### P1: Str RIIR（编译器自身最高频类型）
+
+> 2026-06-30 Discussion 拍板。两步走策略（C++ 内部改布局 → Ring 迁移），解决 extern type → struct 的 ABI bootstrap 不兼容。一次性迁移全部 33 个 ring_str_* 函数，不分批。不做 SSO。
+
+**目标 Ring 定义**（`std/str.ring`，替换 `pub extern type Str`）：
+```ring
+pub struct Str {
+    buf: Ptr<U8>
+    len: Int
+    cap: Int
+}
+
+impl Drop for Str {
+    fn drop(self) with {io} {
+        unsafe { dealloc(self.buf, self.cap) }
+    }
+}
+```
+
+**Step 1：C++ 内部去 STL（bootstrap = 重编 runtime.o + 重链，零风险）**
+
+ring_runtime.cpp 中 Str 的内部表示从 `std::string`（placement-new）改为 C struct `{ char* buf; int64_t len; int64_t cap; }`。所有 33 个 `ring_str_*` 函数签名不变（仍接受/返回 `void*`），内部改用新 struct 操作。`drop_str` 从 `~std::string()` 改为 `free(buf)`。
+
+改完后 Str 的 RC 堆块数据区布局 = `{ char*, int64_t, int64_t }`，与未来 Ring struct `{ Ptr<U8>, Int, Int }` 完全一致。
+
+涉及修改的 33 个函数（全部重写内部实现，签名不变）：
+1. `ring_str_new` — 空字符串（alloc buf=64）
+2. `ring_str_from_cstr` — 字符串字面量构造（alloc + memcpy）
+3. `ring_str_len` / `ring_str_len_u32` — 直接返回 len 字段
+4. `ring_str_concat` — alloc new buf + memcpy 两段
+5. `ring_str_eq` / `ring_str_lt` — memcmp
+6. `ring_str_get` / `ring_str_char_at` — 按字节索引，返回单字节 Str
+7. `ring_str_slice` — alloc + memcpy 子串
+8. `ring_str_contains` / `ring_str_starts_with` / `ring_str_ends_with` — 字节搜索
+9. `ring_str_split` / `ring_str_join` / `ring_str_replace` — 重写为手动内存管理
+10. `ring_str_to_cstr` — 返回 buf 指针（确保 null-terminated）
+11. `ring_str_trim` / `ring_str_trim_start` / `ring_str_trim_end` — 字节级 trim
+12. `ring_str_to_upper` / `ring_str_to_lower` — ASCII-only 逐字节
+13. `ring_str_index_of` / `ring_str_last_index_of` — 字节搜索返回 Option
+14. `ring_str_is_empty` — len == 0
+15. `ring_str_pad_start` / `ring_str_pad_end` / `ring_str_repeat` — alloc + fill
+16. `ring_str_char_code_at` — 返回 Option<Int>
+17. `ring_str_as_ptr` / `ring_str_from_ptr` — P0 bridge，改为操作新 struct
+18. `ring_cl_eq_str` / `ring_cl_ne_str` — closure-wrapped trait dispatch
+
+**null-termination 约定**：buf 始终多分配 1 字节，末尾写 `\0`。`ring_str_to_cstr` 可直接返回 buf。所有创建 Str 的路径都保证此不变量。
+
+**Step 1 验收**：
+- 全部 E2E + llvm_diff ×3 通过
+- 自编译通过（single bootstrap 即可，无 ABI 变化）
+- ASan gating 档 clean
+
+**Step 2：Ring 侧迁移（extern type → struct + Ring impl 方法）**
+
+1. `std/str.ring`：`pub extern type Str` → `pub struct Str { buf: Ptr<U8>, len: Int, cap: Int }` + `impl Drop`
+2. 所有 33 个方法改为 Ring impl 方法（`unsafe {}` 块内使用 Ptr 原语）
+3. `ring_str_from_cstr` 保留为 C++ compatibility shim（字符串字面量 codegen 仍需要）——或改 codegen 用 Ring 构造函数
+4. 删除 ring_runtime.cpp 中不再需要的 ring_str_* 函数
+5. codegen 删除 Str 的 `method_to_runtime` 映射
+6. P0 bridge 函数（`ring_str_as_ptr`/`ring_str_from_ptr`）删除——Str 已是 struct，直接 `self.buf` 访问
+7. Perceus：验证 Str 从特殊处理列表移除后 RC 推断正确
+
+**Bootstrap 策略**（Step 1 已将 C++ 布局对齐，大幅降低风险）：
+- 旧编译器（dist-llvm/）看到 `struct Str` 而非 `extern type Str`，method_to_runtime 可能不匹配（与 P0 StringBuilder 同理）→ fallback 到 Ring 函数调用
+- 字符串字面量构造：旧 codegen 仍调 `ring_str_from_cstr`，Step 1 已改为新布局，ABI 兼容
+- Double bootstrap 验证：stage 0 → stage 1 → stage 2 = stage 1（fixpoint）
+
+**Step 2 验收**：
+- Str 所有用法行为不变（构造 + 方法调用 + 字符串插值 + RC drop）
+- ring_runtime.cpp 中 Str 相关函数大幅减少（仅保留 `ring_str_from_cstr` 或全删）
+- 全部 E2E + llvm_diff ×3 通过
+- 自举一致（double bootstrap fixpoint）
+- ASan gating 档 clean
 
 **吸收 B-107**：P3（Map）自然包含 Hash trait + derive，不再需要单独做 B-107。
 
@@ -817,21 +883,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 多 .o 链接产出与单 Module 行为一致
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-157 prelude impl 方法 `return ()` 静默丢失整个 impl [bugfix] [P1] [S] [judgment] [doing]
-
-> 2026-06-29 B-152 P0 worker 发现。
-
-**现象**：std/*.ring 的 impl 方法体中使用 `return ()` 导致 `check_prelude_decl` 抛 fail。checker.ring 的 prelude 加载用 `catch { _ => none }` 吞掉错误，整个 impl block 的所有方法都找不到（E0305 找不到方法）。
-
-**影响**：阻塞 B-152 RIIR 后续阶段——std/ 中写纯 Ring impl 方法时无法使用 early return。
-
-**涉及修改**：
-1. `compiler/checker.ring`：prelude 加载的 catch 块不应吞掉 checker 错误，或至少输出诊断信息
-2. 或修复 `check_prelude_decl` 对 `return ()` 的处理——prelude impl 方法应该允许 return
-
-**验收标准**：
-- std/ impl 方法中 `return ()` 正常工作（不导致 impl 丢失）
-- 编译器自举一致
 
 ### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [queued]
 
