@@ -385,6 +385,37 @@ pub fn get_rt_fn_type(ctx: LlvmCtx, name: Str) -> LLVMTypeRef {
     }
 }
 
+// B-158: look up a Ring-compiled function (prelude / user code) by its mangled
+// LLVM name.  Unlike get_or_declare_runtime_fn this never creates a new
+// declaration — it expects the function to have been forward-declared during
+// the codegen forward-declaration pass.  Use this for functions that have been
+// RIIR'd from extern-type C++ runtime functions to Ring structs + methods, to
+// avoid the name-collision that get_or_declare_runtime_fn / LLVMAddFunction
+// causes when the Ring-compiled function already exists in the module.
+pub fn get_ring_fn(ctx: LlvmCtx, name: Str) -> (LLVMValueRef, LLVMTypeRef) {
+    let fn_val = match ctx.functions.get(name) {
+        some(f) => f,
+        none => panic("LLVM codegen: Ring function '${name}' not found in module (B-158)"),
+    }
+    let fn_ty = match ctx.fn_types.get(name) {
+        some(t) => t,
+        none => panic("LLVM codegen: Ring function type '${name}' not found (B-158)"),
+    }
+    (fn_val, fn_ty)
+}
+
+// B-158: look up a Ring-compiled top-level function, accounting for module
+// prefix.  In project mode, prelude top-level fns are forward-declared with
+// the current module's prefix (ring_<prefix>$$_<name>).  Impl methods are
+// always unprefixed (ring_<Type>_<method>) — use get_ring_fn for those.
+pub fn get_ring_toplevel_fn(ctx: LlvmCtx, fn_name: Str) -> (LLVMValueRef, LLVMTypeRef) {
+    let mangled = match ctx.module_prefix {
+        some(p) => llvm_mangle_fn_with_prefix(p, fn_name),
+        none => llvm_mangle_fn(fn_name),
+    }
+    get_ring_fn(ctx, mangled)
+}
+
 // ============================================================
 // build_entry_alloca — place alloca in function's entry block
 // ============================================================
