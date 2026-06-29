@@ -32,7 +32,7 @@
 
 // ============================================================================
 // Type aliases (documentation only — all cross-boundary types are void*)
-//   Str          = std::string*     (data ptr into ring_alloc'd block)
+//   Str          = RingStr*         (data ptr into ring_alloc'd block)
 //   List         = std::vector<void*>*
 //   Map          = std::unordered_map<std::string, void*>*
 //   MapInt       = std::unordered_map<int64_t, void*>*
@@ -45,6 +45,27 @@
 //    ^                     ^
 //    ptr-8                 ptr  (returned by ring_alloc, used everywhere)
 // ============================================================================
+
+// B-152 P1 Step 1: RingStr — C struct replacement for std::string in Str data area.
+// Invariants: buf always non-NULL, buf[len]=='\0', cap >= len+1.
+struct RingStr {
+    char* buf;     // always non-NULL, always null-terminated at buf[len]
+    int64_t len;   // content byte count (excluding null terminator)
+    int64_t cap;   // total malloc'd bytes for buf (cap >= len + 1)
+};
+
+static inline RingStr* as_str(void* p) { return (RingStr*)p; }
+
+// Helper: byte-level substring search (no memmem on Windows)
+static inline const char* ring_memmem(const char* hay, size_t hlen,
+                                       const char* needle, size_t nlen) {
+    if (nlen == 0) return hay;
+    if (nlen > hlen) return nullptr;
+    for (size_t i = 0; i <= hlen - nlen; i++) {
+        if (memcmp(hay + i, needle, nlen) == 0) return hay + i;
+    }
+    return nullptr;
+}
 
 // ============================================================================
 // Perceus RC L0 — TypeID constants
@@ -93,7 +114,7 @@
 //   CONST_STATIC — a `const` declaration's initialiser value, built once
 //                  inside the codegen-emitted memoised getter and retagged
 //                  via ring_const_intern (data layout unchanged — a retagged
-//                  Str is still read as std::string* by every str op).
+//                  Str is still read as RingStr* by every str op).
 #define RING_TYPEID_OPTION_NONE 18
 #define RING_TYPEID_CONST_STATIC 19
 // B-104 D9 Part 2: a module-level `const` whose initialiser is a heap-allocating
@@ -425,6 +446,20 @@ extern "C" void ring_register_drop(int64_t typeid_val, void* drop_fn_ptr) {
     }
 }
 
+// B-152 P1 Step 1: helper — allocate a new Ring Str (RingStr) from a C buffer + length.
+// Calls ring_alloc (RC header), then malloc's the buf.  Used by almost every Str-
+// returning function.
+static inline void* make_ring_str(const char* src, int64_t len) {
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* s = as_str(data);
+    s->len = len;
+    s->cap = len + 1;
+    s->buf = (char*)malloc((size_t)s->cap);
+    if (len > 0) memcpy(s->buf, src, (size_t)len);
+    s->buf[len] = '\0';
+    return data;
+}
+
 // B-101 — mark a typeid as never-drop (interned / arena lifetime).  ring_dup and
 // ring_drop become no-ops for such blocks; they live until process exit.  Used for
 // the compiler's immutable shared `Type` DAG (see never_drop_table above).
@@ -438,7 +473,7 @@ extern "C" void ring_register_never_drop(int64_t typeid_val) {
 // module-level singleton.  Called exactly once per const, from the build leg of
 // the codegen-emitted memoised getter (emit_const_body's lazy path).  Only the
 // header typeid changes — the data layout is untouched, so e.g. a retagged Str
-// is still read as std::string* by every str op (nothing in the runtime
+// is still read as RingStr* by every str op (nothing in the runtime
 // dispatches on the STR typeid except dup/drop + diagnostics).  After the
 // retag, stray dup/drop on the singleton are no-ops (never-drop table).
 extern "C" void* ring_const_intern(void* p) {
@@ -500,9 +535,9 @@ static void drop_bool(void* /*data*/)  { /* no-op, scalar */ }
 static void drop_unit(void* /*data*/)  { /* no-op, no payload */ }
 
 static void drop_str(void* data) {
-    // data points at an in-place std::string; destruct but don't free
-    // (the whole block including header is freed by ring_drop).
-    ((std::string*)data)->~basic_string();
+    // data points at a RingStr; free the internal buf (the RC block
+    // including header is freed by ring_drop).
+    free(as_str(data)->buf);
 }
 
 static void drop_cell(void* data) {
@@ -654,15 +689,24 @@ extern "C" int64_t ring_unbox_bool(void* p) {
 // ============================================================================
 
 extern "C" void* ring_str_new() {
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string();
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* s = as_str(data);
+    s->buf = (char*)malloc(1);
+    s->buf[0] = '\0';
+    s->len = 0;
+    s->cap = 1;
     return data;
 }
 
 extern "C" void* ring_str_from_cstr(const char* cstr) {
     CHK("str_from_cstr");
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(cstr);
+    int64_t len = (int64_t)strlen(cstr);
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* s = as_str(data);
+    s->len = len;
+    s->cap = len + 1;
+    s->buf = (char*)malloc((size_t)s->cap);
+    memcpy(s->buf, cstr, (size_t)(len + 1)); // includes null terminator
 #ifdef RING_BOX_PROFILE
     // B-104 D5: string-literal materialization — RA = the IR site evaluating the
     // literal (D5 run 1: 88.2% of live STR was this one class).
@@ -673,131 +717,160 @@ extern "C" void* ring_str_from_cstr(const char* cstr) {
 
 extern "C" int64_t ring_str_len(void* s) {
     CHK("str_len");
-    return (int64_t)((std::string*)s)->size();
+    return as_str(s)->len;
 }
 
 extern "C" void* ring_str_concat(void* a, void* b) {
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(*(std::string*)a + *(std::string*)b);
+    RingStr* sa = as_str(a);
+    RingStr* sb = as_str(b);
+    int64_t new_len = sa->len + sb->len;
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = new_len;
+    rs->cap = new_len + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    if (sa->len > 0) memcpy(rs->buf, sa->buf, (size_t)sa->len);
+    if (sb->len > 0) memcpy(rs->buf + sa->len, sb->buf, (size_t)sb->len);
+    rs->buf[new_len] = '\0';
     return data;
 }
 
 extern "C" int64_t ring_str_eq(void* a, void* b) {
     CHK("str_eq");
     if (!a || !b) return (a == b) ? 1 : 0;
-    return (*(std::string*)a == *(std::string*)b) ? 1 : 0;
+    RingStr* sa = as_str(a);
+    RingStr* sb = as_str(b);
+    if (sa->len != sb->len) return 0;
+    return (sa->len == 0 || memcmp(sa->buf, sb->buf, (size_t)sa->len) == 0) ? 1 : 0;
 }
 
 extern "C" int64_t ring_str_lt(void* a, void* b) {
-    return (*(std::string*)a < *(std::string*)b) ? 1 : 0;
+    RingStr* sa = as_str(a);
+    RingStr* sb = as_str(b);
+    int64_t min_len = sa->len < sb->len ? sa->len : sb->len;
+    int cmp = (min_len > 0) ? memcmp(sa->buf, sb->buf, (size_t)min_len) : 0;
+    if (cmp != 0) return cmp < 0 ? 1 : 0;
+    return sa->len < sb->len ? 1 : 0;
 }
 
 extern "C" void* ring_str_get(void* s, int64_t idx) {
-    std::string* str = (std::string*)s;
-    if (idx < 0 || idx >= (int64_t)str->size()) {
+    RingStr* str = as_str(s);
+    if (idx < 0 || idx >= str->len) {
         fprintf(stderr, "ring panic: string index %lld out of bounds (len %lld)\n",
-                (long long)idx, (long long)str->size());
+                (long long)idx, (long long)str->len);
         exit(1);
     }
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(1, (*str)[(size_t)idx]);
-    return data;
+    return make_ring_str(str->buf + idx, 1);
 }
 
 extern "C" void* ring_str_slice(void* s, int64_t start, int64_t end) {
-    std::string* str = (std::string*)s;
+    RingStr* str = as_str(s);
     if (start < 0) start = 0;
-    if (end > (int64_t)str->size()) end = (int64_t)str->size();
+    if (end > str->len) end = str->len;
     if (start >= end) {
-        void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string();
-        return data;
+        return make_ring_str("", 0);
     }
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(str->substr((size_t)start, (size_t)(end - start)));
-    return data;
+    return make_ring_str(str->buf + start, end - start);
 }
 
 extern "C" int64_t ring_str_contains(void* s, void* sub) {
-    return ((std::string*)s)->find(*(std::string*)sub) != std::string::npos ? 1 : 0;
+    RingStr* str = as_str(s);
+    RingStr* needle = as_str(sub);
+    if (needle->len == 0) return 1;
+    return ring_memmem(str->buf, (size_t)str->len, needle->buf, (size_t)needle->len) != nullptr ? 1 : 0;
 }
 
 extern "C" int64_t ring_str_starts_with(void* s, void* prefix) {
-    std::string* str = (std::string*)s;
-    std::string* pre = (std::string*)prefix;
-    if (pre->size() > str->size()) return 0;
-    return str->compare(0, pre->size(), *pre) == 0 ? 1 : 0;
+    RingStr* str = as_str(s);
+    RingStr* pre = as_str(prefix);
+    if (pre->len > str->len) return 0;
+    return (pre->len == 0 || memcmp(str->buf, pre->buf, (size_t)pre->len) == 0) ? 1 : 0;
 }
 
 extern "C" int64_t ring_str_ends_with(void* s, void* suffix) {
-    std::string* str = (std::string*)s;
-    std::string* suf = (std::string*)suffix;
-    if (suf->size() > str->size()) return 0;
-    return str->compare(str->size() - suf->size(), suf->size(), *suf) == 0 ? 1 : 0;
+    RingStr* str = as_str(s);
+    RingStr* suf = as_str(suffix);
+    if (suf->len > str->len) return 0;
+    return (suf->len == 0 || memcmp(str->buf + str->len - suf->len, suf->buf, (size_t)suf->len) == 0) ? 1 : 0;
 }
 
 extern "C" void* ring_str_split(void* s, void* delim) {
-    std::string* str = (std::string*)s;
-    std::string* del = (std::string*)delim;
+    RingStr* str = as_str(s);
+    RingStr* del = as_str(delim);
     void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
     auto* result = new (ldata) std::vector<void*>();
-    if (del->empty()) {
+    if (del->len == 0) {
         // Split into individual characters
-        for (size_t i = 0; i < str->size(); i++) {
-            void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-            new (sd) std::string(1, (*str)[i]);
-            result->push_back(sd);
+        for (int64_t i = 0; i < str->len; i++) {
+            result->push_back(make_ring_str(str->buf + i, 1));
         }
         return ldata;
     }
-    size_t pos = 0, found;
-    while ((found = str->find(*del, pos)) != std::string::npos) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(str->substr(pos, found - pos));
-        result->push_back(sd);
-        pos = found + del->size();
+    size_t pos = 0;
+    const char* found;
+    while ((found = ring_memmem(str->buf + pos, (size_t)(str->len - (int64_t)pos),
+                                 del->buf, (size_t)del->len)) != nullptr) {
+        size_t found_pos = (size_t)(found - str->buf);
+        result->push_back(make_ring_str(str->buf + pos, (int64_t)(found_pos - pos)));
+        pos = found_pos + (size_t)del->len;
     }
-    void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (sd) std::string(str->substr(pos));
-    result->push_back(sd);
+    result->push_back(make_ring_str(str->buf + pos, str->len - (int64_t)pos));
     return ldata;
 }
 
 extern "C" void* ring_str_join(void* sep, void* list) {
-    std::string* separator = (std::string*)sep;
+    RingStr* separator = as_str(sep);
     auto* vec = (std::vector<void*>*)list;
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    auto* result = new (data) std::string();
+    // Pre-calculate total length
+    int64_t total = 0;
     for (size_t i = 0; i < vec->size(); i++) {
-        if (i > 0) *result += *separator;
-        *result += *(std::string*)((*vec)[i]);
+        if (i > 0) total += separator->len;
+        total += as_str((*vec)[i])->len;
     }
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = total;
+    rs->cap = total + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    int64_t off = 0;
+    for (size_t i = 0; i < vec->size(); i++) {
+        if (i > 0 && separator->len > 0) {
+            memcpy(rs->buf + off, separator->buf, (size_t)separator->len);
+            off += separator->len;
+        }
+        RingStr* elem = as_str((*vec)[i]);
+        if (elem->len > 0) {
+            memcpy(rs->buf + off, elem->buf, (size_t)elem->len);
+            off += elem->len;
+        }
+    }
+    rs->buf[total] = '\0';
     return data;
 }
 
 extern "C" void* ring_str_replace(void* s, void* from, void* to) {
-    std::string result = *(std::string*)s;
-    std::string* f = (std::string*)from;
-    std::string* t = (std::string*)to;
-    if (f->empty()) {
-        void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string(result);
-        return data;
+    RingStr* str = as_str(s);
+    RingStr* f = as_str(from);
+    RingStr* t = as_str(to);
+    if (f->len == 0) {
+        return make_ring_str(str->buf, str->len);
     }
+    // Use std::string locally for replace logic
+    std::string result(str->buf, (size_t)str->len);
+    std::string fs(f->buf, (size_t)f->len);
+    std::string ts(t->buf, (size_t)t->len);
     size_t pos = 0;
-    while ((pos = result.find(*f, pos)) != std::string::npos) {
-        result.replace(pos, f->size(), *t);
-        pos += t->size();
+    while ((pos = result.find(fs, pos)) != std::string::npos) {
+        result.replace(pos, fs.size(), ts);
+        pos += ts.size();
     }
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(result);
-    return data;
+    return make_ring_str(result.c_str(), (int64_t)result.size());
 }
 
 extern "C" void* ring_int_to_str(int64_t val) {
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(std::to_string(val));
-    return data;
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+    return make_ring_str(buf, (int64_t)len);
 }
 
 // JS-parity double formatting: ECMAScript Number→String (String(x) / console.log)
@@ -863,15 +936,13 @@ static std::string js_double_to_string(double val) {
 }
 
 extern "C" void* ring_float_to_str(double val) {
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(js_double_to_string(val));
-    return data;
+    std::string tmp = js_double_to_string(val);
+    return make_ring_str(tmp.c_str(), (int64_t)tmp.size());
 }
 
 extern "C" void* ring_bool_to_str(int64_t val) {
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(val ? "true" : "false");
-    return data;
+    if (val) return make_ring_str("true", 4);
+    return make_ring_str("false", 5);
 }
 
 // ============================================================================
@@ -881,14 +952,14 @@ extern "C" void* ring_bool_to_str(int64_t val) {
 // to LLVM-C functions bypass the N-API addon and go through C-ABI directly.
 // These helpers convert Ring boxed values to C-ABI types at call sites.
 
-// Extract C string pointer from a Ring Str (std::string*)
+// Extract C string pointer from a Ring Str (RingStr*) — zero-copy, already null-terminated
 extern "C" const char* ring_str_to_cstr(void* str) {
-    return ((std::string*)str)->c_str();
+    return as_str(str)->buf;
 }
 
 // Extract the length of a Ring Str as unsigned (for LLVM-C APIs that need it)
 extern "C" unsigned ring_str_len_u32(void* str) {
-    return (unsigned)((std::string*)str)->size();
+    return (unsigned)as_str(str)->len;
 }
 
 // Extract data pointer from a Ring List (std::vector<void*>*)
@@ -1386,10 +1457,11 @@ extern "C" void* ring_map_new() {
 
 extern "C" void* ring_map_get(void* map, void* key) {
     RingMap* m = (RingMap*)map;
-    std::string* k = (std::string*)key;
-    auto it = m->find(*k);
+    RingStr* k = as_str(key);
+    std::string ks(k->buf, (size_t)k->len);
+    auto it = m->find(ks);
     if (it == m->end()) {
-        fprintf(stderr, "ring panic: map key not found: %s\n", k->c_str());
+        fprintf(stderr, "ring panic: map key not found: %s\n", k->buf);
         exit(1);
     }
     return it->second;  // B-098: borrow (no dup); clone on escape
@@ -1397,8 +1469,9 @@ extern "C" void* ring_map_get(void* map, void* key) {
 
 extern "C" void* ring_map_get_opt(void* map, void* key) {
     RingMap* m = (RingMap*)map;
-    std::string* k = (std::string*)key;
-    auto it = m->find(*k);
+    RingStr* k = as_str(key);
+    std::string ks(k->buf, (size_t)k->len);
+    auto it = m->find(ks);
     if (it == m->end()) return ring_enum_none();
     ring_dup(it->second);  // B-098: fresh Option co-owns the value (see ring_list_get_opt)
     return ring_enum_some(it->second);
@@ -1407,20 +1480,21 @@ extern "C" void* ring_map_get_opt(void* map, void* key) {
 extern "C" void* ring_map_set(void* map, void* key, void* val) {
     CHK("map_set");
     RingMap* m = (RingMap*)map;
-    const std::string& k = *(std::string*)key;
+    RingStr* k = as_str(key);
+    std::string ks(k->buf, (size_t)k->len);
     // B-104 D1 rule ④ — duplicate-key insert must DROP the old value.  Insert
     // side: the value arg is a sink position (perceus sink_arg_indices ".insert"),
     // so the map owns +1 per value — the account drop_map settles at end-of-life.
-    // The KEY is value-inlined: the node copies the std::string CONTENT (no RC
+    // The KEY is value-inlined: the node copies the string CONTENT (no RC
     // pointer is stored; the caller's key box stays a pure borrow), so there is
     // no key account to settle on hit (the existing node key is reused, no new
     // copy) or on miss (a fresh content copy owned by the node) — symmetric with
     // the insert side never dup'ing the key.  Store the new value first, THEN
     // drop the old: rc>1 sharers (`let saved = m[k]` escape-Clone / a get()
     // Option's dup) only get decremented; an unshared old value is freed.
-    auto it = m->find(k);
+    auto it = m->find(ks);
     if (it == m->end()) {
-        m->emplace(k, val);
+        m->emplace(ks, val);
     } else {
         void* old = it->second;
         it->second = val;
@@ -1431,7 +1505,9 @@ extern "C" void* ring_map_set(void* map, void* key, void* val) {
 
 extern "C" int64_t ring_map_has(void* map, void* key) {
     RingMap* m = (RingMap*)map;
-    return m->count(*(std::string*)key) > 0 ? 1 : 0;
+    RingStr* k = as_str(key);
+    std::string ks(k->buf, (size_t)k->len);
+    return m->count(ks) > 0 ? 1 : 0;
 }
 
 extern "C" void* ring_map_delete(void* map, void* key) {
@@ -1441,7 +1517,9 @@ extern "C" void* ring_map_delete(void* map, void* key) {
     // end-of-life).  The key owes nothing: the node's std::string is value-
     // inlined and destroyed by erase itself; the caller's key box is a borrow.
     // rc>1 sharers of the value only get decremented.
-    auto it = m->find(*(std::string*)key);
+    RingStr* k = as_str(key);
+    std::string ks(k->buf, (size_t)k->len);
+    auto it = m->find(ks);
     if (it != m->end()) {
         void* old = it->second;
         m->erase(it);
@@ -1456,9 +1534,7 @@ extern "C" void* ring_map_keys(void* map) {
     auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(kv.first);
-        result->push_back(sd);
+        result->push_back(make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
     }
     return ldata;
 }
@@ -1487,9 +1563,7 @@ extern "C" void* ring_map_entries(void* map) {
     for (auto& kv : *m) {
         void* pdata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
         auto* pair = new (pdata) std::vector<void*>();
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(kv.first);
-        pair->push_back(sd);
+        pair->push_back(make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
         ring_dup(kv.second);  // B-098: the fresh entry pair (a List) co-owns the
                               // value; owned-container constructor, not a borrow.
         pair->push_back(kv.second);
@@ -1511,8 +1585,7 @@ extern "C" void* ring_map_for_each(void* map, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     for (auto& kv : *m) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(kv.first);
+        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
         fn(cls->env_ptr, sd, kv.second);
         ring_drop(sd);  // #152 ③: drop synthesized key after closure returns
     }
@@ -1532,8 +1605,7 @@ extern "C" void* ring_map_fold(void* map, void* init, void* closure) {
     void* acc = init;
     size_t i = 0;
     for (auto& kv : *m) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(kv.first);
+        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
         void* old_acc = acc;
         acc = fn(cls->env_ptr, old_acc, sd, kv.second);
         ring_drop(sd);  // #152 ③: drop synthesized key after closure returns
@@ -1552,8 +1624,7 @@ extern "C" void* ring_map_filter(void* map, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     for (auto& kv : *m) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(kv.first);
+        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
         void* r = fn(cls->env_ptr, sd, kv.second);
         int match = ring_unbox_int(r) != 0;
         ring_drop(r);   // #152 ①: drop predicate Bool box
@@ -1573,8 +1644,7 @@ extern "C" int64_t ring_map_any(void* map, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     for (auto& kv : *m) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(kv.first);
+        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
         void* r = fn(cls->env_ptr, sd, kv.second);
         int match = ring_unbox_int(r) != 0;
         ring_drop(r);   // #152 ①: drop predicate Bool box
@@ -1867,16 +1937,19 @@ extern "C" void* ring_set_new() {
 }
 
 extern "C" void* ring_set_add(void* set, void* elem) {
-    ((RingSet*)set)->insert(*(std::string*)elem);
+    RingStr* e = as_str(elem);
+    ((RingSet*)set)->insert(std::string(e->buf, (size_t)e->len));
     return set;
 }
 
 extern "C" int64_t ring_set_has(void* set, void* elem) {
-    return ((RingSet*)set)->count(*(std::string*)elem) > 0 ? 1 : 0;
+    RingStr* e = as_str(elem);
+    return ((RingSet*)set)->count(std::string(e->buf, (size_t)e->len)) > 0 ? 1 : 0;
 }
 
 extern "C" void* ring_set_delete(void* set, void* elem) {
-    ((RingSet*)set)->erase(*(std::string*)elem);
+    RingStr* e = as_str(elem);
+    ((RingSet*)set)->erase(std::string(e->buf, (size_t)e->len));
     return set;
 }
 
@@ -1886,9 +1959,7 @@ extern "C" void* ring_set_to_list(void* set) {
     auto* result = new (ldata) std::vector<void*>();
     result->reserve(s->size());
     for (auto& elem : *s) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(elem);
-        result->push_back(sd);
+        result->push_back(make_ring_str(elem.c_str(), (int64_t)elem.size()));
     }
     return ldata;
 }
@@ -1906,7 +1977,8 @@ extern "C" void* ring_set_from_list(void* list) {
     void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
     auto* result = new (data) RingSet();
     for (size_t i = 0; i < vec->size(); i++) {
-        result->insert(*(std::string*)((*vec)[i]));
+        RingStr* e = as_str((*vec)[i]);
+        result->insert(std::string(e->buf, (size_t)e->len));
     }
     return data;
 }
@@ -1916,8 +1988,7 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (auto& elem : *s) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(elem);
+        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
         fn(cls->env_ptr, sd);
         ring_drop(sd);  // #152 ③: drop synthesized STR elem after closure returns
     }
@@ -1937,8 +2008,7 @@ extern "C" void* ring_set_fold(void* set, void* init, void* closure) {
     void* acc = init;
     size_t i = 0;
     for (auto& elem : *s) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(elem);
+        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
         void* old_acc = acc;
         acc = fn(cls->env_ptr, old_acc, sd);
         ring_drop(sd);  // #152 ③: drop synthesized STR elem
@@ -1957,8 +2027,7 @@ extern "C" void* ring_set_filter(void* set, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (auto& elem : *s) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(elem);
+        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
         void* r = fn(cls->env_ptr, sd);
         int match = ring_unbox_int(r) != 0;
         ring_drop(r);   // #152 ①: drop predicate Bool box
@@ -1977,8 +2046,7 @@ extern "C" int64_t ring_set_any(void* set, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (auto& elem : *s) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(elem);
+        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
         void* r = fn(cls->env_ptr, sd);
         int match = ring_unbox_int(r) != 0;
         ring_drop(r);   // #152 ①: drop predicate Bool box
@@ -1995,8 +2063,7 @@ extern "C" int64_t ring_set_all(void* set, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (auto& elem : *s) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(elem);
+        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
         void* r = fn(cls->env_ptr, sd);
         int match = ring_unbox_int(r) == 0;
         ring_drop(r);   // #152 ①: drop predicate Bool box
@@ -2210,7 +2277,9 @@ extern "C" void* ring_set_int_clear(void* set) {
 
 extern "C" void* ring_print(void* s) {
     CHK("PRINT");
-    printf("%s\n", ((std::string*)s)->c_str());
+    RingStr* str = as_str(s);
+    fwrite(str->buf, 1, (size_t)str->len, stdout);
+    fputc('\n', stdout);
     fflush(stdout);
     fflush(stderr);
     return nullptr;
@@ -2218,7 +2287,9 @@ extern "C" void* ring_print(void* s) {
 
 extern "C" void* ring_eprintln(void* s) {
     CHK("EPRINTLN");
-    fprintf(stderr, "%s\n", ((std::string*)s)->c_str());
+    RingStr* str = as_str(s);
+    fwrite(str->buf, 1, (size_t)str->len, stderr);
+    fputc('\n', stderr);
     fflush(stderr);
     return nullptr;
 }
@@ -2226,7 +2297,7 @@ extern "C" void* ring_eprintln(void* s) {
 extern "C" void* ring_panic(void* s) {
     CHK("PANIC");
     if (s) {
-        fprintf(stderr, "ring panic: %s\n", ((std::string*)s)->c_str());
+        fprintf(stderr, "ring panic: %s\n", as_str(s)->buf);
     } else {
         fprintf(stderr, "ring panic: (null message)\n");
     }
@@ -2241,7 +2312,7 @@ extern "C" void* ring_panic(void* s) {
 extern "C" void* ring_match_fail(void* enum_name, int64_t tag, int64_t site, void* scrut) {
     (void)scrut;
     fprintf(stderr, "ring panic: non-exhaustive match on enum '%s' (runtime tag=%lld, site #%lld)\n",
-            enum_name ? ((std::string*)enum_name)->c_str() : "?",
+            enum_name ? as_str(enum_name)->buf : "?",
             (long long)tag, (long long)site);
     fflush(stderr);
     exit(1);
@@ -2249,10 +2320,10 @@ extern "C" void* ring_match_fail(void* enum_name, int64_t tag, int64_t site, voi
 }
 
 extern "C" void* ring_read_file(void* path) {
-    std::string* p = (std::string*)path;
-    FILE* f = fopen(p->c_str(), "rb");
+    RingStr* p = as_str(path);
+    FILE* f = fopen(p->buf, "rb");
     if (!f) {
-        fprintf(stderr, "ring panic: cannot open file: %s\n", p->c_str());
+        fprintf(stderr, "ring panic: cannot open file: %s\n", p->buf);
         exit(1);
     }
     fseek(f, 0, SEEK_END);
@@ -2263,27 +2334,31 @@ extern "C" void* ring_read_file(void* path) {
     long size = ftell(f);
 #endif
     if (size < 0) {
-        fprintf(stderr, "ring panic: cannot determine file size: %s\n", p->c_str());
+        fprintf(stderr, "ring panic: cannot determine file size: %s\n", p->buf);
         fclose(f);
         exit(1);
     }
     fseek(f, 0, SEEK_SET);
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    auto* result = new (data) std::string((size_t)size, '\0');
-    fread(&(*result)[0], 1, (size_t)size, f);
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = (int64_t)size;
+    rs->cap = (int64_t)size + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    fread(rs->buf, 1, (size_t)size, f);
+    rs->buf[size] = '\0';
     fclose(f);
     return data;
 }
 
 extern "C" void* ring_write_file(void* path, void* content) {
-    std::string* p = (std::string*)path;
-    std::string* c = (std::string*)content;
-    FILE* f = fopen(p->c_str(), "wb");
+    RingStr* p = as_str(path);
+    RingStr* c = as_str(content);
+    FILE* f = fopen(p->buf, "wb");
     if (!f) {
-        fprintf(stderr, "ring panic: cannot write file: %s\n", p->c_str());
+        fprintf(stderr, "ring panic: cannot write file: %s\n", p->buf);
         exit(1);
     }
-    fwrite(c->data(), 1, c->size(), f);
+    fwrite(c->buf, 1, (size_t)c->len, f);
     fclose(f);
     return nullptr;
 }
@@ -2300,9 +2375,7 @@ extern "C" void* ring_args() {
     // Skip argv[0] (program name) to match JS backend behavior
     // where process.argv.slice(2) skips [node, script]
     for (int i = 1; i < g_argc; i++) {
-        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (sd) std::string(g_argv[i]);
-        result->push_back(sd);
+        result->push_back(make_ring_str(g_argv[i], (int64_t)strlen(g_argv[i])));
     }
     return ldata;
 }
@@ -2317,9 +2390,7 @@ extern "C" void* ring_cwd() {
         fprintf(stderr, "ring panic: getcwd failed\n");
         exit(1);
     }
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(buf);
-    return data;
+    return make_ring_str(buf, (int64_t)strlen(buf));
 }
 
 // ============================================================================
@@ -2340,13 +2411,20 @@ extern "C" void* ring_sb_new() {
 }
 
 extern "C" void* ring_sb_add(void* sb, void* s) {
-    *(std::string*)sb += *(std::string*)s;
+    RingStr* rs = as_str(s);
+    ((std::string*)sb)->append(rs->buf, (size_t)rs->len);
     return sb;
 }
 
 extern "C" void* ring_sb_to_str(void* sb) {
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(*(std::string*)sb);
+    std::string* sbs = (std::string*)sb;
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = (int64_t)sbs->size();
+    rs->cap = rs->len + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    if (rs->len > 0) memcpy(rs->buf, sbs->c_str(), (size_t)rs->len);
+    rs->buf[rs->len] = '\0';
 #ifdef RING_BOX_PROFILE
     // B-104 D5: StringBuilder.to_str results — RA = the IR call site (D5 run 1:
     // 11.7% of live STR).
@@ -2503,93 +2581,86 @@ extern "C" void* ring_try(void* body_cl, void* catch_cl) {
 // ============================================================================
 
 extern "C" void* ring_path_join(void* a, void* b) {
-    std::string* sa = (std::string*)a;
-    std::string* sb = (std::string*)b;
-    void* data;
-    if (sa->empty()) {
-        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string(*sb);
-        return data;
-    }
-    if (sb->empty()) {
-        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string(*sa);
-        return data;
-    }
-    char last = sa->back();
+    RingStr* sa = as_str(a);
+    RingStr* sb = as_str(b);
+    if (sa->len == 0) return make_ring_str(sb->buf, sb->len);
+    if (sb->len == 0) return make_ring_str(sa->buf, sa->len);
+    char last = sa->buf[sa->len - 1];
     if (last == '/' || last == '\\') {
-        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string(*sa + *sb);
+        // a already ends with separator
+        int64_t new_len = sa->len + sb->len;
+        void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+        RingStr* rs = as_str(data);
+        rs->len = new_len; rs->cap = new_len + 1;
+        rs->buf = (char*)malloc((size_t)rs->cap);
+        memcpy(rs->buf, sa->buf, (size_t)sa->len);
+        memcpy(rs->buf + sa->len, sb->buf, (size_t)sb->len);
+        rs->buf[new_len] = '\0';
         return data;
     }
-    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(*sa + PATH_SEP + *sb);
+    int64_t new_len = sa->len + 1 + sb->len;
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = new_len; rs->cap = new_len + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    memcpy(rs->buf, sa->buf, (size_t)sa->len);
+    rs->buf[sa->len] = PATH_SEP;
+    memcpy(rs->buf + sa->len + 1, sb->buf, (size_t)sb->len);
+    rs->buf[new_len] = '\0';
     return data;
 }
 
 extern "C" void* ring_path_resolve(void* p) {
-    std::string* sp = (std::string*)p;
-    void* data;
+    RingStr* sp = as_str(p);
 #ifdef _WIN32
     char buf[4096];
-    DWORD len = GetFullPathNameA(sp->c_str(), sizeof(buf), buf, nullptr);
+    DWORD len = GetFullPathNameA(sp->buf, sizeof(buf), buf, nullptr);
     if (len == 0 || len >= sizeof(buf)) {
-        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string(*sp);
-        return data;
+        return make_ring_str(sp->buf, sp->len);
     }
-    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(buf);
-    return data;
+    return make_ring_str(buf, (int64_t)strlen(buf));
 #else
-    char* resolved = realpath(sp->c_str(), nullptr);
+    char* resolved = realpath(sp->buf, nullptr);
     if (!resolved) {
-        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string(*sp);
-        return data;
+        return make_ring_str(sp->buf, sp->len);
     }
-    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(resolved);
+    void* data = make_ring_str(resolved, (int64_t)strlen(resolved));
     free(resolved);
     return data;
 #endif
 }
 
 extern "C" void* ring_path_dirname(void* p) {
-    std::string* sp = (std::string*)p;
-    size_t pos = sp->find_last_of("/\\");
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if (pos == std::string::npos) {
-        new (data) std::string(".");
-    } else {
-        new (data) std::string(sp->substr(0, pos));
+    RingStr* sp = as_str(p);
+    int64_t pos = -1;
+    for (int64_t i = sp->len - 1; i >= 0; i--) {
+        if (sp->buf[i] == '/' || sp->buf[i] == '\\') { pos = i; break; }
     }
-    return data;
+    if (pos < 0) return make_ring_str(".", 1);
+    return make_ring_str(sp->buf, pos);
 }
 
 extern "C" void* ring_path_basename(void* p) {
-    std::string* sp = (std::string*)p;
-    size_t pos = sp->find_last_of("/\\");
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if (pos == std::string::npos) {
-        new (data) std::string(*sp);
-    } else {
-        new (data) std::string(sp->substr(pos + 1));
+    RingStr* sp = as_str(p);
+    int64_t pos = -1;
+    for (int64_t i = sp->len - 1; i >= 0; i--) {
+        if (sp->buf[i] == '/' || sp->buf[i] == '\\') { pos = i; break; }
     }
-    return data;
+    if (pos < 0) return make_ring_str(sp->buf, sp->len);
+    return make_ring_str(sp->buf + pos + 1, sp->len - pos - 1);
 }
 
 extern "C" void* ring_path_extname(void* p) {
-    std::string* sp = (std::string*)p;
-    size_t slash = sp->find_last_of("/\\");
-    size_t dot = sp->rfind('.');
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
-        new (data) std::string("");
-    } else {
-        new (data) std::string(sp->substr(dot));
+    RingStr* sp = as_str(p);
+    int64_t slash = -1, dot = -1;
+    for (int64_t i = sp->len - 1; i >= 0; i--) {
+        if ((sp->buf[i] == '/' || sp->buf[i] == '\\') && slash < 0) slash = i;
+        if (sp->buf[i] == '.' && dot < 0) dot = i;
     }
-    return data;
+    if (dot < 0 || (slash >= 0 && dot < slash)) {
+        return make_ring_str("", 0);
+    }
+    return make_ring_str(sp->buf + dot, sp->len - dot);
 }
 
 // ============================================================================
@@ -2597,18 +2668,18 @@ extern "C" void* ring_path_extname(void* p) {
 // ============================================================================
 
 extern "C" void* ring_file_exists(void* path) {
-    std::string* p = (std::string*)path;
+    RingStr* p = as_str(path);
 #ifdef _WIN32
-    int64_t exists = _access(p->c_str(), 0) == 0 ? 1 : 0;
+    int64_t exists = _access(p->buf, 0) == 0 ? 1 : 0;
 #else
-    int64_t exists = access(p->c_str(), F_OK) == 0 ? 1 : 0;
+    int64_t exists = access(p->buf, F_OK) == 0 ? 1 : 0;
 #endif
     return ring_box_bool(exists);
 }
 
 extern "C" void* ring_delete_file(void* path) {
-    std::string* p = (std::string*)path;
-    remove(p->c_str());
+    RingStr* p = as_str(path);
+    remove(p->buf);
     return nullptr;
 }
 
@@ -2634,9 +2705,9 @@ extern "C" void* ring_map_clone(void* map) {
     void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
     RingMap* nm = new (data) RingMap(*m);
     // B-104 (#135): same as ring_list_clone — a clone must co-own its values
-    // (keys are std::string, inline; values are RC void*). dup each value so the
-    // clone is an independent owner; without it both maps deep-drop the same
-    // values under Perceus RC -> over-free. Latent until temp-drop activates.
+    // (keys are std::string inline in the map; values are RC void*). dup each
+    // value so the clone is an independent owner; without it both maps deep-drop
+    // the same values under Perceus RC -> over-free. Latent until temp-drop activates.
     for (auto& kv : *nm) ring_dup(kv.second);
     return data;
 }
@@ -2656,7 +2727,8 @@ extern "C" void* ring_map_from(void* entries) {
     for (size_t i = 0; i < vec->size(); i++) {
         auto* pair = (std::vector<void*>*)((*vec)[i]);
         if (pair->size() >= 2) {
-            std::string* key = (std::string*)((*pair)[0]);
+            RingStr* key = as_str((*pair)[0]);
+            std::string ks(key->buf, (size_t)key->len);
             void* val = (*pair)[1];
             // B-103: dup — the fresh map co-owns the value still owned by the
             // entries pair-list (owned-container-constructor rule; see
@@ -2668,9 +2740,9 @@ extern "C" void* ring_map_from(void* entries) {
             // reference is untouched either way (rc only steps back to the
             // pre-dup count, never below — the overwritten value stays alive
             // for the entries list).
-            auto it = result->find(*key);
+            auto it = result->find(ks);
             if (it == result->end()) {
-                result->emplace(*key, val);
+                result->emplace(ks, val);
             } else {
                 void* old = it->second;
                 it->second = val;
@@ -2688,148 +2760,151 @@ extern "C" void* ring_map_from(void* entries) {
 // ============================================================================
 
 extern "C" void* ring_str_trim(void* s) {
-    std::string* str = (std::string*)s;
-    size_t start = str->find_first_not_of(" \t\n\r\f\v");
-    size_t end = str->find_last_not_of(" \t\n\r\f\v");
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if (start == std::string::npos) {
-        new (data) std::string("");
-    } else {
-        new (data) std::string(str->substr(start, end - start + 1));
-    }
-    return data;
+    RingStr* str = as_str(s);
+    int64_t start = 0;
+    while (start < str->len && isspace((unsigned char)str->buf[start])) start++;
+    int64_t end = str->len;
+    while (end > start && isspace((unsigned char)str->buf[end - 1])) end--;
+    return make_ring_str(str->buf + start, end - start);
 }
 
 extern "C" void* ring_str_trim_start(void* s) {
-    std::string* str = (std::string*)s;
-    size_t start = str->find_first_not_of(" \t\n\r\f\v");
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if (start == std::string::npos) {
-        new (data) std::string("");
-    } else {
-        new (data) std::string(str->substr(start));
-    }
-    return data;
+    RingStr* str = as_str(s);
+    int64_t start = 0;
+    while (start < str->len && isspace((unsigned char)str->buf[start])) start++;
+    return make_ring_str(str->buf + start, str->len - start);
 }
 
 extern "C" void* ring_str_trim_end(void* s) {
-    std::string* str = (std::string*)s;
-    size_t end = str->find_last_not_of(" \t\n\r\f\v");
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if (end == std::string::npos) {
-        new (data) std::string("");
-    } else {
-        new (data) std::string(str->substr(0, end + 1));
-    }
-    return data;
+    RingStr* str = as_str(s);
+    int64_t end = str->len;
+    while (end > 0 && isspace((unsigned char)str->buf[end - 1])) end--;
+    return make_ring_str(str->buf, end);
 }
 
 extern "C" void* ring_str_to_upper(void* s) {
-    std::string result = *(std::string*)s;
-    for (size_t i = 0; i < result.size(); i++) {
-        result[i] = (char)toupper((unsigned char)result[i]);
+    RingStr* str = as_str(s);
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = str->len;
+    rs->cap = str->len + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    for (int64_t i = 0; i < str->len; i++) {
+        rs->buf[i] = (char)toupper((unsigned char)str->buf[i]);
     }
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(result);
+    rs->buf[str->len] = '\0';
     return data;
 }
 
 extern "C" void* ring_str_to_lower(void* s) {
-    std::string result = *(std::string*)s;
-    for (size_t i = 0; i < result.size(); i++) {
-        result[i] = (char)tolower((unsigned char)result[i]);
+    RingStr* str = as_str(s);
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = str->len;
+    rs->cap = str->len + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    for (int64_t i = 0; i < str->len; i++) {
+        rs->buf[i] = (char)tolower((unsigned char)str->buf[i]);
     }
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(result);
+    rs->buf[str->len] = '\0';
     return data;
 }
 
 extern "C" void* ring_str_char_at(void* s, int64_t idx) {
-    std::string* str = (std::string*)s;
-    if (idx < 0 || idx >= (int64_t)str->size()) {
+    RingStr* str = as_str(s);
+    if (idx < 0 || idx >= str->len) {
         return ring_enum_none();
     }
-    void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (sd) std::string(1, (*str)[(size_t)idx]);
+    void* sd = make_ring_str(str->buf + idx, 1);
     return ring_enum_some(sd);
 }
 
 extern "C" void* ring_str_index_of(void* s, void* sub) {
-    std::string* str = (std::string*)s;
-    std::string* needle = (std::string*)sub;
-    size_t pos = str->find(*needle);
-    if (pos == std::string::npos) {
+    RingStr* str = as_str(s);
+    RingStr* needle = as_str(sub);
+    const char* found = ring_memmem(str->buf, (size_t)str->len, needle->buf, (size_t)needle->len);
+    if (!found) {
         return ring_enum_none();
     }
-    return ring_enum_some(ring_box_int((int64_t)pos));
+    return ring_enum_some(ring_box_int((int64_t)(found - str->buf)));
 }
 
 extern "C" void* ring_str_last_index_of(void* s, void* sub) {
-    std::string* str = (std::string*)s;
-    std::string* needle = (std::string*)sub;
-    size_t pos = str->rfind(*needle);
-    if (pos == std::string::npos) {
+    RingStr* str = as_str(s);
+    RingStr* needle = as_str(sub);
+    if (needle->len == 0) {
+        return ring_enum_some(ring_box_int(str->len));
+    }
+    if (needle->len > str->len) {
         return ring_enum_none();
     }
-    return ring_enum_some(ring_box_int((int64_t)pos));
+    for (int64_t i = str->len - needle->len; i >= 0; i--) {
+        if (memcmp(str->buf + i, needle->buf, (size_t)needle->len) == 0) {
+            return ring_enum_some(ring_box_int(i));
+        }
+    }
+    return ring_enum_none();
 }
 
 extern "C" int64_t ring_str_is_empty(void* s) {
-    return ((std::string*)s)->empty() ? 1 : 0;
+    return as_str(s)->len == 0 ? 1 : 0;
 }
 
 extern "C" void* ring_str_pad_start(void* s, int64_t length, void* fill) {
-    std::string* str = (std::string*)s;
-    std::string* filler = (std::string*)fill;
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if ((int64_t)str->size() >= length || filler->empty()) {
-        new (data) std::string(*str);
-        return data;
+    RingStr* str = as_str(s);
+    RingStr* filler = as_str(fill);
+    if (str->len >= length || filler->len == 0) {
+        return make_ring_str(str->buf, str->len);
     }
+    std::string pad(filler->buf, (size_t)filler->len);
     std::string result;
-    while ((int64_t)(result.size() + str->size()) < length) {
-        result += *filler;
+    while ((int64_t)(result.size() + (size_t)str->len) < length) {
+        result += pad;
     }
-    result = result.substr(0, (size_t)(length - (int64_t)str->size()));
-    result += *str;
-    new (data) std::string(result);
-    return data;
+    result = result.substr(0, (size_t)(length - str->len));
+    result.append(str->buf, (size_t)str->len);
+    return make_ring_str(result.c_str(), (int64_t)result.size());
 }
 
 extern "C" void* ring_str_pad_end(void* s, int64_t length, void* fill) {
-    std::string* str = (std::string*)s;
-    std::string* filler = (std::string*)fill;
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    if ((int64_t)str->size() >= length || filler->empty()) {
-        new (data) std::string(*str);
-        return data;
+    RingStr* str = as_str(s);
+    RingStr* filler = as_str(fill);
+    if (str->len >= length || filler->len == 0) {
+        return make_ring_str(str->buf, str->len);
     }
-    std::string result = *str;
+    std::string pad(filler->buf, (size_t)filler->len);
+    std::string result(str->buf, (size_t)str->len);
     while ((int64_t)result.size() < length) {
-        result += *filler;
+        result += pad;
     }
-    new (data) std::string(result.substr(0, (size_t)length));
-    return data;
+    result = result.substr(0, (size_t)length);
+    return make_ring_str(result.c_str(), (int64_t)result.size());
 }
 
 extern "C" void* ring_str_repeat(void* s, int64_t count) {
-    std::string* str = (std::string*)s;
-    std::string result;
+    RingStr* str = as_str(s);
+    int64_t total = str->len * count;
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = total;
+    rs->cap = total + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    int64_t off = 0;
     for (int64_t i = 0; i < count; i++) {
-        result += *str;
+        if (str->len > 0) memcpy(rs->buf + off, str->buf, (size_t)str->len);
+        off += str->len;
     }
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(result);
+    rs->buf[total] = '\0';
     return data;
 }
 
 extern "C" void* ring_str_char_code_at(void* s, int64_t idx) {
     CHK("str_char_code_at");
-    std::string* str = (std::string*)s;
-    if (idx < 0 || idx >= (int64_t)str->size()) {
+    RingStr* str = as_str(s);
+    if (idx < 0 || idx >= str->len) {
         return ring_enum_none();
     }
-    return ring_enum_some(ring_box_int((int64_t)(unsigned char)(*str)[(size_t)idx]));
+    return ring_enum_some(ring_box_int((int64_t)(unsigned char)str->buf[idx]));
 }
 
 // ============================================================================
@@ -2837,7 +2912,10 @@ extern "C" void* ring_str_char_code_at(void* s, int64_t idx) {
 // ============================================================================
 
 extern "C" void* ring_sb_line(void* sb, void* s) {
-    if (s) *(std::string*)sb += *(std::string*)s;
+    if (s) {
+        RingStr* rs = as_str(s);
+        ((std::string*)sb)->append(rs->buf, (size_t)rs->len);
+    }
     *(std::string*)sb += "\n";
     return sb;
 }
@@ -2855,14 +2933,12 @@ extern "C" void* ring_sb_add_int(void* sb, int64_t n) {
 extern "C" int64_t ring_unbox_int(void*);  // forward decl
 
 extern "C" void* ring_str_as_ptr(void* s) {
-    return (void*)((std::string*)s)->data();
+    return (void*)as_str(s)->buf;
 }
 
 extern "C" void* ring_str_from_ptr(void* ptr, void* len_tagged) {
     int64_t len = ring_unbox_int(len_tagged);
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string((const char*)ptr, (size_t)len);
-    return data;
+    return make_ring_str((const char*)ptr, len);
 }
 
 extern "C" void* ring_buf_alloc(void* cap_tagged) {
@@ -2903,11 +2979,12 @@ extern "C" void* ring_buf_set_byte(void* p, void* offset_tagged, void* val_tagge
 // ============================================================================
 
 extern "C" void* ring_parse_int(void* s) {
-    std::string* str = (std::string*)s;
+    RingStr* str = as_str(s);
     try {
+        std::string tmp(str->buf, (size_t)str->len);
         size_t pos;
-        int64_t val = std::stoll(*str, &pos);
-        if (pos == str->size()) {
+        int64_t val = std::stoll(tmp, &pos);
+        if (pos == tmp.size()) {
             return ring_enum_some(ring_box_int(val));
         }
     } catch (...) {}
@@ -2915,11 +2992,12 @@ extern "C" void* ring_parse_int(void* s) {
 }
 
 extern "C" void* ring_parse_float(void* s) {
-    std::string* str = (std::string*)s;
+    RingStr* str = as_str(s);
     try {
+        std::string tmp(str->buf, (size_t)str->len);
         size_t pos;
-        double val = std::stod(*str, &pos);
-        if (pos == str->size()) {
+        double val = std::stod(tmp, &pos);
+        if (pos == tmp.size()) {
             return ring_enum_some(ring_box_float(val));
         }
     } catch (...) {}
@@ -3041,7 +3119,7 @@ extern "C" void* ring_set_clear(void* set) {
 
 extern "C" void* ring_assert(int64_t cond, void* msg) {
     if (!cond) {
-        fprintf(stderr, "ring assertion failed: %s\n", ((std::string*)msg)->c_str());
+        fprintf(stderr, "ring assertion failed: %s\n", as_str(msg)->buf);
         fflush(stderr);
         exit(1);
     }
@@ -3053,15 +3131,13 @@ extern "C" void* ring_assert(int64_t cond, void* msg) {
 // rendered as a quoted, escaped JSON string. (General <T> serialization would
 // require runtime type tags, which the uniform-boxing runtime does not carry.)
 extern "C" void* ring_json_stringify(void* val) {
-    void* data;
     if (!val) {
-        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-        new (data) std::string("null");
-        return data;
+        return make_ring_str("null", 4);
     }
-    std::string* s = (std::string*)val;
+    RingStr* s = as_str(val);
     std::string out = "\"";
-    for (unsigned char c : *s) {
+    for (int64_t i = 0; i < s->len; i++) {
+        unsigned char c = (unsigned char)s->buf[i];
         switch (c) {
             case '"':  out += "\\\""; break;
             case '\\': out += "\\\\"; break;
@@ -3081,9 +3157,7 @@ extern "C" void* ring_json_stringify(void* val) {
         }
     }
     out += "\"";
-    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(out);
-    return data;
+    return make_ring_str(out.c_str(), (int64_t)out.size());
 }
 
 // ============================================================================
@@ -3128,9 +3202,12 @@ extern "C" void* ring_cl_cmp_float(void* env, void* a, void* b) {
     return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
 }
 extern "C" void* ring_cl_cmp_str(void* env, void* a, void* b) {
-    const std::string& x = *(std::string*)a;
-    const std::string& y = *(std::string*)b;
-    return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
+    RingStr* x = as_str(a);
+    RingStr* y = as_str(b);
+    int64_t min_len = x->len < y->len ? x->len : y->len;
+    int cmp = (min_len > 0) ? memcmp(x->buf, y->buf, (size_t)min_len) : 0;
+    if (cmp != 0) return ring_box_int(cmp < 0 ? -1 : 1);
+    return ring_box_int(x->len < y->len ? -1 : (x->len > y->len ? 1 : 0));
 }
 extern "C" void* ring_cl_cmp_bool(void* env, void* a, void* b) {
     int64_t x = ring_unbox_bool(a), y = ring_unbox_bool(b);
@@ -3179,9 +3256,10 @@ static void* ring_Float_debug(void* /*env*/, void* val) {
 }
 static void* ring_Str_debug(void* /*env*/, void* val) {
     // Debug for Str: wrap in quotes and escape special characters
-    std::string* s = (std::string*)val;
+    RingStr* s = as_str(val);
     std::string result = "\"";
-    for (char c : *s) {
+    for (int64_t i = 0; i < s->len; i++) {
+        char c = s->buf[i];
         switch (c) {
             case '"':  result += "\\\""; break;
             case '\\': result += "\\\\"; break;
@@ -3192,9 +3270,7 @@ static void* ring_Str_debug(void* /*env*/, void* val) {
         }
     }
     result += "\"";
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(std::move(result));
-    return data;
+    return make_ring_str(result.c_str(), (int64_t)result.size());
 }
 static void* ring_make_debug_dict(void* debugfn) {
     // Debug dict: single `debug` closure at slot 0.
@@ -3328,7 +3404,8 @@ static void drop_evidence(void* data) {
 
 extern "C" void* ring_get_builtin_dict(void* name_ptr) {
     if (!name_ptr) return nullptr;
-    std::string& n = *(std::string*)name_ptr;
+    RingStr* rs = as_str(name_ptr);
+    std::string n(rs->buf, (size_t)rs->len);
 
     // #194: Use suffix matching for trait names and segment matching for type
     // names to avoid false positives from user types (e.g. "OrdinaryThing",
@@ -3388,13 +3465,31 @@ extern "C" void* ring_get_builtin_dict(void* name_ptr) {
 
 extern "C" void* ring_list_join(void* list, void* sep) {
     auto* vec = (std::vector<void*>*)list;
-    std::string* separator = (std::string*)sep;
-    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    auto* result = new (data) std::string();
+    RingStr* separator = as_str(sep);
+    // Pre-calculate total length
+    int64_t total = 0;
     for (size_t i = 0; i < vec->size(); i++) {
-        if (i > 0) *result += *separator;
-        *result += *(std::string*)((*vec)[i]);
+        if (i > 0) total += separator->len;
+        total += as_str((*vec)[i])->len;
     }
+    void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
+    RingStr* rs = as_str(data);
+    rs->len = total;
+    rs->cap = total + 1;
+    rs->buf = (char*)malloc((size_t)rs->cap);
+    int64_t off = 0;
+    for (size_t i = 0; i < vec->size(); i++) {
+        if (i > 0 && separator->len > 0) {
+            memcpy(rs->buf + off, separator->buf, (size_t)separator->len);
+            off += separator->len;
+        }
+        RingStr* elem = as_str((*vec)[i]);
+        if (elem->len > 0) {
+            memcpy(rs->buf + off, elem->buf, (size_t)elem->len);
+            off += elem->len;
+        }
+    }
+    rs->buf[total] = '\0';
     return data;
 }
 
