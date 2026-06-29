@@ -84,7 +84,7 @@ trait Drop {
 **涉及修改**：
 5. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
 6. **`Weak<T>`（子项）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
-7. **try/catch codegen 改用栈分配 catch frame**：当前 codegen（`codegen_llvm_expr.ring`）使用 `ring_catch_push`/`ring_catch_pop`（每次 try/catch 堆分配+释放 RingCatchFrame）；`ring_runtime.cpp` 已有 `ring_try`（栈分配 RingCatchFrame，零堆开销）但未被使用。unwind 重写时一并切换到栈分配方案（2026-06-27 审计观察 #1 并入）
+7. **try/catch codegen 改用栈分配 catch frame**：当前 codegen（`codegen_llvm_expr.ring`）使用 `ring_catch_push`/`ring_catch_pop`（每次 try/catch 堆分配+释放 RingCatchFrame）；`ring_runtime.cpp` 已有 `ring_try`（栈分配 RingCatchFrame，零堆开销）但未被使用。unwind 重写时一并切换到栈分配方案（2026-06-27 审计观察 #1 并入）。**2026-06-29 尝试记录**：alloca `[512 x i8]` + `ring_catch_init/restore` 方案代码实现完整（5 文件 +77 -34），但 v2 ring.exe 连 `check` 都 crash（0xC0000005），加 `LLVMSetAlignment(frame, 16)` 后更严重。revert 后 v2 正常——确认是改动 bug 非基座问题。crash 在 codegen 函数执行时而非生成代码运行时，需更深入 debug（可能是 alloca 动态大小 / extern fn 调用约定 / HandleCleanup 结构变更的交互问题）
 
 **Phase 2 验收标准**：
 - abort 路径（fail.raise 穿越含 Drop 局部的函数）→ 所有 Drop 正确执行（invoke/landingpad）
