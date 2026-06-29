@@ -833,7 +833,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - std/ impl 方法中 `return ()` 正常工作（不导致 impl 丢失）
 - 编译器自举一致
 
-### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [queued]
+### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [doing]
 
 > 2026-06-29 B-152 P0 worker 发现。
 
