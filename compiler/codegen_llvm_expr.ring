@@ -12,7 +12,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     is_extern_handle_type}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall, HandleCleanup,
-    fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_ring_fn, get_ring_toplevel_fn,
+    fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     llvm_resolve_fn, build_entry_alloca,
     get_or_assign_typeid, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV,
@@ -2531,7 +2531,7 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     if name == "ring_map_len" { return true }
     if name == "ring_set_has" { return true }
     if name == "ring_set_len" { return true }
-    // B-158: ring_sb_len removed (StringBuilder RIIR'd to Ring struct)
+    if name == "ring_sb_len" { return true }
     if name == "ring_map_int_has" { return true }
     if name == "ring_map_int_len" { return true }
     if name == "ring_set_int_has" { return true }
@@ -2595,7 +2595,7 @@ fn rt_method_int_arg_count(name: Str) -> Int {
     if name == "ring_str_pad_start" { return 1 }
     if name == "ring_str_pad_end" { return 1 }
     if name == "ring_str_repeat" { return 1 }
-    // B-158: ring_sb_add_int removed (StringBuilder RIIR'd to Ring struct)
+    if name == "ring_sb_add_int" { return 1 }
     0
 }
 
@@ -2795,9 +2795,10 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
             let fn_val = ensure_runtime_method(ctx, rt_name, call_args.len())
             let fn_ty = get_rt_fn_type(ctx, rt_name)
 
-            // Pad missing trailing args with null.  The checker allows fewer
-            // args than declared for extern methods (missing arity-underflow
-            // check), so codegen must compensate.
+            // Pad missing trailing args with null (e.g. sb.line() called with
+            // 0 user args but ring_sb_line is declared (ptr,ptr)->ptr).  The
+            // checker allows fewer args than declared for extern methods
+            // (missing arity-underflow check), so codegen must compensate.
             let expected_params = LLVMCountParams(fn_val)
             while call_args.len() < expected_params {
                 call_args.push(LLVMConstPointerNull(ctx.ptr_type))
@@ -3279,20 +3280,17 @@ fn gen_if_expr(mut ctx: LlvmCtx, condition: HExpr, then_branch: HExpr, else_bran
 // ============================================================
 
 fn gen_string_interp(mut ctx: LlvmCtx, parts: List<HStringInterpPart>) -> LLVMValueRef {
-    // B-158: use Ring-compiled StringBuilder functions (RIIR'd from C++ ring_sb_*).
-    // Looked up via get_ring_fn (ctx.functions / ctx.fn_types) instead of
-    // get_or_declare_runtime_fn to avoid LLVM name collision with the already-
-    // compiled Ring function that has the same symbol name.
-    let (sb_new_fn, sb_new_ty) = get_ring_toplevel_fn(ctx, "string_builder")
+    // Create a StringBuilder
+    let sb_new_fn = get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ctx.ptr_type)
+    let sb_new_ty = get_rt_fn_type(ctx, "ring_sb_new")
     let sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], fresh_name(ctx, "sb"))
 
-    let (sb_add_fn, sb_add_ty) = get_ring_fn(ctx, "ring_StringBuilder_add")
+    let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
 
     // B-104 D9 Part 1: codegen-level drop for interp temporaries.
     // StringBuilder.add copies bytes — str_val ownership stays with caller.
     // StringBuilder.to_str copies buffer to a new string — sb itself still alive.
-    // Perceus "all parameters borrow" means the Ring-compiled methods never drop
-    // their arguments — the caller (here, codegen) manages RC explicitly.
     let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
     let drop_ty = get_rt_fn_type(ctx, "ring_drop")
 
@@ -3322,11 +3320,10 @@ fn gen_string_interp(mut ctx: LlvmCtx, parts: List<HStringInterpPart>) -> LLVMVa
     }
 
     // Convert StringBuilder to Str
-    let (sb_to_str_fn, sb_to_str_ty) = get_ring_fn(ctx, "ring_StringBuilder_to_str")
+    let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+    let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
     let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "interp"))
     // D9: drop the StringBuilder itself after extracting the result string.
-    // ring_drop dispatches to the registered ring_drop_StringBuilder (user Drop
-    // impl calls ring_buf_dealloc, then fields are recursively dropped).
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
     result
 }

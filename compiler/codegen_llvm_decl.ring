@@ -7,7 +7,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     default_method_self_name,
     hexpr_type, hexpr_effects, type_contains_extern_handle}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
-    fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_ring_fn, get_ring_toplevel_fn,
+    fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid, RING_TYPEID_DICT_STATIC, RING_TYPEID_CLOSURE,
     LLVM_INT_EQ, LLVM_INT_NE, LLVM_INT_SGT, LLVM_INT_SGE, LLVM_INT_SLT, LLVM_INT_SLE,
@@ -2292,7 +2292,7 @@ fn emit_clone_fn(mut ctx: LlvmCtx, type_name: Str) {
 //   enum Color::Red              →  "Red"
 //   enum Shape::Circle(7)        →  "Circle(7)"
 //
-// Uses Ring-compiled StringBuilder (B-158: RIIR'd from C++ ring_sb_*).
+// Uses ring_sb_new / ring_sb_add / ring_sb_to_str for string building.
 
 fn emit_derived_debug_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
     let type_name = di.type_name
@@ -2334,11 +2334,12 @@ fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFi
     }
 
     // Build string: "TypeName { field1: val1, field2: val2, ... }"
-    // B-158: use Ring-compiled StringBuilder functions (see gen_string_interp).
-    let (sb_new_fn, sb_new_ty) = get_ring_toplevel_fn(ctx, "string_builder")
+    let sb_new_fn = get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ctx.ptr_type)
+    let sb_new_ty = get_rt_fn_type(ctx, "ring_sb_new")
     let sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], fresh_name(ctx, "sb"))
 
-    let (sb_add_fn, sb_add_ty) = get_ring_fn(ctx, "ring_StringBuilder_add")
+    let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
 
     let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
     let drop_ty = get_rt_fn_type(ctx, "ring_drop")
@@ -2395,8 +2396,9 @@ fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFi
     discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, suffix], fresh_name(ctx, "sba")))
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [suffix], ""))
 
-    // Convert sb to string — B-158: Ring-compiled StringBuilder.to_str
-    let (sb_to_str_fn, sb_to_str_ty) = get_ring_fn(ctx, "ring_StringBuilder_to_str")
+    // Convert sb to string
+    let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+    let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
     let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
     LLVMBuildRet(ctx.builder, result)
@@ -2477,11 +2479,12 @@ fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVa
 }
 
 fn emit_enum_variant_debug_str(mut ctx: LlvmCtx, self_val: LLVMValueRef, type_name: Str, variant: DerivedVariant, enum_info: EnumTypeInfo) -> LLVMValueRef {
-    // B-158: use Ring-compiled StringBuilder functions.
-    let (sb_new_fn, sb_new_ty) = get_ring_toplevel_fn(ctx, "string_builder")
+    let sb_new_fn = get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ctx.ptr_type)
+    let sb_new_ty = get_rt_fn_type(ctx, "ring_sb_new")
     let sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], fresh_name(ctx, "sb"))
 
-    let (sb_add_fn, sb_add_ty) = get_ring_fn(ctx, "ring_StringBuilder_add")
+    let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
 
     let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
     let drop_ty = get_rt_fn_type(ctx, "ring_drop")
@@ -2500,7 +2503,8 @@ fn emit_enum_variant_debug_str(mut ctx: LlvmCtx, self_val: LLVMValueRef, type_na
 
     // Get variant layout from enum_info (for field access we use enum_info.llvm_type)
     if enum_info.variants.get(variant.name).is_none() {
-        let (sb_to_str_fn, sb_to_str_ty) = get_ring_fn(ctx, "ring_StringBuilder_to_str")
+        let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+        let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
         let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
         discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
         return result
@@ -2540,7 +2544,8 @@ fn emit_enum_variant_debug_str(mut ctx: LlvmCtx, self_val: LLVMValueRef, type_na
     discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, suffix], fresh_name(ctx, "sba")))
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [suffix], ""))
 
-    let (sb_to_str_fn, sb_to_str_ty) = get_ring_fn(ctx, "ring_StringBuilder_to_str")
+    let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+    let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
     let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
     result
@@ -2661,11 +2666,12 @@ fn emit_tuple_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef, element_actions: Li
         return gen_str_lit_simple(ctx, "()")
     }
 
-    // B-158: use Ring-compiled StringBuilder functions.
-    let (sb_new_fn, sb_new_ty) = get_ring_toplevel_fn(ctx, "string_builder")
+    let sb_new_fn = get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ctx.ptr_type)
+    let sb_new_ty = get_rt_fn_type(ctx, "ring_sb_new")
     let sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], fresh_name(ctx, "sb"))
 
-    let (sb_add_fn, sb_add_ty) = get_ring_fn(ctx, "ring_StringBuilder_add")
+    let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
     let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
     let drop_ty = get_rt_fn_type(ctx, "ring_drop")
     let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
@@ -2692,7 +2698,8 @@ fn emit_tuple_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef, element_actions: Li
     discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, close_paren], fresh_name(ctx, "sba")))
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [close_paren], ""))
 
-    let (sb_to_str_fn, sb_to_str_ty) = get_ring_fn(ctx, "ring_StringBuilder_to_str")
+    let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+    let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
     let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
     result
