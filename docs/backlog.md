@@ -817,6 +817,39 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 多 .o 链接产出与单 Module 行为一致
 - 全部 E2E + llvm_diff 通过；自举一致
 
+### B-157 prelude impl 方法 `return ()` 静默丢失整个 impl [bugfix] [P1] [S] [judgment] [queued]
+
+> 2026-06-29 B-152 P0 worker 发现。
+
+**现象**：std/*.ring 的 impl 方法体中使用 `return ()` 导致 `check_prelude_decl` 抛 fail。checker.ring 的 prelude 加载用 `catch { _ => none }` 吞掉错误，整个 impl block 的所有方法都找不到（E0305 找不到方法）。
+
+**影响**：阻塞 B-152 RIIR 后续阶段——std/ 中写纯 Ring impl 方法时无法使用 early return。
+
+**涉及修改**：
+1. `compiler/checker.ring`：prelude 加载的 catch 块不应吞掉 checker 错误，或至少输出诊断信息
+2. 或修复 `check_prelude_decl` 对 `return ()` 的处理——prelude impl 方法应该允许 return
+
+**验收标准**：
+- std/ impl 方法中 `return ()` 正常工作（不导致 impl 丢失）
+- 编译器自举一致
+
+### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [queued]
+
+> 2026-06-29 B-152 P0 worker 发现。
+
+**现象**：Ring 编译的函数（如 `ring_string_builder`）已存在于 LLVM module 中时，`get_or_declare_runtime_fn` 再声明同名但函数类型不同的外部函数，LLVM 自动加 `.XX` 后缀，导致链接时 undefined symbol。
+
+**影响**：gen_string_interp 无法迁移到 Ring 编译符号（当前保留旧 ring_sb_* C++ 函数作为 workaround）。
+
+**涉及修改**：
+1. `codegen_llvm_expr.ring`：`get_or_declare_runtime_fn` 应先检查 module 中是否已有同名函数，有则直接使用（可能需要 bitcast 适配类型）
+2. 或 gen_string_interp 改为直接查找 Ring 编译函数（`LLVMGetNamedFunction`）而非 declare
+
+**验收标准**：
+- gen_string_interp 可使用 Ring 编译的 StringBuilder 函数
+- 旧 ring_sb_* C++ 函数可删除
+- 全部 E2E 通过；自举一致
+
 ### B-155 自编译 IR 非确定性：字符串常量含堆地址 [bugfix] [P2] [L] [judgment] [queued] [deferred: B-152]
 
 > 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。
