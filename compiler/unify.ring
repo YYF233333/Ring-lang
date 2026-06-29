@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, effect_kind_name, effects_match_kind, UNIT}
-use union_find::{UnionFind, uf_bind, uf_lookup, uf_insert, new_union_find}
+use union_find::{UnionFind, uf_bind, uf_find, uf_lookup, uf_insert, new_union_find}
 use env::{TypeEnv, apply_subst, apply_subst_row, apply_subst_map}
 
 // ============================================================
@@ -37,8 +37,7 @@ fn unify_error_msg(detail: Str) -> Never {
 // ============================================================
 
 pub fn occurs_in(var_id: Int, t: Type, subst: UnionFind) -> Bool {
-    let resolved = apply_subst(subst, t)
-    match resolved {
+    match t {
         Type::IntType => false,
         Type::FloatType => false,
         Type::StrType => false,
@@ -47,7 +46,14 @@ pub fn occurs_in(var_id: Int, t: Type, subst: UnionFind) -> Bool {
         Type::NeverType => false,
         Type::AnyType => false,
         Type::ErrorType => false,
-        Type::TypeVar { id, .. } => id == var_id,
+        Type::TypeVar { id, .. } => {
+            let root = uf_find(subst, id)
+            if root == var_id { return true }
+            match uf_lookup(subst, root) {
+                some(resolved) => occurs_in(var_id, resolved, subst),
+                none => false
+            }
+        },
         Type::FnType { params, return_type, effects } =>
             params.any(fn(p) { occurs_in(var_id, p, subst) }) ||
             occurs_in(var_id, return_type, subst) ||
@@ -61,7 +67,14 @@ pub fn occurs_in(var_id: Int, t: Type, subst: UnionFind) -> Bool {
             args.any(fn(a) { occurs_in(var_id, a, subst) }),
         Type::RecordType { fields, tail, .. } => {
             let in_tail = match tail {
-                some(t_id) => occurs_in(var_id, Type::TypeVar { id: t_id, name: none }, subst),
+                some(t_id) => {
+                    let root = uf_find(subst, t_id)
+                    if root == var_id { return true }
+                    match uf_lookup(subst, root) {
+                        some(resolved) => occurs_in(var_id, resolved, subst),
+                        none => false
+                    }
+                },
                 none => false
             }
             in_tail || fields.any(fn(f) { occurs_in(var_id, f.ty, subst) })
@@ -77,7 +90,14 @@ pub fn occurs_in(var_id: Int, t: Type, subst: UnionFind) -> Bool {
 
 fn occurs_in_row(var_id: Int, row: EffectRow, subst: UnionFind) -> Bool {
     let in_tail = match row.tail {
-        some(t_id) => occurs_in(var_id, Type::TypeVar { id: t_id, name: none }, subst),
+        some(t_id) => {
+            let root = uf_find(subst, t_id)
+            if root == var_id { return true }
+            match uf_lookup(subst, root) {
+                some(resolved) => occurs_in(var_id, resolved, subst),
+                none => false
+            }
+        },
         none => false
     }
     in_tail || row.effects.any(fn(e) { occurs_in_effect(var_id, e, subst) })
