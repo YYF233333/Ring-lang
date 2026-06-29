@@ -817,7 +817,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 多 .o 链接产出与单 Module 行为一致
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-157 prelude impl 方法 `return ()` 静默丢失整个 impl [bugfix] [P1] [S] [judgment] [queued]
+### B-157 prelude impl 方法 `return ()` 静默丢失整个 impl [bugfix] [P1] [S] [judgment] [doing]
 
 > 2026-06-29 B-152 P0 worker 发现。
 
