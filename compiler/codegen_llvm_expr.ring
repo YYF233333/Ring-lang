@@ -102,16 +102,8 @@ extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
 // Type-aware map/set dispatch helpers
 // ============================================================
 
-fn is_int_keyed_map(ty: Type) -> Bool {
-    match ty {
-        Type::StructType { name, type_params } =>
-            name == "Map" && type_params.len() == 2 && match type_params[0] {
-                Type::IntType => true,
-                _ => false,
-            },
-        _ => false,
-    }
-}
+// B-152 P3: is_int_keyed_map removed — Map is now a unified Ring struct with
+// Hash + Eq trait bounds; no dual dispatch needed.
 
 fn is_int_set(ty: Type) -> Bool {
     match ty {
@@ -1279,15 +1271,12 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
                     none => {},
                 }
             }
-            let final_name = if call_name == "map_new" && is_int_keyed_map(result_ty) {
-                "map_int_new"
-            } else { if call_name == "set_new" && is_int_set(result_ty) {
+            // B-152 P3: Map int-keyed dispatch removed — Map is now a unified Ring struct.
+            let final_name = if call_name == "set_new" && is_int_set(result_ty) {
                 "set_int_new"
-            } else { if call_name == "map_from" && is_int_keyed_map(result_ty) {
-                "map_int_from"
             } else { if call_name == "set_from" && is_int_set(result_ty) {
                 "set_int_from"
-            } else { call_name } } } }
+            } else { call_name } }
             gen_direct_call(ctx, final_name, arg_vals, dict_vals)
         },
         HExpr::FieldAccess { receiver, field, .. } => {
@@ -2506,9 +2495,7 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     // gen_list_lit still calls ring_list_new directly via get_or_declare_runtime_fn.
     if name == "map_from" { return some("ring_map_from") }
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
-    if name == "map_int_new" { return some("ring_map_int_new") }
     if name == "set_int_new" { return some("ring_set_int_new") }
-    if name == "map_int_from" { return some("ring_map_int_from") }
     if name == "set_int_from" { return some("ring_set_int_from_list") }
     if name == "Cell" { return some("ring_Cell_new") }
     // B-125: Ptr<T> builtins
@@ -2523,6 +2510,8 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "ring_buf_grow" { return some("ring_buf_grow") }
     if name == "ring_buf_copy_at" { return some("ring_buf_copy_at") }
     if name == "ring_buf_set_byte" { return some("ring_buf_set_byte") }
+    if name == "ring_buf_get_byte" { return some("ring_buf_get_byte") }
+    if name == "ring_buf_alloc_zeroed" { return some("ring_buf_alloc_zeroed") }
     none
 }
 
@@ -2550,16 +2539,12 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     if name == "ring_set_has" { return true }
     if name == "ring_set_len" { return true }
     if name == "ring_sb_len" { return true }
-    if name == "ring_map_int_has" { return true }
-    if name == "ring_map_int_len" { return true }
+    if name == "ring_map_is_empty" { return true }
     if name == "ring_set_int_has" { return true }
     if name == "ring_set_int_len" { return true }
-    if name == "ring_map_is_empty" { return true }
     if name == "ring_set_is_empty" { return true }
-    if name == "ring_map_int_is_empty" { return true }
     if name == "ring_set_int_is_empty" { return true }
     if name == "ring_map_any" { return true }
-    if name == "ring_map_int_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2581,15 +2566,12 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_map_int_has" { return true }
     if name == "ring_set_int_has" { return true }
     if name == "ring_map_is_empty" { return true }
     if name == "ring_set_is_empty" { return true }
-    if name == "ring_map_int_is_empty" { return true }
     if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
     if name == "ring_map_any" { return true }
-    if name == "ring_map_int_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2724,28 +2706,9 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
     }
     match rt_method {
         some(base_rt_name) => {
-            // Dispatch to int-keyed variants if applicable
-            let rt_name = if is_int_keyed_map(recv_type) {
-                match method {
-                    "get" => "ring_map_int_get_opt",
-                    "insert" => "ring_map_int_set",
-                    "contains_key" => "ring_map_int_has",
-                    "keys" => "ring_map_int_keys",
-                    "values" => "ring_map_int_values",
-                    "entries" => "ring_map_int_entries",
-                    "len" => "ring_map_int_len",
-                    "remove" => "ring_map_int_delete",
-                    "for_each" => "ring_map_int_for_each",
-                    "clear" => "ring_map_int_clear",
-                    "clone" => "ring_map_int_clone",
-                    "is_empty" => "ring_map_int_is_empty",
-                    "fold" => "ring_map_int_fold",
-                    "filter" => "ring_map_int_filter",
-                    "any" => "ring_map_int_any",
-                    "map_values" => "ring_map_int_map_values",
-                    _ => base_rt_name,
-                }
-            } else { if is_int_set(recv_type) {
+            // B-152 P3: int-keyed Map dispatch removed — Map is now a unified Ring struct.
+            // Dispatch to int-keyed variants for Set only.
+            let rt_name = if is_int_set(recv_type) {
                 match method {
                     "add" => "ring_set_int_add",
                     "insert" => "ring_set_int_add",
@@ -2768,7 +2731,7 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                     "all" => "ring_set_int_all",
                     _ => base_rt_name,
                 }
-            } else { base_rt_name } }
+            } else { base_rt_name }
             // Build call args with proper unboxing
             let mut call_args: List<LLVMValueRef> = []
 
@@ -2917,7 +2880,9 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     // All List method calls fall through to the Ring-compiled impl methods.
     // NOTE: Map.clone / List.clone / Set.clone are compiler-internal (HExpr::Clone
     // from Perceus RC), not user-callable methods — they are NOT in this table.
-    // Map methods
+    // B-152 P3: Map is now a Ring struct, but method calls still route through
+    // C++ bootstrap shims to avoid codegen dict-passing issues with trait-bounded
+    // impl blocks. The shims understand the new RingMapStruct layout.
     if type_name == "Map" && method == "get" { return some("ring_map_get_opt") }
     if type_name == "Map" && method == "insert" { return some("ring_map_set") }
     if type_name == "Map" && method == "contains_key" { return some("ring_map_has") }
@@ -4650,10 +4615,9 @@ fn gen_index_expr(mut ctx: LlvmCtx, receiver: HExpr, index: HExpr, ty: Type) -> 
             LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], fresh_name(ctx, "sg"))
         } else {
             if type_name == "Map" && is_builtin_collection(recv_type) {
-                // Map subscript — use int-keyed variant if applicable
-                let map_get_name = if is_int_keyed_map(recv_type) { "ring_map_int_get" } else { "ring_map_get" }
-                let get_fn = get_or_declare_runtime_fn(ctx, map_get_name, [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
-                let get_ty = get_rt_fn_type(ctx, map_get_name)
+                // B-152 P3: Map subscript — unified, always calls ring_map_get
+                let get_fn = get_or_declare_runtime_fn(ctx, "ring_map_get", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+                let get_ty = get_rt_fn_type(ctx, "ring_map_get")
                 LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "mg"))
             } else {
                 // Fallback: try list_get

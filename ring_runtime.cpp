@@ -1510,460 +1510,418 @@ extern "C" void* ring_list_flat_map(void* list, void* closure) {
 }
 
 // ============================================================================
-// Map (~10)
+// Map — B-152 P3: Map is now a pure Ring struct
 // ============================================================================
+//
+// New layout: { void* meta, void** keys, void** values, void* len_tagged, void* cap_tagged }
+// meta: byte buffer (0=empty, 1=occupied, 2=tombstone), keys/values: slot buffers
+// len/cap: tagged ints (Ring boxed Int)
+//
+// The ring_map_* functions below are BOOTSTRAP SHIMS — they are called by the
+// OLD compiler (dist-llvm/) which still has method_to_runtime entries for Map.
+// After double bootstrap, the new compiler calls Ring-compiled Map methods instead.
+// The shims understand the new struct layout and implement hash/eq inline.
 
-typedef std::unordered_map<std::string, void*> RingMap;
-typedef std::unordered_map<int64_t, void*> RingMapInt;
+// RingMap typedefs removed — Map is now a Ring struct (not std::unordered_map).
+// RingMapInt typedefs removed — no separate int-keyed map type.
 
+struct RingMapStruct {
+    void*  meta;       // byte buffer (uint8_t array)
+    void** keys;       // slot buffer (void* array)
+    void** values;     // slot buffer (void* array)
+    void*  len_tagged; // tagged int
+    void*  cap_tagged; // tagged int
+};
+
+static int64_t ringmap_cap(RingMapStruct* m) {
+    return ring_unbox_int(m->cap_tagged);
+}
+
+static int64_t ringmap_len(RingMapStruct* m) {
+    return ring_unbox_int(m->len_tagged);
+}
+
+// Hash a key — detect type at runtime (tagged int/bool vs heap Str)
+static int64_t ringmap_hash_key(void* key) {
+    uintptr_t kp = (uintptr_t)key;
+    if (kp & 1) {
+        // Tagged int/bool — splitmix64 finalizer (matches ring_cl_hash_int)
+        uint64_t x = (uint64_t)((int64_t)((intptr_t)kp >> 1));
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+        x = x ^ (x >> 31);
+        return (int64_t)x;
+    }
+    // Heap object — assume Str, FNV-1a (matches ring_cl_hash_str)
+    RingStr* s = as_str(key);
+    uint64_t h = 14695981039346656037ULL;
+    for (int64_t i = 0; i < s->len; i++) {
+        h ^= (uint8_t)s->buf[i];
+        h *= 1099511628211ULL;
+    }
+    return (int64_t)h;
+}
+
+// Compare two keys for equality
+static bool ringmap_keys_eq(void* a, void* b) {
+    uintptr_t ap = (uintptr_t)a;
+    uintptr_t bp = (uintptr_t)b;
+    if ((ap & 1) && (bp & 1)) {
+        // Both tagged — pointer equality (same tag = same value)
+        return a == b;
+    }
+    if (!(ap & 1) && !(bp & 1)) {
+        // Both heap — assume Str
+        return ring_str_eq(a, b) != 0;
+    }
+    return false; // mixed types
+}
+
+// Probe for key in new Ring Map struct.  Returns slot index or -1 if not found.
+// If found, meta[idx] == 1.
+static int64_t ringmap_probe(RingMapStruct* m, void* key) {
+    int64_t cap = ringmap_cap(m);
+    if (cap == 0) return -1;
+    uint8_t* meta = (uint8_t*)m->meta;
+    int64_t h = ringmap_hash_key(key);
+    int64_t idx = h % cap;
+    if (idx < 0) idx += cap;
+    for (int64_t guard = 0; guard < cap; guard++) {
+        uint8_t mb = meta[idx];
+        if (mb == 0) return -1; // empty — not found
+        if (mb == 1 && ringmap_keys_eq(m->keys[idx], key)) return idx;
+        idx = (idx + 1) % cap;
+    }
+    return -1;
+}
+
+// Probe for insertion: returns index to insert at.  If key exists, returns
+// that index with meta==1.  Otherwise returns first empty/tombstone.
+static int64_t ringmap_probe_insert(RingMapStruct* m, void* key) {
+    int64_t cap = ringmap_cap(m);
+    if (cap == 0) return -1;
+    uint8_t* meta = (uint8_t*)m->meta;
+    int64_t h = ringmap_hash_key(key);
+    int64_t idx = h % cap;
+    if (idx < 0) idx += cap;
+    int64_t first_tombstone = -1;
+    for (int64_t guard = 0; guard < cap; guard++) {
+        uint8_t mb = meta[idx];
+        if (mb == 0) return (first_tombstone >= 0) ? first_tombstone : idx;
+        if (mb == 2 && first_tombstone < 0) first_tombstone = idx;
+        if (mb == 1 && ringmap_keys_eq(m->keys[idx], key)) return idx;
+        idx = (idx + 1) % cap;
+    }
+    return (first_tombstone >= 0) ? first_tombstone : idx;
+}
+
+// Ensure capacity — grow if load > 75%
+static void ringmap_ensure_cap(RingMapStruct* m) {
+    int64_t cap = ringmap_cap(m);
+    int64_t len = ringmap_len(m);
+    if (cap == 0 || len * 4 >= cap * 3) {
+        int64_t new_cap = (cap < 8) ? 8 : cap * 2;
+        uint8_t* new_meta = (uint8_t*)calloc((size_t)new_cap, 1);
+        void** new_keys = (void**)calloc((size_t)new_cap, sizeof(void*));
+        void** new_values = (void**)calloc((size_t)new_cap, sizeof(void*));
+        // Rehash
+        uint8_t* old_meta = (uint8_t*)m->meta;
+        for (int64_t i = 0; i < cap; i++) {
+            if (old_meta[i] == 1) {
+                int64_t h = ringmap_hash_key(m->keys[i]);
+                int64_t idx = h % new_cap;
+                if (idx < 0) idx += new_cap;
+                while (new_meta[idx] == 1) idx = (idx + 1) % new_cap;
+                new_meta[idx] = 1;
+                new_keys[idx] = m->keys[i];
+                new_values[idx] = m->values[i];
+            }
+        }
+        if (cap > 0) { free(m->meta); free(m->keys); free(m->values); }
+        m->meta = (void*)new_meta;
+        m->keys = new_keys;
+        m->values = new_values;
+        m->cap_tagged = ring_box_int(new_cap);
+    }
+}
+
+// Forward declarations for bootstrap shims defined later
+extern "C" void* ring_map_from(void* entries);
+extern "C" void* ring_map_clear(void* map);
+
+// Bootstrap shim: ring_map_new — allocate Map with 8 pre-allocated slots
 extern "C" void* ring_map_new() {
-    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
-    new (data) RingMap();
-    return data;
+    RingMapStruct* m = (RingMapStruct*)ring_alloc(sizeof(RingMapStruct), RING_TYPEID_MAP);
+    m->meta = calloc(8, 1);      // 8 bytes, zeroed (all empty)
+    m->keys = (void**)calloc(8, sizeof(void*));
+    m->values = (void**)calloc(8, sizeof(void*));
+    m->len_tagged = ring_box_int(0);
+    m->cap_tagged = ring_box_int(8);
+    return (void*)m;
 }
 
+// Bootstrap shim: ring_map_get — panic-on-miss subscript (IndexExpr)
 extern "C" void* ring_map_get(void* map, void* key) {
-    RingMap* m = (RingMap*)map;
-    RingStr* k = as_str(key);
-    std::string ks(k->buf, (size_t)k->len);
-    auto it = m->find(ks);
-    if (it == m->end()) {
-        fprintf(stderr, "ring panic: map key not found: %s\n", k->buf);
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t idx = ringmap_probe(m, key);
+    if (idx < 0) {
+        fprintf(stderr, "ring panic: map key not found\n");
         exit(1);
     }
-    return it->second;  // B-098: borrow (no dup); clone on escape
+    ring_dup(m->values[idx]);
+    return m->values[idx];
 }
 
+// Bootstrap shim: ring_map_get_opt
 extern "C" void* ring_map_get_opt(void* map, void* key) {
-    RingMap* m = (RingMap*)map;
-    RingStr* k = as_str(key);
-    std::string ks(k->buf, (size_t)k->len);
-    auto it = m->find(ks);
-    if (it == m->end()) return ring_enum_none();
-    ring_dup(it->second);  // B-098: fresh Option co-owns the value (see ring_list_get_opt)
-    return ring_enum_some(it->second);
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t idx = ringmap_probe(m, key);
+    if (idx < 0) return ring_enum_none();
+    ring_dup(m->values[idx]);
+    return ring_enum_some(m->values[idx]);
 }
 
+// Bootstrap shim: ring_map_set (insert)
 extern "C" void* ring_map_set(void* map, void* key, void* val) {
-    CHK("map_set");
-    RingMap* m = (RingMap*)map;
-    RingStr* k = as_str(key);
-    std::string ks(k->buf, (size_t)k->len);
-    // B-104 D1 rule ④ — duplicate-key insert must DROP the old value.  Insert
-    // side: the value arg is a sink position (perceus sink_arg_indices ".insert"),
-    // so the map owns +1 per value — the account drop_map settles at end-of-life.
-    // The KEY is value-inlined: the node copies the string CONTENT (no RC
-    // pointer is stored; the caller's key box stays a pure borrow), so there is
-    // no key account to settle on hit (the existing node key is reused, no new
-    // copy) or on miss (a fresh content copy owned by the node) — symmetric with
-    // the insert side never dup'ing the key.  Store the new value first, THEN
-    // drop the old: rc>1 sharers (`let saved = m[k]` escape-Clone / a get()
-    // Option's dup) only get decremented; an unshared old value is freed.
-    auto it = m->find(ks);
-    if (it == m->end()) {
-        m->emplace(ks, val);
-    } else {
-        void* old = it->second;
-        it->second = val;
+    RingMapStruct* m = (RingMapStruct*)map;
+    ringmap_ensure_cap(m);
+    int64_t idx = ringmap_probe_insert(m, key);
+    uint8_t* meta = (uint8_t*)m->meta;
+    if (meta[idx] == 1) {
+        // Key exists — replace value
+        void* old = m->values[idx];
+        m->values[idx] = val;
         ring_drop(old);
+    } else {
+        meta[idx] = 1;
+        ring_dup(key);
+        m->keys[idx] = key;
+        m->values[idx] = val;
+        m->len_tagged = ring_box_int(ringmap_len(m) + 1);
     }
     return map;
 }
 
+// Bootstrap shim: ring_map_has (contains_key)
 extern "C" int64_t ring_map_has(void* map, void* key) {
-    RingMap* m = (RingMap*)map;
-    RingStr* k = as_str(key);
-    std::string ks(k->buf, (size_t)k->len);
-    return m->count(ks) > 0 ? 1 : 0;
+    return ringmap_probe((RingMapStruct*)map, key) >= 0 ? 1 : 0;
 }
 
+// Bootstrap shim: ring_map_delete (remove)
 extern "C" void* ring_map_delete(void* map, void* key) {
-    RingMap* m = (RingMap*)map;
-    // B-104 D1 rule ④ — removal must DROP the value the map owned (+1 from the
-    // ".insert" sink dup / map_from's dup; the account drop_map settles at
-    // end-of-life).  The key owes nothing: the node's std::string is value-
-    // inlined and destroyed by erase itself; the caller's key box is a borrow.
-    // rc>1 sharers of the value only get decremented.
-    RingStr* k = as_str(key);
-    std::string ks(k->buf, (size_t)k->len);
-    auto it = m->find(ks);
-    if (it != m->end()) {
-        void* old = it->second;
-        m->erase(it);
-        ring_drop(old);
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t idx = ringmap_probe(m, key);
+    if (idx >= 0) {
+        ring_drop(m->keys[idx]);
+        ring_drop(m->values[idx]);
+        m->keys[idx] = nullptr;
+        m->values[idx] = nullptr;
+        ((uint8_t*)m->meta)[idx] = 2; // tombstone
+        m->len_tagged = ring_box_int(ringmap_len(m) - 1);
     }
     return map;
 }
 
+// Bootstrap shim: ring_map_keys
 extern "C" void* ring_map_keys(void* map) {
-    RingMap* m = (RingMap*)map;
-    void* ldata = make_ring_list((int64_t)m->size());
-    for (auto& kv : *m) {
-        ring_list_push_raw(ldata, make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    void* ldata = make_ring_list(0);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->keys[i]);
+            ring_list_push_raw(ldata, m->keys[i]);
+        }
     }
     return ldata;
 }
 
+// Bootstrap shim: ring_map_values
 extern "C" void* ring_map_values(void* map) {
-    RingMap* m = (RingMap*)map;
-    void* ldata = make_ring_list((int64_t)m->size());
-    for (auto& kv : *m) {
-        ring_dup(kv.second);
-        ring_list_push_raw(ldata, kv.second);
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    void* ldata = make_ring_list(0);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->values[i]);
+            ring_list_push_raw(ldata, m->values[i]);
+        }
     }
     return ldata;
 }
 
+// Bootstrap shim: ring_map_entries
 extern "C" void* ring_map_entries(void* map) {
-    RingMap* m = (RingMap*)map;
-    void* ldata = make_ring_list((int64_t)m->size());
-    for (auto& kv : *m) {
-        void* pdata = make_ring_list(2);
-        ring_list_push_raw(pdata, make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
-        ring_dup(kv.second);
-        ring_list_push_raw(pdata, kv.second);
-        ring_list_push_raw(ldata, pdata);
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    void* ldata = make_ring_list(0);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            void* pdata = make_ring_list(2);
+            ring_dup(m->keys[i]);
+            ring_list_push_raw(pdata, m->keys[i]);
+            ring_dup(m->values[i]);
+            ring_list_push_raw(pdata, m->values[i]);
+            ring_list_push_raw(ldata, pdata);
+        }
     }
     return ldata;
 }
 
+// Bootstrap shim: ring_map_len
 extern "C" int64_t ring_map_len(void* map) {
-    return (int64_t)((RingMap*)map)->size();
+    return ringmap_len((RingMapStruct*)map);
 }
 
+// Bootstrap shim: ring_map_is_empty
 extern "C" int64_t ring_map_is_empty(void* map) {
-    return ((RingMap*)map)->empty() ? 1 : 0;
+    return ringmap_len((RingMapStruct*)map) == 0 ? 1 : 0;
 }
 
+// Bootstrap shim: ring_map_for_each
 extern "C" void* ring_map_for_each(void* map, void* closure) {
-    RingMap* m = (RingMap*)map;
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
-        fn(cls->env_ptr, sd, kv.second);
-        ring_drop(sd);  // #152 ③: drop synthesized key after closure returns
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->keys[i]);
+            ring_dup(m->values[i]);
+            fn(cls->env_ptr, m->keys[i], m->values[i]);
+        }
     }
     return nullptr;
 }
 
-// fold: left fold over Map entries. Closure is ternary: fn(env, acc, key, value) -> acc.
-// Key is a synthesized Str (alloc + drop per iteration, see ring_map_for_each).
+// Bootstrap shim: ring_map_fold
 extern "C" void* ring_map_fold(void* map, void* init, void* closure) {
-    RingMap* m = (RingMap*)map;
-    if (m->empty()) {
-        ring_dup(init);
-        return init;
-    }
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    if (ringmap_len(m) == 0) { ring_dup(init); return init; }
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_3 fn = (ring_fn_3)(cls->fn_ptr);
     void* acc = init;
-    size_t i = 0;
-    for (auto& kv : *m) {
-        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
-        void* old_acc = acc;
-        acc = fn(cls->env_ptr, old_acc, sd, kv.second);
-        ring_drop(sd);  // #152 ③: drop synthesized key after closure returns
-        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
-        i++;
+    uint8_t* meta = (uint8_t*)m->meta;
+    int64_t count = 0;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->keys[i]);
+            ring_dup(m->values[i]);
+            void* old_acc = acc;
+            acc = fn(cls->env_ptr, old_acc, m->keys[i], m->values[i]);
+            if (count > 0) ring_drop(old_acc);
+            count++;
+        }
     }
     return acc;
 }
 
-// filter: returns a new Map containing only entries where predicate returns true.
-// Closure is binary: fn(env, key, value) -> Bool.
+// Bootstrap shim: ring_map_filter
 extern "C" void* ring_map_filter(void* map, void* closure) {
-    RingMap* m = (RingMap*)map;
-    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
-    auto* result = new (data) RingMap();
+    // For old codegen compatibility — create a new Map with the new struct layout
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    // Allocate a new empty map
+    RingMapStruct* result = (RingMapStruct*)ring_alloc(sizeof(RingMapStruct), RING_TYPEID_MAP);
+    result->meta = calloc(8, 1);
+    result->keys = (void**)calloc(8, sizeof(void*));
+    result->values = (void**)calloc(8, sizeof(void*));
+    result->len_tagged = ring_box_int(0);
+    result->cap_tagged = ring_box_int(8);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
-        void* r = fn(cls->env_ptr, sd, kv.second);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(sd);  // #152 ③: drop synthesized key
-        if (match) {
-            ring_dup(kv.second);  // B-103: fresh map co-owns the value
-            result->emplace(kv.first, kv.second);
-        }
-    }
-    return data;
-}
-
-// any: returns true if any entry satisfies the predicate.
-// Closure is binary: fn(env, key, value) -> Bool.
-extern "C" int64_t ring_map_any(void* map, void* closure) {
-    RingMap* m = (RingMap*)map;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* sd = make_ring_str(kv.first.c_str(), (int64_t)kv.first.size());
-        void* r = fn(cls->env_ptr, sd, kv.second);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(sd);  // #152 ③: drop synthesized key
-        if (match) return 1;
-    }
-    return 0;
-}
-
-// map_values: returns a new Map with the same keys but values transformed by the closure.
-// Closure is unary: fn(env, value) -> new_value.
-extern "C" void* ring_map_map_values(void* map, void* closure) {
-    RingMap* m = (RingMap*)map;
-    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
-    auto* result = new (data) RingMap();
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* new_val = fn(cls->env_ptr, kv.second);
-        result->emplace(kv.first, new_val);
-    }
-    return data;
-}
-
-// ============================================================================
-// Map<Int> — int64_t-keyed map
-// ============================================================================
-
-extern "C" void* ring_map_int_new() {
-    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
-    new (data) RingMapInt();
-    return data;
-}
-
-extern "C" void* ring_map_int_get(void* map, void* key) {
-    RingMapInt* m = (RingMapInt*)map;
-    int64_t k = ring_unbox_int(key);
-    auto it = m->find(k);
-    if (it == m->end()) {
-        fprintf(stderr, "ring panic: map key not found: %lld\n", (long long)k);
-        exit(1);
-    }
-    return it->second;  // B-098: borrow (no dup); clone on escape
-}
-
-extern "C" void* ring_map_int_get_opt(void* map, void* key) {
-    RingMapInt* m = (RingMapInt*)map;
-    int64_t k = ring_unbox_int(key);
-    auto it = m->find(k);
-    if (it == m->end()) return ring_enum_none();
-    ring_dup(it->second);  // B-098: fresh Option co-owns the value (see ring_list_get_opt)
-    return ring_enum_some(it->second);
-}
-
-extern "C" void* ring_map_int_set(void* map, void* key, void* val) {
-    CHK("map_int_set");
-    RingMapInt* m = (RingMapInt*)map;
-    int64_t k = ring_unbox_int(key);
-    // B-104 D1 rule ④ — duplicate-key insert must DROP the old value (the map
-    // owns +1 per value via the ".insert" sink dup; see ring_map_set).  The key
-    // is an unboxed int64 read out of the caller's box — value-inlined, no RC
-    // account on either insert or overwrite.
-    auto it = m->find(k);
-    if (it == m->end()) {
-        m->emplace(k, val);
-    } else {
-        void* old = it->second;
-        it->second = val;
-        ring_drop(old);
-    }
-    return map;
-}
-
-extern "C" int64_t ring_map_int_has(void* map, void* key) {
-    RingMapInt* m = (RingMapInt*)map;
-    int64_t k = ring_unbox_int(key);
-    return m->count(k) > 0 ? 1 : 0;
-}
-
-extern "C" void* ring_map_int_delete(void* map, void* key) {
-    RingMapInt* m = (RingMapInt*)map;
-    int64_t k = ring_unbox_int(key);
-    // B-104 D1 rule ④ — removal must DROP the owned value (see ring_map_delete);
-    // the int64 key is value-inlined, no RC account.
-    auto it = m->find(k);
-    if (it != m->end()) {
-        void* old = it->second;
-        m->erase(it);
-        ring_drop(old);
-    }
-    return map;
-}
-
-extern "C" void* ring_map_int_keys(void* map) {
-    RingMapInt* m = (RingMapInt*)map;
-    void* ldata = make_ring_list((int64_t)m->size());
-    for (auto& kv : *m) {
-        ring_list_push_raw(ldata, ring_box_int(kv.first));
-    }
-    return ldata;
-}
-
-extern "C" void* ring_map_int_values(void* map) {
-    RingMapInt* m = (RingMapInt*)map;
-    void* ldata = make_ring_list((int64_t)m->size());
-    for (auto& kv : *m) {
-        ring_dup(kv.second);
-        ring_list_push_raw(ldata, kv.second);
-    }
-    return ldata;
-}
-
-extern "C" void* ring_map_int_entries(void* map) {
-    RingMapInt* m = (RingMapInt*)map;
-    void* ldata = make_ring_list((int64_t)m->size());
-    for (auto& kv : *m) {
-        void* pdata = make_ring_list(2);
-        ring_list_push_raw(pdata, ring_box_int(kv.first));
-        ring_dup(kv.second);
-        ring_list_push_raw(pdata, kv.second);
-        ring_list_push_raw(ldata, pdata);
-    }
-    return ldata;
-}
-
-extern "C" int64_t ring_map_int_len(void* map) {
-    return (int64_t)((RingMapInt*)map)->size();
-}
-
-extern "C" int64_t ring_map_int_is_empty(void* map) {
-    return ((RingMapInt*)map)->empty() ? 1 : 0;
-}
-
-extern "C" void* ring_map_int_for_each(void* map, void* closure) {
-    RingMapInt* m = (RingMapInt*)map;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* kb = ring_box_int(kv.first);
-        fn(cls->env_ptr, kb, kv.second);
-        ring_drop(kb);  // #152 ③: drop synthesized INT key box
-    }
-    return nullptr;
-}
-
-// fold: left fold over Map<Int> entries. Closure is ternary: fn(env, acc, key, value) -> acc.
-// Key is boxed as Int (alloc + drop per iteration, see ring_map_int_for_each).
-extern "C" void* ring_map_int_fold(void* map, void* init, void* closure) {
-    RingMapInt* m = (RingMapInt*)map;
-    if (m->empty()) {
-        ring_dup(init);
-        return init;
-    }
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_3 fn = (ring_fn_3)(cls->fn_ptr);
-    void* acc = init;
-    size_t i = 0;
-    for (auto& kv : *m) {
-        void* kb = ring_box_int(kv.first);
-        void* old_acc = acc;
-        acc = fn(cls->env_ptr, old_acc, kb, kv.second);
-        ring_drop(kb);  // #152 ③: drop synthesized INT key box
-        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
-        i++;
-    }
-    return acc;
-}
-
-// filter: returns a new Map<Int> containing only entries where predicate returns true.
-// Closure is binary: fn(env, key, value) -> Bool.
-extern "C" void* ring_map_int_filter(void* map, void* closure) {
-    RingMapInt* m = (RingMapInt*)map;
-    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
-    auto* result = new (data) RingMapInt();
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* kb = ring_box_int(kv.first);
-        void* r = fn(cls->env_ptr, kb, kv.second);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // drop predicate Bool box
-        ring_drop(kb);  // drop synthesized INT key box
-        if (match) {
-            ring_dup(kv.second);  // fresh map co-owns the value
-            result->emplace(kv.first, kv.second);
-        }
-    }
-    return data;
-}
-
-// any: returns true if any entry satisfies the predicate.
-// Closure is binary: fn(env, key, value) -> Bool.
-extern "C" int64_t ring_map_int_any(void* map, void* closure) {
-    RingMapInt* m = (RingMapInt*)map;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* kb = ring_box_int(kv.first);
-        void* r = fn(cls->env_ptr, kb, kv.second);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // drop predicate Bool box
-        ring_drop(kb);  // drop synthesized INT key box
-        if (match) return 1;
-    }
-    return 0;
-}
-
-// map_values: returns a new Map<Int> with the same keys but values transformed.
-// Closure is unary: fn(env, value) -> new_value.
-extern "C" void* ring_map_int_map_values(void* map, void* closure) {
-    RingMapInt* m = (RingMapInt*)map;
-    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
-    auto* result = new (data) RingMapInt();
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& kv : *m) {
-        void* new_val = fn(cls->env_ptr, kv.second);
-        result->emplace(kv.first, new_val);
-    }
-    return data;
-}
-
-extern "C" void* ring_map_int_clone(void* map) {
-    RingMapInt* m = (RingMapInt*)map;
-    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
-    RingMapInt* nm = new (data) RingMapInt(*m);
-    // B-104 (#135): dup each value — clone must co-own values (keys inline int64,
-    // values RC void*). Same class as ring_list_clone / ring_map_clone.
-    for (auto& kv : *nm) ring_dup(kv.second);
-    return data;
-}
-
-extern "C" void* ring_map_int_from(void* entries) {
-    RingList* vec = as_list(entries);
-    int64_t vln = list_len(vec);
-    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
-    auto* result = new (data) RingMapInt();
-    for (int64_t i = 0; i < vln; i++) {
-        RingList* pair = as_list(vec->buf[i]);
-        if (list_len(pair) >= 2) {
-            int64_t key = ring_unbox_int(pair->buf[0]);
-            void* val = pair->buf[1];
-            ring_dup(val);
-            auto it = result->find(key);
-            if (it == result->end()) {
-                result->emplace(key, val);
-            } else {
-                void* old = it->second;
-                it->second = val;
-                ring_drop(old);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->keys[i]);
+            ring_dup(m->values[i]);
+            void* r = fn(cls->env_ptr, m->keys[i], m->values[i]);
+            int match = ring_unbox_int(r) != 0;
+            ring_drop(r);
+            if (match) {
+                ring_dup(m->keys[i]);
+                ring_dup(m->values[i]);
+                ring_map_set((void*)result, m->keys[i], m->values[i]);
             }
         }
     }
-    return data;
+    return (void*)result;
 }
 
-extern "C" void* ring_map_int_clear(void* map) {
-    RingMapInt* m = (RingMapInt*)map;
-    // B-104 D1 rule ④ — drop every owned value (see ring_map_clear); int64 keys
-    // are value-inlined, no RC account.
-    for (auto& kv : *m) ring_drop(kv.second);
-    m->clear();
-    return map;
+// Bootstrap shim: ring_map_any
+extern "C" int64_t ring_map_any(void* map, void* closure) {
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->keys[i]);
+            ring_dup(m->values[i]);
+            void* r = fn(cls->env_ptr, m->keys[i], m->values[i]);
+            int match = ring_unbox_int(r) != 0;
+            ring_drop(r);
+            if (match) return 1;
+        }
+    }
+    return 0;
 }
+
+// Bootstrap shim: ring_map_map_values
+extern "C" void* ring_map_map_values(void* map, void* closure) {
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    RingMapStruct* result = (RingMapStruct*)ring_alloc(sizeof(RingMapStruct), RING_TYPEID_MAP);
+    result->meta = calloc(8, 1);
+    result->keys = (void**)calloc(8, sizeof(void*));
+    result->values = (void**)calloc(8, sizeof(void*));
+    result->len_tagged = ring_box_int(0);
+    result->cap_tagged = ring_box_int(8);
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->values[i]);
+            void* new_val = fn(cls->env_ptr, m->values[i]);
+            ring_dup(m->keys[i]);
+            ring_map_set((void*)result, m->keys[i], new_val);
+        }
+    }
+    return (void*)result;
+}
+
+// Bootstrap shim: ring_map_int_* — now all redirect to the unified ring_map_* shims
+// (Int keys are tagged pointers, work with the same hash/eq helpers)
+extern "C" void* ring_map_int_new()                          { return ring_map_new(); }
+extern "C" void* ring_map_int_get(void* m, void* k)          { return ring_map_get(m, k); }
+extern "C" void* ring_map_int_get_opt(void* m, void* k)      { return ring_map_get_opt(m, k); }
+extern "C" void* ring_map_int_set(void* m, void* k, void* v) { return ring_map_set(m, k, v); }
+extern "C" int64_t ring_map_int_has(void* m, void* k)        { return ring_map_has(m, k); }
+extern "C" void* ring_map_int_delete(void* m, void* k)       { return ring_map_delete(m, k); }
+extern "C" void* ring_map_int_keys(void* m)                  { return ring_map_keys(m); }
+extern "C" void* ring_map_int_values(void* m)                { return ring_map_values(m); }
+extern "C" void* ring_map_int_entries(void* m)                { return ring_map_entries(m); }
+extern "C" int64_t ring_map_int_len(void* m)                 { return ring_map_len(m); }
+extern "C" int64_t ring_map_int_is_empty(void* m)            { return ring_map_is_empty(m); }
+extern "C" void* ring_map_int_for_each(void* m, void* c)     { return ring_map_for_each(m, c); }
+extern "C" void* ring_map_int_fold(void* m, void* i, void* c){ return ring_map_fold(m, i, c); }
+extern "C" void* ring_map_int_filter(void* m, void* c)       { return ring_map_filter(m, c); }
+extern "C" int64_t ring_map_int_any(void* m, void* c)        { return ring_map_any(m, c); }
+extern "C" void* ring_map_int_map_values(void* m, void* c)   { return ring_map_map_values(m, c); }
+extern "C" void* ring_map_int_clone(void* m)                 { /* handled by Ring map_clone */ return m; }
+
+// Bootstrap shim: ring_map_int_from — redirect to ring_map_from
+extern "C" void* ring_map_int_from(void* entries) { return ring_map_from(entries); }
+
+// Bootstrap shim: ring_map_int_clear — redirect to ring_map_clear
+extern "C" void* ring_map_int_clear(void* map) { return ring_map_clear(map); }
 
 // ============================================================================
 // Set (~8)
@@ -2740,16 +2698,35 @@ extern "C" void* ring_list_clone_rt(void* list) {
     return data;
 }
 
+// B-152 P3: ring_map_clone — bootstrap shim for new Ring struct layout
 extern "C" void* ring_map_clone(void* map) {
-    RingMap* m = (RingMap*)map;
-    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
-    RingMap* nm = new (data) RingMap(*m);
-    // B-104 (#135): same as ring_list_clone — a clone must co-own its values
-    // (keys are std::string inline in the map; values are RC void*). dup each
-    // value so the clone is an independent owner; without it both maps deep-drop
-    // the same values under Perceus RC -> over-free. Latent until temp-drop activates.
-    for (auto& kv : *nm) ring_dup(kv.second);
-    return data;
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    RingMapStruct* result = (RingMapStruct*)ring_alloc(sizeof(RingMapStruct), RING_TYPEID_MAP);
+    if (cap == 0) {
+        result->meta = calloc(1, 1);
+        result->keys = (void**)calloc(1, sizeof(void*));
+        result->values = (void**)calloc(1, sizeof(void*));
+        result->len_tagged = ring_box_int(0);
+        result->cap_tagged = ring_box_int(0);
+        return (void*)result;
+    }
+    result->meta = malloc((size_t)cap);
+    memcpy(result->meta, m->meta, (size_t)cap);
+    result->keys = (void**)calloc((size_t)cap, sizeof(void*));
+    result->values = (void**)calloc((size_t)cap, sizeof(void*));
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_dup(m->keys[i]);
+            ring_dup(m->values[i]);
+            result->keys[i] = m->keys[i];
+            result->values[i] = m->values[i];
+        }
+    }
+    result->len_tagged = m->len_tagged;
+    result->cap_tagged = m->cap_tagged;
+    return (void*)result;
 }
 
 extern "C" void* ring_set_clone(void* set) {
@@ -2759,29 +2736,27 @@ extern "C" void* ring_set_clone(void* set) {
     return data;
 }
 
+// B-152 P3: ring_map_from — bootstrap shim, now uses new struct layout
 extern "C" void* ring_map_from(void* entries) {
     RingList* vec = as_list(entries);
     int64_t vln = list_len(vec);
-    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
-    auto* result = new (data) RingMap();
+    RingMapStruct* result = (RingMapStruct*)ring_alloc(sizeof(RingMapStruct), RING_TYPEID_MAP);
+    result->meta = calloc(1, 1);
+    result->keys = (void**)calloc(1, sizeof(void*));
+    result->values = (void**)calloc(1, sizeof(void*));
+    result->len_tagged = ring_box_int(0);
+    result->cap_tagged = ring_box_int(0);
     for (int64_t i = 0; i < vln; i++) {
         RingList* pair = as_list(vec->buf[i]);
         if (list_len(pair) >= 2) {
-            RingStr* key = as_str(pair->buf[0]);
-            std::string ks(key->buf, (size_t)key->len);
+            void* key = pair->buf[0];
             void* val = pair->buf[1];
+            ring_dup(key);
             ring_dup(val);
-            auto it = result->find(ks);
-            if (it == result->end()) {
-                result->emplace(ks, val);
-            } else {
-                void* old = it->second;
-                it->second = val;
-                ring_drop(old);
-            }
+            ring_map_set((void*)result, key, val);
         }
     }
-    return data;
+    return (void*)result;
 }
 
 // ring_set_from_list already defined above
@@ -2977,6 +2952,11 @@ extern "C" void* ring_buf_alloc(void* cap_tagged) {
     return malloc((size_t)cap);
 }
 
+extern "C" void* ring_buf_alloc_zeroed(void* cap_tagged) {
+    int64_t cap = ring_unbox_int(cap_tagged);
+    return calloc((size_t)cap, 1);
+}
+
 extern "C" void* ring_buf_dealloc(void* p) {
     free(p);
     return nullptr;
@@ -3005,8 +2985,9 @@ extern "C" void* ring_buf_set_byte(void* p, void* offset_tagged, void* val_tagge
     return nullptr;
 }
 
-extern "C" int64_t ring_buf_get_byte(void* p, int64_t offset) {
-    return (int64_t)((uint8_t*)p)[(size_t)offset];
+extern "C" void* ring_buf_get_byte(void* p, void* offset_tagged) {
+    int64_t offset = ring_unbox_int(offset_tagged);
+    return ring_box_int((int64_t)((uint8_t*)p)[(size_t)offset]);
 }
 
 // ============================================================================
@@ -3125,12 +3106,21 @@ extern "C" void* ring_list_extend(void* list, void* other) {
 // Map operations (additional)
 // ============================================================================
 
+// B-152 P3: ring_map_clear — bootstrap shim for new Ring struct layout
 extern "C" void* ring_map_clear(void* map) {
-    RingMap* m = (RingMap*)map;
-    // B-104 D1 rule ④ — drop every owned value (see ring_list_clear); keys are
-    // value-inlined std::string, destroyed by clear() itself, no RC account.
-    for (auto& kv : *m) ring_drop(kv.second);
-    m->clear();
+    RingMapStruct* m = (RingMapStruct*)map;
+    int64_t cap = ringmap_cap(m);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_drop(m->keys[i]);
+            ring_drop(m->values[i]);
+            m->keys[i] = nullptr;
+            m->values[i] = nullptr;
+            meta[i] = 0;
+        }
+    }
+    m->len_tagged = ring_box_int(0);
     return map;
 }
 
@@ -3371,22 +3361,23 @@ static void drop_list(void* data) {
     free(l->buf);
 }
 
+// B-152 P3: drop_map for new Ring struct layout
 static void drop_map(void* data) {
-    auto* m = (RingMap*)data;
-    // Str keys are std::string (value type, not pointer), destructor handles them.
-    // Values are void* pointing to Ring heap objects, need ring_drop.
-    for (auto& kv : *m) {
-        ring_drop(kv.second);
+    RingMapStruct* m = (RingMapStruct*)data;
+    int64_t cap = ring_unbox_int(m->cap_tagged);
+    uint8_t* meta = (uint8_t*)m->meta;
+    for (int64_t i = 0; i < cap; i++) {
+        if (meta[i] == 1) {
+            ring_drop(m->keys[i]);
+            ring_drop(m->values[i]);
+        }
     }
-    m->~unordered_map();
+    if (cap > 0) { free(meta); free(m->keys); free(m->values); }
 }
 
+// B-152 P3: drop_map_int removed — unified with drop_map
 static void drop_map_int(void* data) {
-    auto* m = (RingMapInt*)data;
-    for (auto& kv : *m) {
-        ring_drop(kv.second);
-    }
-    m->~unordered_map();
+    drop_map(data);  // Same layout now
 }
 
 static void drop_set(void* data) {
