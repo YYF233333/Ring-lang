@@ -6,7 +6,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
     collect_extern_type_names, compare_by_first}
-use env::{TypeScheme, apply_subst, find_impl, has_impl}
+use env::{TypeScheme, apply_subst, apply_subst_map, apply_subst_row_map, find_impl, has_impl}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
 use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705, E0707, E0802, E0803}
@@ -1839,10 +1839,10 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 build_var_mapping(return_type, reg_ret, var_mapping)
 
                 // Map the resolved return type back to registration-time vars
-                let mapped_ret = apply_var_mapping(return_type, var_mapping)
+                let mapped_ret = apply_subst_map(var_mapping, return_type)
 
                 // Also map effects
-                let mapped_effects = map_effect_row(effects, var_mapping)
+                let mapped_effects = apply_subst_row_map(var_mapping, effects)
 
                 let new_type = Type::FnType {
                     params: reg_params, return_type: mapped_ret, effects: mapped_effects
@@ -1908,70 +1908,6 @@ fn build_var_mapping(check_ty: Type, reg_ty: Type, mut mapping: Map<Int, Type>) 
         },
         _ => {}
     }
-}
-
-// Apply var-id mapping to a type: replace check-time TypeVars with registration-time types.
-fn apply_var_mapping(ty: Type, mapping: Map<Int, Type>) -> Type {
-    match ty {
-        Type::TypeVar { id, .. } => {
-            match mapping.get(id) {
-                some(mapped) => mapped,
-                none => ty  // unmapped var — keep as-is (concrete types don't have this)
-            }
-        },
-        Type::FnType { params, return_type, effects } => {
-            let mut mapped_params: List<Type> = []
-            for p in params { mapped_params.push(apply_var_mapping(p, mapping)) }
-            Type::FnType {
-                params: mapped_params,
-                return_type: apply_var_mapping(return_type, mapping),
-                effects: map_effect_row(effects, mapping)
-            }
-        },
-        Type::StructType { name, type_params } => {
-            let mut mapped_tps: List<Type> = []
-            for tp in type_params { mapped_tps.push(apply_var_mapping(tp, mapping)) }
-            Type::StructType { name: name, type_params: mapped_tps }
-        },
-        Type::EnumType { name, type_params } => {
-            let mut mapped_tps: List<Type> = []
-            for tp in type_params { mapped_tps.push(apply_var_mapping(tp, mapping)) }
-            Type::EnumType { name: name, type_params: mapped_tps }
-        },
-        Type::TupleType { elements } => {
-            let mut mapped_els: List<Type> = []
-            for e in elements { mapped_els.push(apply_var_mapping(e, mapping)) }
-            Type::TupleType { elements: mapped_els }
-        },
-        Type::GenericType { base, args } => {
-            let mut mapped_args: List<Type> = []
-            for a in args { mapped_args.push(apply_var_mapping(a, mapping)) }
-            Type::GenericType { base: apply_var_mapping(base, mapping), args: mapped_args }
-        },
-        _ => ty  // IntType, FloatType, StrType, BoolType, UnitType, etc. — concrete, no mapping needed
-    }
-}
-
-// Apply var-id mapping to an effect row
-fn map_effect_row(row: EffectRow, mapping: Map<Int, Type>) -> EffectRow {
-    if mapping.len() == 0 { return row }
-    let mut mapped_effects: List<Effect> = []
-    for eff in row.effects {
-        match eff {
-            Effect::FailEffect { error_type } =>
-                mapped_effects.push(Effect::FailEffect { error_type: apply_var_mapping(error_type, mapping) }),
-            Effect::MutEffect { state_type } =>
-                mapped_effects.push(Effect::MutEffect { state_type: apply_var_mapping(state_type, mapping) }),
-            Effect::CustomEffect { name, type_args } => {
-                let mut mapped_args: List<Type> = []
-                for a in type_args { mapped_args.push(apply_var_mapping(a, mapping)) }
-                mapped_effects.push(Effect::CustomEffect { name: name, type_args: mapped_args })
-            },
-            Effect::IoEffect => mapped_effects.push(eff),
-            Effect::UnsafeEffect => mapped_effects.push(eff)
-        }
-    }
-    EffectRow { effects: mapped_effects, tail: row.tail }
 }
 
 // ============================================================

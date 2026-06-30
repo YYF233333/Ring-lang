@@ -10,15 +10,6 @@
 
 ## 前端
 
-### #236 apply_var_mapping 重复 env.ring 的 apply_subst_map [medium] [mechanical] [open]
-
-`infer_decl.ring:1855-1893` 的 `apply_var_mapping` 与 `env.ring:394-584` 的 `apply_subst_map` 功能完全相同——遍历相同的 Type match 分支做逐字段重建，仅变量来源不同（Map<Int,Type> vs SubstMap）。两处约 160 行近乎相同代码，修改 Type 结构时需同步两处。
-
-**修复方向**：`infer_decl.ring` 的 `apply_var_mapping` 改为调用 `env.ring` 的 `apply_subst_map`，或提取带 resolver 回调的通用类型遍历器。
-
-发现者：Opus
-
----
 
 ## Runtime
 
