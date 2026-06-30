@@ -2482,7 +2482,8 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "parse_int" { return some("ring_parse_int") }
     if name == "parse_float" { return some("ring_parse_float") }
     if name == "set_from" { return some("ring_set_from_list") }
-    if name == "list_new" { return some("ring_list_new") }
+    // B-152 P2: list_new removed — list() is now a Ring function.
+    // gen_list_lit still calls ring_list_new directly via get_or_declare_runtime_fn.
     if name == "map_from" { return some("ring_map_from") }
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
     if name == "map_int_new" { return some("ring_map_int_new") }
@@ -2892,35 +2893,10 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     if type_name == "Float" && method == "to_str" { return some("ring_float_to_str") }
     // Bool methods
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
-    // List methods
-    if type_name == "List" && method == "push" { return some("ring_list_push") }
-    if type_name == "List" && method == "len" { return some("ring_list_len") }
-    if type_name == "List" && method == "get" { return some("ring_list_get_opt") }
-    if type_name == "List" && method == "join" { return some("ring_list_join") }
-    if type_name == "List" && method == "concat" { return some("ring_list_concat") }
-    if type_name == "List" && method == "slice" { return some("ring_list_slice") }
-    if type_name == "List" && method == "reverse" { return some("ring_list_reverse") }
-    if type_name == "List" && method == "sort_by" { return some("ring_list_sort") }
-    if type_name == "List" && method == "is_empty" { return some("ring_list_is_empty") }
-    if type_name == "List" && method == "first" { return some("ring_list_first") }
-    if type_name == "List" && method == "last" { return some("ring_list_last") }
-    if type_name == "List" && method == "pop" { return some("ring_list_pop") }
-    if type_name == "List" && method == "set" { return some("ring_list_set") }
-    // NOTE: contains / index_of / sort are intentionally NOT mapped to runtime
-    // functions. They live in bounded impl blocks (impl<T: Eq/Ord> List) and must
-    // dispatch through trait dicts. Falling through routes to the generated Ring impls.
-    if type_name == "List" && method == "map" { return some("ring_list_map") }
-    if type_name == "List" && method == "filter" { return some("ring_list_filter") }
-    if type_name == "List" && method == "for_each" { return some("ring_list_for_each") }
-    if type_name == "List" && method == "any" { return some("ring_list_any") }
-    if type_name == "List" && method == "all" { return some("ring_list_all") }
-    if type_name == "List" && method == "find" { return some("ring_list_find") }
-    if type_name == "List" && method == "find_index" { return some("ring_list_find_index") }
-    if type_name == "List" && method == "fold" { return some("ring_list_fold") }
-    if type_name == "List" && method == "flat_map" { return some("ring_list_flat_map") }
-    if type_name == "List" && method == "clear" { return some("ring_list_clear") }
-    if type_name == "List" && method == "shift" { return some("ring_list_shift") }
-    if type_name == "List" && method == "extend" { return some("ring_list_extend") }
+    // B-152 P2: List methods are now pure Ring — no method_to_runtime entries.
+    // All List method calls fall through to the Ring-compiled impl methods.
+    // NOTE: Map.clone / List.clone / Set.clone are compiler-internal (HExpr::Clone
+    // from Perceus RC), not user-callable methods — they are NOT in this table.
     // Map methods
     if type_name == "Map" && method == "get" { return some("ring_map_get_opt") }
     if type_name == "Map" && method == "insert" { return some("ring_map_set") }
@@ -2937,8 +2913,6 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     if type_name == "Map" && method == "filter" { return some("ring_map_filter") }
     if type_name == "Map" && method == "any" { return some("ring_map_any") }
     if type_name == "Map" && method == "map_values" { return some("ring_map_map_values") }
-    // NOTE: Map.clone / List.clone / Set.clone are compiler-internal (HExpr::Clone
-    // from Perceus RC), not user-callable methods — they are NOT in this table.
     // Set methods
     if type_name == "Set" && method == "add" { return some("ring_set_add") }
     if type_name == "Set" && method == "insert" { return some("ring_set_add") }

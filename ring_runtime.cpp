@@ -33,7 +33,7 @@
 // ============================================================================
 // Type aliases (documentation only — all cross-boundary types are void*)
 //   Str          = RingStr*         (data ptr into ring_alloc'd block)
-//   List         = std::vector<void*>*
+//   List         = RingList*        (Ring struct: {buf, len_tagged, cap_tagged})
 //   Map          = std::unordered_map<std::string, void*>*
 //   MapInt       = std::unordered_map<int64_t, void*>*
 //   Set          = std::unordered_set<std::string>*
@@ -55,6 +55,21 @@ struct RingStr {
 };
 
 static inline RingStr* as_str(void* p) { return (RingStr*)p; }
+
+// B-152 P2: RingList — Ring struct replacement for std::vector<void*> in List data area.
+// Layout mirrors the Ring struct: { buf: Ptr<T>, len: Int, cap: Int }
+// where Int is a tagged pointer: (value << 1) | 1.
+struct RingList {
+    void** buf;        // slot buffer (calloc'd array of void*)
+    void*  len_tagged; // tagged int: (len << 1) | 1
+    void*  cap_tagged; // tagged int: (cap << 1) | 1
+};
+
+static inline RingList* as_list(void* p) { return (RingList*)p; }
+static inline int64_t list_len(RingList* l) { return (int64_t)((uintptr_t)l->len_tagged >> 1); }
+static inline int64_t list_cap(RingList* l) { return (int64_t)((uintptr_t)l->cap_tagged >> 1); }
+static inline void list_set_len(RingList* l, int64_t n) { l->len_tagged = (void*)(((uintptr_t)n << 1) | 1); }
+static inline void list_set_cap(RingList* l, int64_t n) { l->cap_tagged = (void*)(((uintptr_t)n << 1) | 1); }
 
 // Helper: byte-level substring search (no memmem on Windows)
 static inline const char* ring_memmem(const char* hay, size_t hlen,
@@ -366,6 +381,38 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
         ring_box_profile_record(raw + 8, _ReturnAddress(), (uint32_t)typeid_val);
 #endif
     return raw + 8;                               // return data pointer
+}
+
+// B-152 P2: RingList helpers (deferred from early forward-declaration).
+static void* make_ring_list(int64_t cap) {
+    void* data = ring_alloc(sizeof(RingList), RING_TYPEID_LIST);
+    RingList* l = as_list(data);
+    if (cap > 0) {
+        l->buf = (void**)calloc((size_t)cap, sizeof(void*));
+    } else {
+        l->buf = nullptr;
+    }
+    list_set_len(l, 0);
+    list_set_cap(l, cap);
+    return data;
+}
+
+static void ring_list_push_raw(void* list, void* val) {
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    int64_t cp = list_cap(l);
+    if (ln >= cp) {
+        int64_t new_cap = cp == 0 ? 4 : cp * 2;
+        void** new_buf = (void**)calloc((size_t)new_cap, sizeof(void*));
+        if (l->buf) {
+            memmove(new_buf, l->buf, (size_t)ln * sizeof(void*));
+            free(l->buf);
+        }
+        l->buf = new_buf;
+        list_set_cap(l, new_cap);
+    }
+    l->buf[ln] = val;
+    list_set_len(l, ln + 1);
 }
 
 extern "C" void ring_dup(void* ptr) {
@@ -797,12 +844,10 @@ extern "C" int64_t ring_str_ends_with(void* s, void* suffix) {
 extern "C" void* ring_str_split(void* s, void* delim) {
     RingStr* str = as_str(s);
     RingStr* del = as_str(delim);
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
+    void* ldata = make_ring_list(0);
     if (del->len == 0) {
-        // Split into individual characters
         for (int64_t i = 0; i < str->len; i++) {
-            result->push_back(make_ring_str(str->buf + i, 1));
+            ring_list_push_raw(ldata, make_ring_str(str->buf + i, 1));
         }
         return ldata;
     }
@@ -811,21 +856,21 @@ extern "C" void* ring_str_split(void* s, void* delim) {
     while ((found = ring_memmem(str->buf + pos, (size_t)(str->len - (int64_t)pos),
                                  del->buf, (size_t)del->len)) != nullptr) {
         size_t found_pos = (size_t)(found - str->buf);
-        result->push_back(make_ring_str(str->buf + pos, (int64_t)(found_pos - pos)));
+        ring_list_push_raw(ldata, make_ring_str(str->buf + pos, (int64_t)(found_pos - pos)));
         pos = found_pos + (size_t)del->len;
     }
-    result->push_back(make_ring_str(str->buf + pos, str->len - (int64_t)pos));
+    ring_list_push_raw(ldata, make_ring_str(str->buf + pos, str->len - (int64_t)pos));
     return ldata;
 }
 
 extern "C" void* ring_str_join(void* sep, void* list) {
     RingStr* separator = as_str(sep);
-    auto* vec = (std::vector<void*>*)list;
-    // Pre-calculate total length
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     int64_t total = 0;
-    for (size_t i = 0; i < vec->size(); i++) {
+    for (int64_t i = 0; i < ln; i++) {
         if (i > 0) total += separator->len;
-        total += as_str((*vec)[i])->len;
+        total += as_str(l->buf[i])->len;
     }
     void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
     RingStr* rs = as_str(data);
@@ -833,12 +878,12 @@ extern "C" void* ring_str_join(void* sep, void* list) {
     rs->cap = total + 1;
     rs->buf = (char*)malloc((size_t)rs->cap);
     int64_t off = 0;
-    for (size_t i = 0; i < vec->size(); i++) {
+    for (int64_t i = 0; i < ln; i++) {
         if (i > 0 && separator->len > 0) {
             memcpy(rs->buf + off, separator->buf, (size_t)separator->len);
             off += separator->len;
         }
-        RingStr* elem = as_str((*vec)[i]);
+        RingStr* elem = as_str(l->buf[i]);
         if (elem->len > 0) {
             memcpy(rs->buf + off, elem->buf, (size_t)elem->len);
             off += elem->len;
@@ -962,14 +1007,14 @@ extern "C" unsigned ring_str_len_u32(void* str) {
     return (unsigned)as_str(str)->len;
 }
 
-// Extract data pointer from a Ring List (std::vector<void*>*)
+// Extract data pointer from a Ring List (RingList struct)
 extern "C" void** ring_list_data(void* list) {
-    return ((std::vector<void*>*)list)->data();
+    return as_list(list)->buf;
 }
 
 // Extract size from a Ring List as unsigned (for LLVM-C count params)
 extern "C" unsigned ring_list_size_u32(void* list) {
-    return (unsigned)((std::vector<void*>*)list)->size();
+    return (unsigned)list_len(as_list(list));
 }
 
 // LLVMIsNullPtr — custom helper (not part of LLVM-C API, provided by the N-API
@@ -980,55 +1025,104 @@ extern "C" int LLVMIsNullPtr(void* val) {
 }
 
 // ============================================================================
-// List (~18)
+// B-152 P2: slot bridge functions for Ring List RIIR
+// ============================================================================
+
+extern "C" void* ring_slot_alloc(void* count_tagged) {
+    int64_t count = ring_unbox_int(count_tagged);
+    return calloc((size_t)count, sizeof(void*));
+}
+
+extern "C" void* ring_slot_dealloc(void* buf, void* count_tagged) {
+    (void)count_tagged;
+    free(buf);
+    return nullptr;
+}
+
+extern "C" void* ring_slot_read(void* buf, void* idx_tagged) {
+    int64_t idx = ring_unbox_int(idx_tagged);
+    void* val = ((void**)buf)[idx];
+    if (val) ring_dup(val);
+    return val;
+}
+
+extern "C" void* ring_slot_take(void* buf, void* idx_tagged) {
+    int64_t idx = ring_unbox_int(idx_tagged);
+    void* val = ((void**)buf)[idx];
+    ((void**)buf)[idx] = nullptr;
+    return val;
+}
+
+extern "C" void* ring_slot_write(void* buf, void* idx_tagged, void* val) {
+    int64_t idx = ring_unbox_int(idx_tagged);
+    ((void**)buf)[idx] = val;
+    return nullptr;
+}
+
+extern "C" void* ring_slot_swap(void* buf, void* i_tagged, void* j_tagged) {
+    int64_t i = ring_unbox_int(i_tagged);
+    int64_t j = ring_unbox_int(j_tagged);
+    void** arr = (void**)buf;
+    void* tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    return nullptr;
+}
+
+extern "C" void* ring_slot_move(void* src, void* src_off_tagged, void* dst, void* dst_off_tagged, void* count_tagged) {
+    int64_t src_off = ring_unbox_int(src_off_tagged);
+    int64_t dst_off = ring_unbox_int(dst_off_tagged);
+    int64_t count = ring_unbox_int(count_tagged);
+    memmove((void**)dst + dst_off, (void**)src + src_off, (size_t)count * sizeof(void*));
+    return nullptr;
+}
+
+extern "C" void* ring_slot_drop(void* buf, void* idx_tagged) {
+    int64_t idx = ring_unbox_int(idx_tagged);
+    void* val = ((void**)buf)[idx];
+    ((void**)buf)[idx] = nullptr;
+    if (val) ring_drop(val);
+    return nullptr;
+}
+
+// ============================================================================
+// List (codegen + bootstrap shims — gen_list_lit / gen_index_expr / gen_tuple_lit)
 // ============================================================================
 
 extern "C" void* ring_list_new() {
     CHK("list_new");
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    new (data) std::vector<void*>();
-    return data;
+    return make_ring_list(0);
 }
 
 extern "C" void* ring_list_push(void* list, void* val) {
     CHK("list_push");
-    ((std::vector<void*>*)list)->push_back(val);
+    ring_list_push_raw(list, val);
     return list;
 }
 
 extern "C" void* ring_list_get(void* list, int64_t idx) {
     CHK("list_get");
-    auto* vec = (std::vector<void*>*)list;
-    if (idx < 0 || idx >= (int64_t)vec->size()) {
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    if (idx < 0 || idx >= ln) {
         fprintf(stderr, "ring panic: list index %lld out of bounds (len %lld)\n",
-                (long long)idx, (long long)vec->size());
+                (long long)idx, (long long)ln);
         exit(1);
     }
     // B-098: a list element read is a BORROW — return the element WITHOUT
     // bumping its refcount (it still belongs to the list).  The borrow-inference
     // pass clones (ring_dup) it only when it escapes into an owned sink.
-    void* elem = (*vec)[(size_t)idx];
-    return elem;
+    return l->buf[idx];
 }
 
 extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
-    auto* vec = (std::vector<void*>*)list;
-    if (idx < 0 || idx >= (int64_t)vec->size()) {
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    if (idx < 0 || idx >= ln) {
         fprintf(stderr, "ring panic: list index %lld out of bounds (len %lld)\n",
-                (long long)idx, (long long)vec->size());
+                (long long)idx, (long long)ln);
         exit(1);
     }
-    // B-104 D1 rule ④ — overwrite must DROP the old element.  Insert side: the
-    // value arg is a sink position (perceus sink_arg_indices ".set" → borrows are
-    // escape-Cloned, fresh temps transfer ownership), so the list owns +1 per slot
-    // — exactly the account drop_list settles at end-of-life.  Overwriting without
-    // a drop leaked that +1 (unbounded for hot slots).  Store first, THEN drop:
-    // a self-assign `xs.set(i, xs[i])` arrives with its own call-site dup (rc ≥ 2)
-    // and external sharers (`let saved = xs[i]` escape-Clone) hold their own +1,
-    // so the drop only decrements for them; an unshared old value (rc=1) is freed
-    // — the reclaimed leak.
-    void* old = (*vec)[(size_t)idx];
-    (*vec)[(size_t)idx] = val;
+    void* old = l->buf[idx];
+    l->buf[idx] = val;
     ring_drop(old);
     return list;
 }
@@ -1036,49 +1130,52 @@ extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
 extern "C" int64_t ring_list_len(void* list) {
     CHK("list_len");
     if (!list) { return 0; }
-    return (int64_t)((std::vector<void*>*)list)->size();
+    return list_len(as_list(list));
 }
 
 extern "C" void* ring_list_concat(void* a, void* b) {
-    auto* va = (std::vector<void*>*)a;
-    auto* vb = (std::vector<void*>*)b;
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>(*va);
-    result->insert(result->end(), vb->begin(), vb->end());
+    RingList* la = as_list(a);
+    RingList* lb = as_list(b);
+    int64_t la_len = list_len(la);
+    int64_t lb_len = list_len(lb);
+    void* data = make_ring_list(la_len + lb_len);
+    RingList* r = as_list(data);
+    if (la_len > 0) memmove(r->buf, la->buf, (size_t)la_len * sizeof(void*));
+    if (lb_len > 0) memmove(r->buf + la_len, lb->buf, (size_t)lb_len * sizeof(void*));
+    list_set_len(r, la_len + lb_len);
     // B-103: the fresh list co-owns elements still owned by `a` and `b` — dup each
-    // (owned-container-constructor rule, design §7.11; same class as ring_list_clone).
-    // Without this, dropping both the concat result and a source deep-drops the
-    // same elements → double-free (latent while the leak régime never dropped the
-    // sources; detonates under is_droppable_init(Call)=true / the D1 total pass).
-    for (void* el : *result) ring_dup(el);
+    for (int64_t i = 0; i < la_len + lb_len; i++) ring_dup(r->buf[i]);
     return data;
 }
 
 extern "C" void* ring_list_slice(void* list, int64_t start, int64_t end) {
-    auto* vec = (std::vector<void*>*)list;
-    int64_t len = (int64_t)vec->size();
+    RingList* l = as_list(list);
+    int64_t len = list_len(l);
     if (start < 0) start = 0;
     if (end > len) end = len;
     if (start >= end) {
-        void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-        new (data) std::vector<void*>();
-        return data;
+        return make_ring_list(0);
     }
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>(vec->begin() + start, vec->begin() + end);
+    int64_t count = end - start;
+    void* data = make_ring_list(count);
+    RingList* r = as_list(data);
+    memmove(r->buf, l->buf + start, (size_t)count * sizeof(void*));
+    list_set_len(r, count);
     // B-103: dup the copied range — the fresh slice co-owns elements still owned
     // by the source list (owned-container-constructor rule; see ring_list_concat).
-    for (void* el : *result) ring_dup(el);
+    for (int64_t i = 0; i < count; i++) ring_dup(r->buf[i]);
     return data;
 }
 
 extern "C" void* ring_list_pop(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    if (vec->empty()) {
-        return ring_enum_none(); // B-104 D6: the none singleton (was an inline fresh tag-1 OPTION)
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    if (ln == 0) {
+        return ring_enum_none();
     }
-    void* val = vec->back();
-    vec->pop_back();
+    void* val = l->buf[ln - 1];
+    l->buf[ln - 1] = nullptr;
+    list_set_len(l, ln - 1);
     void* data = ring_alloc(sizeof(int64_t) + sizeof(void*), RING_TYPEID_OPTION);
     ((int64_t*)data)[0] = 0; // Some tag
     *((void**)((int64_t*)data + 1)) = val;
@@ -1086,41 +1183,40 @@ extern "C" void* ring_list_pop(void* list) {
 }
 
 extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
-    auto* vec = (std::vector<void*>*)list;
-    if (idx < 0 || idx >= (int64_t)vec->size()) {
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    if (idx < 0 || idx >= ln) {
         return ring_enum_none();
     }
-    // B-098: `.get()` builds a FRESH owned Option (ring_enum_some) that co-owns
-    // the element — same owned-container-constructor rule as map_values: dup the
-    // element so drop_option (which drops the payload) is balanced.  (The DIRECT
-    // element reads — ring_list_get / map_get / IndexExpr — return a borrow and
-    // are the ones whose always-own dup is reverted.)
-    void* elem = (*vec)[(size_t)idx];
+    void* elem = l->buf[idx];
     ring_dup(elem);
     return ring_enum_some(elem);
 }
 
 extern "C" void* ring_list_reverse(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    // B-123: in-place permute — no ownership change, no dup/drop needed.
-    // Matches JS backend semantics (Unit-typed, mutates receiver).
-    std::reverse(vec->begin(), vec->end());
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    std::reverse(l->buf, l->buf + ln);
     return list;
 }
 
 extern "C" void* ring_list_sort(void* list, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
-    // B-123: in-place sort — no ownership change, no dup/drop needed.
-    // Matches JS backend semantics (Unit-typed, mutates receiver).
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingClosure* cmp = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cmp->fn_ptr);
-    std::sort(vec->begin(), vec->end(), [fn, cmp](void* a, void* b) -> bool {
+    std::sort(l->buf, l->buf + ln, [fn, cmp](void* a, void* b) -> bool {
         void* r = fn(cmp->env_ptr, a, b);
         int64_t result = ring_unbox_int(r);
         ring_drop(r);              // #170: drop comparator's boxed return value
         return result < 0;
     });
     return list;
+}
+
+// B-152 P2: bridge for Ring sort_by method — same as ring_list_sort.
+extern "C" void* ring_list_sort_bridge(void* list, void* closure) {
+    return ring_list_sort(list, closure);
 }
 
 static void* ring_enum_some(void* val) {
@@ -1233,49 +1329,44 @@ extern "C" void* ring_Option_unwrap_or_else(void* opt, void* closure) {
 }
 
 extern "C" int64_t ring_list_any(void* list, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        void* r = fn(cls->env_ptr, (*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        void* r = fn(cls->env_ptr, l->buf[i]);
         int match = ring_unbox_int(r) != 0;
-        ring_drop(r);  // #152 ①: drop predicate Bool box
+        ring_drop(r);
         if (match) return 1;
     }
     return 0;
 }
 
 extern "C" int64_t ring_list_all(void* list, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        void* r = fn(cls->env_ptr, (*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        void* r = fn(cls->env_ptr, l->buf[i]);
         int match = ring_unbox_int(r) == 0;
-        ring_drop(r);  // #152 ①: drop predicate Bool box
+        ring_drop(r);
         if (match) return 0;
     }
     return 1;
 }
 
 extern "C" void* ring_list_find(void* list, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        void* r = fn(cls->env_ptr, (*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        void* r = fn(cls->env_ptr, l->buf[i]);
         int match = ring_unbox_int(r) != 0;
-        ring_drop(r);  // #152 ①: drop predicate Bool box
+        ring_drop(r);
         if (match) {
-            // B-103: .find builds a FRESH owned Option that co-owns the matched
-            // element (same owned-container-constructor rule as ring_list_get_opt /
-            // first / last — dup the element so drop_option is balanced).  Was a
-            // latent un-dup'd borrow: `let f = xs.find(p)` is now droppable
-            // (is_droppable_init(Call)=true), so without this dup, scope-end-dropping
-            // the Option frees the list's element → UAF (native self-compile
-            // over-free in infer_field_access: struct_def.fields.find(...) freeing a
-            // registered StructField).
-            void* elem = (*vec)[i];
+            void* elem = l->buf[i];
             ring_dup(elem);
             return ring_enum_some(elem);
         }
@@ -1283,29 +1374,24 @@ extern "C" void* ring_list_find(void* list, void* closure) {
     return ring_enum_none();
 }
 
-// find_index: return Some(boxed index) of the first element satisfying the
-// predicate, else None. Mirrors ring_list_find but boxes the index instead of
-// returning the element (matches the JS backend's List.find_index semantics).
 extern "C" void* ring_list_find_index(void* list, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        void* r = fn(cls->env_ptr, (*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        void* r = fn(cls->env_ptr, l->buf[i]);
         int match = ring_unbox_int(r) != 0;
-        ring_drop(r);  // #152 ①: drop predicate Bool box
+        ring_drop(r);
         if (match) {
-            return ring_enum_some(ring_box_int((int64_t)i));
+            return ring_enum_some(ring_box_int(i));
         }
     }
     return ring_enum_none();
 }
 
-// fold: left fold with an explicit accumulator initial value. The closure is
-// binary: fn(env, acc, elem) -> acc. Matches the JS backend's
-// `list.reduce(cb, init)` lowering (acc is the first closure argument).
 extern "C" void* ring_list_fold(void* list, void* init, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
     // B-104 D1 Stage 3 (audit #150): on the EMPTY path the result is `init`.
     // Returning it VERBATIM while the caller's result binding MOVES it would
     // make the binding co-own one box with init's owner — double-free at scope
@@ -1313,128 +1399,107 @@ extern "C" void* ring_list_fold(void* list, void* init, void* closure) {
     // returns the closure's owned result; B-103 dup-on-share pattern, see
     // ring_list_filter / ring_list_concat).  This dup is what retired `fold`
     // from is_arg_returning_call and the perceus anf_arg mechanism.
-    if (vec->empty()) {
+    int64_t ln = list_len(l);
+    if (ln == 0) {
         ring_dup(init);
         return init;
     }
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     void* acc = init;
-    for (size_t i = 0; i < vec->size(); i++) {
+    for (int64_t i = 0; i < ln; i++) {
         void* old_acc = acc;
-        acc = fn(cls->env_ptr, old_acc, (*vec)[i]);
-        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
+        acc = fn(cls->env_ptr, old_acc, l->buf[i]);
+        if (i > 0) ring_drop(old_acc);
     }
     return acc;
 }
 
 extern "C" void* ring_list_map(void* list, void* closure) {
     if (!list) {
-        void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-        new (data) std::vector<void*>();
-        return data;
+        return make_ring_list(0);
     }
-    auto* vec = (std::vector<void*>*)list;
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>();
-    result->reserve(vec->size());
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    void* data = make_ring_list(ln);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        result->push_back(fn(cls->env_ptr, (*vec)[i]));
+    for (int64_t i = 0; i < ln; i++) {
+        ring_list_push_raw(data, fn(cls->env_ptr, l->buf[i]));
     }
     return data;
 }
 
 extern "C" void* ring_list_filter(void* list, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>();
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    void* data = make_ring_list(0);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        void* r = fn(cls->env_ptr, (*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        void* r = fn(cls->env_ptr, l->buf[i]);
         int match = ring_unbox_int(r) != 0;
-        ring_drop(r);  // #152 ①: drop predicate Bool box
+        ring_drop(r);
         if (match) {
-            // B-103: dup — the fresh filtered list co-owns the source's element
-            // (owned-container-constructor rule; see ring_list_concat).
-            ring_dup((*vec)[i]);
-            result->push_back((*vec)[i]);
+            ring_dup(l->buf[i]);
+            ring_list_push_raw(data, l->buf[i]);
         }
     }
     return data;
 }
 
 extern "C" void* ring_list_for_each(void* list, void* closure) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        fn(cls->env_ptr, (*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        fn(cls->env_ptr, l->buf[i]);
     }
     return nullptr;
 }
 
 extern "C" int64_t ring_list_is_empty(void* list) {
-    return ((std::vector<void*>*)list)->empty() ? 1 : 0;
+    return list_len(as_list(list)) == 0 ? 1 : 0;
 }
 
 extern "C" void* ring_list_last(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    if (vec->empty()) {
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    if (ln == 0) {
         return ring_enum_none();
     }
-    // B-103: like ring_list_get_opt, .last() builds a FRESH owned Option that
-    // co-owns the element (the Ring-source `self.get(self.len()-1)` goes through
-    // ring_list_get_opt, which dups).  The LLVM backend shortcuts `.last` straight
-    // to this runtime fn (codegen_llvm_expr.ring), so it must dup the element too —
-    // otherwise the returned Option's payload aliases the container element and
-    // scope-end-dropping the Option (now droppable: is_droppable_init(Call)=true)
-    // double-frees it.  Owned-container-constructor rule (design §7.11): dup on
-    // co-own, balanced by drop_option.
-    void* elem = vec->back();
+    void* elem = l->buf[ln - 1];
     ring_dup(elem);
     return ring_enum_some(elem);
 }
 
 extern "C" void* ring_list_first(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    if (vec->empty()) {
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    if (ln == 0) {
         return ring_enum_none();
     }
-    // B-103: see ring_list_last — fresh owned Option co-owns the element (dup),
-    // matching ring_list_get_opt and the Ring-source `self.get(0)`.
-    void* elem = vec->front();
+    void* elem = l->buf[0];
     ring_dup(elem);
     return ring_enum_some(elem);
 }
 
-// flat_map: apply closure (returns List) to each element, concatenate results.
-// Mirrors ring_list_map's closure-call pattern but flattens each returned List.
 extern "C" void* ring_list_flat_map(void* list, void* closure) {
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>();
+    void* data = make_ring_list(0);
     if (!list) return data;
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (size_t i = 0; i < vec->size(); i++) {
-        void* sub = fn(cls->env_ptr, (*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        void* sub = fn(cls->env_ptr, l->buf[i]);
         if (sub) {
-            auto* svec = (std::vector<void*>*)sub;
-            // B-103: dup each copied element, then drop the sub-list (the
-            // closure's result, owned by Ring-fn convention).  Before this, the
-            // result STOLE the sub-list's element ownership (no dup) and leaked
-            // the sub-list header — and when the closure returned a Clone of an
-            // EXISTING list (`.flat_map(fn(l) { l })` — tail escape Clones the
-            // borrowed param), the result's deep-drop freed elements still owned
-            // by the original → UAF.  dup + drop is balanced for both cases:
-            // fresh sub (rc1: dup→2, deep-drop→1, owned by result; header freed)
-            // and shared sub (rc≥2: dup, shallow drop; both owners intact).
-            for (void* el : *svec) {
-                ring_dup(el);
-                result->push_back(el);
+            RingList* sl = as_list(sub);
+            int64_t sln = list_len(sl);
+            for (int64_t j = 0; j < sln; j++) {
+                ring_dup(sl->buf[j]);
+                ring_list_push_raw(data, sl->buf[j]);
             }
             ring_drop(sub);
         }
@@ -1530,44 +1595,32 @@ extern "C" void* ring_map_delete(void* map, void* key) {
 
 extern "C" void* ring_map_keys(void* map) {
     RingMap* m = (RingMap*)map;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(m->size());
+    void* ldata = make_ring_list((int64_t)m->size());
     for (auto& kv : *m) {
-        result->push_back(make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
+        ring_list_push_raw(ldata, make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
     }
     return ldata;
 }
 
 extern "C" void* ring_map_values(void* map) {
     RingMap* m = (RingMap*)map;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(m->size());
+    void* ldata = make_ring_list((int64_t)m->size());
     for (auto& kv : *m) {
-        ring_dup(kv.second);  // B-098: the FRESH list co-owns its elements (the
-                              // map keeps its own copy) — this is the model's
-                              // "escape into a container = clone" inlined into the
-                              // owned-container constructor, NOT a read-borrow dup.
-        result->push_back(kv.second);
+        ring_dup(kv.second);
+        ring_list_push_raw(ldata, kv.second);
     }
     return ldata;
 }
 
 extern "C" void* ring_map_entries(void* map) {
-    // Returns List of {key, value} pairs, each pair as a 2-element List
     RingMap* m = (RingMap*)map;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(m->size());
+    void* ldata = make_ring_list((int64_t)m->size());
     for (auto& kv : *m) {
-        void* pdata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-        auto* pair = new (pdata) std::vector<void*>();
-        pair->push_back(make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
-        ring_dup(kv.second);  // B-098: the fresh entry pair (a List) co-owns the
-                              // value; owned-container constructor, not a borrow.
-        pair->push_back(kv.second);
-        result->push_back(pdata);
+        void* pdata = make_ring_list(2);
+        ring_list_push_raw(pdata, make_ring_str(kv.first.c_str(), (int64_t)kv.first.size()));
+        ring_dup(kv.second);
+        ring_list_push_raw(pdata, kv.second);
+        ring_list_push_raw(ldata, pdata);
     }
     return ldata;
 }
@@ -1740,43 +1793,32 @@ extern "C" void* ring_map_int_delete(void* map, void* key) {
 
 extern "C" void* ring_map_int_keys(void* map) {
     RingMapInt* m = (RingMapInt*)map;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(m->size());
+    void* ldata = make_ring_list((int64_t)m->size());
     for (auto& kv : *m) {
-        result->push_back(ring_box_int(kv.first));
+        ring_list_push_raw(ldata, ring_box_int(kv.first));
     }
     return ldata;
 }
 
 extern "C" void* ring_map_int_values(void* map) {
     RingMapInt* m = (RingMapInt*)map;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(m->size());
+    void* ldata = make_ring_list((int64_t)m->size());
     for (auto& kv : *m) {
-        ring_dup(kv.second);  // B-103: fresh List co-owns the value (same
-                              // owned-container-constructor rule as ring_map_values;
-                              // was a latent un-dup'd borrow, now droppable via
-                              // is_droppable_init(Call)=true).
-        result->push_back(kv.second);
+        ring_dup(kv.second);
+        ring_list_push_raw(ldata, kv.second);
     }
     return ldata;
 }
 
 extern "C" void* ring_map_int_entries(void* map) {
     RingMapInt* m = (RingMapInt*)map;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(m->size());
+    void* ldata = make_ring_list((int64_t)m->size());
     for (auto& kv : *m) {
-        void* pdata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-        auto* pair = new (pdata) std::vector<void*>();
-        pair->push_back(ring_box_int(kv.first));
-        ring_dup(kv.second);  // B-103: fresh entry pair co-owns the value (same as
-                              // ring_map_entries); was a latent un-dup'd borrow.
-        pair->push_back(kv.second);
-        result->push_back(pdata);
+        void* pdata = make_ring_list(2);
+        ring_list_push_raw(pdata, ring_box_int(kv.first));
+        ring_dup(kv.second);
+        ring_list_push_raw(pdata, kv.second);
+        ring_list_push_raw(ldata, pdata);
     }
     return ldata;
 }
@@ -1889,18 +1931,16 @@ extern "C" void* ring_map_int_clone(void* map) {
 }
 
 extern "C" void* ring_map_int_from(void* entries) {
-    auto* vec = (std::vector<void*>*)entries;
+    RingList* vec = as_list(entries);
+    int64_t vln = list_len(vec);
     void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
     auto* result = new (data) RingMapInt();
-    for (size_t i = 0; i < vec->size(); i++) {
-        auto* pair = (std::vector<void*>*)((*vec)[i]);
-        if (pair->size() >= 2) {
-            int64_t key = ring_unbox_int((*pair)[0]);
-            void* val = (*pair)[1];
-            // B-103: dup — fresh map co-owns the value (see ring_map_from).
+    for (int64_t i = 0; i < vln; i++) {
+        RingList* pair = as_list(vec->buf[i]);
+        if (list_len(pair) >= 2) {
+            int64_t key = ring_unbox_int(pair->buf[0]);
+            void* val = pair->buf[1];
             ring_dup(val);
-            // B-104 D1 rule ④ — repeated key: later entry wins; drop the
-            // previously stored dup (this map's own +1; see ring_map_from).
             auto it = result->find(key);
             if (it == result->end()) {
                 result->emplace(key, val);
@@ -1955,11 +1995,9 @@ extern "C" void* ring_set_delete(void* set, void* elem) {
 
 extern "C" void* ring_set_to_list(void* set) {
     RingSet* s = (RingSet*)set;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(s->size());
+    void* ldata = make_ring_list((int64_t)s->size());
     for (auto& elem : *s) {
-        result->push_back(make_ring_str(elem.c_str(), (int64_t)elem.size()));
+        ring_list_push_raw(ldata, make_ring_str(elem.c_str(), (int64_t)elem.size()));
     }
     return ldata;
 }
@@ -1973,11 +2011,12 @@ extern "C" int64_t ring_set_is_empty(void* set) {
 }
 
 extern "C" void* ring_set_from_list(void* list) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
     auto* result = new (data) RingSet();
-    for (size_t i = 0; i < vec->size(); i++) {
-        RingStr* e = as_str((*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        RingStr* e = as_str(l->buf[i]);
         result->insert(std::string(e->buf, (size_t)e->len));
     }
     return data;
@@ -2102,11 +2141,9 @@ extern "C" void* ring_set_int_delete(void* set, void* elem) {
 
 extern "C" void* ring_set_int_to_list(void* set) {
     RingSetInt* s = (RingSetInt*)set;
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    result->reserve(s->size());
+    void* ldata = make_ring_list((int64_t)s->size());
     for (auto& elem : *s) {
-        result->push_back(ring_box_int(elem));
+        ring_list_push_raw(ldata, ring_box_int(elem));
     }
     return ldata;
 }
@@ -2120,11 +2157,12 @@ extern "C" int64_t ring_set_int_is_empty(void* set) {
 }
 
 extern "C" void* ring_set_int_from_list(void* list) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
     auto* result = new (data) RingSetInt();
-    for (size_t i = 0; i < vec->size(); i++) {
-        int64_t k = ring_unbox_int((*vec)[i]);
+    for (int64_t i = 0; i < ln; i++) {
+        int64_t k = ring_unbox_int(l->buf[i]);
         result->insert(k);
     }
     return data;
@@ -2370,12 +2408,9 @@ extern "C" void* ring_exit(void* boxed_code) {
 }
 
 extern "C" void* ring_args() {
-    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (ldata) std::vector<void*>();
-    // Skip argv[0] (program name) to match JS backend behavior
-    // where process.argv.slice(2) skips [node, script]
+    void* ldata = make_ring_list(g_argc > 1 ? (int64_t)(g_argc - 1) : 0);
     for (int i = 1; i < g_argc; i++) {
-        result->push_back(make_ring_str(g_argv[i], (int64_t)strlen(g_argv[i])));
+        ring_list_push_raw(ldata, make_ring_str(g_argv[i], (int64_t)strlen(g_argv[i])));
     }
     return ldata;
 }
@@ -2687,16 +2722,18 @@ extern "C" void* ring_delete_file(void* path) {
 // Collection clone / from
 // ============================================================================
 
-extern "C" void* ring_list_clone(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* nv = new (data) std::vector<void*>(*vec);
-    // B-103: a clone must co-own its elements (deep RC). The shallow copy above
-    // shares element pointers with the source; under Perceus RC both lists would
-    // deep-drop the same elements -> over-free. dup each so the clone is an
-    // independent owner (latent double-free masked by never-drop / the
-    // conservative is_droppable_init Call=false gate before B-102/B-103).
-    for (void* el : *nv) ring_dup(el);
+// B-152 P2: renamed to avoid duplicate symbol with the Ring list_clone function
+// (which the codegen mangles to ring_list_clone).  Kept for bootstrap compat.
+extern "C" void* ring_list_clone_rt(void* list) {
+    RingList* src = as_list(list);
+    int64_t ln = list_len(src);
+    void* data = make_ring_list(ln);
+    RingList* dst = as_list(data);
+    if (ln > 0) {
+        memmove(dst->buf, src->buf, (size_t)ln * sizeof(void*));
+        list_set_len(dst, ln);
+        for (int64_t i = 0; i < ln; i++) ring_dup(dst->buf[i]);
+    }
     return data;
 }
 
@@ -2720,26 +2757,17 @@ extern "C" void* ring_set_clone(void* set) {
 }
 
 extern "C" void* ring_map_from(void* entries) {
-    // entries is List<(K, V)> = List<List<void*>> where each inner list is [key, value]
-    auto* vec = (std::vector<void*>*)entries;
+    RingList* vec = as_list(entries);
+    int64_t vln = list_len(vec);
     void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
     auto* result = new (data) RingMap();
-    for (size_t i = 0; i < vec->size(); i++) {
-        auto* pair = (std::vector<void*>*)((*vec)[i]);
-        if (pair->size() >= 2) {
-            RingStr* key = as_str((*pair)[0]);
+    for (int64_t i = 0; i < vln; i++) {
+        RingList* pair = as_list(vec->buf[i]);
+        if (list_len(pair) >= 2) {
+            RingStr* key = as_str(pair->buf[0]);
             std::string ks(key->buf, (size_t)key->len);
-            void* val = (*pair)[1];
-            // B-103: dup — the fresh map co-owns the value still owned by the
-            // entries pair-list (owned-container-constructor rule; see
-            // ring_list_concat).
+            void* val = pair->buf[1];
             ring_dup(val);
-            // B-104 D1 rule ④ — repeated key: the later entry wins (JS
-            // `new Map(entries)` oracle), and the previously stored dup is THIS
-            // map's own +1 — release it, else it leaks.  The entries list's own
-            // reference is untouched either way (rc only steps back to the
-            // pre-dup count, never below — the overwritten value stays alive
-            // for the entries list).
             auto it = result->find(ks);
             if (it == result->end()) {
                 result->emplace(ks, val);
@@ -3050,39 +3078,36 @@ extern "C" void* ring_set_difference(void* a, void* b) {
 // ============================================================================
 
 extern "C" void* ring_list_shift(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    if (vec->empty()) {
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    if (ln == 0) {
         return ring_enum_none();
     }
-    void* val = vec->front();
-    vec->erase(vec->begin());
+    void* val = l->buf[0];
+    if (ln > 1) memmove(l->buf, l->buf + 1, (size_t)(ln - 1) * sizeof(void*));
+    l->buf[ln - 1] = nullptr;
+    list_set_len(l, ln - 1);
     return ring_enum_some(val);
 }
 
 extern "C" void* ring_list_clear(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    // B-104 D1 rule ④ — clear is early end-of-life for the CONTENTS: drop every
-    // element the list owned (+1 per slot from the push/set sink dups — the same
-    // account drop_list settles when the list itself dies).  rc>1 sharers are
-    // only decremented; the list stays alive and reusable.
-    for (void* elem : *vec) ring_drop(elem);
-    vec->clear();
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
+    for (int64_t i = 0; i < ln; i++) {
+        if (l->buf[i]) ring_drop(l->buf[i]);
+        l->buf[i] = nullptr;
+    }
+    list_set_len(l, 0);
     return list;
 }
 
 extern "C" void* ring_list_extend(void* list, void* other) {
-    auto* va = (std::vector<void*>*)list;
-    auto* vb = (std::vector<void*>*)other;
-    // B-102: each element of `other` ESCAPES into `list` (the destination co-owns
-    // it), so dup it — exactly like push (the clone-all-escape "escape into a
-    // container = clone" rule, inlined at runtime, same as map.values()/entries()).
-    // Without this, `list` and `other` would share the same element pointers; when
-    // both lists are scope-end-dropped (e.g. emit_fn_decl's `all.extend(param_names)`
-    // then both `all` and `param_names` drop), drop_list would free each shared
-    // element TWICE → native self-compile over-free (B-102 layer 5).
-    for (void* e : *vb) {
-        ring_dup(e);
-        va->push_back(e);
+    RingList* la = as_list(list);
+    RingList* lb = as_list(other);
+    int64_t lb_len = list_len(lb);
+    for (int64_t i = 0; i < lb_len; i++) {
+        ring_dup(lb->buf[i]);
+        ring_list_push_raw(list, lb->buf[i]);
     }
     return list;
 }
@@ -3288,11 +3313,13 @@ static void* ring_make_debug_dict(void* debugfn) {
 // ============================================================================
 
 static void drop_list(void* data) {
-    auto* v = (std::vector<void*>*)data;
-    for (void* elem : *v) {
-        ring_drop(elem);
+    RingList* l = as_list(data);
+    int64_t ln = list_len(l);
+    for (int64_t i = 0; i < ln; i++) {
+        void* elem = l->buf[i];
+        if (elem) ring_drop(elem);
     }
-    v->~vector();
+    free(l->buf);
 }
 
 static void drop_map(void* data) {
@@ -3464,13 +3491,13 @@ extern "C" void* ring_get_builtin_dict(void* name_ptr) {
 // ============================================================================
 
 extern "C" void* ring_list_join(void* list, void* sep) {
-    auto* vec = (std::vector<void*>*)list;
+    RingList* l = as_list(list);
+    int64_t ln = list_len(l);
     RingStr* separator = as_str(sep);
-    // Pre-calculate total length
     int64_t total = 0;
-    for (size_t i = 0; i < vec->size(); i++) {
+    for (int64_t i = 0; i < ln; i++) {
         if (i > 0) total += separator->len;
-        total += as_str((*vec)[i])->len;
+        total += as_str(l->buf[i])->len;
     }
     void* data = ring_alloc(sizeof(RingStr), RING_TYPEID_STR);
     RingStr* rs = as_str(data);
@@ -3478,12 +3505,12 @@ extern "C" void* ring_list_join(void* list, void* sep) {
     rs->cap = total + 1;
     rs->buf = (char*)malloc((size_t)rs->cap);
     int64_t off = 0;
-    for (size_t i = 0; i < vec->size(); i++) {
+    for (int64_t i = 0; i < ln; i++) {
         if (i > 0 && separator->len > 0) {
             memcpy(rs->buf + off, separator->buf, (size_t)separator->len);
             off += separator->len;
         }
-        RingStr* elem = as_str((*vec)[i]);
+        RingStr* elem = as_str(l->buf[i]);
         if (elem->len > 0) {
             memcpy(rs->buf + off, elem->buf, (size_t)elem->len);
             off += elem->len;
