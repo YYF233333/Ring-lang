@@ -69,6 +69,56 @@ Ring-lang/
 - **runtime 编译必须 -O2**：`clang++ -c ring_runtime.cpp` 必须带 `-O2`（不是 -O0）。-O0 下自编译耗时翻倍，不可接受。
 - **日常只 commit 不 push**：CI 单次 ~1h，跟不上 commit 速度。需要测试时再 `git push`，不要每个 commit 都推。
 
+## RIIR 实施指南（B-152 经验，适用于 P3 Map / P4 Set / P1 Step 2 Str）
+
+### 类型分类决定迁移路径
+
+| 类型 | 身份 | 迁移难度 | 已完成 |
+|------|------|---------|--------|
+| StringBuilder | `pub extern type`（structs map） | 简单（P0 已验证） | ✅ P0 |
+| List | `pub extern type`（structs map） | 中等 | ✅ P2 |
+| Map / Set | `pub extern type`（structs map） | 中等（同 List 模式） | 待做 |
+| Str | `Type::StrType`（Type 枚举变体） | 困难（需改类型系统 26 处） | P1 Step 1 ✅，Step 2 排最后 |
+
+- **extern type**（List/Map/Set/StringBuilder）：走 structs map 的 `Type::StructType`，改为 `pub struct` 后 checker/codegen 自然走通
+- **内建类型**（Str/Int/Bool）：`resolve_named_type` 有硬编码短路，codegen 26+ 处特殊分支，必须逐一改
+
+### Bridge 函数模式（标准做法）
+
+C++ 端实现 slot 级操作，Ring 端声明为 `extern fn`，codegen 自动声明+调用（`fdab843` 修复后不再 panic）：
+
+```ring
+// std/list.ring（或 std/map.ring）
+extern fn ring_slot_read<T>(buf: Ptr<T>, idx: Int) -> T   // peek + dup
+extern fn ring_slot_take<T>(buf: Ptr<T>, idx: Int) -> T   // move out
+extern fn ring_slot_write<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
+extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
+```
+
+- **不需要 `extern_fn_to_runtime` 映射**——codegen fallback 自动处理
+- **不需要 `declare_runtime_fns`**——codegen fallback 自动声明
+- **只需要** ring_runtime.cpp 中有对应 `extern "C"` 实现
+- 旧编译器（dist-llvm/）也能正常编译调用（codegen 修复后）
+
+### RC 语义（bridge 函数的 dup/drop 职责）
+
+| 操作 | 语义 | 用途 |
+|------|------|------|
+| `ring_slot_read` | peek + `ring_dup` | get/first/last/concat/clone（共享所有权） |
+| `ring_slot_take` | move out，slot 置 null | pop/shift/clear/drop（转移所有权） |
+| `ring_slot_write` | 直接写入 | push/set/构造（接管所有权） |
+| `ring_slot_drop` | take + `ring_drop` | set 替换旧值 / clear / Drop impl |
+
+### 已知陷阱
+
+1. **Drop/Clone 冲突**（E0802）：Ring 禁止同时 `impl Drop` + `impl Clone`。内建容器（List/Map/Set）有编译器内建的 Clone，加 `impl Drop` 会触发 E0802。解法：在 codegen 的 `emit_drop_functions` 中为容器生成 custom drop 循环，不用 `impl Drop`
+2. **`let mut` effect 泄漏**：impl 方法中 `let mut i = 0; while i < n { ... i = i + 1 }` 会导致 `mut` effect 泄漏到方法签名。解法：用 `for i in 0..n` 代替 while 循环（range iterator 不泄漏 mut）
+3. **Effect 暴露**：C runtime 函数没有 effect 签名，Ring 方法有。迁移后调用者可能因新暴露的 effect 而编译失败。需检查 HOF 方法（map/filter/fold 等）的 effect 传播
+4. **Typeid 一致性**：用户定义的 struct 会被分配 user typeid（≥64），但 C runtime 的 drop/dup 使用固定 typeid（如 RING_TYPEID_LIST=4）。需在 codegen 中强制分配匹配的 typeid（`get_or_assign_typeid` 特殊化）
+5. **C++ 函数保留为 shim**：旧编译器的 method_to_runtime 仍会引用 ring_list_* 等 C++ 函数，链接时需要符号存在。RIIR 后保留 C++ 函数不删除，作为 bootstrap shim
+6. **sort_by 委托 C runtime**：原地排序用 Ring 实现效率低（无 break/continue），可委托 C 端的 `ring_list_sort_bridge` 桥接
+7. **Str 是内建类型**：`resolve_named_type("Str")` 在 `infer_ctx.ring:L1134` 短路返回 `Type::StrType`，绕过 structs map。P1 Step 2 需要删除此短路 + 改 26 处 StrType 引用
+
 ## 测试策略
 
 - **E2E 语义测试**（`tests/cases/*.ring`）：语言规范的可执行版本，每个特性一个文件
