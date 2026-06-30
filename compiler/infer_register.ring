@@ -954,9 +954,10 @@ fn register_impl_method(
 
     let impl_m_effects = match declared_effects {
         some(de) => resolve_declared_effects(ctx, de),
-        none => EMPTY_ROW
+        none => infer_hof_effect_row(param_types)
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_m_effects }
+    collect_effect_tail_vars(fn_type, all_tvs)
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: impl_scheme_bounds, def_id: none })
 
     // Track mut self methods
@@ -1223,6 +1224,48 @@ fn expand_effect_exprs(mut ctx: InferCtx, decl_effects: List<EffectExpr>, mut ex
     effects
 }
 
+fn collect_effect_tail_vars(ty: Type, mut vars: List<Int>) {
+    match ty {
+        Type::FnType { params, return_type, effects } => {
+            match effects.tail {
+                some(t_id) => {
+                    if !vars.contains(t_id) { vars.push(t_id) }
+                },
+                none => {}
+            }
+            for p in params { collect_effect_tail_vars(p, vars) }
+            collect_effect_tail_vars(return_type, vars)
+        },
+        Type::StructType { type_params, .. } => {
+            for tp in type_params { collect_effect_tail_vars(tp, vars) }
+        },
+        Type::EnumType { type_params, .. } => {
+            for tp in type_params { collect_effect_tail_vars(tp, vars) }
+        },
+        Type::TupleType { elements } => {
+            for e in elements { collect_effect_tail_vars(e, vars) }
+        },
+        Type::GenericType { base, args } => {
+            collect_effect_tail_vars(base, vars)
+            for a in args { collect_effect_tail_vars(a, vars) }
+        },
+        _ => {}
+    }
+}
+
+fn infer_hof_effect_row(param_types: List<Type>) -> EffectRow {
+    for pt in param_types {
+        match pt {
+            Type::FnType { effects, .. } => match effects.tail {
+                some(t_id) => { return EffectRow { effects: [], tail: some(t_id) } },
+                none => {}
+            },
+            _ => {}
+        }
+    }
+    EMPTY_ROW
+}
+
 pub fn resolve_declared_effects(mut ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
     let mut expanding: Set<Str> = set_new()
     let effects = expand_effect_exprs(ctx, decl_effects, expanding)
@@ -1359,9 +1402,10 @@ fn register_fn_common(
 
     let effects = match declared_effects {
         some(de) => resolve_declared_effects(ctx, de),
-        none => EMPTY_ROW
+        none => infer_hof_effect_row(param_types)
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: effects }
+    collect_effect_tail_vars(fn_type, type_vars)
 
     let mut fn_bounds_list: List<FnBound> = []
     let mut scheme_bounds: List<SchemeBound> = []

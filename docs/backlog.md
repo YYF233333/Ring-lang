@@ -359,34 +359,6 @@ fn test_fetch() {
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
-### B-159 Effect 多态：TypeScheme effect 变量泛化 [bugfix] [P1] [L] [judgment] [queued]
-
-> 2026-06-30 立项（B-152 P2 List RIIR 暴露的 pre-existing checker bug）。C runtime dispatch 下被隐藏（C 函数没有 effect 签名），RIIR 后 Ring 方法带 effect 才暴露。2 个测试标 pending/skip（trait_hof_effect + adversarial_regress_closure_nested_effect）。
-
-**根因**：TypeScheme 不量化 closure 参数的 effect row tail 变量，导致 HOF 多次调用时 effect 变量共享、推断结果错误。
-
-**4 层问题链**：
-1. `register_fn_common` / `register_impl_method` 不把 effect tail 加入 type_vars
-2. `build_var_mapping` 不映射 FnType 的 effect tail
-3. `rebind_fn_type` 对 impl 方法 lookup 失败（impl_methods vs scope stack）
-4. `load_prelude` 的 `check_prelude_decl` 不走 rebind 路径
-
-**已尝试**：修复 1-3 后 standalone 函数 OK，但修 prelude impl 方法（#4）导致编译器自身出现大量 W0001 和类型错误——effect 推断管线需要全面协调改造。已 revert。
-
-**涉及修改**：
-1. `infer_decl.ring`：`register_fn_common` / `register_impl_method` 将 effect tail 变量加入 TypeScheme.type_vars
-2. `infer_ctx.ring`：`build_var_mapping` 处理 FnType effect tail 映射
-3. `infer_ctx.ring`：`rebind_fn_type` 支持 impl 方法 lookup
-4. `checker.ring`：`load_prelude` / `check_prelude_decl` 走 rebind 路径
-5. effect 推断管线全面协调（预期大量级联影响）
-
-**验收标准**：
-- trait_hof_effect + adversarial_regress_closure_nested_effect 两个测试从 pending/skip 恢复通过
-- 编译器自举一致
-- 全量 E2E + llvm_diff 通过
-
-**不阻塞 B-152 P3/P4**：Map/Set 的 HOF 方法可暂时保留 C runtime dispatch
-
 ### B-156 extern fn 声明处 `requires {unsafe}` 签字检查 [feature] [P2] [M] [judgment] [queued]
 
 > 2026-06-27 从 B-125 拆出。B-125 core 完成但 extern fn 签字检查推迟——当前无文件级 `requires` 语法（327 个 extern fn 声明分布在 19 个文件顶层，无 `mod` 块包装），需先设计文件级 `requires` 语法。
@@ -865,6 +837,26 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
+
+### B-160 rebind_fn_type / update_fn_effects 不查 impl_methods [bugfix] [P2] [M] [judgment] [queued]
+
+> 2026-06-30 立项（B-159 修复过程中发现的残留问题）。
+
+`rebind_fn_type`（infer_decl.ring:1815）和 `update_fn_effects`（infer_ctx.ring:551）都用 `ctx.env.lookup(name)` 查 scope stack，但 impl 方法在 `trait_reg.impl_methods` 映射中，查不到。导致 impl 方法 body check 后的 inferred effects/return type 不回写 scheme。
+
+B-159 靠注册时共享 closure 参数 effect tail 绕过了 HOF 场景，但非 HOF 的 impl 方法（如声明了 effects 但 body 实际 effect 更窄的方法）可能有 effect 信息不准确的问题。
+
+此外，prelude 方法的 check 路径不走 `check_one_decl_with_rebind` 而是直接 `check_decl`，修了会导致编译器自身大量 W0001——需要协调处理 prelude 注册的 effect 推断。
+
+**涉及修改**：
+1. `infer_decl.ring`：`rebind_fn_type` 增加 `impl_methods` 查找路径
+2. `infer_ctx.ring`：`update_fn_effects` 同上
+3. `infer_decl.ring`：prelude check 路径走 rebind（需处理 W0001 级联）
+
+**验收标准**：
+- impl 方法的 scheme 在 body check 后正确反映 inferred effects 和 return type
+- prelude 方法（List::map 等）的 scheme 正确
+- 编译器自举一致 + 全量测试通过
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。

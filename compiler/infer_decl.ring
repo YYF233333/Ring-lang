@@ -476,7 +476,7 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
                     // Zonk the default body
                     let zctx = ZonkCtx { subst: ctx.subst, names: map_new() }
                     default_body = some(zonk_block(zctx, body_result.hexpr))
-                    ctx.env.pop_scope()
+                    let _ = ctx.env.pop_scope()
                 },
                 none => {},
             },
@@ -1864,8 +1864,8 @@ fn build_var_mapping(check_ty: Type, reg_ty: Type, mut mapping: Map<Int, Type>) 
                 mapping.insert(check_id, reg_ty)
             }
         },
-        (Type::FnType { params: cp, return_type: cr, .. },
-         Type::FnType { params: rp, return_type: rr, .. }) => {
+        (Type::FnType { params: cp, return_type: cr, effects: ce },
+         Type::FnType { params: rp, return_type: rr, effects: re }) => {
             let mut i = 0
             for c in cp {
                 match rp.get(i) {
@@ -1875,6 +1875,14 @@ fn build_var_mapping(check_ty: Type, reg_ty: Type, mut mapping: Map<Int, Type>) 
                 i = i + 1
             }
             build_var_mapping(cr, rr, mapping)
+            match (ce.tail, re.tail) {
+                (some(check_tail), some(reg_tail)) => {
+                    if !mapping.contains_key(check_tail) {
+                        mapping.insert(check_tail, Type::TypeVar { id: reg_tail, name: none })
+                    }
+                },
+                _ => {}
+            }
         },
         (Type::StructType { type_params: ct, .. }, Type::StructType { type_params: rt, .. }) => {
             let mut i = 0

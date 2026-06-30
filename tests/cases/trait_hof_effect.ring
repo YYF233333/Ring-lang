@@ -1,5 +1,3 @@
-// PENDING: B-159 effect polymorphism — HOF closure effect not propagated after List RIIR
-// (TypeScheme effect vars not quantified; pre-existing, exposed by P2 List RIIR)
 fn main() {
     let nums = [1, 2, 3]
     

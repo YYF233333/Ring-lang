@@ -135,7 +135,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 - **Handler 只支持 tail-resumptive + abort**：非 abort effect 的 handler 返回值即 resume 值；`fail.raise` 为 abort。Full AE（post-resume / multi-resume）不计划实现
 - **Trait dictionary dispatch 的 evidence 转发已基本修复**（#77），delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）。**Default trait method + custom effect 的 evidence 转发已修复**（B-139，2026-06-24）；**default trait methods 已支持**（B-141，2026-06-24）
-- **Effect 多态不完整**（B-159）：TypeScheme 不量化 closure 参数的 effect row tail 变量，导致 HOF 多次调用时 effect 变量共享。C runtime dispatch 下被隐藏，RIIR 后暴露。2 个测试标 pending/skip
+- **Effect 多态核心已修复**（B-159 ✅）：HOF closure effect 量化 + 传播。**残留**：`rebind_fn_type` 不查 `impl_methods` 映射（只查 scope stack），impl 方法的 body-inferred effects 不回写 scheme。prelude 不走 rebind 路径，修了会导致编译器自身大量 W0001。当前靠注册时共享 closure 参数 effect tail 绕过
 - **`catch` 总是消除 fail effect**：完整捕获点，catch arms 经穷尽性检查。需要部分处理时在 catch 内部 match + re-raise
 - **`unsafe` effect + `Ptr<T>` 已实现**（B-125 ✅）：`unsafe { expr }` discharge 块 + `mod requires {unsafe}` 两级许可 + `Ptr<T>` 内建类型（RC 排除）+ 原语集 v1（alloc/dealloc/read/take/write/offset/cast/addr/from_addr/ptr_copy）。`read` = peek+dup，`take` = move out。extern fn 声明处签字检查推迟（B-156，需文件级 `requires` 语法）
 - **Drop/RAII Phase 1 已实现**（B-002p1 ✅）：`impl Drop for T { fn drop(self) with {io} { ... } }`，scope-end 触发用户 drop → 字段递归 drop。Move checker：Drop 类型 `let y = x` 后使用 x → E0801。`impl Drop` 禁 `impl Clone`（E0802）、drop 禁 fail（E0803）。Phase 2（unwind + Weak）推迟到 RIIR 之后
