@@ -838,6 +838,46 @@ source-map 支持 + 断点调试。
 ## 已知 Bug / 技术债
 
 
+### B-161 default effect handler sibling op dispatch 走错路径 [bugfix] [P1] [M] [judgment] [queued]
+
+> 2026-06-30 立项（worker feedback #4 + audit-report #218）。
+
+default effect handler 的 default body 调用 sibling op 时，未正确 dispatch 到 override handler，走了 default 路径。
+
+**复现**（`tests/cases/default_effect_sibling_op.ring`）：
+```ring
+effect Counter {
+    fn get() -> Int { 0 }
+    fn increment() -> Int {
+        let current = Counter.get()   // sibling op 调用
+        current + 1
+    }
+}
+
+let result = handle {
+    use_counter()       // 调 increment()
+} with {
+    Counter.get() => 10,  // override get
+}
+// 期望 11（override get=10, +1），实际 1（default get=0, +1）
+```
+
+**根因方向**：default effect op body 编译时，sibling op 调用的 evidence 未绑定到当前 handler 上下文——codegen 把 default body 编译为独立函数，调 sibling op 时用了 default evidence 而非 handler 提供的 evidence。
+
+**涉及修改**：
+1. `codegen_llvm_expr.ring` / `codegen_llvm_decl.ring`：default effect op body 中 sibling op 调用的 evidence 传递——需从 handler 上下文获取同 effect 其他 op 的 evidence
+2. 可能需要在 default body codegen 时传入完整 evidence vector（而非仅自身 op 的 evidence）
+
+**LLVM_SKIP 移除**（修好后）：
+- `default_effect_sibling_op.ring`（e2e）
+- `default_effect_sibling.ring`（llvm golden）
+- audit-report #218 关闭
+
+**验收标准**：
+- Test 2（override sibling op）断言通过：`increment` 的 default body 调用被 override 的 `get()` 返回 10，结果 11
+- 两个 LLVM_SKIP 用例移除且通过
+- 编译器自举一致 + 全量测试通过
+
 ### B-160 rebind_fn_type / update_fn_effects 不查 impl_methods [bugfix] [P2] [M] [judgment] [queued]
 
 > 2026-06-30 立项（B-159 修复过程中发现的残留问题）。
