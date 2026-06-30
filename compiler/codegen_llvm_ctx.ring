@@ -408,6 +408,12 @@ pub fn get_or_assign_typeid(mut ctx: LlvmCtx, type_name: Str) -> Int {
                 ctx.type_to_typeid.insert(type_name, 4)
                 return 4
             }
+            // B-152 P3: Map is a Ring struct but must keep RING_TYPEID_MAP (5)
+            // so the runtime's drop_map understands the struct layout.
+            if type_name == "Map" {
+                ctx.type_to_typeid.insert(type_name, 5)
+                return 5
+            }
             let id = ctx.next_user_typeid
             ctx.next_user_typeid = id + 1
             ctx.type_to_typeid.insert(type_name, id)

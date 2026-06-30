@@ -1,11 +1,11 @@
-T1: b:4;c:6;d:8;
-T2: b=2;c=3;
+T1: c:6;d:8;b:4;
+T2: c=3;b=2;
 T3a: true
 T3b: evens_len=4
 T4a: true
 T4b: false
-T5: alice(95,PASS);bob(80,FAIL);carol(90,PASS);
-T6: scores: [alice=95] [bob=80] [carol=90]
+T5: carol(90,PASS);bob(80,FAIL);alice(95,PASS);
+T6: scores: [carol=90] [bob=80] [alice=95]
 T7a: empty_filter_len=0
 T7b: empty_any=false
 T7c: empty_fold=init

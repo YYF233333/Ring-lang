@@ -146,6 +146,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_buf_grow", [ptr, ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_buf_copy_at", [ptr, ptr, ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_buf_set_byte", [ptr, ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_buf_get_byte", [ptr, ptr], ptr)
 
     // Int/Float/Bool to Str — match C signatures: int64_t, double, ptr (boxed bool)
     get_or_declare_runtime_fn(ctx, "ring_int_to_str", [i64], ptr)
@@ -1310,6 +1311,9 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
         // (which understands the RingList struct layout).  The codegen-generated
         // per-field drop would NOT clean up the slot buffer.
         if sname == "List" { continue }
+        // B-152 P3: Map uses RING_TYPEID_MAP (5) with the runtime's drop_map
+        // (which understands the RingMapStruct layout and iterates occupied slots).
+        if sname == "Map" { continue }
         // B-102 R-clean: Type-DAG structs get a normal recursive ring_drop_T
         // (per-field GEP + ring_drop), so the Type DAG is reclaimed by RC like any
         // other data.  (A1's never-drop skip is removed.)
