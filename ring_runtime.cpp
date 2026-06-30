@@ -11,6 +11,7 @@
 #include <cstring>
 #include <csetjmp>
 #include <string>
+#include <stdexcept>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
@@ -792,6 +793,7 @@ extern "C" int64_t ring_str_eq(void* a, void* b) {
 }
 
 extern "C" int64_t ring_str_lt(void* a, void* b) {
+    if (!a || !b) return (!a && b) ? 1 : 0;  // null < non-null
     RingStr* sa = as_str(a);
     RingStr* sb = as_str(b);
     int64_t min_len = sa->len < sb->len ? sa->len : sb->len;
@@ -2382,8 +2384,9 @@ extern "C" void* ring_read_file(void* path) {
     rs->len = (int64_t)size;
     rs->cap = (int64_t)size + 1;
     rs->buf = (char*)malloc((size_t)rs->cap);
-    fread(rs->buf, 1, (size_t)size, f);
-    rs->buf[size] = '\0';
+    size_t read = fread(rs->buf, 1, (size_t)size, f);
+    rs->len = (int64_t)read;  // use actual bytes read (may be less than size)
+    rs->buf[read] = '\0';
     fclose(f);
     return data;
 }
@@ -3015,7 +3018,8 @@ extern "C" void* ring_parse_int(void* s) {
         if (pos == tmp.size()) {
             return ring_enum_some(ring_box_int(val));
         }
-    } catch (...) {}
+    } catch (const std::invalid_argument&) {
+    } catch (const std::out_of_range&) {}
     return ring_enum_none();
 }
 
@@ -3028,7 +3032,8 @@ extern "C" void* ring_parse_float(void* s) {
         if (pos == tmp.size()) {
             return ring_enum_some(ring_box_float(val));
         }
-    } catch (...) {}
+    } catch (const std::invalid_argument&) {
+    } catch (const std::out_of_range&) {}
     return ring_enum_none();
 }
 
