@@ -1079,26 +1079,26 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 旧 ring_sb_* C++ 函数可删除
 - 全部 E2E 通过；**自编译通过**（project mode 验证）
 
-### B-155 自编译 IR 非确定性：字符串常量含堆地址 [bugfix] [P2] [L] [judgment] [queued] [deferred: B-152]
+### B-155 自编译 IR 非确定性：字符串常量含堆地址 [bugfix] [P2] [L] [judgment] [queued]
 
-> 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。
+> 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。2026-06-30 深度调查（见下）。
 
-**现象**：`ring.exe build compiler/main.ring --target=llvm` 两次编译产出的 LLVM IR 不一致。84 个字符串常量（64 个 109 字节 + 20 个 1409 字节）包含编译进程的堆地址，每次运行不同。代码段（反汇编）完全一致，差异仅在 `.rdata` 常量池。
+**现象**：`ring.exe build compiler/main.ring --target=llvm` 两次编译产出的 LLVM IR 不一致。64 个 `[109 x i8]` + 210 个 `[1410 x i8]` 常量包含编译进程的堆数据，每次运行不同。代码段（.text 反汇编）两次编译完全一致，差异仅在 `.rdata`。
 
-**已排除**：
-- Map 迭代顺序：IR 差异不是函数/声明顺序问题，而是字符串常量内容差异
-- LLVM O2 非确定性：差异在 Ring 产出的 IR 层，不在 LLVM 优化层
-- extern fn marshalling 错误：编译后 IR 确认 `ring_str_to_cstr` 被正确调用
+**2026-06-30 调查结论**：
+- **非确定性 100% 在 pre-opt IR**（Ring codegen 层，非 LLVM 优化 pass）
+- 所有 64 个 109 字节常量都是**恰好 31 字符**的字符串（如 "Result in ring_Result_unwrap_or"、"Option in ring_zonk$$_zonk_expr"）——应为 `[32 x i8]` 但变成 `[109 x i8]`（多 77 字节脏数据）
+- `ring_str_to_cstr` 断言通过：`strlen(buf) == s->len`，null-termination 正确
+- strlen 不匹配诊断：**零匹配**——C API 层面一切正确
+- **不是 bootstrap 传播**——每次运行独立产生非确定性（stage2≠stage3，但两个都能运行）
+- `gen_str_lit` 的编译输出 IR 确认 `ring_str_to_cstr` → `LLVMBuildGlobalStringPtr` 之间无 drop/alloc
 
-**根因线索**：
-- 所有受影响常量由 `LLVMBuildGlobalStringPtr` 创建（经 `ring_str_to_cstr` 提取 `const char*`）
-- 可见文本长度 24-31 字符，但常量分别是 109/1409 字节——`std::string` 内容超出可见文本，含二进制数据（堆指针）
-- 简单程序（`tests/cases/`）不受影响，仅自编译（大代码量）时出现
-- 疑似 `std::string` 操作中的内存越界读取或内容污染，与 MSVC STL 内部表示相关
+**未解问题**：`strlen(buf)==31` 但 `LLVMBuildGlobalStringPtr` 创建 `[109 x i8]` 常量——矛盾。可能是 LLVM-C 22 的 `LLVMBuildGlobalStringPtr` 实现读取了超出 `strlen` 的数据，或 ring.exe 的编译产出机器码在调用 LLVM API 时有微妙的 ABI/寄存器问题。
 
-**涉及修改**：
-1. 定位哪个代码路径导致 `std::string` 内容被污染（可能需 ASan 或 valgrind 辅助）
-2. 修复 `ring_runtime.cpp` 或编译器 codegen 中的相关 bug
+**下一步方向**：
+- (A) ASan self-compile——检测 ring.exe 运行时是否有 UAF/OOB
+- (B) 修改 `gen_str_lit` 使用 `LLVMConstStringInContext`（显式传长度）绕过 strlen 依赖
+- (C) 用 LLVM debugger 在 `LLVMBuildGlobalStringPtr` 内部断点，观察 `StringRef` 构造时的实际长度
 
 **验收标准**：
 - `ring.exe build compiler/main.ring --target=llvm` 两次编译产出字节一致的 `ring_output.ll`
