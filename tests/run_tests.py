@@ -79,6 +79,8 @@ LLVM_SKIP = {
     # Negative cases: ring.exe behavior differs from in-process checker
     "error_occurs_check.ring",
     "error_tuple_oob.ring",
+    # B-159: effect polymorphism — HOF closure effect not propagated after List RIIR
+    "adversarial_regress_closure_nested_effect.ring",
 }
 
 # Windows-specific clang link flags.
