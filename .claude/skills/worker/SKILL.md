@@ -239,3 +239,4 @@ Worker 在实现过程中可能发现新 bug、设计偏差或需要讨论的决
 - **完成即清理 worktree**——`git worktree remove -f -f`
 - **N-API addon 提示**——worktree 中 `llvm_addon.node` 在 .gitignore 里没有，agent prompt 中加 `Copy-Item` 指令从主仓库复制
 - **文件冲突追踪**——维护 running agents 的文件列表，新派发的 agent 不能改同一文件。同文件的 items 排队等前一个 merge 后再派
+- **Subagent 禁止 background task**——subagent 无法挂起等待，开 background task 后会轮询浪费 token。所有命令阻塞执行（不传 `run_in_background`），除非需要并行跑多个独立任务（如同时编译+测试）。Orchestrator 在 agent prompt 中明确写入此约束

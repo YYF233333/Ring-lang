@@ -403,7 +403,7 @@ static void ring_list_push_raw(void* list, void* val) {
     int64_t ln = list_len(l);
     int64_t cp = list_cap(l);
     if (ln >= cp) {
-        int64_t new_cap = cp == 0 ? 4 : cp * 2;
+        int64_t new_cap = cp < 4 ? 4 : cp + cp / 2;
         void** new_buf = (void**)calloc((size_t)new_cap, sizeof(void*));
         if (l->buf) {
             memmove(new_buf, l->buf, (size_t)ln * sizeof(void*));

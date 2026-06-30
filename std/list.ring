@@ -71,7 +71,7 @@ impl<T> List {
 
     pub fn push(mut self: List<T>, item: T) -> Unit {
         if self.len >= self.cap {
-            let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 }
+            let new_cap = if self.cap < 4 { 4 } else { self.cap + self.cap / 2 }
             let new_buf: Ptr<T> = ring_slot_alloc(new_cap)
             if self.len > 0 {
                 ring_slot_move(self.buf, 0, new_buf, 0, self.len)
