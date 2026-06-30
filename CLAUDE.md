@@ -17,6 +17,7 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 ## 技术栈
 
 - **编译器**：Ring 自举。ring.exe 自编译（dist-llvm/ .o 冻结产出 + ring_runtime.cpp → clang 链接）；dist/（冻结 JS 产出）保留作紧急 stage 0 回退
+- **Runtime**：ring_runtime.cpp（~3600 行 C++ STL wrapper）→ RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 design.md §7.12
 - **LLVM codegen**：codegen_llvm*.ring（5 个模块），ring.exe 直接调用 LLVM-C 22 API
 - **测试**：Python test runner（`tests/run_tests.py`），零外部依赖
 - **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译

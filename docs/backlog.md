@@ -393,7 +393,7 @@ fn test_fetch() {
 | P2 | List\<T\> — `Ptr<T>` + len + cap，替换 std::vector\<void*\> | L |
 | P3 | Map\<K,V\> — 开放寻址哈希表，替换 std::unordered_map（吸收 B-107 Hash trait） | XL |
 | P4 | Set\<K\> — 复用 Map 实现 | M |
-| P5 | 清理 ring_runtime.cpp（保留 RC 核心 + IO + FFI glue） | M |
+| P5 | 清理：删除全部 C++ 残留，`.cpp` → `.c`，`clang++` → `clang`（最终 ~400 行纯 C：RC 核心 + boxing + IO/OS + fail effect + Ptr 原语 + init，详见 design.md §7.12） | M |
 
 **每阶段模式**：
 1. 在 `std/` 中用纯 Ring 实现新类型（`unsafe {}` 块内使用 `Ptr<T>` 原语）

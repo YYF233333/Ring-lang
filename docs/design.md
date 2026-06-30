@@ -1848,6 +1848,33 @@ buffer 内的值 = RC 世界之外、所有权由封装作者人工记账。拆�
 
 **RIIR 边界已定（2026-06-13 拍板）= 全部自己实现**：容器底层（vector/string/unordered_map）全部用纯 Ring + `Ptr<T>` 重写，不保留 C++ STL 依赖（「系统语言标准库借 C++ = 玩具」）。unsafe 原语实现 = B-125（P3，XL）；容器 RIIR = B-125 后立项。
 
+**RIIR 最终形态（2026-06-30 拍板）= `ring_runtime.c` 纯 C ~400 行**：
+
+作为 native 语言，runtime 中不应有 C++ 成分。RIIR 完成后 `ring_runtime.cpp` 改为 `ring_runtime.c`（纯 C11），消除全部 C++ STL 依赖（`std::string` / `std::unordered_map` / `std::unordered_set` / `std::vector` / `std::algorithm` / `std::sstream`）。最终 runtime 只保留以下纯 C 内容：
+
+| 层 | 内容 | 约行数 | 理由 |
+|----|------|--------|------|
+| RC 核心 | `ring_alloc` / `ring_dup` / `ring_drop` / `drop_table` / typeid 常量 | ~150 | 自举循环依赖——Ring 的 RC 系统无法管理自己的 RC 系统；这是唯一不可消除的 C 层 |
+| Boxing | `ring_box_int` / `ring_unbox_int` / `ring_box_float` / `ring_box_bool` | ~30 | 极简 C，codegen 内联调用频繁 |
+| IO / OS | `ring_print` / `ring_read_file` / `ring_write_file` / `ring_args` / `ring_cwd` / `ring_exit` / `ring_path_*` / `ring_file_exists` | ~100 | C ABI syscall wrapper，本来就是纯 C |
+| Fail effect | `ring_catch_push` / `ring_catch_pop` / `ring_raise` / `ring_try` + `setjmp`/`longjmp` | ~60 | C ABI，Ring 无对应原语 |
+| Ptr 原语 | `ring_raw_alloc` / `ring_raw_dealloc` / `ring_ptr_copy` / `ring_slot_*` | ~30 | `malloc`/`free`/`memmove` 薄 wrapper |
+| 初始化 | `ring_runtime_init` / `main` | ~30 | 入口 |
+
+**迁移到 Ring 侧的内容**（B-152 P0–P5）：
+
+| 内容 | 迁出方式 |
+|------|---------|
+| Map / MapInt（`std::unordered_map`） | P3：Ring 开放寻址哈希表 + Hash trait |
+| Set / SetInt（`std::unordered_set`） | P4：复用 Map 实现 |
+| StringBuilder（`std::string`） | P0（pilot） |
+| Str 操作中的 `std::string` 临时计算（replace/pad_start/pad_end） | P1 Step 2 |
+| List HOF（map/filter/fold/any/all/find 等） | 已部分迁移（P2），HOF 可全迁 Ring |
+| `ring_get_builtin_dict` + primitive trait closures | primitive `impl Eq/Ord/Debug/Hash for Int/Str/...` 全用 Ring 写后自然消失 |
+| 诊断 profiling（`RING_BOX_PROFILE` / `RING_ALLOC_STATS`） | P5 清理时删除或用 Ring 重写 |
+
+**P5 清理步骤**：B-152 P0–P4 完成后，(1) 删除所有 C++ 残留（`#include <string>` 等、placement new、析构调用）；(2) 将 `.cpp` 改为 `.c`，编译命令从 `clang++` 改为 `clang`；(3) 验证自举 + 全量测试。
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
@@ -1940,7 +1967,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 **LLVM 是唯一后端。** JS 后端已归档（B-100 Phase 2，commit `5df6c99`）。dist/ JS 编译产出冻结作 stage 0 回退。
 
-**LLVM 后端**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。codegen 用 Ring 编写、调用 LLVM-C API。Bootstrap 阶段经 N-API addon（`compiler/llvm-addon/`，不入仓库）；自举后直接 C ABI。**值表示**：uniform boxing（`ptr`），Int/Bool 用低位 tagged pointer（B-080，codegen inline shl/or/ashr）。Float 留 boxed。**Runtime**：`ring_runtime.cpp`（~2200 行 C++ STL wrapper），`extern "C"` 暴露；**RIIR 已拍定全部自己实现**（B-125 unsafe 原语后立项）。**fail/catch**：`setjmp`/`longjmp`；**tail-resumptive effect**：evidence passing（hybrid，详见 backlog B-090）。多文件编成单 Module/单 .o（增量编译 → B-105 deferred）。LLVM O2 管线已接入（B-126）。
+**LLVM 后端**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。codegen 用 Ring 编写、调用 LLVM-C API。Bootstrap 阶段经 N-API addon（`compiler/llvm-addon/`，不入仓库）；自举后直接 C ABI。**值表示**：uniform boxing（`ptr`），Int/Bool 用低位 tagged pointer（B-080，codegen inline shl/or/ashr）。Float 留 boxed。**Runtime**：`ring_runtime.cpp`（~3600 行 C++ STL wrapper），`extern "C"` 暴露；**RIIR 已拍定全部自己实现**（B-125 unsafe 原语后立项）。最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 §7.12。**fail/catch**：`setjmp`/`longjmp`；**tail-resumptive effect**：evidence passing（hybrid，详见 backlog B-090）。多文件编成单 Module/单 .o（增量编译 → B-105 deferred）。LLVM O2 管线已接入（B-126）。
 
 ### 10.5 FFI 设计
 
@@ -2247,6 +2274,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | unsafe 区域图景（2026-06-11，所有权讨论）| 三栏总账（安全区 / unsafe 区 / 明确不做）+ `unsafe` effect 形态 + 两级 discharge（`mod requires {unsafe}` 许可 + `unsafe {}` 块吸收，关键字与 Rust 一致）+ `ring audit unsafe` 审计面；裸指针不参与 RC（extern type 排除规则推广）；撤销旧「不做 unsafe 块 / 裸指针」立场。详见 §7.12，原语集细化归 B-106 | unsafe 是所有权张力的最终出处——栏 C「明确不做」的可信度由栏 B 兜底背书；effect 形态 = 签名可见自动追踪（Rust 隔离 + effect 追踪复合，竞品无）；discharge 点清单 = 全代码库人类审查面，接无人回路公理 |
 | unsafe 原语集 + `Ptr<T>` 拍定（2026-06-13，B-106 正文）| typed 单一 `Ptr<T>`（不分 const/mut）普通值、操作才 unsafe；原语 v1 = alloc/dealloc/read/write/offset(inbounds)/cast/copy/addr 互转（互转 safe）；read/write = 按位 move 不动 RC（Perceus 零特殊化，落 B-103 既有分类）；extern fn 声明处签字（调用点 safe，extern type 句柄层与 Ptr 并存）；跨界 per-type 三件套、不做泛型 addr_of；不做 MaybeUninit / 泛型 transmute / v1 volatile-atomic。详见 §7.12，实现 = B-125 | 操作锚点使安全封装成立（持有即感染则容器 struct 定义本身被感染）；泛型 addr_of 把引擎私有值表示变可观测 API、堵死「优化不可观测」；inbounds 换别名分析/向量化（容器热路径）；声明处签字 = 信任点真实位置（签名忠实性在声明不在调用）+ 与现状 std 兼容、Rust 2024 同方向 |
 | RIIR 边界 = 全部自己实现（2026-06-13，B-106 收尾）| 容器底层（vector/string/unordered_map）全部纯 Ring + `Ptr<T>` 重写，不保留 C++ STL 依赖。B-125（unsafe 原语）后立项 | 「系统语言标准库借 C++ = 玩具」——自包含 + 容器内部跑 Perceus reuse 是方向性收益，不需等实测数据才决定 |
+| RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（2026-06-30）| B-152 P5 完成后 runtime 从 `.cpp` 改为 `.c`（纯 C11）。保留：RC 核心（ring_alloc/dup/drop，自举循环依赖不可消除）+ boxing + IO/OS syscall wrapper + fail effect（setjmp/longjmp）+ Ptr 原语 + init。迁走：全部容器（Map/Set/StringBuilder/Str 操作/List HOF）+ primitive trait dict 工厂 + 诊断 profiling | native 语言 runtime 中不应有 C++ 成分；RC 核心留 C 因为 Ring 的 RC 系统无法管理自身的 RC 系统（鸡蛋问题）；IO/OS/setjmp 是 C ABI 边界天然留在 C |
 | 析构顺序 = 对齐 Rust（2026-06-13，B-002 确认）| 同 scope 逆序 / struct 字段声明序 / 容器元素序，两后端一致并入差分回归 | LLM 训练数据 Rust 最强、对齐 = 零学习负担；四通道之③从悬空→已定（§7.9 表已更新）|
 | G-b emit 排序确定化（2026-06-13，B-089 G-b）| codegen 所有依赖 Map 迭代的 emit 点改稳定序（名字典序等），使 native/node 产出字节一致。拍 (a) 排序确定化，否决 (b) 语义等价判定 | B-080 验收实锤：排序差异不只美观——native 产 JS 运行崩溃（`__ring_ev_fail` undefined，evidence 传递因序断裂）。(b) 不解决功能性 bug |
 | RC 性能立场 = 渐近零开销（2026-06-13）| RC 计数当前有代价 = 优化器成熟度问题非模型税：树状所有权（静态可证唯一）处计数全部可优化消除（borrow 推断/move/reuse/单例化/标记指针/drop specialization），计数只保留在真共享处——该场景 Rust 同付 Rc/Arc。结论 = 相对 Rust 渐近无性能损失，差距可测量（B-104 re-measure 即实践）。详见 §7.9 | Rust 零开销只覆盖树状（borrow checker 静态证唯一 → 无条件 drop）；Perceus 框架下 Rust 模式 = 计数恒为 1 的退化情形，Ring 在可证唯一处向其收敛；真共享处两语言成本同构，Ring 把 Rust 手写 Rc 的标注负担变默认自动（lv0 零标注交换）|
