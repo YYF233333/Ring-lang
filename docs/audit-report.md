@@ -13,29 +13,6 @@
 
 ## Runtime
 
-### #223 ring_str_lt 缺 null guard（ring_str_eq 有但 ring_str_lt 没有）[medium] [mechanical] [open]
-
-`ring_runtime.cpp:691-692`：`ring_str_eq`（L687）有 `if (!a || !b) return (a == b) ? 1 : 0;` null guard，但 `ring_str_lt`（L691）直接解引用 `*(std::string*)a < *(std::string*)b`。ring_str_eq 的 null guard 证明 null 字符串在运行时可能出现——ring_str_lt 遇到 null 将段错误。
-
-**修复方向**：添加与 ring_str_eq 一致的 null guard。null < non-null 可定义为 true（空串最小）或 panic。
-
-发现者：Opus
-
-### #224 ring_read_file 的 fread 返回值未检查 [medium] [mechanical] [open]
-
-`ring_runtime.cpp:2273`：`fread(&(*result)[0], 1, (size_t)size, f);` 返回值未检查。若 I/O 错误导致短读，预分配的 `std::string((size_t)size, '\0')` 尾部保留 null 字节，编译器将静默处理含垃圾数据的源文件。
-
-**修复方向**：检查 fread 返回值，短读时 panic 或 resize result。
-
-发现者：Opus
-
-### #225 ring_parse_int / ring_parse_float 裸 catch(...) 吞没所有异常 [medium] [mechanical] [open]
-
-`ring_runtime.cpp:2862,2873`：两个解析函数使用 `try { std::stoll/stod } catch (...) {}`，吞没所有 C++ 异常——包括 `std::bad_alloc`（OOM 应终止而非静默返回 none）。
-
-**修复方向**：捕获具体异常 `catch (const std::invalid_argument&)` 和 `catch (const std::out_of_range&)`，不捕获 `std::bad_alloc`。
-
-发现者：DS
 
 ### #226 Map<Int>/Map<Str> + Set<Int>/Set<Str> 按 key 类型 ~700 行重复 [medium] [judgment] [open]
 
