@@ -69,7 +69,13 @@ extern fn LLVMBuildZExt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLV
 extern fn LLVMBuildSExt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildPhi(builder: LLVMBuilderRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMAddIncoming(phi: LLVMValueRef, vals: List<LLVMValueRef>, blocks: List<LLVMBasicBlockRef>) -> Unit
-extern fn LLVMBuildGlobalStringPtr(builder: LLVMBuilderRef, str: Str, name: Str) -> LLVMValueRef
+// B-155: LLVMConstStringInContext takes explicit length (StrToCstrAndLen marshall),
+// bypassing strlen-based LLVMBuildGlobalStringPtr which reads heap garbage.
+extern fn LLVMConstStringInContext(ctx: LLVMContextRef, str: Str, dont_null_terminate: Int) -> LLVMValueRef
+extern fn LLVMSetGlobalConstant(global: LLVMValueRef, is_constant: Int) -> Unit
+extern fn LLVMSetLinkage(global: LLVMValueRef, linkage: Int) -> Unit
+extern fn LLVMInt8TypeInContext(ctx: LLVMContextRef) -> LLVMTypeRef
+extern fn LLVMArrayType2(elem: LLVMTypeRef, count: Int) -> LLVMTypeRef
 extern fn LLVMBuildUnreachable(builder: LLVMBuilderRef) -> LLVMValueRef
 extern fn LLVMBuildBitCast(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMFunctionType(ret: LLVMTypeRef, params: List<LLVMTypeRef>, is_var_arg: Int) -> LLVMTypeRef
@@ -276,8 +282,22 @@ fn gen_float_lit(mut ctx: LlvmCtx, value: Float) -> LLVMValueRef {
     LLVMBuildCall2(ctx.builder, box_fn_ty, box_fn, [raw], fresh_name(ctx, "flt"))
 }
 
+// B-155 workaround: use LLVMConstStringInContext (explicit length) instead of
+// LLVMBuildGlobalStringPtr (strlen-based, reads heap garbage on self-compiled ring.exe).
+fn build_global_cstring(mut ctx: LlvmCtx, value: Str) -> LLVMValueRef {
+    let i8_ty = LLVMInt8TypeInContext(ctx.context)
+    let str_const = LLVMConstStringInContext(ctx.context, value, 0)
+    let arr_ty = LLVMArrayType2(i8_ty, value.len() + 1)
+    let global = LLVMAddGlobal(ctx.module, arr_ty, fresh_name(ctx, ".str"))
+    LLVMSetInitializer(global, str_const)
+    LLVMSetGlobalConstant(global, 1)
+    LLVMSetLinkage(global, 9)
+    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+    LLVMBuildGEP2(ctx.builder, arr_ty, global, [zero, zero], fresh_name(ctx, "str"))
+}
+
 fn gen_str_lit(mut ctx: LlvmCtx, value: Str) -> LLVMValueRef {
-    let global_str = LLVMBuildGlobalStringPtr(ctx.builder, value, fresh_name(ctx, "str"))
+    let global_str = build_global_cstring(ctx, value)
     let from_cstr_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
     let from_cstr_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
     LLVMBuildCall2(ctx.builder, from_cstr_ty, from_cstr_fn, [global_str], fresh_name(ctx, "s"))
@@ -295,7 +315,7 @@ fn emit_divzero_guard(mut ctx: LlvmCtx, divisor: LLVMValueRef) {
     LLVMPositionBuilderAtEnd(ctx.builder, panic_bb)
     let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
     let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "integer division by zero", fresh_name(ctx, "panicmsg"))
+    let msg = build_global_cstring(ctx, "integer division by zero")
     let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
     let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
     let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "panicstr"))
@@ -2111,7 +2131,7 @@ fn gen_extern_LLVMGetTargetFromTriple(mut ctx: LlvmCtx, arg_vals: List<LLVMValue
     LLVMPositionBuilderAtEnd(ctx.builder, panic_bb)
     let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
     let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "LLVMGetTargetFromTriple failed", fresh_name(ctx, "panicmsg"))
+    let msg = build_global_cstring(ctx, "LLVMGetTargetFromTriple failed")
     let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
     let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
     let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "panicstr"))
@@ -2852,7 +2872,7 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                     eprintln("LLVM codegen warning: unknown method '${type_name}.${method}' (mangled: ${mangled}), generating panic")
                     let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
                     let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-                    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "LLVM: missing method '${type_name}.${method}'", fresh_name(ctx, "panicmsg"))
+                    let msg = build_global_cstring(ctx, "LLVM: missing method '${type_name}.${method}'")
                     let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
                     let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
                     let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "ps"))

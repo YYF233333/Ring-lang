@@ -80,7 +80,14 @@ extern fn LLVMBuildZExt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLV
 extern fn LLVMBuildSub(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildPtrToInt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildAnd(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
-extern fn LLVMBuildGlobalStringPtr(builder: LLVMBuilderRef, str: Str, name: Str) -> LLVMValueRef
+extern fn LLVMConstStringInContext(ctx: LLVMContextRef, str: Str, dont_null_terminate: Int) -> LLVMValueRef
+extern fn LLVMSetGlobalConstant(global: LLVMValueRef, is_constant: Int) -> Unit
+extern fn LLVMSetLinkage(global: LLVMValueRef, linkage: Int) -> Unit
+extern fn LLVMInt8TypeInContext(ctx: LLVMContextRef) -> LLVMTypeRef
+extern fn LLVMArrayType2(elem: LLVMTypeRef, count: Int) -> LLVMTypeRef
+extern fn LLVMBuildGEP2(builder: LLVMBuilderRef, ty: LLVMTypeRef, ptr: LLVMValueRef, indices: List<LLVMValueRef>, name: Str) -> LLVMValueRef
+extern fn LLVMAddGlobal(m: LLVMModuleRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+extern fn LLVMSetInitializer(global: LLVMValueRef, val: LLVMValueRef) -> Unit
 extern fn LLVMBuildShl(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildOr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildIntToPtr(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
@@ -1798,12 +1805,22 @@ fn resolve_dict_for_derived(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
     }
 }
 
-// Simple string literal generation (for dict name resolution).
+fn build_global_cstring_decl(mut ctx: LlvmCtx, value: Str) -> LLVMValueRef {
+    let i8_ty = LLVMInt8TypeInContext(ctx.context)
+    let str_const = LLVMConstStringInContext(ctx.context, value, 0)
+    let arr_ty = LLVMArrayType2(i8_ty, value.len() + 1)
+    let global = LLVMAddGlobal(ctx.module, arr_ty, fresh_name(ctx, ".str"))
+    LLVMSetInitializer(global, str_const)
+    LLVMSetGlobalConstant(global, 1)
+    LLVMSetLinkage(global, 9)
+    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+    LLVMBuildGEP2(ctx.builder, arr_ty, global, [zero, zero], fresh_name(ctx, "str"))
+}
+
 fn gen_str_lit_simple(mut ctx: LlvmCtx, s: Str) -> LLVMValueRef {
     let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
     let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
-    // Build a global constant string
-    let c_str = LLVMBuildGlobalStringPtr(ctx.builder, s, fresh_name(ctx, "str"))
+    let c_str = build_global_cstring_decl(ctx, s)
     LLVMBuildCall2(ctx.builder, str_ty, str_fn, [c_str], fresh_name(ctx, "sl"))
 }
 
