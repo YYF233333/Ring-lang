@@ -2305,15 +2305,12 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
                         },
                         none => {},
                     }
-                    eprintln("LLVM codegen warning: unknown function '${name}', generating panic")
-                    let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
-                    let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-                    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "LLVM: missing function '${name}'", fresh_name(ctx, "panicmsg"))
-                    let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
-                    let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
-                    let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "ps"))
-                    discard(LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [str_val], ""))
-                    LLVMConstPointerNull(ctx.ptr_type)
+                    // B-152: unknown extern fn → declare as external + call (linker resolves).
+                    // All Ring extern fns use ptr (void*) ABI for all params and return.
+                    let mut param_types: List<LLVMTypeRef> = []
+                    for _ in arg_vals { param_types.push(ctx.ptr_type) }
+                    let _ = get_or_declare_runtime_fn(ctx, name, param_types, ctx.ptr_type)
+                    gen_runtime_call(ctx, name, arg_vals)
                 },
             }
         },
