@@ -359,6 +359,34 @@ fn test_fetch() {
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
+### B-159 Effect 多态：TypeScheme effect 变量泛化 [bugfix] [P1] [L] [judgment] [queued]
+
+> 2026-06-30 立项（B-152 P2 List RIIR 暴露的 pre-existing checker bug）。C runtime dispatch 下被隐藏（C 函数没有 effect 签名），RIIR 后 Ring 方法带 effect 才暴露。2 个测试标 pending/skip（trait_hof_effect + adversarial_regress_closure_nested_effect）。
+
+**根因**：TypeScheme 不量化 closure 参数的 effect row tail 变量，导致 HOF 多次调用时 effect 变量共享、推断结果错误。
+
+**4 层问题链**：
+1. `register_fn_common` / `register_impl_method` 不把 effect tail 加入 type_vars
+2. `build_var_mapping` 不映射 FnType 的 effect tail
+3. `rebind_fn_type` 对 impl 方法 lookup 失败（impl_methods vs scope stack）
+4. `load_prelude` 的 `check_prelude_decl` 不走 rebind 路径
+
+**已尝试**：修复 1-3 后 standalone 函数 OK，但修 prelude impl 方法（#4）导致编译器自身出现大量 W0001 和类型错误——effect 推断管线需要全面协调改造。已 revert。
+
+**涉及修改**：
+1. `infer_decl.ring`：`register_fn_common` / `register_impl_method` 将 effect tail 变量加入 TypeScheme.type_vars
+2. `infer_ctx.ring`：`build_var_mapping` 处理 FnType effect tail 映射
+3. `infer_ctx.ring`：`rebind_fn_type` 支持 impl 方法 lookup
+4. `checker.ring`：`load_prelude` / `check_prelude_decl` 走 rebind 路径
+5. effect 推断管线全面协调（预期大量级联影响）
+
+**验收标准**：
+- trait_hof_effect + adversarial_regress_closure_nested_effect 两个测试从 pending/skip 恢复通过
+- 编译器自举一致
+- 全量 E2E + llvm_diff 通过
+
+**不阻塞 B-152 P3/P4**：Map/Set 的 HOF 方法可暂时保留 C runtime dispatch
+
 ### B-156 extern fn 声明处 `requires {unsafe}` 签字检查 [feature] [P2] [M] [judgment] [queued]
 
 > 2026-06-27 从 B-125 拆出。B-125 core 完成但 extern fn 签字检查推迟——当前无文件级 `requires` 语法（327 个 extern fn 声明分布在 19 个文件顶层，无 `mod` 块包装），需先设计文件级 `requires` 语法。
