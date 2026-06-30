@@ -389,7 +389,7 @@ fn test_fetch() {
 | 阶段 | 内容 | 量 |
 |------|------|----|
 | P0 | StringBuilder — 管线验证 pilot（extern type → Ring struct + impl Drop + codegen 适配） | M |
-| P1 | Str — `Ptr<U8>` + len + cap，替换 std::string（P0 bridge 函数自然消失） | L |
+| P1 | Str — Step 1 ✅（C++ 去 STL）；Step 2 推迟（Str 是内建 Type 枚举，非 extern type） | L |
 | P2 | List\<T\> — `Ptr<T>` + len + cap，替换 std::vector\<void*\> | L |
 | P3 | Map\<K,V\> — 开放寻址哈希表，替换 std::unordered_map（吸收 B-107 Hash trait） | XL |
 | P4 | Set\<K\> — 复用 Map 实现 | M |
