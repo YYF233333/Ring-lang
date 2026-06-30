@@ -286,8 +286,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_path_basename", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_path_extname", [ptr], ptr)
 
-    // Collection clone/from
-    get_or_declare_runtime_fn(ctx, "ring_list_clone", [ptr], ptr)
+    // Collection clone/from (B-152 P2: ring_list_clone removed — now a Ring function)
     get_or_declare_runtime_fn(ctx, "ring_map_clone", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_clone", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_from", [ptr], ptr)
@@ -1304,6 +1303,10 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
     let mut struct_names = ctx.struct_types.keys()
     struct_names.sort()
     for sname in struct_names {
+        // B-152 P2: List uses RING_TYPEID_LIST (4) with the runtime's drop_list
+        // (which understands the RingList struct layout).  The codegen-generated
+        // per-field drop would NOT clean up the slot buffer.
+        if sname == "List" { continue }
         // B-102 R-clean: Type-DAG structs get a normal recursive ring_drop_T
         // (per-field GEP + ring_drop), so the Type DAG is reclaimed by RC like any
         // other data.  (A1's never-drop skip is removed.)

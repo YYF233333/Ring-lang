@@ -402,6 +402,12 @@ pub fn get_or_assign_typeid(mut ctx: LlvmCtx, type_name: Str) -> Int {
     match ctx.type_to_typeid.get(type_name) {
         some(id) => id,
         none => {
+            // B-152 P2: List is a Ring struct but must keep RING_TYPEID_LIST (4)
+            // so the runtime's drop_list and gen_list_lit's ring_list_new are consistent.
+            if type_name == "List" {
+                ctx.type_to_typeid.insert(type_name, 4)
+                return 4
+            }
             let id = ctx.next_user_typeid
             ctx.next_user_typeid = id + 1
             ctx.type_to_typeid.insert(type_name, id)
