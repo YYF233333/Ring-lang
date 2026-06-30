@@ -567,7 +567,102 @@ ring_runtime.cpp 中 Str 的内部表示从 `std::string`（placement-new）改�
 - 自举一致（double bootstrap fixpoint）
 - ASan gating 档 clean
 
-**吸收 B-107**：P3（Map）自然包含 Hash trait + derive，不再需要单独做 B-107。
+#### P3: Map\<K,V\> RIIR — Hash trait + 开放寻址哈希表
+
+> 2026-06-30 Discussion 拍板。引入 Hash trait（同 Eq/Ord 模式），Map 统一为单一泛型实现，消除 Str/Int 双分发 + ~700 行 C++ 重复（#226）。
+
+**Hash trait**（`builtins.ring` 注册，同 Eq/Ord）：
+```ring
+trait Hash {
+    fn hash(self) -> Int
+}
+```
+
+原语 impl（builtins.ring 注册）：
+- `impl Hash for Int`：C bridge `ring_hash_int`（multiply-xorshift mixing）
+- `impl Hash for Str`：C bridge `ring_hash_str`（FNV-1a）
+- `impl Hash for Bool`：C bridge `ring_hash_bool`（0/1）
+- derive Hash 暂不做（编译器自身只用 Str/Int key，用户需求后续加 derive.ring 一行即可）
+
+**Ring struct 定义**（`std/map.ring`，替换 `pub extern type Map<K, V>`）：
+```ring
+pub struct Map<K, V> {
+    meta: Ptr<Int>      // byte buffer（ring_buf_alloc），1 byte/slot：0=empty 1=occupied 2=tombstone
+    keys: Ptr<K>        // slot buffer（ring_slot_alloc），void*/slot
+    values: Ptr<V>      // slot buffer（ring_slot_alloc），void*/slot
+    len: Int
+    cap: Int
+}
+```
+
+**数据结构**：线性探测 + tombstone。负载因子 > 0.75 时 2x 扩容（rehash 到新 buffer，清除 tombstone）。最小容量 8。
+
+**方法实现**（全部 `impl<K: Hash + Eq, V> Map`，纯 Ring + unsafe 块）：
+- `map_new<K, V>() -> Map<K, V>`：初始 cap=0，三个 buffer 为空 alloc
+- `insert(mut self, key: K, value: V)`：probe → hit 则 drop 旧 value + 替换；miss 则写入空/tombstone slot
+- `get(self, key: K) -> Option<V>`：probe → hit 则 `ring_slot_read` value（dup）；miss 则 none
+- `contains_key(self, key: K) -> Bool`：probe → hit/miss
+- `remove(mut self, key: K)`：probe → hit 则 `ring_slot_drop` key+value，meta 置 tombstone
+- `keys(self) -> List<K>`：遍历 occupied，`ring_slot_read` 每个 key
+- `values(self) -> List<V>`：遍历 occupied，`ring_slot_read` 每个 value
+- `entries(self) -> List<(K, V)>`：遍历 occupied，read key+value → tuple
+- `len(self) -> Int`：`self.len`
+- `is_empty(self) -> Bool`：`self.len == 0`
+- `clear(mut self)`：遍历 occupied → `ring_slot_drop` key+value → meta 清零
+- HOF 方法（`for_each`/`fold`/`filter`/`any`/`map_values`）：遍历 occupied slots，while 循环（避免 `mut` effect 泄漏）
+
+**Clone**：standalone `map_clone<K, V>(m: Map<K, V>) -> Map<K, V>` 函数（非 `impl Clone`，避免 E0802），遍历 occupied → `ring_slot_read` key+value → 写入新 buffer。
+
+**MapIterator**：保持现有 `MapIterator<K, V>` 结构，`iter()` 方法调 `self.entries()` 构造 List。
+
+**Bridge 函数**（ring_runtime.cpp 新增）：
+- `ring_hash_str(s: void*) -> int64_t`：FNV-1a 64-bit（读 RingStr::buf 字节）
+- `ring_hash_int(n: void*) -> int64_t`：unbox + multiply-xorshift mixing
+- `ring_hash_bool(b: void*) -> int64_t`：unbox → 0/1
+- `ring_hash_combine(h1: int64_t, h2: int64_t) -> int64_t`：FNV combine（derive 用，暂不需要）
+- `ring_buf_get_byte(p: void*, offset: int64_t) -> int64_t`：`((uint8_t*)p)[offset]` 返回 boxed Int
+
+注意：Ring 无位运算符（AND/OR/XOR/shift），hash 必须由 C bridge 实现。hash 返回值为 boxed Int（tagged pointer）。probe 索引计算 `h % cap` 用 Ring `%` 运算符，负数处理：`let idx = h % cap; let idx = if idx < 0 { idx + cap } else { idx }`。
+
+**Codegen 变更**：
+1. `codegen_llvm_expr.ring:2901-2915`：删除 15 行 Map `method_to_runtime` 映射
+2. `codegen_llvm_expr.ring:2708-2727`：删除 15 行 `is_int_keyed_map` 分发
+3. `codegen_llvm_expr.ring:2728-2748`：删除 Int-Set 分发（P4 同时清理）
+4. `codegen_llvm_expr.ring:99-108`：删除 `is_int_keyed_map()` helper
+5. `codegen_llvm_expr.ring:2470,2487,2489,2491`：删除 `map_new`/`map_from`/`map_int_new`/`map_int_from` 映射
+6. `codegen_llvm_expr.ring:1262-1267`：删除 `map_int_new`/`map_int_from` 构造函数分发
+7. `codegen_llvm_expr.ring:4632-4637`：IndexExpr Map 下标特殊路径改为走通用 `get` 方法调用
+8. `codegen_llvm.ring:194-212`：删除 `ring_map_*` runtime 函数声明（~20 行）
+9. `codegen_llvm.ring:290`：删除 `ring_map_clone` 声明
+10. `codegen_llvm.ring:1309` 附近：emit_drop_functions 跳过 Map（同 List）
+11. `codegen_llvm_ctx.ring:407-409`：get_or_assign_typeid 加 Map → 5 特殊化
+
+**builtins.ring 变更**：
+1. 新增 `register_hash_trait`（同 `register_eq_trait` 模式）
+2. 注册 Hash impl for Int, Str, Bool
+3. 在 `register_all_builtins` 中调用
+
+**Runtime 变更**：
+1. 删除 ~30 个 `ring_map_*` / `ring_map_int_*` C++ 函数
+2. 更新 `drop_map`：新 struct layout（meta/keys/values/len_tagged/cap_tagged），遍历 meta occupied → drop key+value → free 三个 buffer
+3. 删除 `RingMapInt` typedef + `drop_map_int` + `RING_TYPEID_MAP_INT`
+4. 删除 `RING_TYPEID_MAP` 定义（codegen 用 hardcoded 5）——或保留供 drop_map 使用
+5. 新增 `ring_hash_str`/`ring_hash_int`/`ring_hash_bool`/`ring_buf_get_byte` bridge 函数
+
+**B-162 workaround**：Map impl 中 `self.len = self.len + 1` 等 FieldAccess scalar reassign 会泄漏旧 boxed Int。暂不修（B-162 单独追踪），接受泄漏。Map 的 insert/remove 频率远低于 List.push，影响可控。
+
+**Bootstrap 策略**：同 List RIIR——旧 dist-llvm/ 看到 `struct Map` 而非 `extern type Map`，method_to_runtime 查不到 → fallback 到 Ring 函数调用（`fdab843` 修复保证）。`map_new()` 等构造函数同理。需 double bootstrap。
+
+**P3 验收标准**：
+- Map 所有用法行为不变（构造 + 方法调用 + 下标 + RC drop + clone）
+- Hash trait 可用（`impl<K: Hash + Eq, V> Map` 编译通过）
+- ring_runtime.cpp 中 ~30 个 `ring_map_*` / `ring_map_int_*` 函数删除
+- `RING_TYPEID_MAP_INT` 和双分发逻辑从 codegen 中完全删除
+- 全部 E2E + llvm_diff ×3 通过
+- 自举一致（double bootstrap fixpoint）
+- ASan gating 档 clean
+
+**吸收 B-107**：P3 自然包含 Hash trait + primitive impl，不再需要单独做 B-107。
 
 **验收标准**：
 - 各阶段：替换的容器类型 E2E 行为与 C++ 版一致
@@ -1051,6 +1146,15 @@ design.md 2.3 层级 1。已被 Option 方法（`unwrap_or` / `unwrap_or_else`�
 
 ### Full Algebraic Effects（B-009）
 Post-resume handler + multi-resume。取消原因：tail-resumptive + abort 覆盖 95%+ 实际需求，剩余用例用 async effect + defer 解决更好。实现复杂度（delimited continuation + 资源安全）与工程价值不成比例。
+
+---
+
+## TODO（非正式立项，备忘）
+
+> 尚未正式立项（无 B-xxx 编号），但值得记录的想法和发现。正式推进时再开 B-xxx 条目。
+
+- **位运算符（AND/OR/XOR/shift）**：Ring 当前无位运算。hash 函数必须走 C bridge。后续如果有更多 low-level 场景需求，考虑加 `&`/`|`/`^`/`<<`/`>>` 运算符（lexer/parser/infer/codegen 全链路，LLVM 对应 `LLVMBuildAnd`/`LLVMBuildOr`/`LLVMBuildXor`/`LLVMBuildShl`/`LLVMBuildAShr`）。当前被 hash 需求触发但不阻塞（P3 Map RIIR 靠 C bridge 绕过）。
+- **impl Drop + impl Clone 互斥（E0802）放松**：当前 Drop 类型禁止 auto-derive Clone。容器（List/Map/Set）用 C++ drop 函数 + standalone clone 函数绕过。长期考虑放松为"有 Drop 的类型 Clone 必须手动 impl"而非完全禁止。依赖 B-002p2 unwind 做稳后再评估。
 
 ---
 
