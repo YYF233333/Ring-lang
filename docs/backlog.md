@@ -837,7 +837,28 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
+### B-162 Perceus FieldAccess scalar reassign 不 drop 旧 boxed Int（List RIIR 内存回归主因）[bugfix] [P1] [M] [judgment] [queued]
 
+> 2026-06-30 立项（内存调查：self-compile 9.86GB → 17.36GB，+76%）。
+
+`perceus.ring:1946` 的 `scalar_reassign_drop_name` 只处理 `Ident` 目标。`self.len = self.len + 1` 等 FieldAccess 赋值不 drop 旧 boxed Int，直接泄漏。编译器 push 调用千万量级，每次泄漏 16 字节，量级 ~1-2GB。B-152 P2 前 List 是 extern type，len/cap 是 C++ int64_t，不存在此问题。
+
+**首次尝试记录（2026-06-30，失败）**：W5 pattern（tmp→old→assign→drop 四步序列）导致 385/396 e2e heap corruption。根因未完全定位——可能是 `target` HExpr 在 Let init 和 Assign target 两处复用时 codegen 产生了意外行为（gen_expr vs emit_assign 对 FieldAccess 处理差异），或 raw target 未经 RC 处理导致 codegen 期望不匹配。需要先在 codegen 层面确认 FieldAccess 作为 Let init 的 dup/drop 行为。
+
+**替代方案方向**：
+- (A) 在 codegen 层面修（emit_assign 对 scalar FieldAccess 目标生成 load-old + drop-old + store-new）——绕过 Perceus 层复杂性
+- (B) 修正 Perceus W5 pattern——需要理解 gen_expr(FieldAccess) 是否生成 dup，确保 target 复用安全
+- (C) codegen 对 Int/Bool struct 字段使用 inline storage（不 box）——根治，但工作量大
+
+**涉及修改**：
+1. `compiler/perceus.ring`（方案 B）或 `compiler/codegen_llvm_expr.ring`（方案 A）
+2. `compiler/verify_rc.ring`：同步更新 scalar field overwrite 报告
+
+**验收标准**：
+- `self.len = self.len + 1` 等 FieldAccess 赋值正确 drop 旧 boxed Int
+- self-compile 峰值内存显著下降（预期回到 ~10GB 量级）
+- 全量 e2e + llvm_diff 通过
+- 编译器自举一致
 
 ### B-160 rebind_fn_type / update_fn_effects 不查 impl_methods [bugfix] [P2] [M] [judgment] [queued]
 
