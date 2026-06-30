@@ -120,13 +120,6 @@
 
 发现者：Opus+DS
 
-### #218 default effect handler dispatch：sibling op 调用走错路径 [medium] [judgment] [open]
-
-`default_effect_sibling_op.ring` runtime assertion 失败："increment default should call overridden get"。default effect handler 的 sibling op 调用未正确 dispatch 到 override handler，走了 default 路径。
-
-**LLVM_SKIP**：`default_effect_sibling_op.ring`（e2e）、`default_effect_sibling.ring`（llvm golden）。修好后移除。
-
-发现者：B-151 CI
 
 ### #219 effect handler 交互：custom effect + fail 组合 runtime crash [medium] [judgment] [open]
 

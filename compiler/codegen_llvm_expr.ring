@@ -6028,6 +6028,21 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
     // B-097: merge default bodies for unhandled ops.
     // If the effect declares ops with default bodies that weren't explicitly
     // handled, inject their default body closures into the evidence struct.
+    //
+    // B-161: before generating default body closures, temporarily set
+    // named_values[ev_name] to point to the handler's evidence struct (ev_ptr).
+    // Without this, gen_lambda captures the *default* evidence (set by
+    // build_default_evidence_all), so sibling op calls in the default body
+    // dispatch through the default evidence instead of the handler's overrides.
+    // Example: Counter.increment()'s default body calls Counter.get() — if the
+    // handler overrides get() => 10, increment must dispatch through the
+    // handler's evidence to see the override, not the default get() => 0.
+    let ev_name_for_default = evidence_param_name(effect_name)
+    let saved_ev_for_default = ctx.named_values.get(ev_name_for_default)
+    let handler_ev_alloca = build_entry_alloca(ctx, ctx.ptr_type, fresh_name(ctx, "hev_tmp"))
+    discard(LLVMBuildStore(ctx.builder, ev_ptr, handler_ev_alloca))
+    ctx.named_values.insert(ev_name_for_default, handler_ev_alloca)
+
     match ctx.effect_ops.get(effect_name) {
         some(all_ops) => {
             for op in all_ops {
@@ -6047,6 +6062,12 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
             }
         },
         none => {},
+    }
+
+    // B-161: restore original evidence in named_values.
+    match saved_ev_for_default {
+        some(old_alloca) => ctx.named_values.insert(ev_name_for_default, old_alloca),
+        none => ctx.named_values.remove(ev_name_for_default),
     }
 
     ev_ptr

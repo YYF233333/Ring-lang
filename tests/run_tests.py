@@ -66,8 +66,6 @@ LLVM_SKIP = {
     "trait_alias.ring",
     "scc_mutual_recursion.ring",
     # Runtime assertion failures (pre-existing LLVM backend bugs)
-    "default_effect_sibling.ring",
-    "default_effect_sibling_op.ring",
     "effect_custom_and_fail.ring",
     "effect_custom_multi_effect.ring",
     "exhaustive_generic_payload.ring",
