@@ -1182,6 +1182,9 @@ fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<St
     if trait_method_order.get("Debug").is_none() {
         trait_method_order.insert("Debug", ["debug"])
     }
+    if trait_method_order.get("Hash").is_none() {
+        trait_method_order.insert("Hash", ["hash"])
+    }
 }
 
 // Collect all transitive supertraits for a given trait: if Top: Mid and

@@ -3005,6 +3005,10 @@ extern "C" void* ring_buf_set_byte(void* p, void* offset_tagged, void* val_tagge
     return nullptr;
 }
 
+extern "C" int64_t ring_buf_get_byte(void* p, int64_t offset) {
+    return (int64_t)((uint8_t*)p)[(size_t)offset];
+}
+
 // ============================================================================
 // Parse functions
 // ============================================================================
@@ -3314,6 +3318,46 @@ static void* ring_make_debug_dict(void* debugfn) {
 }
 
 // ============================================================================
+// Hash trait closure functions — Hash has a single method `hash(val) -> Int`.
+// Each closure takes (env, val) where val is a boxed Ring value, returns a boxed Int.
+// ============================================================================
+
+static void* ring_cl_hash_int(void* /*env*/, void* val) {
+    uint64_t x = (uint64_t)ring_unbox_int(val);
+    // multiply-xorshift mixing (splitmix64 finalizer)
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    x = x ^ (x >> 31);
+    return ring_box_int((int64_t)x);
+}
+
+static void* ring_cl_hash_str(void* /*env*/, void* val) {
+    RingStr* s = as_str(val);
+    // FNV-1a 64-bit
+    uint64_t h = 14695981039346656037ULL;
+    for (int64_t i = 0; i < s->len; i++) {
+        h ^= (uint8_t)s->buf[i];
+        h *= 1099511628211ULL;
+    }
+    return ring_box_int((int64_t)h);
+}
+
+static void* ring_cl_hash_bool(void* /*env*/, void* val) {
+    return ring_box_int(ring_unbox_int(val) ? 1LL : 0LL);
+}
+
+static void* ring_make_hash_dict(void* hashfn) {
+    // Hash dict: single `hash` closure at slot 0.
+    // Same count-prefixed DICT_STATIC layout as Eq/Ord/Debug dicts.
+    void* data = ring_alloc(sizeof(int64_t) + 4 * sizeof(void*), RING_TYPEID_DICT_STATIC);
+    *(int64_t*)data = 4;
+    void** d = (void**)((char*)data + 8);
+    d[0] = ring_make_closure(hashfn);
+    d[1] = nullptr; d[2] = nullptr; d[3] = nullptr;
+    return data;
+}
+
+// ============================================================================
 // Perceus RC L0 — container drop functions
 // ============================================================================
 
@@ -3483,6 +3527,15 @@ extern "C" void* ring_get_builtin_dict(void* name_ptr) {
         if (has_type_segment("Bool"))  return ring_make_debug_dict((void*)ring_Bool_debug);
         if (has_type_segment("Float")) return ring_make_debug_dict((void*)ring_Float_debug);
         fprintf(stderr, "ring: no builtin Debug dict for '%s'\n", n.c_str());
+        fflush(stderr);
+        return nullptr;
+    }
+    // Hash dicts (single `hash` method).
+    if (has_trait_suffix("Hash")) {
+        if (has_type_segment("Str"))   return ring_make_hash_dict((void*)ring_cl_hash_str);
+        if (has_type_segment("Int"))   return ring_make_hash_dict((void*)ring_cl_hash_int);
+        if (has_type_segment("Bool"))  return ring_make_hash_dict((void*)ring_cl_hash_bool);
+        fprintf(stderr, "ring: no builtin Hash dict for '%s'\n", n.c_str());
         fflush(stderr);
         return nullptr;
     }

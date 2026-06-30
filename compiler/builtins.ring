@@ -76,6 +76,7 @@ pub fn register_builtins(mut env: TypeEnv) {
     register_ord_trait(env)
     register_debug_trait(env)
     register_option_debug(env)
+    register_hash_trait(env)
     register_mut_methods(env)
     register_ptr_builtins(env)
 }
@@ -624,6 +625,38 @@ fn register_option_debug(mut env: TypeEnv) {
         method_names: ["debug"],
         assoc_types: map_new()
     })
+}
+
+// ============================================================
+// register_hash_trait: Hash trait + primitive impls
+// ============================================================
+
+fn register_hash_trait(mut env: TypeEnv) {
+    let self_var_id = env.fresh_var_id()
+    let self_var = Type::TypeVar { id: self_var_id, name: none }
+
+    let hash_fn = Type::FnType { params: [self_var], return_type: INT, effects: EMPTY_ROW }
+
+    env.trait_reg.traits.insert("Hash", TraitDef {
+        name: "Hash",
+        type_params: [],
+        type_param_vars: [self_var_id],
+        methods: [
+            TraitMethodDef { name: "hash", ty: hash_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
+        ],
+        supertraits: [],
+        assoc_types: []
+    })
+
+    for prim in ["Int", "Str", "Bool"] {
+        add_impl(env.trait_reg, ImplEntry {
+            trait_name: "Hash",
+            target_type_name: prim,
+            type_params: [],
+            method_names: ["hash"],
+            assoc_types: map_new()
+        })
+    }
 }
 
 // ============================================================
