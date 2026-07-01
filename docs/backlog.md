@@ -1093,12 +1093,25 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - **不是 bootstrap 传播**——每次运行独立产生非确定性（stage2≠stage3，但两个都能运行）
 - `gen_str_lit` 的编译输出 IR 确认 `ring_str_to_cstr` → `LLVMBuildGlobalStringPtr` 之间无 drop/alloc
 
-**未解问题**：`strlen(buf)==31` 但 `LLVMBuildGlobalStringPtr` 创建 `[109 x i8]` 常量——矛盾。可能是 LLVM-C 22 的 `LLVMBuildGlobalStringPtr` 实现读取了超出 `strlen` 的数据，或 ring.exe 的编译产出机器码在调用 LLVM API 时有微妙的 ABI/寄存器问题。
+**2026-07-01 深度调查（LLVMConstStringInContext 绕过 + C wrapper 实验）**：
 
-**下一步方向**：
-- (A) ASan self-compile——检测 ring.exe 运行时是否有 UAF/OOB
-- (B) 修改 `gen_str_lit` 使用 `LLVMConstStringInContext`（显式传长度）绕过 strlen 依赖
-- (C) 用 LLVM debugger 在 `LLVMBuildGlobalStringPtr` 内部断点，观察 `StringRef` 构造时的实际长度
+排除的假设：
+- ❌ **LLVMBuildGlobalStringPtr 的 strlen 读垃圾**——改用 LLVMConstStringInContext（显式 len）后 `[109 x i8]` 完全不变。commit `d1a52ea`
+- ❌ **UAF（buf 在 ring_str_to_cstr 返回后被释放）**——strdup 防御无效，`[109 x i8]` 不变
+- ❌ **ring_str_to_cstr 返回损坏数据**——运行时诊断确认每次调用时 `strlen(buf) == len`，零 mismatch
+
+确认的事实：
+- `ring_str_to_cstr` 在被调用时返回正确数据（strlen==len），但 LLVM API 收到的 Length 参数不是 31
+- 小文件（`test_str31.ring`）的 31 字节字符串正确产出 `[32 x i8]`——**问题只在自编译（大文件）时出现**
+- C wrapper `ring_const_string(ctx, cstr, len)` 完全绕过 `StrToCstrAndLen`，用标准 `StrToCstr` + `IntToI32` 传参——消除了 `[109 x i8]`（**0 个！**），但引入了新的 crash（ring_fix.exe 自编译时 0xC0000005）
+- C wrapper 的 crash 可能是因为 `StrToCstr` marshalling 让 Perceus 过早 drop 了 Str 参数
+
+**根因定位**：Ring 的 extern fn 调用在**大型编译场景**下存在 ABI 层面的参数传递异常。`StrToCstrAndLen` 特殊路径（仅 `LLVMConstStringInContext` 使用）生成的 IR 形式正确（`call ptr @LLVMConstStringInContext(ptr, ptr, i32, i32)` 完全匹配 C 签名），但运行时实际传递的 `len` 值不正确。小文件正确而大文件出错，暗示可能是编译器 binary 自身的常量损坏（旧 dist-llvm 编译产出的 ring.exe 包含 `[109 x i8]` 垃圾常量）导致的行为异常。
+
+**下一步方向**（优先级排序）：
+- (A) **反汇编对比**：在 ring.exe 中反汇编 `build_global_cstring` 的机器码，检查 R8（第三参数）是否确实载入了 `ring_str_len_u32` 的返回值
+- (B) **纯 C stage 0**：用 dist/（JS 冻结产出）作 stage 0 回退，产出完全干净的 dist-llvm/，消除旧常量污染
+- (C) **Perceus extern fn 参数生命周期审计**：检查 `StrToCstr` 对 Str 参数的 RC 语义——是否在 extern fn 调用后过早 drop Str 对象导致 buf 悬垂
 
 **验收标准**：
 - `ring.exe build compiler/main.ring --target=llvm` 两次编译产出字节一致的 `ring_output.ll`
