@@ -12,6 +12,9 @@ Usage:
     python tests/run_tests.py --suite llvm           # golden snapshots
     python tests/run_tests.py --suite rc             # RC verify sweep
     python tests/run_tests.py --suite self-compile   # self-compile x3
+    python tests/run_tests.py --suite diff           # dual-backend diff (opt-in)
+    python tests/run_tests.py --backend=c            # compile via C backend
+    python tests/run_tests.py --filter substr        # only cases matching substr
     python tests/run_tests.py --update-golden        # regenerate .expected
 """
 
@@ -79,6 +82,15 @@ LLVM_SKIP = {
     "error_occurs_check.ring",
     "error_tuple_oob.ring",
 }
+
+# Cases not yet supported by the C backend (B-163 migration set, independent
+# of LLVM_SKIP). Applies under --backend=c and --suite diff. Grown/shrunk by
+# migration waves as the C backend gains coverage.
+C_SKIP: set = set()
+
+# The C backend does not support project/module mode yet; module cases are
+# SKIPped under --backend=c and --suite diff until a later wave flips this.
+C_BACKEND_SUPPORTS_MODULES = False
 
 # Windows-specific clang link flags.
 # /MANIFEST:EMBED + /MANIFESTUAC:asInvoker prevents Windows Installer Detection
@@ -240,15 +252,26 @@ def norm(s: str) -> str:
     return s.replace("\r\n", "\n")
 
 
+def matches_filter(name: str, name_filter: Optional[str]) -> bool:
+    """Case-insensitive substring match; no filter matches everything.
+
+    Backslashes are normalized to '/' so filters like "llvm/" work on Windows.
+    """
+    if not name_filter:
+        return True
+    return name_filter.replace("\\", "/").lower() in name.replace("\\", "/").lower()
+
+
 # ---------------------------------------------------------------------------
 # Compile + link + run helpers
 # ---------------------------------------------------------------------------
 
 def ring_build(ring_exe: str, ring_file: str, *,
                out_dir: Optional[str] = None,
+               target: str = "llvm",
                timeout: int = TIMEOUT_COMPILE) -> subprocess.CompletedProcess:
-    """Run ring.exe build <file> --target=llvm [--out-dir=<dir>]."""
-    cmd = [ring_exe, "build", ring_file, "--target=llvm"]
+    """Run ring.exe build <file> --target=<target> [--out-dir=<dir>]."""
+    cmd = [ring_exe, "build", ring_file, f"--target={target}"]
     if out_dir:
         # Use --out-dir=<path> (equals-sign) form; ring.exe CLI parser does
         # not accept --out-dir <path> as two separate arguments.
@@ -286,22 +309,28 @@ def run_exe(exe_path: str, timeout: int = TIMEOUT_RUN) -> subprocess.CompletedPr
 # ---------------------------------------------------------------------------
 
 def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
-                     tmpdir: str, *, is_module: bool = False) -> Tuple[bool, str, str]:
+                     tmpdir: str, *, is_module: bool = False,
+                     backend: str = "llvm") -> Tuple[bool, str, str]:
     """Compile a .ring file, link, run, return (ok, stdout, error_detail).
 
     On success, ok=True and stdout contains the program output.
     On failure, ok=False and error_detail describes the failure.
+
+    backend selects the codegen target ("llvm" or "c"). The C backend always
+    compiles with --out-dir=<tmpdir> (contract: emits <tmpdir>/<base>.c and
+    <tmpdir>/<base>.o) so no artifacts land next to the test sources.
+    Linking and running are backend-independent.
     """
     base = Path(ring_file).stem
 
-    if is_module:
+    if backend == "c" or is_module:
         out_dir = tmpdir
     else:
         out_dir = None
 
     # Compile
     try:
-        r = ring_build(ring_exe, ring_file, out_dir=out_dir)
+        r = ring_build(ring_exe, ring_file, out_dir=out_dir, target=backend)
     except subprocess.TimeoutExpired:
         return False, "", "compile timed out"
 
@@ -309,10 +338,10 @@ def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
         return False, "", f"compile failed (exit {r.returncode}): {(r.stderr or r.stdout or '')[:500]}"
 
     # Locate the .o file
-    if is_module:
-        o_file = os.path.join(tmpdir, base + ".o")
+    if out_dir is not None:
+        o_file = os.path.join(out_dir, base + ".o")
     else:
-        # Single-file: .o placed next to the .ring file
+        # Single-file LLVM: .o placed next to the .ring file
         o_file = str(Path(ring_file).with_suffix(".o"))
 
     if not os.path.isfile(o_file):
@@ -325,8 +354,8 @@ def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
     except subprocess.TimeoutExpired:
         return False, "", "link timed out"
     finally:
-        # Clean up .o if single-file (placed next to source)
-        if not is_module and os.path.isfile(o_file):
+        # Clean up .o if single-file LLVM (placed next to source)
+        if out_dir is None and os.path.isfile(o_file):
             os.remove(o_file)
         # Clean up ring_output.ll if generated
         ll_file = REPO / "ring_output.ll"
@@ -402,7 +431,9 @@ def discover_module_negative(modules_dir: Path) -> List[Path]:
     return cases
 
 
-def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector) -> None:
+def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
+            backend: str = "llvm",
+            name_filter: Optional[str] = None) -> None:
     """Run the E2E test suite."""
     suite = "e2e"
 
@@ -418,14 +449,21 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector) -> None:
             name = ring_file.name
             rel = ring_file.relative_to(CASES_DIR)
 
+            if not matches_filter(str(rel), name_filter):
+                continue
+
             if name in LLVM_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, str(rel), "LLVM_SKIP"))
+                continue
+            if backend == "c" and name in C_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, str(rel), "C_SKIP"))
                 continue
 
             expected_file = ring_file.with_suffix(".expected")
             expected = norm(expected_file.read_text(encoding="utf-8"))
 
-            ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file), tmpdir)
+            ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file),
+                                                  tmpdir, backend=backend)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, str(rel), detail))
                 continue
@@ -450,6 +488,11 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector) -> None:
     for ring_file in negative:
         rel = ring_file.relative_to(CASES_DIR)
         name = ring_file.name
+
+        # Negative cases go through `ring check` only -- backend-independent,
+        # so neither --backend nor C_SKIP applies here.
+        if not matches_filter(str(rel), name_filter):
+            continue
 
         if name in LLVM_SKIP:
             collector.add(TestResult(TestResult.SKIP, suite, f"neg:{rel}", "LLVM_SKIP"))
@@ -484,11 +527,24 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector) -> None:
     with tempfile.TemporaryDirectory(prefix="ring_mod_") as tmpdir:
         for main_file in mod_positive:
             mod_name = main_file.parent.name
+
+            if not matches_filter(f"mod:{mod_name}", name_filter):
+                continue
+
+            if backend == "c" and not C_BACKEND_SUPPORTS_MODULES:
+                collector.add(TestResult(TestResult.SKIP, suite, f"mod:{mod_name}",
+                                         "C backend: project mode not yet supported"))
+                continue
+            if backend == "c" and mod_name in C_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, f"mod:{mod_name}", "C_SKIP"))
+                continue
+
             expected_file = main_file.parent / "main.expected"
             expected = norm(expected_file.read_text(encoding="utf-8"))
 
             ok, stdout, detail = compile_link_run(
-                ring_exe, clang_path, str(main_file), tmpdir, is_module=True)
+                ring_exe, clang_path, str(main_file), tmpdir, is_module=True,
+                backend=backend)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, f"mod:{mod_name}", detail))
                 continue
@@ -507,6 +563,11 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector) -> None:
     mod_negative = discover_module_negative(MODULES_DIR)
     for main_file in mod_negative:
         mod_name = main_file.parent.name
+
+        # check-only, backend-independent (see single-file negative above)
+        if not matches_filter(f"mod-neg:{mod_name}", name_filter):
+            continue
+
         error_file = main_file.parent / "main.error"
         pattern = error_file.read_text(encoding="utf-8").strip()
 
@@ -536,8 +597,10 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector) -> None:
 # ---------------------------------------------------------------------------
 
 def run_llvm(ring_exe: str, clang_path: str, collector: ResultCollector,
-             *, update_golden: bool = False) -> None:
-    """Run the LLVM golden-snapshot regression suite."""
+             *, update_golden: bool = False,
+             backend: str = "llvm",
+             name_filter: Optional[str] = None) -> None:
+    """Run the golden-snapshot regression suite (backend-selectable)."""
     suite = "llvm"
     cases = discover_positive_cases(LLVM_CASES_DIR)
     if not cases:
@@ -549,11 +612,18 @@ def run_llvm(ring_exe: str, clang_path: str, collector: ResultCollector,
             name = ring_file.name
             expected_file = ring_file.with_suffix(".expected")
 
+            if not matches_filter(name, name_filter):
+                continue
+
             if name in LLVM_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, name, "LLVM_SKIP"))
                 continue
+            if backend == "c" and name in C_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, name, "C_SKIP"))
+                continue
 
-            ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file), tmpdir)
+            ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file),
+                                                  tmpdir, backend=backend)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, name, detail))
                 continue
@@ -577,16 +647,106 @@ def run_llvm(ring_exe: str, clang_path: str, collector: ResultCollector,
 
 
 # ---------------------------------------------------------------------------
+# Dual-backend diff suite (B-163: C backend vs LLVM oracle)
+# ---------------------------------------------------------------------------
+
+# Backends compared by --suite diff: (oracle, candidate).
+DIFF_BACKENDS = ("llvm", "c")
+
+
+def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
+             name_filter: Optional[str] = None) -> None:
+    """Dual-backend differential suite (plan-c-backend.md §2.3).
+
+    Every positive case -- golden (tests/cases/llvm/), e2e single-file, and
+    modules -- is compiled, linked and run under both DIFF_BACKENDS; the
+    normalized stdout must match byte-for-byte. Expected files are NOT
+    consulted: the LLVM backend is the oracle, agreement is the assertion.
+
+    LLVM_SKIP and C_SKIP both apply (no oracle / no candidate -> no diff).
+    Module cases are SKIPped while the C backend lacks project mode.
+    """
+    suite = "diff"
+    case_seq = [0]  # mutable counter for unique per-case work dirs
+
+    def diff_one(label: str, ring_file: Path, tmpdir: str, *,
+                 is_module: bool = False) -> None:
+        case_seq[0] += 1
+        outputs: List[str] = []
+        for side, backend in enumerate(DIFF_BACKENDS):
+            side_dir = os.path.join(tmpdir, f"case{case_seq[0]}_side{side}")
+            os.makedirs(side_dir)
+            ok, stdout, detail = compile_link_run(
+                ring_exe, clang_path, str(ring_file), side_dir,
+                is_module=is_module, backend=backend)
+            if not ok:
+                collector.add(TestResult(TestResult.FAIL, suite, label,
+                                         f"[{backend}] {detail}"))
+                return
+            outputs.append(norm(stdout))
+
+        if outputs[0] == outputs[1]:
+            collector.add(TestResult(TestResult.PASS, suite, label))
+        else:
+            collector.add(TestResult(
+                TestResult.FAIL, suite, label,
+                f"backend outputs differ: {DIFF_BACKENDS[0]}={outputs[0][:200]!r}, "
+                f"{DIFF_BACKENDS[1]}={outputs[1][:200]!r}"))
+
+    # --- Single-file positive cases: e2e (incl. subdirs) + golden ---
+    single = discover_positive_cases(CASES_DIR)
+    for subdir_name in EXTRA_NEG_DIRS:
+        single.extend(discover_positive_cases(CASES_DIR / subdir_name))
+    single.extend(discover_positive_cases(LLVM_CASES_DIR))
+
+    with tempfile.TemporaryDirectory(prefix="ring_diff_") as tmpdir:
+        for ring_file in single:
+            name = ring_file.name
+            rel = str(ring_file.relative_to(CASES_DIR))
+
+            if not matches_filter(rel, name_filter):
+                continue
+            if name in LLVM_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, rel, "LLVM_SKIP"))
+                continue
+            if name in C_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, rel, "C_SKIP"))
+                continue
+
+            diff_one(rel, ring_file, tmpdir)
+
+        # --- Module positive cases ---
+        for main_file in discover_module_positive(MODULES_DIR):
+            mod_name = main_file.parent.name
+            label = f"mod:{mod_name}"
+
+            if not matches_filter(label, name_filter):
+                continue
+            if not C_BACKEND_SUPPORTS_MODULES:
+                collector.add(TestResult(TestResult.SKIP, suite, label,
+                                         "C backend: project mode not yet supported"))
+                continue
+            if mod_name in C_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, label, "C_SKIP"))
+                continue
+
+            diff_one(label, main_file, tmpdir, is_module=True)
+
+
+# ---------------------------------------------------------------------------
 # RC verify suite
 # ---------------------------------------------------------------------------
 
-def run_rc(ring_exe: str, collector: ResultCollector) -> None:
+def run_rc(ring_exe: str, collector: ResultCollector, *,
+           name_filter: Optional[str] = None) -> None:
     """Run the RC verify suite."""
     suite = "rc"
 
     # 1. Self-verify: compiler/main.ring --verify-rc
     compiler_main = REPO / "compiler" / "main.ring"
-    if compiler_main.is_file():
+    if not matches_filter("self-verify (compiler/main.ring)", name_filter):
+        pass
+    elif compiler_main.is_file():
         try:
             r = ring_check(ring_exe, str(compiler_main),
                            extra_args=["--verify-rc"],
@@ -608,6 +768,8 @@ def run_rc(ring_exe: str, collector: ResultCollector) -> None:
         positive = discover_positive_cases(directory)
         for ring_file in positive:
             name = f"{label}/{ring_file.name}"
+            if not matches_filter(name, name_filter):
+                continue
             try:
                 r = ring_check(ring_exe, str(ring_file), extra_args=["--verify-rc"])
             except subprocess.TimeoutExpired:
@@ -632,6 +794,8 @@ def run_rc(ring_exe: str, collector: ResultCollector) -> None:
     if RC_NEG_DIR.is_dir():
         for ring_file in sorted(RC_NEG_DIR.glob("*.ring")):
             name = f"neg/{ring_file.name}"
+            if not matches_filter(name, name_filter):
+                continue
             try:
                 r = ring_check(ring_exe, str(ring_file), extra_args=["--verify-rc"])
             except subprocess.TimeoutExpired:
@@ -652,9 +816,13 @@ def run_rc(ring_exe: str, collector: ResultCollector) -> None:
 # Self-compile suite
 # ---------------------------------------------------------------------------
 
-def run_self_compile(ring_exe: str, collector: ResultCollector) -> None:
+def run_self_compile(ring_exe: str, collector: ResultCollector, *,
+                     name_filter: Optional[str] = None) -> None:
     """Run the self-compile suite: build compiler 3x, outputs must be identical."""
     suite = "self-compile"
+    # Coarse-grained: the whole suite is one unit; filter matches the suite name.
+    if not matches_filter(suite, name_filter):
+        return
     compiler_main = REPO / "compiler" / "main.ring"
     if not compiler_main.is_file():
         collector.add(TestResult(TestResult.SKIP, suite, "all", "compiler/main.ring not found"))
@@ -714,7 +882,7 @@ def print_summary(collector: ResultCollector) -> None:
     print("=== Summary ===")
     summary = collector.summary()
 
-    for suite_name in ["e2e", "llvm", "rc", "self-compile"]:
+    for suite_name in ["e2e", "llvm", "diff", "rc", "self-compile"]:
         if suite_name not in summary:
             continue
         s = summary[suite_name]
@@ -739,21 +907,35 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Ring-lang Python test runner (B-151 P2)")
     parser.add_argument(
-        "--suite", choices=["e2e", "llvm", "rc", "self-compile"],
+        "--suite", choices=["e2e", "llvm", "rc", "self-compile", "diff"],
         action="append", dest="suites",
-        help="Test suite(s) to run. Omit for all.")
+        help="Test suite(s) to run. Omit for all (diff is opt-in only).")
+    parser.add_argument(
+        "--backend", choices=["llvm", "c"], default="llvm",
+        help="Codegen backend for e2e/llvm positive cases (default: llvm). "
+             "Negative (check) cases are backend-independent.")
+    parser.add_argument(
+        "--filter", dest="name_filter", metavar="SUBSTR", default=None,
+        help="Only run cases whose name contains SUBSTR (case-insensitive, "
+             "applies to all suites).")
     parser.add_argument(
         "--update-golden", action="store_true",
         help="Regenerate .expected golden snapshots instead of comparing.")
     args = parser.parse_args()
 
+    # diff is opt-in: never part of the default all-suites run.
     suites = args.suites or ["e2e", "llvm", "rc", "self-compile"]
+
+    if args.update_golden and args.backend != "llvm":
+        # Golden snapshots are the oracle; only the LLVM backend may write them.
+        print("ERROR: --update-golden requires --backend=llvm.", file=sys.stderr)
+        return 1
 
     # --- Tool discovery ---
     clang_path = find_clang()
     ring_exe = find_ring_exe()
 
-    needs_clang = any(s in suites for s in ["e2e", "llvm"])
+    needs_clang = any(s in suites for s in ["e2e", "llvm", "diff"])
 
     if ring_exe is None:
         print("ERROR: ring.exe not found.", file=sys.stderr)
@@ -775,22 +957,32 @@ def main() -> int:
     if clang_path:
         print(f"clang:    {clang_path}")
     print(f"suites:   {', '.join(suites)}")
+    if args.backend != "llvm":
+        print(f"backend:  {args.backend}")
+    if args.name_filter:
+        print(f"filter:   {args.name_filter}")
     print()
 
     collector = ResultCollector()
 
     if "e2e" in suites:
-        run_e2e(ring_exe, clang_path or "", collector)
+        run_e2e(ring_exe, clang_path or "", collector,
+                backend=args.backend, name_filter=args.name_filter)
 
     if "llvm" in suites:
         run_llvm(ring_exe, clang_path or "", collector,
-                 update_golden=args.update_golden)
+                 update_golden=args.update_golden,
+                 backend=args.backend, name_filter=args.name_filter)
+
+    if "diff" in suites:
+        run_diff(ring_exe, clang_path or "", collector,
+                 name_filter=args.name_filter)
 
     if "rc" in suites:
-        run_rc(ring_exe, collector)
+        run_rc(ring_exe, collector, name_filter=args.name_filter)
 
     if "self-compile" in suites:
-        run_self_compile(ring_exe, collector)
+        run_self_compile(ring_exe, collector, name_filter=args.name_filter)
 
     print_summary(collector)
     return 1 if collector.failures > 0 else 0

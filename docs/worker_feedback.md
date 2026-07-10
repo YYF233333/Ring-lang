@@ -11,6 +11,18 @@
 
 ---
 
+## [通知] B-163 Phase 1 测试 runner 扩展：实现取舍（2026-07-10，runner worker）
+
+`tests/run_tests.py` 已支持 `--backend=llvm|c` / `--suite diff` / `C_SKIP` / `--filter`。默认行为逐行零变化（改动前后 `--suite e2e` 输出 Compare-Object 完全一致，396/0/21）。自差分（临时 llvm vs llvm，已还原为 llvm vs c）全量 494 pass / 36 skip，2 例 `const_basic.ring` / `llvm/effect_nested_handle.ring` 撞 ring.exe 间歇 AV（exit 3221225477，复跑均过——即 B-155 快照里的已知间歇崩溃，非 runner 问题）。取舍如下：
+
+1. **C 后端产物落 tmpdir，不落源目录**：`--backend=c` 单文件用例也总是传 `--out-dir=<tmpdir>`（契约产出 `D/foo.c` + `D/foo.o`），避免 `.c`/`.o` 残留在 `tests/cases/`。LLVM 单文件路径保持现状（源旁 .o、用后即删）。
+2. **modules 在 C 侧静态跳过**：C 后端 project 模式支持性无法运行时探测（迁移期后端尚不存在），用模块级常量 `C_BACKEND_SUPPORTS_MODULES = False` 控制——`--backend=c` 与 `--suite diff` 下 module 正向用例报 SKIP（detail 注明原因），后续 wave 支持后翻 True 即纳入。
+3. **`--backend=c` 下 LLVM_SKIP 照样生效**（与 C_SKIP 叠加）：LLVM_SKIP 内混有 checker 层问题（frozen dist-llvm、负面行为差异）与 LLVM runtime crash，迁移期在 C 下状态未知，先统一跳；plan §2.3 的 #219-#222 重评估时再把确认可跑的从 LLVM_SKIP 挪出或挪入 C_SKIP。
+4. **diff 输出格式**：FAIL detail 为 `[llvm]/[c] <编译/链接/运行错误>`（单侧失败）或 `backend outputs differ: llvm=<repr 前 200 字符>, c=<repr 前 200 字符>`（输出不一致），与现有 e2e 的 expected/got 风格一致。diff 不读 `.expected`——LLVM 是 oracle，两侧一致即断言。
+5. **`--filter` 语义**：大小写不敏感子串，`\` 归一化为 `/`（`--filter llvm/` 可选中 golden 子集）。被过滤的用例不跑不报（不计 SKIP）。rc 的 self-verify 按条目名匹配；self-compile 整套按 suite 名 `self-compile` 匹配（粗粒度）。
+6. **防呆**：`--update-golden` 强制要求 `--backend=llvm`（golden 快照是 oracle，禁止 C 侧覆写）。
+7. **当前 ring.exe 对 `--target=c` 的行为**：exit 0 但不产出 .o → runner 报 `.o file not found` FAIL（安全方向，不假绿）；C 后端 worktree 按契约落地后自然走通。
+
 ## [通知] B-155 方向 C 审计中断快照（2026-07-10，用户拍板转 Phase 1）
 
 > 审计进行约半程时用户拍板收卷（B-163 Phase 1 直接开工，B-155 推迟到字符串字面量步骤有 .c 文本证据后再审）。以下为全部阶段性发现，**下次重启审计从这里接力**。无修复尝试、无诊断脚手架残留（源码零改动，#241 除外）。
