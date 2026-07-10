@@ -25,9 +25,11 @@
 #include <io.h>      // _access
 #include <windows.h> // GetFullPathName
 #include <intrin.h>  // _ReturnAddress
+#include <process.h> // _spawnvp (B-163 exec_sync)
 #define PATH_SEP '\\'
 #else
-#include <unistd.h>  // getcwd, access
+#include <unistd.h>  // getcwd, access, fork/execvp (B-163 exec_sync)
+#include <sys/wait.h> // waitpid (B-163 exec_sync)
 #define PATH_SEP '/'
 #endif
 
@@ -2387,6 +2389,52 @@ extern "C" void* ring_cwd() {
         exit(1);
     }
     return make_ring_str(buf, (int64_t)strlen(buf));
+}
+
+// B-163 step 1: exec_sync(cmd: Str, args: List<Str>) -> Int (std/process.ring).
+// Declared in std since B-151 but never implemented in the native runtime; the
+// C backend needs it to shell out `clang -c <file>.c -o <file>.o`.
+// Uniform boxed ABI (extern fn fallback declaration): all params void*, returns
+// a tagged Int (child exit code; -1 if the process could not be spawned).
+// Windows: _spawnvp does NOT quote argv entries itself — quote any arg that
+// contains spaces (paths under "C:\Users\Yufeng Ying\..." etc.).
+extern "C" void* exec_sync(void* cmd, void* args) {
+    RingStr* c = as_str(cmd);
+    int64_t n = ring_list_len(args);
+    std::vector<std::string> storage;
+    storage.reserve((size_t)n + 1);
+    storage.push_back(std::string(c->buf, (size_t)c->len));
+    for (int64_t i = 0; i < n; i++) {
+        RingStr* a = as_str(ring_list_get(args, i));
+        storage.push_back(std::string(a->buf, (size_t)a->len));
+    }
+#ifdef _WIN32
+    for (size_t i = 0; i < storage.size(); i++) {
+        if (storage[i].empty() || storage[i].find(' ') != std::string::npos) {
+            storage[i] = "\"" + storage[i] + "\"";
+        }
+    }
+    std::vector<const char*> argv;
+    for (size_t i = 0; i < storage.size(); i++) argv.push_back(storage[i].c_str());
+    argv.push_back(nullptr);
+    intptr_t code = _spawnvp(_P_WAIT, c->buf, argv.data());
+    if (code == -1) return (void*)(((uintptr_t)(int64_t)-1 << 1) | 1);
+    return (void*)(((uintptr_t)(int64_t)code << 1) | 1);
+#else
+    pid_t pid = fork();
+    if (pid < 0) return (void*)(((uintptr_t)(int64_t)-1 << 1) | 1);
+    if (pid == 0) {
+        std::vector<char*> argv;
+        for (size_t i = 0; i < storage.size(); i++) argv.push_back(const_cast<char*>(storage[i].c_str()));
+        argv.push_back(nullptr);
+        execvp(c->buf, argv.data());
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return (void*)(((uintptr_t)(int64_t)-1 << 1) | 1);
+    int64_t code = WIFEXITED(status) ? (int64_t)WEXITSTATUS(status) : (int64_t)-1;
+    return (void*)(((uintptr_t)code << 1) | 1);
+#endif
 }
 
 // ============================================================================

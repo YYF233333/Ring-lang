@@ -4,6 +4,7 @@ use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
 use formatter::{format_human, format_llm}
 use checker::{CheckResult, check as check_single}
 use codegen_llvm::{generate_llvm}
+use codegen_c::{generate_c}
 use compiler_mod::{compile_project, compile_project_llvm, verify_project_rc}
 use parser::{parse}
 use perceus::{perceus_transform, perceus_transform_mutated}
@@ -83,6 +84,12 @@ pub fn cli_main() {
             }
         } else {
             if parsed.command == "build" {
+                // B-163: multi-file (project) C emission lands in step 8.
+                if parsed.target == "c" {
+                    eprintln("--target=c does not support multi-file (project) mode yet — planned for B-163 step 8; use --target=llvm")
+                    exit_process(1)
+                    return
+                }
                 let out_dir = path_resolve(parsed.out_dir)
                 let out_path = path_join(out_dir, path_basename(file_path).replace(".ring", ".o"))
                 let result = compile_project_llvm(file_path, out_path, parsed.error_format)
@@ -149,9 +156,27 @@ pub fn cli_main() {
         print("OK")
     } else {
         if parsed.command == "build" {
-            let out_path = file_path.replace(".ring", ".o")
             let rc_program = perceus_transform(check_result.program)
-            generate_llvm(rc_program, out_path)
+            if parsed.target == "c" {
+                // B-163 C backend: emit <name>.c, then shell out clang -c → <name>.o.
+                // --out-dir redirects both artifacts when explicitly given;
+                // default drops them next to the source (LLVM single-file parity).
+                let base = path_basename(file_path).replace(".ring", "")
+                let c_path = if parsed.out_dir_set {
+                    path_join(path_resolve(parsed.out_dir), "${base}.c")
+                } else {
+                    file_path.replace(".ring", ".c")
+                }
+                let o_path = if parsed.out_dir_set {
+                    path_join(path_resolve(parsed.out_dir), "${base}.o")
+                } else {
+                    file_path.replace(".ring", ".o")
+                }
+                generate_c(rc_program, c_path, o_path, parsed.c_lines)
+            } else {
+                let out_path = file_path.replace(".ring", ".o")
+                generate_llvm(rc_program, out_path)
+            }
         } else {
             eprintln("Only 'build' and 'check' commands are supported")
             exit_process(1)
@@ -169,7 +194,9 @@ struct CliArgs {
     debug: Bool,
     error_format: Str,
     out_dir: Str,
+    out_dir_set: Bool,
     target: Str,
+    c_lines: Bool,
     verify_rc: Bool,
     verify_strict: Bool,
     rc_mutate: Str
@@ -196,7 +223,9 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
     let mut debug = false
     let mut error_format = "human"
     let mut out_dir = "dist"
+    let mut out_dir_set = false
     let mut target = "llvm"
+    let mut c_lines = true
     let mut verify_rc = false
     let mut verify_strict = false
     let mut rc_mutate = ""
@@ -212,6 +241,12 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
                 if arg == "--verify-rc-strict" {
                     verify_strict = true
                 } else {
+                    if arg == "--no-c-lines" {
+                        // B-163: suppress #line directives in --target=c output
+                        // (human-readable generated C; default keeps them so
+                        // sanitizer/debugger reports point at .ring sources).
+                        c_lines = false
+                    } else {
                     if arg.starts_with("--rc-mutate=") {
                         // TEST-ONLY (B-104 D2 negative tests): degrade the RC
                         // pipeline so the verifier's detection can be asserted.
@@ -222,6 +257,7 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
                         } else {
                             if arg.starts_with("--out-dir=") {
                                 out_dir = arg.slice(10, arg.len())
+                                out_dir_set = true
                             } else {
                                 if arg.starts_with("--target=") {
                                     target = arg.slice(9, arg.len())
@@ -230,6 +266,7 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
@@ -245,7 +282,9 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
         debug: debug,
         error_format: error_format,
         out_dir: out_dir,
+        out_dir_set: out_dir_set,
         target: target,
+        c_lines: c_lines,
         verify_rc: verify_rc,
         verify_strict: verify_strict,
         rc_mutate: rc_mutate
@@ -264,6 +303,8 @@ fn usage() {
     print("  --debug                   Print intermediate info")
     print("  --error-format=human|llm  Error output format (default: human)")
     print("  --out-dir=<path>          Output directory (default: dist)")
+    print("  --target=llvm|c           Code generation backend (default: llvm; c = B-163 C backend)")
+    print("  --no-c-lines              (--target=c) omit #line directives from the generated C")
     print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR")
     print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail")
 }
