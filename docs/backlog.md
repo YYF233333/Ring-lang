@@ -1067,7 +1067,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [queued]
+### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [doing: phase0]
 
 > 2026-07-10 立项（Discussion，B-155 泥潭止损 + 后端信道结构性分析）。**完整执行计划见 `docs/plan-c-backend.md`**，执行前必读。
 
