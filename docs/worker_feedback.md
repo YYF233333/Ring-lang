@@ -23,6 +23,29 @@
 6. **防呆**：`--update-golden` 强制要求 `--backend=llvm`（golden 快照是 oracle，禁止 C 侧覆写）。
 7. **当前 ring.exe 对 `--target=c` 的行为**：exit 0 但不产出 .o → runner 报 `.o file not found` FAIL（安全方向，不假绿）；C 后端 worktree 按契约落地后自然走通。
 
+## [通知] B-163 Phase 1 steps 1-3 完成：C 后端骨架 + 基础表达式 + 控制流（2026-07-10，Phase 1 worker）
+
+**验收结果**：golden 子集 14/14 全绿（每例三重判据：C 输出 == .expected、C vs LLVM 双后端运行输出 diff=0、同用例 `--target=c` 编译 ×2 .c 文本字节一致）。全量回归：e2e 396/0、llvm golden 212/0（含新增用例 c_backend_steps123）、rc 529/0。self-compile ×3 各自 PASS 但 consistency 字节比较 FAIL——这是 **B-155 已知 IR 非确定性**（CI bootstrap 因此禁用、Phase 0 已实锤活 bug、正是 B-163 立项动机），与本次改动无关（该套件走 LLVM 后端 + 冻结 ring.exe）。
+
+### 实现取舍（[通知] 合集）
+
+1. **#line flag 命名**：`--no-c-lines`（默认**开**，sanitizer/调试器映射 .ring 是本后端核心卖点；人读生成码时显式关）。实测默认 636 条 #line、关闭后 0 条。
+2. **generate_c 签名**扩展为 `(program, c_path, o_path, emit_lines)`——.c/.o 双产物路径 + flag 需要入参，任务书的两参形状不够用。
+3. **exec_sync 缺失实现**：`std/process.ring` 早已声明 `exec_sync` 但 ring_runtime.cpp 从未实现（此前无 native 调用者）。本次补上（Windows `_spawnvp` + 含空格 argv 手动引号 / POSIX fork+execvp），返回 tagged-Int 退出码。这是 clang shell-out 的前提。
+4. **符号冲突改名**：prelude Ring 函数 mangle 后撞 runtime C++ 符号（`map_new`→`ring_map_new` 等 3 处）——LLVM 后端靠 LLVM module 级自动重命名兜底，C 里是硬链接错误。方案：撞 runtime 符号表的 Ring 函数定义加 `__ring` 后缀，调用点经 CFnInfo.c_name 透明解析；直接调用这些名字的路径本来就走 extern_fn_to_runtime 优先（与 LLVM 行为一致）。
+5. **prelude 全量流经后端**：单文件模式 checker 把整个 std prelude 前置进 program.decls，所以 step 1 起 C 后端就要消化全部 prelude 声明。未移植构造（match/struct/enum 构造与字段访问/closure/dict/handler/if-let）发射为**编译期干净的 runtime-panic stub**（去重的 interned 消息），golden 子集运行路径不触达。代价：clang 编译时 2 条良性 warning（stub 死代码路径上 `% RING_UNTAG(RING_UNIT)` 的常量除零警告——该语句前必有 divzero guard panic，运行不可达）。
+6. **method_to_runtime / runtime 原型表全量迁移**（非只子集）：rt proto 表逐条转录 declare_runtime_fns 并与 ring_runtime.cpp 实签名核对（i64/double/void 特化，含 `const char*` 修饰）。C 原型 arity 固定 → sb.line() 类缺参调用按已知 arity NULL-pad（对应 LLVM 的 LLVMCountParams pad）。
+7. **顺带实现的"越界但必要"项**：Ptr 方法 read/take/write/offset/cast/addr（各一行 C，避免 prelude stub 面扩大）；tuple/list literal、IndexExpr、for-in list/Set/Map 转换与 tuple 解构（emit_for_in 是 step 3 控制流的组成部分，全部是 runtime 调用不含 struct 构造）；Test decl、Const 三分支（Str→ring_const_intern / enum→ring_unit_intern 记忆化 + 标量 per-access）、Option/Result 内建 ctor。
+8. **语义对齐细节**：Float `!=` 用 `(a<b||a>b)`（LLVM ONE 是 ordered，C `!=` 对 NaN 是 unordered-true）；整数 +/-/* 经 RING_IADD 等无符号 wrap 宏（LLVM 无 nsw = wrap，C 有符号溢出是 UB）；除零 guard 照抄 B-148；C main 传 NULL evidence（default evidence 是 step 6）、无 drop registration（step 7）。
+9. **局部变量全部提升到函数顶部声明**（LLVM entry-alloca 的 C 等价物）——一次性绕开 C 块作用域全部坑（if/loop 结果临时跨块赋值、goto 跨声明、Ring shadowing）。Ring `continue` 在 for 循环映射为 `goto __ring_incr_N`（增量 + binding box drop 序列，对应 LLVM incr_bb），while 循环直接 `continue`；`break` 直接映射。
+10. **e2e 首跑撞 2 例 ring.exe 间歇性 0xC0000005**（struct_update_test / while_basic，编译进程崩溃），单跑 ×3 + 整套重跑全绿——B-155 家族已知间歇性 AV，冻结二进制自身行为，与本改动无关。
+11. clang 调用参数：`-std=c11 -O2 -c`（-O2 沿用 runtime 编译约定）。`--out-dir` 显式给出时 .c/.o 进该目录（CliArgs 新增 out_dir_set 区分默认值），否则落在源文件旁（与 LLVM 单文件行为一致）。
+
+### 遗留 / 下一步接口
+
+- step 4 接口已备好：CStructInfo 字段注册、typeid 分配器（List=4/Map=5/user≥64、Result 已占 64）都在 ctx；stub 消息注明 "B-163 later step"，grep `c_stub_` 可列全未移植面。
+- `gen_c_ident` 对带 dict 的一等函数值是 stub；零 dict 一等函数值返回裸函数指针（closure ABI 是 step 5，调用侧同为 stub，行为自洽）。
+
 ## [通知] B-155 方向 C 审计中断快照（2026-07-10，用户拍板转 Phase 1）
 
 > 审计进行约半程时用户拍板收卷（B-163 Phase 1 直接开工，B-155 推迟到字符串字面量步骤有 .c 文本证据后再审）。以下为全部阶段性发现，**下次重启审计从这里接力**。无修复尝试、无诊断脚手架残留（源码零改动，#241 除外）。
