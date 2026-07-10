@@ -1125,7 +1125,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 旧 ring_sb_* C++ 函数可删除
 - 全部 E2E 通过；**自编译通过**（project mode 验证）
 
-### B-155 自编译 IR 非确定性：字符串常量含堆垃圾（活 RC bug，方向 C 审计）[bugfix] [P2] [L] [judgment] [queued]
+### B-155 自编译 IR 非确定性：字符串常量含堆垃圾（活 RC bug，方向 C 审计）[bugfix] [P0] [L] [judgment] [doing]
 
 > 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。2026-06-30 深度调查（见下）。
 > **2026-07-10 Phase 0 定性（B-163 链式重放 21 代 + 完美对照实验，commit `1e2bc9d`/`361c490`）**：「执行层污染 / 尸体遗传」假设**推翻**——**活 bug 在现行源码**，经 native RC（Perceus dup/drop 生效）暴露；JS 后端 GC 下 RC 是 no-op 故全程不可见。判据（0bd7822 完美对照对，同源码同 LLVM，唯一变量 = 执行信道）：JS 执行 0 垃圾 + 三次重编与提交版逐字节一致；native 执行（干净 JS 锚点 .o 链接的 ring.exe）64×`[109 x i8]` + ×2 重编不一致；干净链条复现间歇性 0xC0000005（~1/3 命中，同一 RC bug 的致命形态）。本条目改写为**方向 C 审计**。
