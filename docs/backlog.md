@@ -380,9 +380,10 @@ fn test_fetch() {
 
 ## RIIR
 
-### B-152 RIIR 标准库（纯 Ring 重写 ring_runtime.cpp）[feature] [P1] [XL] [judgment] [doing]
+### B-152 RIIR 标准库（纯 Ring 重写 ring_runtime.cpp）[feature] [P1] [XL] [judgment] [paused: B-163]
 
 > 2026-06-27 立项（Discussion，路线图重定）。消除 C++ STL 依赖，让 Ring 真正拥有自己的底层。容器（Str/List/Map/Set）全部用纯 Ring + `Ptr<T>` + Drop 重写。
+> **2026-07-10 暂停**：B-163 C 后端迁移插队 P0，剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。P3 Map 已 merge（`8871592`），但 trait-bounded impl 方法 dict 转发 bug 迫使 Map 方法仍走 `method_to_runtime` + C++ bootstrap shim——P3 验收「~30 个 ring_map_* 删除」未闭环，调查并入 B-163 计划（plan-c-backend.md §2.5 #1），修好后回本条目关 P3。
 
 **前置**：B-125（unsafe/Ptr<T> 原语）+ B-002 Phase 1（精简版 Drop）
 
@@ -694,6 +695,8 @@ pub struct Map<K, V> {
 
 ### B-107 泛型 Map key（Hash trait + derive）[feature] [P2] [L] [judgment] [absorbed: B-152p3]
 
+> **2026-07-10 注记**：P3 已落地 Hash trait + 泛型 Map struct，但 dict 转发 bug 致方法调用仍走 C++ bootstrap shim（shim 内联 hash 仅支持 tagged Int/Bool + Str；`K: Hash` bound 把 key 限在这三类内，行为安全但泛型 key 承诺未兑现）。本条目保留至 shim 删除（B-163 plan §2.5 #1）+ derive Hash 落地后再关单。
+
 > 2026-06-07 立项（Discussion）。**类型系统说谎的缺口**：`std/map.ring` 的 `Map<K,V>` 类型层全泛型（`get(key:K)`/`insert(key:K,..)` 用类型变量 K），类型检查器放行 `Map<Int,T>`/`Map<MyEnum,T>`，但 runtime（LLVM `unordered_map<std::string,void*>`、JS 同样 Str-key）只兑现 Str key。非 Str key 静默错误，**两后端皆有，LLVM 上具体化**。bootstrap 阶段编译器自身的 Map 几乎全是 `Map<Str,...>` 故未暴露（migration diary 记录的简化）。
 
 **设计方向**：加 `Hash` trait + derive，镜像现有 Eq/Ord/Clone/Debug 的 derive 机制；runtime Map 改为 key 为 void*，经 Eq/Hash dict 派发——**复用 `List.contains` 已走的 `ring_get_builtin_dict` 泛型 Eq 派发路径**。与 B-080（标量 unboxing）协同：Int unbox 后 hash Int key trivial。
@@ -934,6 +937,23 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
+### B-164 alloc 原语 size=0 语义未定义（heap corruption 风险）[bugfix] [P2] [S] [judgment] [queued]
+
+> 2026-07-10 立项（Discussion，B-152 P3 worker_feedback 通知触发）。
+
+**现象**：B-152 P3 中 `map_new()` 用 `ring_buf_alloc(0)` / `ring_slot_alloc(0)` 创建零容量 Map，后续 `drop_map` 处理空 buffer 时 Windows heap validator 报 heap corruption。Worker 以「预分配 8 slot」绕过，根因未定位（怀疑 malloc(0) 返回的 sentinel pointer 被 free 时的行为差异 MSVC vs glibc，未证实）。size=0 分配语义未定义 = P4 Set / 未来用户 unsafe 代码的复踩点。
+
+**涉及修改**：
+1. 定位根因：构造零容量分配 + drop 的最小复现，确认是 malloc(0) sentinel、drop 遍历越界读、还是其他
+2. `ring_runtime.cpp`：在 `ring_buf_alloc` / `ring_slot_alloc` / `ring_buf_alloc_zeroed` 层显式定义 size<=0 语义（推荐方向：最小分配 1 字节 / 1 slot，保证返回可安全 free 的唯一指针；具体依根因定）
+3. 回归测试：零容量分配 + drop 路径
+
+**验收标准**：
+- size=0 分配 + drop 在 Windows heap validator + ASan gating 档下 clean
+- 根因结论成文（本条目更新或 commit message）
+- `std/map.ring` 的「预分配 8」可改为纯容量策略（不再是 corruption workaround）
+- 全部 E2E + llvm_diff 通过；自举一致
+
 ### B-162 Perceus FieldAccess scalar reassign 不 drop 旧 boxed Int（List RIIR 内存回归主因）[bugfix] [P1] [M] [judgment] [queued]
 
 > 2026-06-30 立项（内存调查：self-compile 9.86GB → 17.36GB，+76%）。
@@ -967,14 +987,18 @@ B-159 靠注册时共享 closure 参数 effect tail 绕过了 HOF 场景，但�
 
 此外，prelude 方法的 check 路径不走 `check_one_decl_with_rebind` 而是直接 `check_decl`，修了会导致编译器自身大量 W0001——需要协调处理 prelude 注册的 effect 推断。
 
+**局部 `let mut` 泄漏（2026-07-10 并入，B-152 P3 worker_feedback 触发）**：impl 方法体内 `let mut i = 0; while i < n { ... }` 会把 `mut` effect 泄漏到方法签名（CLAUDE.md RIIR 陷阱 #2；P3 `map_new` 再次命中，被迫新增 `ring_buf_alloc_zeroed` C bridge 绕过）。局部变量的 mutation 外部不可观测，不应成为签名 effect——修复时需确认这是与回写同区的 masking 缺失还是独立 bug，一并处理。
+
 **涉及修改**：
 1. `infer_decl.ring`：`rebind_fn_type` 增加 `impl_methods` 查找路径
 2. `infer_ctx.ring`：`update_fn_effects` 同上
 3. `infer_decl.ring`：prelude check 路径走 rebind（需处理 W0001 级联）
+4. 局部 `let mut` 的 `mut` effect 在函数边界 mask（不泄漏到签名）
 
 **验收标准**：
 - impl 方法的 scheme 在 body check 后正确反映 inferred effects 和 return type
 - prelude 方法（List::map 等）的 scheme 正确
+- impl 方法体内局部 `let mut` + while 循环不泄漏 `mut` effect 到方法签名（RIIR 陷阱 #2 场景可删除；`ring_buf_alloc_zeroed` workaround 可回退为 Ring 侧循环初始化）
 - 编译器自举一致 + 全量测试通过
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]

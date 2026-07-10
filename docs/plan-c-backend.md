@@ -105,6 +105,11 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 - ASan capstone 全量通过
 - 自编译耗时回填实测数（预期单 .c clang -O2 增加数十秒量级；若不可接受，内循环降 -O1 / 拆分提前，作为 tuning 决策上报）
 
+### 2.5 移植注意事项（B-152 P3 反馈回流，2026-07-10 Discussion 拍板）
+
+1. **trait-bounded impl 方法 dict 转发 bug（B-152 P3 遗留，step 5 时调查）**：`impl<K: Hash + Eq, V> Map` 这类 trait-bounded impl 块的方法调用，codegen 在某些场景下未正确传递 Hash/Eq dict，double bootstrap 崩溃。P3 被迫保留 Map 的 `method_to_runtime` 映射 + ring_runtime.cpp C++ bootstrap shim（shim 内联 hash/eq，仅支持 tagged Int/Bool + Str key），导致 P3 验收「~30 个 ring_map_* 删除」未闭环。移植 step 5（trait dict / evidence passing）时定位该 bug 在共享层（dict_lower/checker，则必须修）还是 codegen_llvm 层（则 C 后端勿复制即可）；修好后删除 Map 的 `method_to_runtime` 条目 + 全部 ring_map_* bootstrap shim，Map 方法直走 Ring 代码路径。audit-report #93/#123 的 delegate dict 转发残留可能同根，一并核对。
+2. **trait_method_order 不复制双层注册模式**：现 LLVM 后端要求新增 trait 在 `builtins.ring`（checker 层）与 `codegen_llvm.ring:scan_trait_decls`（codegen 层 `trait_method_order`）两处独立注册，漏一处即 panic（B-152 P3 Hash trait 实测踩中）——违反「跨阶段共享约定放 hir.ring」开发约定。C 后端实现 trait dispatch 时方法序必须从 checker/hir 层单一来源导出，不得在 codegen_c 中再硬编码一份。
+
 ---
 
 ## 3. Phase 2 — parity 认证 + LLVM-C 后端退役
