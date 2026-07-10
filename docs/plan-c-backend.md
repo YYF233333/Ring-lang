@@ -46,10 +46,10 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 > 对应 workflow「立项前实测前提」规则：Phase 0 即本计划的前提探针。
 > **必须先于 Phase 1**：C 后端移植需要由干净的 ring.exe 执行，否则污染继续传播。
 
-**步骤**：
-1. 用 dist/（JS 冻结产出）+ llvm_addon.node 作 stage 0，从当前源码全量重建 dist-llvm/（注意 workflow.md 的 addon 构建规则：`cd compiler/llvm-addon && node-gyp rebuild`）。
-2. 用新 dist-llvm/ 构建 ring.exe，self-compile ×3，逐轮字节比较 ring_output.ll。
-3. 检查 `[109 x i8]` / `[1410 x i8]` 垃圾常量是否消失。
+**步骤**（2026-07-10 修订：原 Step 1「JS dist/ 单跳编 HEAD」不可行——dist/ 冻结于 `0bd7822`，无 Ptr/unsafe/Drop/Hash，编不了 B-152 RIIR 后的 std。探针已实锤：JS dist/ 编 source@0bd7822 产出与提交版 main.o 逐字节一致 = 干净锚点。用户拍板方案 A：全量链式重放 + 代际审计）：
+1. **链式重放**：从干净锚点 `0bd7822` 起，按 dist-llvm rebuild commit 顺序逐代重放（~17 代际至 HEAD）——gen N ring.exe 编 source@commit(N+1)，产出与该 commit 提交版 main.o 逐字节比对。每代用该 commit 的 ring_runtime.cpp（-O2）构建链接；B-152 P2（`fae4738`）/ P3（`8871592`）数据结构重构点按 CLAUDE.md 纪律 double bootstrap；revert 对（`26abe34`→`a5fb9a4`）跳过。每代顺带扫描产出中的超尺寸垃圾常量（`[109 x i8]` / `[1410 x i8]` 型）。
+2. **首个分歧代分类**：出现字节分歧时区分 .text vs .rdata、核对 B-155 垃圾常量签名，并对该代做 ×2 重编确定性检查——判别「历史污染引入点」（干净重放产物本身干净）vs「活 bug」（干净链条也复现垃圾/非确定性）。
+3. 链条走到 HEAD 后：用干净 dist-llvm@HEAD 构建 ring.exe，self-compile ×3 逐轮字节比较 + 垃圾常量归零检查（原 Step 2/3 不变）。
 
 **结果路由**：
 - **×3 字节一致 + 垃圾常量消失** → 污染假设实锤。B-155 关单（结论写入 commit message），CI bootstrap 重新启用，进入 Phase 1。
