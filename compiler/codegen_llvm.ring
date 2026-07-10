@@ -621,7 +621,7 @@ fn apply_fn_attributes(ctx: LlvmCtx, fn_val: LLVMValueRef, params: List<HParam>,
     // nonnull: per-parameter attribute for non-Option params
     // In uniform boxing, all Ring values are pointers. Non-Option values are
     // guaranteed non-null (Int/Bool use tagged pointers which are still non-null).
-    let nonnull_kind = LLVMGetEnumAttributeKindForName("nonnull", 6)
+    let nonnull_kind = LLVMGetEnumAttributeKindForName("nonnull", 7)
     if nonnull_kind > 0 {
         let nonnull_attr = LLVMCreateEnumAttribute(ctx.context, nonnull_kind, 0)
         let mut idx = 0
