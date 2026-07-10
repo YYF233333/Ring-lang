@@ -1125,12 +1125,14 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 旧 ring_sb_* C++ 函数可删除
 - 全部 E2E 通过；**自编译通过**（project mode 验证）
 
-### B-155 自编译 IR 非确定性：字符串常量含堆垃圾（活 RC bug，方向 C 审计）[bugfix] [P0] [L] [judgment] [doing]
+### B-155 自编译 IR 非确定性：字符串常量含堆垃圾（活 RC bug，方向 C 审计）[bugfix] [P0] [L] [judgment] [queued] [deferred: B-163p1-step2]
 
 > 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。2026-06-30 深度调查（见下）。
 > **2026-07-10 Phase 0 定性（B-163 链式重放 21 代 + 完美对照实验，commit `1e2bc9d`/`361c490`）**：「执行层污染 / 尸体遗传」假设**推翻**——**活 bug 在现行源码**，经 native RC（Perceus dup/drop 生效）暴露；JS 后端 GC 下 RC 是 no-op 故全程不可见。判据（0bd7822 完美对照对，同源码同 LLVM，唯一变量 = 执行信道）：JS 执行 0 垃圾 + 三次重编与提交版逐字节一致；native 执行（干净 JS 锚点 .o 链接的 ring.exe）64×`[109 x i8]` + ×2 重编不一致；干净链条复现间歇性 0xC0000005（~1/3 命中，同一 RC bug 的致命形态）。本条目改写为**方向 C 审计**。
 > **Phase 0 收窄线索**：膨胀常量 = 31 字符 Str 常量（allocator size class 32）emit 时 Length 变 108（前 31 字节 + null 正确，后 77 字节堆垃圾）；引用处 `ring_str_from_cstr` strlen 截断 → 运行时行为无恙（解释测试全绿可自举）。非确定性 100% 局限于膨胀常量内容（HEAD ×3 各轮 .ll 互 diff 恰好 69 行 = 69 个 `[109 x i8]`，零 .text/语义差异）。垃圾**计数**由源码代际决定（每轮恒定，内容随机）：`[14xx]`×210 仅存在于 27815e0（B-159）~951de21 代际，6198020（P3 Map RIIR）后消失且 109 型 64→69——B-159/B-152 改动交叉点是归因起点。膨胀机制疑似发生在 marshalling 之前（编译器堆内 Str len 已脏，Phase 0 判读）。
-> **基线**：干净 dist-llvm@HEAD = `1e2bc9d`（provenance 全程可追溯 JS 锚点 0bd7822）；逐代 CSV/.ll/构建日志在 2026-07-10 session scratchpad `replay\`。
+> **基线**：干净 dist-llvm@HEAD = `1e2bc9d`（provenance 全程可追溯 JS 锚点 0bd7822）。取证数据持久化于 `C:\Users\Yufeng Ying\Desktop\Ring-lang-artifacts\b155-replay-2026-07-10\`（逐代比对 CSV + 全部构建日志 + 0bd7822 JS/native 完美对照 .ll 对；各代 .ll/exe 体积大未存，可按 CSV 重放复建）。
+> **2026-07-10 审计中断快照（方向 C 半程，用户拍板绕过转 B-163 Phase 1）**：① 膨胀 = 读取时 `s->len` 已脏而 buf 完好——数组类型（Ring 层 `value.len()+1`）与 initializer 长度（marshalling 层 `ring_str_len_u32`）两条独立路径一致读到 108，LLVM 越界抄 108 字节把相邻堆烤进常量；② Length 恒 108/1408 非随机 → 覆写者是系统性固定模式，108 为偶数排除 tagged Int 覆写，受害块 = RingStr header（24B raw，size class 32）；③ 受害 Str 全部是**插值构造的临时**（`"${type_name} { "` 类）；④ `gen_str_lit_simple`/`build_global_cstring_decl` 两层 IR 的 RC 时序正确（drop 全在 scope-end）→ 嫌疑上移至 `gen_string_interp` 插值构造层（B-158 revert `a5fb9a4` 可能是同 bug 另一形态）或 Perceus 跨函数传参 borrow 推断；⑤ **07-01「strlen==len 零 mismatch」结论不可靠**（当时诊断跑在脏 stage 上），重启时需在干净 stage 重验。**重启序（性价比排序）**：ASan 单用例循环（复现候选：`string_builder.ring` / `handle_try_return_cleanup.ring` 编译进程曾间歇 AV）→ free 毒化二分 → 插值路径审计 → Perceus extern 约定审计。
+> **推迟决策（2026-07-10 用户拍板）**：B-163 Phase 1 step 2（字符串字面量发射）= 本 bug 判别实验——.c 文本带垃圾 → 拿文本证据重启审计（好查一个量级）；.c 干净 → bug 为 marshalling 层特有，随 LLVM 后端退役消亡。Phase 1 收尾验收「.c 字节一致」仍被本 bug gate。
 
 **现象**：`ring.exe build compiler/main.ring --target=llvm` 两次编译产出的 LLVM IR 不一致。64 个 `[109 x i8]` + 210 个 `[1410 x i8]` 常量包含编译进程的堆数据，每次运行不同。代码段（.text 反汇编）两次编译完全一致，差异仅在 `.rdata`。
 
