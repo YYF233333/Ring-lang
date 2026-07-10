@@ -16,9 +16,11 @@
 
 ### #226 Map<Int>/Map<Str> + Set<Int>/Set<Str> 按 key 类型 ~700 行重复 [medium] [judgment] [open]
 
-`ring_runtime.cpp:1381-2205`：Map<Int,V> 是 Map<Str,V> 的逐行拷贝（~450 行），Set<Int> 是 Set<Str> 的逐行拷贝（~250 行）。总计约 700 行完全相同逻辑仅 key 类型不同。修改 Map/Set 行为需同步两份代码。
+> 2026-07-10 更新：Map 半已被 B-152 P3 消除（`ring_map_int_*` 现为单行 redirect 到统一 shim）。剩余 = Set 半（`RingSetInt` 仍是 `RingSet` 的独立 STL 实现，~250 行，ring_runtime.cpp:2079 起）。
 
-**修复方向**：C++ 模板化或宏消除重复。注意 B-152 RIIR 会用纯 Ring 重写容器——如果 B-152 优先级足够近，可推迟此项。
+`ring_runtime.cpp`：Set<Int> 是 Set<Str> 的逐行拷贝（~250 行），逻辑相同仅 key 类型不同。修改 Set 行为需同步两份代码。
+
+**修复方向**：B-152 P4（Set RIIR，暂停中，B-163 后恢复）会整体消除——届时本条目随 P4 关单，不单独修。
 
 发现者：Opus
 
@@ -72,6 +74,14 @@
 
 
 ## LLVM Codegen
+
+### #241 `LLVMGetEnumAttributeKindForName("nonnull", 6)` 长度错误，nonnull 属性全部静默丢失 [low] [mechanical] [open]
+
+`codegen_llvm.ring:624`："nonnull" 是 7 字符但传 len=6 → LLVM 查无此 attr 名 → native 直连下全部 nonnull 参数属性静默丢失（JS addon 时代产物 2284 处 vs 现 native 0 处）。JS 时代不可见原因：addon 包装忽略 Ring 传的 len、用 `name.size()` 重算（llvm_addon.cpp:346）——B-163 plan §0.1「FFI marshalling 类型真空」的活标本。影响仅优化提示缺失，语义无害、确定性。同文件 "nounwind"/8、"returns_twice"/13 均正确。
+
+**修复方向**：6 → 7（一字符）。LLVM-C 后端将随 B-163 退役，可现在修（一分钟）或随 B-163 Phase 1 移植时在 C 后端等价物中带上；修复后重编 dist-llvm。
+
+发现者：B-163 Phase 0 worker（2026-07-10）
 
 ### #233 method_to_runtime + 4 配套查找链需同步维护 [medium] [judgment] [open]
 

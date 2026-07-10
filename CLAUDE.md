@@ -16,7 +16,7 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 
 ## 技术栈
 
-- **编译器**：Ring 自举。ring.exe 自编译（dist-llvm/ .o 冻结产出 + ring_runtime.cpp → clang 链接）；dist/（冻结 JS 产出）保留作紧急 stage 0 回退
+- **编译器**：Ring 自举。ring.exe 自编译（dist-llvm/ .o 冻结产出 + ring_runtime.cpp → clang 链接）；dist/（冻结 JS 产出）= stage 0 信任锚，但语言快照停在 `0bd7822`（2026-06-27）——只能编该代源码，回退到 HEAD 需链式重放（B-163 Phase 0 实测，2026-07-10）
 - **Runtime**：ring_runtime.cpp（~3600 行 C++ STL wrapper）→ RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 design.md §7.12
 - **LLVM codegen**：codegen_llvm*.ring（5 个模块），ring.exe 直接调用 LLVM-C 22 API
 - **测试**：Python test runner（`tests/run_tests.py`），零外部依赖
@@ -56,7 +56,7 @@ Ring-lang/
 
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_ctor_name`），不允许跨阶段硬编码字符串契约
-- **dist-llvm/ 重编**：修改编译器后用 ring.exe 重编：`ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。ring.exe 构建方式见「常用命令」。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。dist/ 保留作紧急 stage 0 回退（需 llvm_addon，不再日常使用）。
+- **dist-llvm/ 重编**：修改编译器后用 ring.exe 重编：`ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。ring.exe 构建方式见「常用命令」。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。dist/ 作 stage 0 信任锚（需 llvm_addon；语言快照停在 `0bd7822`，编不了 HEAD 源码——回退需链式重放，见 B-163 Phase 0）。
 - 注释语法 `//`，无 pipe 运算符，`.method()` 是唯一链式调用方式（`::` 模块路径和 `.method()` 方法调用是两个不互通的范畴，无 UFCS）
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
 - 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）

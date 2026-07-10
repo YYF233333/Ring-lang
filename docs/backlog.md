@@ -1067,13 +1067,13 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [doing: phase0]
+### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [queued: phase1]
 
 > 2026-07-10 立项（Discussion，B-155 泥潭止损 + 后端信道结构性分析）。**完整执行计划见 `docs/plan-c-backend.md`**，执行前必读。
 
 **一句话**：codegen 后端从"91 个 extern fn 在内存里搭 LLVM IR"改为"纯 Ring StringBuilder 发射 C11 源码 + shell out clang"。编译期零 FFI、零 marshalling、零 LLVM 链接，产物可读可 diff，`#line` 映射让 sanitizer 报告直指 .ring 源码。HIR 之前全链路 + Perceus + runtime 零改动。
 
-**Phase 0（先行，探针）**：JS dist/ stage 0 清洁重建 → self-compile ×3 字节比较 → 检验 B-155"执行层污染"假设，结果回填 B-155。**必须先于 Phase 1**（移植需干净 ring.exe 执行）。
+**Phase 0 ✅（2026-07-10）**：链式重放 21 代完成（方案 A，JS 锚点 0bd7822 → HEAD）。「执行层污染」假设**推翻**——B-155 为现行源码活 RC bug（已回填 B-155 条目，改写为方向 C 审计）。干净 dist-llvm@HEAD = `1e2bc9d`。**注意**：Phase 1 验收「.c 文本字节一致」被 B-155 gate，方向 C 审计需在 Phase 1 收尾前完成（并行不冲突）。
 
 **Phase 1**：C 后端实现（叶到根九步，见 plan §2.2）。移植期间 LLVM 后端保留为差分 oracle——双后端同用例输出 diff = 0。
 
@@ -1125,10 +1125,12 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 旧 ring_sb_* C++ 函数可删除
 - 全部 E2E 通过；**自编译通过**（project mode 验证）
 
-### B-155 自编译 IR 非确定性：字符串常量含堆地址 [bugfix] [P2] [L] [judgment] [queued]
+### B-155 自编译 IR 非确定性：字符串常量含堆垃圾（活 RC bug，方向 C 审计）[bugfix] [P2] [L] [judgment] [queued]
 
 > 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。2026-06-30 深度调查（见下）。
-> **2026-07-10 更新**：方向 (B)（纯 C stage 0 清洁重建）并入 **B-163 Phase 0** 执行，附带新机制假设（"自洽尸体"UAF——诊断 strlen==len 通过是因为 header 与 buf 被同一新对象连贯复用，详见 `docs/plan-c-backend.md` §0.2）。Phase 0 结果回填本条目后关单或改写为方向 (C) 审计。
+> **2026-07-10 Phase 0 定性（B-163 链式重放 21 代 + 完美对照实验，commit `1e2bc9d`/`361c490`）**：「执行层污染 / 尸体遗传」假设**推翻**——**活 bug 在现行源码**，经 native RC（Perceus dup/drop 生效）暴露；JS 后端 GC 下 RC 是 no-op 故全程不可见。判据（0bd7822 完美对照对，同源码同 LLVM，唯一变量 = 执行信道）：JS 执行 0 垃圾 + 三次重编与提交版逐字节一致；native 执行（干净 JS 锚点 .o 链接的 ring.exe）64×`[109 x i8]` + ×2 重编不一致；干净链条复现间歇性 0xC0000005（~1/3 命中，同一 RC bug 的致命形态）。本条目改写为**方向 C 审计**。
+> **Phase 0 收窄线索**：膨胀常量 = 31 字符 Str 常量（allocator size class 32）emit 时 Length 变 108（前 31 字节 + null 正确，后 77 字节堆垃圾）；引用处 `ring_str_from_cstr` strlen 截断 → 运行时行为无恙（解释测试全绿可自举）。非确定性 100% 局限于膨胀常量内容（HEAD ×3 各轮 .ll 互 diff 恰好 69 行 = 69 个 `[109 x i8]`，零 .text/语义差异）。垃圾**计数**由源码代际决定（每轮恒定，内容随机）：`[14xx]`×210 仅存在于 27815e0（B-159）~951de21 代际，6198020（P3 Map RIIR）后消失且 109 型 64→69——B-159/B-152 改动交叉点是归因起点。膨胀机制疑似发生在 marshalling 之前（编译器堆内 Str len 已脏，Phase 0 判读）。
+> **基线**：干净 dist-llvm@HEAD = `1e2bc9d`（provenance 全程可追溯 JS 锚点 0bd7822）；逐代 CSV/.ll/构建日志在 2026-07-10 session scratchpad `replay\`。
 
 **现象**：`ring.exe build compiler/main.ring --target=llvm` 两次编译产出的 LLVM IR 不一致。64 个 `[109 x i8]` + 210 个 `[1410 x i8]` 常量包含编译进程的堆数据，每次运行不同。代码段（.text 反汇编）两次编译完全一致，差异仅在 `.rdata`。
 
@@ -1153,15 +1155,15 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - C wrapper `ring_const_string(ctx, cstr, len)` 完全绕过 `StrToCstrAndLen`，用标准 `StrToCstr` + `IntToI32` 传参——消除了 `[109 x i8]`（**0 个！**），但引入了新的 crash（ring_fix.exe 自编译时 0xC0000005）
 - C wrapper 的 crash 可能是因为 `StrToCstr` marshalling 让 Perceus 过早 drop 了 Str 参数
 
-**根因定位**：Ring 的 extern fn 调用在**大型编译场景**下存在 ABI 层面的参数传递异常。`StrToCstrAndLen` 特殊路径（仅 `LLVMConstStringInContext` 使用）生成的 IR 形式正确（`call ptr @LLVMConstStringInContext(ptr, ptr, i32, i32)` 完全匹配 C 签名），但运行时实际传递的 `len` 值不正确。小文件正确而大文件出错，暗示可能是编译器 binary 自身的常量损坏（旧 dist-llvm 编译产出的 ring.exe 包含 `[109 x i8]` 垃圾常量）导致的行为异常。
+**根因定位（2026-07-10 修订）**：~~编译器 binary 自身常量损坏导致行为异常~~——已被 Phase 0 推翻（干净链条照样产生垃圾）。现行结论：现行源码存在活的 RC/marshalling 生命周期 bug，`StrToCstrAndLen` 特殊路径生成的 IR 形式正确但运行时 Length 值膨胀，小文件正确大文件出错（堆翻腾相关）。
 
-**下一步方向**（优先级排序）：
-- (A) **反汇编对比**：在 ring.exe 中反汇编 `build_global_cstring` 的机器码，检查 R8（第三参数）是否确实载入了 `ring_str_len_u32` 的返回值
-- (B) **纯 C stage 0**：用 dist/（JS 冻结产出）作 stage 0 回退，产出完全干净的 dist-llvm/，消除旧常量污染
-- (C) **Perceus extern fn 参数生命周期审计**：检查 `StrToCstr` 对 Str 参数的 RC 语义——是否在 extern fn 调用后过早 drop Str 对象导致 buf 悬垂
+**下一步 = 方向 C（唯一主方向）**：**Perceus extern fn 参数生命周期审计**——检查 `StrToCstr`/`StrToCstrAndLen` marshalling 对 Str 参数的 RC 语义：是否过早 drop Str 对象导致同 run 内堆块复用、len/buf 被"新住户"改写。辅助手段：(A) 反汇编比对 `build_global_cstring`（检查 Length 实参来源）；间歇性 0xC0000005 用 ASan gating 档抓（CLAUDE.md ASan 两档跑法）。
+
+**与 B-163 关系**：方向 C 审计与 Phase 1 移植并行不冲突（plan §5 风险表）；但膨胀机制疑似在 marshalling 之前（编译器堆内 Str len 已脏）——若为通用 RC 排序 bug，C 后端 emit 的字符串字面量同样受影响（文本层肉眼可见）。**B-163 Phase 1 验收「self-compile ×3 .c 文本字节一致」被本 bug gate，Phase 1 收尾前必须修**。
 
 **验收标准**：
 - `ring.exe build compiler/main.ring --target=llvm` 两次编译产出字节一致的 `ring_output.ll`
+- 垃圾常量归零（`[109 x i8]` 型膨胀消失）+ 自编译间歇性 0xC0000005 消失（llvm_diff ×3 全绿）
 - CI bootstrap（self-compile ×3 一致性检查）通过
 
 ---
