@@ -9,6 +9,8 @@
 
 ## 层 3 排序（2026-06-27 Discussion 重定，JS 退役完成后启动）
 
+> **2026-07-10 插队更新**：**B-163 C 后端迁移 (XL) 插队为 P0**（B-155 泥潭止损，Discussion 拍板，计划见 `docs/plan-c-backend.md`）。B-152 RIIR 剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。下面原排序在 B-163 之后恢复。
+
 B-151 CI → B-125 unsafe/Ptr<T> (XL) → B-002p1 精简 Drop (L) → B-152 RIIR std (XL) → B-002p2 unwind 补全 (L)；后续 B-110 别名追踪 → B-068 用户面。async 线（B-116 probe → B-007）和类型系统线（B-001 Refinement 需 B-070）在 RIIR 之后。M 项当 XL 间换气穿插；P3 研究最后。
 
 > **战略**：unsafe + Ptr<T> → 精简 Drop → RIIR 标准库，让 Ring 拥有自己的底层，消除 C++ STL 依赖。
@@ -1041,6 +1043,26 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
+### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [queued]
+
+> 2026-07-10 立项（Discussion，B-155 泥潭止损 + 后端信道结构性分析）。**完整执行计划见 `docs/plan-c-backend.md`**，执行前必读。
+
+**一句话**：codegen 后端从"91 个 extern fn 在内存里搭 LLVM IR"改为"纯 Ring StringBuilder 发射 C11 源码 + shell out clang"。编译期零 FFI、零 marshalling、零 LLVM 链接，产物可读可 diff，`#line` 映射让 sanitizer 报告直指 .ring 源码。HIR 之前全链路 + Perceus + runtime 零改动。
+
+**Phase 0（先行，探针）**：JS dist/ stage 0 清洁重建 → self-compile ×3 字节比较 → 检验 B-155"执行层污染"假设，结果回填 B-155。**必须先于 Phase 1**（移植需干净 ring.exe 执行）。
+
+**Phase 1**：C 后端实现（叶到根九步，见 plan §2.2）。移植期间 LLVM 后端保留为差分 oracle——双后端同用例输出 diff = 0。
+
+**Phase 2**：B-100 (Z) 策略 parity 认证 → LLVM-C 后端 tag `llvm-c-backend-final` 归档删除 → dist-c/（.c 文本）成为 stage 0 信任锚 → CI bootstrap 重启（文本 diff）→ 文档 bookkeeping（清单见 plan §3）。
+
+**验收标准**：
+- 全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）
+- self-compile via C 后端 ×3 **.c 文本字节一致**（B-155 验收升级版）
+- ASan capstone 全量通过；CI bootstrap 重新启用
+- 退役 + bookkeeping 清单全部完成
+
+**排序影响**：B-152 RIIR 剩余（P4 Set / P1s2 Str / P5）建议暂停，本条完成后在 C 后端上继续（纯 Ring 代码天然跨后端）。远期 LLVM target 重启 gates 见 plan §4（届时走修宪程序）。
+
 ### B-105 增量编译（per-module .o）[feature] [P3] [XL] [judgment] [queued] [deferred: native-primary]
 
 > 2026-06-07 立项（Discussion，从 migration diary 未登记债转入）。**deferred**——gate 在「native 成为主工具链（B-099 之后）+ 编译时间成实测痛点」。不阻塞 B-089/B-099/B-100。
@@ -1082,6 +1104,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 ### B-155 自编译 IR 非确定性：字符串常量含堆地址 [bugfix] [P2] [L] [judgment] [queued]
 
 > 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。2026-06-30 深度调查（见下）。
+> **2026-07-10 更新**：方向 (B)（纯 C stage 0 清洁重建）并入 **B-163 Phase 0** 执行，附带新机制假设（"自洽尸体"UAF——诊断 strlen==len 通过是因为 header 与 buf 被同一新对象连贯复用，详见 `docs/plan-c-backend.md` §0.2）。Phase 0 结果回填本条目后关单或改写为方向 (C) 审计。
 
 **现象**：`ring.exe build compiler/main.ring --target=llvm` 两次编译产出的 LLVM IR 不一致。64 个 `[109 x i8]` + 210 个 `[1410 x i8]` 常量包含编译进程的堆数据，每次运行不同。代码段（.text 反汇编）两次编译完全一致，差异仅在 `.rdata`。
 
@@ -1122,6 +1145,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 ---
 
 ## 架构：后端策略（2026-06-27 更新）
+
+> **2026-07-10 更新**：**B-163（C 后端迁移）已立项 P0 queued**——完成后本节改写为：C 源码发射为唯一后端，LLVM-C 后端 tag 归档。远期 LLVM target 重启 gates 见 `docs/plan-c-backend.md` §4（Phase 2 bookkeeping 时迁入 design.md）。在此之前下述内容为现状描述。
 
 **LLVM 是唯一后端。** JS codegen 后端已归档（B-100 Phase 2，commit `5df6c99`，2026-06-27）。dist/ JS 编译产出冻结作 stage 0 回退。
 
