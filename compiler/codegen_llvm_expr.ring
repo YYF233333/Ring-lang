@@ -3368,6 +3368,17 @@ pub fn discard(v: LLVMValueRef) {
 // Match expression
 // ============================================================
 
+// #245: true when a field/element sub-pattern is refutable — anything but a
+// Wildcard/Binding needs a Phase-1 check (ctor tag / literal value / nested
+// tuple recursion).
+fn subpattern_is_refutable(p: Pattern) -> Bool {
+    match p {
+        Pattern::Wildcard { .. } => false,
+        Pattern::Binding { .. } => false,
+        _ => true,
+    }
+}
+
 fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, result_ty: Type) -> LLVMValueRef {
     let current_fn = match ctx.current_fn {
         some(f) => f,
@@ -3402,25 +3413,50 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
     // becomes unreachable. Detect this and fall back to the if-else chain.
     let mut any_guard = false
     let mut has_dup_tag = false
+    // #245: an or-pattern alternative with refutable ctor fields (e.g.
+    // `some(1) | some(2)`) cannot be tag-dispatched — the switch routes a tag
+    // to exactly one target with no fall-through for a failed field check,
+    // and duplicate alternative tags would emit invalid IR (LLVM switch case
+    // values must be unique). Or-pattern alternatives therefore (a) count
+    // toward duplicate-tag detection and (b) force the if-else chain when
+    // any alternative carries a refutable sub-pattern.
+    let mut has_refutable_or_alt = false
     let mut seen_ctors: List<Str> = []
     for arm in arms {
         match arm.guard { some(_) => { any_guard = true }, none => {} }
-        let ctor_name = match arm.pattern {
-            Pattern::Constructor { name, .. } => some(name),
-            Pattern::NamedConstructor { name, .. } => some(name),
-            _ => none,
-        }
-        match ctor_name {
-            some(cn) => {
-                if seen_ctors.contains(cn) {
-                    has_dup_tag = true
+        let mut arm_ctors: List<Str> = []
+        match arm.pattern {
+            Pattern::Constructor { name, .. } => { arm_ctors.push(name) },
+            Pattern::NamedConstructor { name, .. } => { arm_ctors.push(name) },
+            Pattern::OrPattern { patterns, .. } => {
+                for alt in patterns {
+                    match alt {
+                        Pattern::Constructor { name, fields, .. } => {
+                            arm_ctors.push(name)
+                            for fp in fields {
+                                if subpattern_is_refutable(fp) { has_refutable_or_alt = true }
+                            }
+                        },
+                        Pattern::NamedConstructor { name, fields, .. } => {
+                            arm_ctors.push(name)
+                            for nf in fields {
+                                if subpattern_is_refutable(nf.pattern) { has_refutable_or_alt = true }
+                            }
+                        },
+                        _ => {},
+                    }
                 }
-                seen_ctors.push(cn)
             },
-            none => {},
+            _ => {},
+        }
+        for cn in arm_ctors {
+            if seen_ctors.contains(cn) {
+                has_dup_tag = true
+            }
+            seen_ctors.push(cn)
         }
     }
-    if any_guard || has_dup_tag {
+    if any_guard || has_dup_tag || has_refutable_or_alt {
         return gen_match_if_else(ctx, scrut_val, scrut_ty, arms, merge_bb, default_bb, current_fn)
     }
 
@@ -3697,13 +3733,15 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
     }
 }
 
-// Recursively check nested constructor tags within a pattern.  When a
+// Recursively check the refutable parts of a nested pattern.  When a
 // sub-pattern is Pattern::Constructor or Pattern::NamedConstructor the
-// corresponding runtime value's tag must equal the expected variant tag —
-// otherwise the arm does not match and control branches to fail_bb.  This
-// mirrors TuplePattern's Phase-1 tag-checking approach (see the tuple case in
-// gen_match_if_else) and fixes the bug where bind_nested_pattern blindly
-// destructured an inner enum variant without verifying its tag.
+// corresponding runtime value's tag must equal the expected variant tag;
+// when it is Pattern::Literal (#245) the value must compare equal to the
+// literal; Pattern::TuplePattern recurses into its elements.  On any
+// mismatch control branches to fail_bb.  This mirrors TuplePattern's
+// Phase-1 tag-checking approach (see the tuple case in gen_match_if_else)
+// and fixes the bug where bind_nested_pattern blindly destructured an inner
+// enum variant without verifying its tag.
 fn check_nested_ctor_tags(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern, fail_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) {
     match pat {
         Pattern::Constructor { name: cname, qualifier, fields, .. } => {
@@ -3768,6 +3806,44 @@ fn check_nested_ctor_tags(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern, fai
                     none => {},
                 },
                 none => {},
+            }
+        },
+        Pattern::Literal { value, .. } => {
+            // #245: a literal sub-pattern must COMPARE the value.  This was a
+            // no-op, so `some(0)` matched EVERY `some(_)` — the first same-tag
+            // arm swallowed all values.  The scrutinee type is not threaded
+            // down to nested positions; ErrorType is harmless because
+            // gen_literal_pattern_cond dispatches on the LiteralValue, not the
+            // type.  RC: the compared value is a borrow (enum field load /
+            // ring_list_get), and gen_literal_pattern_cond drops its own
+            // fresh Str literal box — no new RC obligations.
+            let cmp = gen_literal_pattern_cond(ctx, val, Type::ErrorType, value)
+            let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "nested.lit.pass")
+            discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, fail_bb))
+            LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            // #245: recurse into tuple elements — a ctor field / tuple element
+            // may itself be a tuple carrying literals or nested ctors (e.g.
+            // `P((0, x))`, `((0, _), y)`).  Elements are read as borrows via
+            // ring_list_get (no RC transfer).
+            let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+            let get_ty = get_rt_fn_type(ctx, "ring_list_get")
+            for i in 0..elements.len() {
+                match elements.get(i) {
+                    some(ep) => {
+                        match ep {
+                            Pattern::Binding { .. } => {},
+                            Pattern::Wildcard { .. } => {},
+                            _ => {
+                                let idx = LLVMConstInt(ctx.i64_type, i, 0)
+                                let elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [val, idx], fresh_name(ctx, "nte"))
+                                check_nested_ctor_tags(ctx, elem, ep, fail_bb, current_fn)
+                            },
+                        }
+                    },
+                    none => {},
+                }
             }
         },
         _ => {},
@@ -3961,12 +4037,21 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                                 some(alt) => {
                                     let miss_bb = if k == nalts - 1 { next_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.or.alt") }
                                     match alt {
-                                        Pattern::Constructor { name: an, qualifier: aq, .. } => {
-                                            gen_ctor_tag_test(ctx, scrut_val, an, aq, arm_bb, miss_bb, current_fn)
+                                        Pattern::Constructor { .. } => {
+                                            // #245: a ctor alternative may carry refutable
+                                            // sub-patterns (`some(1) | some(2)`) — check the
+                                            // full pattern (tag + nested fields), not just the
+                                            // tag. All checks passing falls through here;
+                                            // branch to the shared arm body. An unresolvable
+                                            // ctor emits no test = unconditional match
+                                            // (gen_ctor_tag_test best-effort parity).
+                                            check_nested_ctor_tags(ctx, scrut_val, alt, miss_bb, current_fn)
+                                            discard(LLVMBuildBr(ctx.builder, arm_bb))
                                             LLVMPositionBuilderAtEnd(ctx.builder, miss_bb)
                                         },
-                                        Pattern::NamedConstructor { name: an, qualifier: aq, .. } => {
-                                            gen_ctor_tag_test(ctx, scrut_val, an, aq, arm_bb, miss_bb, current_fn)
+                                        Pattern::NamedConstructor { .. } => {
+                                            check_nested_ctor_tags(ctx, scrut_val, alt, miss_bb, current_fn)
+                                            discard(LLVMBuildBr(ctx.builder, arm_bb))
                                             LLVMPositionBuilderAtEnd(ctx.builder, miss_bb)
                                         },
                                         Pattern::Literal { value, .. } => {
@@ -3996,60 +4081,25 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         let get_ty = get_rt_fn_type(ctx, "ring_list_get")
                         let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
 
-                        // Phase 1: Check constructor sub-patterns' tags AND literal
-                        // sub-patterns' values. Both tuple-style (Constructor) and
-                        // struct-style (NamedConstructor) sub-patterns must verify the
-                        // element's tag — otherwise an arm like
-                        // `(Type::FnType { .. }, Type::FnType { .. })` would match ANY pair of
-                        // values, reading the wrong fields out of the actual variant.
-                        // #B-087 (B-088 hedged #2): a literal element such as `(0, s)` must
-                        // also compare the element against the literal — previously skipped,
-                        // so `(0, s)` matched ANY first element (every arm collapsed to the
-                        // first literal arm).
+                        // Phase 1: check every refutable element sub-pattern via
+                        // check_nested_ctor_tags — ctor tags at EVERY depth,
+                        // literal comparisons, and nested tuples.
+                        // #B-087 (B-088 hedged #2): a literal element such as `(0, s)`
+                        // must compare the element against the literal.
+                        // #245: a ctor element's INNER sub-patterns must be checked
+                        // recursively — `(Neg(Lit(0)), _)` previously only verified
+                        // the one-level Neg tag, so the inner Lit(0) matched any
+                        // Neg payload.
                         for j in 0..elements.len() {
                             match elements.get(j) {
                                 some(elem_pat) => {
-                                    let ctor_ref = match elem_pat {
-                                        Pattern::Constructor { name: cname, qualifier, .. } => some((cname, qualifier)),
-                                        Pattern::NamedConstructor { name: cname, qualifier, .. } => some((cname, qualifier)),
-                                        _ => none,
-                                    }
-                                    match ctor_ref {
-                                        some(cref) => {
-                                            let (cname, qualifier) = cref
+                                    match elem_pat {
+                                        Pattern::Binding { .. } => {},
+                                        Pattern::Wildcard { .. } => {},
+                                        _ => {
                                             let idx = LLVMConstInt(ctx.i64_type, j, 0)
                                             let elem_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tc"))
-                                            let ei = find_enum_by_variant(ctx, cname, qualifier)
-                                            match ei {
-                                                some(enum_info) => match enum_info.variants.get(cname) {
-                                                    some(vi) => {
-                                                        let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, elem_val, 0, fresh_name(ctx, "tp"))
-                                                        let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
-                                                        let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                                                        let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected, fresh_name(ctx, "tc"))
-                                                        let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tuple.check")
-                                                        discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, next_bb))
-                                                        LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
-                                                    },
-                                                    none => {},
-                                                },
-                                                none => {},
-                                            }
-                                        },
-                                        none => {
-                                            // Literal element: compare the tuple element against the literal.
-                                            match elem_pat {
-                                                Pattern::Literal { value, .. } => {
-                                                    let idx = LLVMConstInt(ctx.i64_type, j, 0)
-                                                    let elem_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tl"))
-                                                    let elem_ty = tuple_element_type(scrut_ty, j)
-                                                    let cmp = gen_literal_pattern_cond(ctx, elem_val, elem_ty, value)
-                                                    let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tuple.litcheck")
-                                                    discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, next_bb))
-                                                    LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
-                                                },
-                                                _ => {},
-                                            }
+                                            check_nested_ctor_tags(ctx, elem_val, elem_pat, next_bb, current_fn)
                                         },
                                     }
                                 },
@@ -4415,19 +4465,6 @@ fn get_tuple_llvm_type(mut ctx: LlvmCtx, count: Int) -> LLVMTypeRef {
         elem_types.push(ctx.ptr_type)
     }
     LLVMStructTypeInContext(ctx.context, elem_types, 0)
-}
-
-// Element type at position `idx` of a tuple scrutinee type (for literal sub-pattern
-// comparison). Falls back to ErrorType when not a tuple / out of range — harmless
-// because gen_literal_pattern_cond dispatches on the LiteralValue, not this type.
-fn tuple_element_type(ty: Type, idx: Int) -> Type {
-    match ty {
-        Type::TupleType { elements } => match elements.get(idx) {
-            some(t) => t,
-            none => Type::ErrorType,
-        },
-        _ => Type::ErrorType,
-    }
 }
 
 fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, value: LiteralValue) -> LLVMValueRef {

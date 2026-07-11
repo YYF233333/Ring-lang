@@ -1440,14 +1440,19 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
                 match patterns.get(k) {
                     some(alt) => {
                         if k == nalts - 1 {
+                            // Last alternative: fail edge — a failed check falls
+                            // to the next arm; a full pass falls through to the
+                            // body label emitted right below.
                             match alt {
-                                Pattern::Constructor { name: an, qualifier: aq, .. } => {
-                                    if emit_c_ctor_tag_fail_test(ctx, scrut, an, aq, next_lbl) {
+                                Pattern::Constructor { .. } => {
+                                    // #245: full pattern check (tag + nested
+                                    // literal/ctor fields), not just the tag.
+                                    if check_c_nested_ctor_tags(ctx, scrut, alt, next_lbl) {
                                         next_used = true
                                     }
                                 },
-                                Pattern::NamedConstructor { name: an, qualifier: aq, .. } => {
-                                    if emit_c_ctor_tag_fail_test(ctx, scrut, an, aq, next_lbl) {
+                                Pattern::NamedConstructor { .. } => {
+                                    if check_c_nested_ctor_tags(ctx, scrut, alt, next_lbl) {
                                         next_used = true
                                     }
                                 },
@@ -1459,13 +1464,28 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
                             }
                         } else {
                             match alt {
-                                Pattern::Constructor { name: an, qualifier: aq, .. } => {
-                                    emit_c_ctor_tag_match_test(ctx, scrut, an, aq, body_lbl)
+                                Pattern::Constructor { .. } => {
+                                    // #245: full pattern check; a failed check
+                                    // falls to the next alternative, a full pass
+                                    // jumps to the shared body.  No test emitted
+                                    // (unresolvable ctor) = unconditional match
+                                    // (LLVM best-effort parity).
+                                    let alt_miss = fresh_label(ctx, "morfail")
+                                    let tested = check_c_nested_ctor_tags(ctx, scrut, alt, alt_miss)
+                                    c_emit(ctx, "goto ${body_lbl};")
                                     body_used = true
+                                    if tested {
+                                        c_raw(ctx, "${alt_miss}:;")
+                                    }
                                 },
-                                Pattern::NamedConstructor { name: an, qualifier: aq, .. } => {
-                                    emit_c_ctor_tag_match_test(ctx, scrut, an, aq, body_lbl)
+                                Pattern::NamedConstructor { .. } => {
+                                    let alt_miss = fresh_label(ctx, "morfail")
+                                    let tested = check_c_nested_ctor_tags(ctx, scrut, alt, alt_miss)
+                                    c_emit(ctx, "goto ${body_lbl};")
                                     body_used = true
+                                    if tested {
+                                        c_raw(ctx, "${alt_miss}:;")
+                                    }
                                 },
                                 Pattern::Literal { value, .. } => {
                                     emit_c_literal_match_test(ctx, scrut, value, body_lbl)
@@ -1484,33 +1504,26 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
         },
         Pattern::TuplePattern { elements, .. } => {
             rt_use(ctx, "ring_list_get", 2)
-            // Phase 1: ctor sub-patterns' tags AND literal sub-patterns' values
-            // (#B-087: a literal element must compare, not match-any).
+            // Phase 1: check every refutable element sub-pattern via
+            // check_c_nested_ctor_tags — ctor tags at EVERY depth, literal
+            // comparisons, nested tuples.
+            // #B-087: a literal element like `(0, s)` must compare, not match-any.
+            // #245: a ctor element's INNER sub-patterns must be checked
+            // recursively — `(Neg(Lit(0)), _)` previously only verified the
+            // one-level Neg tag.
             for j in 0..elements.len() {
                 match elements.get(j) {
                     some(elem_pat) => {
                         match elem_pat {
-                            Pattern::Constructor { name: cn, qualifier: cq, .. } => {
+                            Pattern::Binding { .. } => {},
+                            Pattern::Wildcard { .. } => {},
+                            _ => {
                                 let ev = fresh_tmp(ctx)
                                 c_emit(ctx, "${ev} = ring_list_get(${scrut}, ${j});")
-                                if emit_c_ctor_tag_fail_test(ctx, ev, cn, cq, next_lbl) {
+                                if check_c_nested_ctor_tags(ctx, ev, elem_pat, next_lbl) {
                                     next_used = true
                                 }
                             },
-                            Pattern::NamedConstructor { name: cn, qualifier: cq, .. } => {
-                                let ev = fresh_tmp(ctx)
-                                c_emit(ctx, "${ev} = ring_list_get(${scrut}, ${j});")
-                                if emit_c_ctor_tag_fail_test(ctx, ev, cn, cq, next_lbl) {
-                                    next_used = true
-                                }
-                            },
-                            Pattern::Literal { value, .. } => {
-                                let ev = fresh_tmp(ctx)
-                                c_emit(ctx, "${ev} = ring_list_get(${scrut}, ${j});")
-                                emit_c_literal_fail_test(ctx, ev, value, next_lbl)
-                                next_used = true
-                            },
-                            _ => {},
                         }
                     },
                     none => {},
@@ -1637,25 +1650,14 @@ fn emit_c_ctor_tag_fail_test(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: S
     }
 }
 
-// Tag test, match edge (or-pattern alternatives): jump to match_lbl when the
-// tag matches.  An unresolvable variant branches unconditionally (LLVM parity).
-fn emit_c_ctor_tag_match_test(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?, match_lbl: Str) {
-    match find_c_enum_by_variant(ctx, cname, qualifier) {
-        some(ei) => match ei.variants.get(cname) {
-            some(vi) => c_emit(ctx, "if (*(int64_t*)${scrut} == ${vi.tag}) goto ${match_lbl};"),
-            none => c_emit(ctx, "goto ${match_lbl};"),
-        },
-        none => c_emit(ctx, "goto ${match_lbl};"),
-    }
-}
-
 // Consume an ignored Bool result (codebase `discard` idiom).
 fn discard_c_bool(b: Bool) {
     // intentionally empty
 }
 
-// Recursively check nested constructor tags within a pattern; a mismatch
-// jumps to fail_lbl.  Returns true when any test was emitted.
+// Recursively check the refutable parts of a nested pattern (ctor tags at
+// every depth, literal value comparisons (#245), nested tuple elements); a
+// mismatch jumps to fail_lbl.  Returns true when any test was emitted.
 fn check_c_nested_ctor_tags(mut ctx: CCtx, val: Str, pat: Pattern, fail_lbl: Str) -> Bool {
     match pat {
         Pattern::Constructor { name: cname, qualifier, fields, .. } => {
@@ -1707,6 +1709,40 @@ fn check_c_nested_ctor_tags(mut ctx: CCtx, val: Str, pat: Pattern, fail_lbl: Str
                 },
                 none => false,
             }
+        },
+        Pattern::Literal { value, .. } => {
+            // #245: a literal sub-pattern must COMPARE the value (was a no-op,
+            // so the first same-tag arm swallowed every value).  RC: the
+            // compared value is a borrow (enum field slot / ring_list_get),
+            // and emit_c_str_eq_flag drops its own fresh Str literal.
+            emit_c_literal_fail_test(ctx, val, value, fail_lbl)
+            true
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            // #245: recurse into tuple elements — a ctor field / tuple element
+            // may itself be a tuple carrying literals or nested ctors (e.g.
+            // `P((0, x))`, `((0, _), y)`).  Elements are borrows (ring_list_get).
+            rt_use(ctx, "ring_list_get", 2)
+            let mut used = false
+            for i in 0..elements.len() {
+                match elements.get(i) {
+                    some(ep) => {
+                        match ep {
+                            Pattern::Binding { .. } => {},
+                            Pattern::Wildcard { .. } => {},
+                            _ => {
+                                let ev = fresh_tmp(ctx)
+                                c_emit(ctx, "${ev} = ring_list_get(${val}, ${i});")
+                                if check_c_nested_ctor_tags(ctx, ev, ep, fail_lbl) {
+                                    used = true
+                                }
+                            },
+                        }
+                    },
+                    none => {},
+                }
+            }
+            used
         },
         _ => false,
     }
