@@ -5427,6 +5427,52 @@ fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMVa
     phi
 }
 
+// #246: does a catch arm pattern carry refutable tests beyond a single
+// top-level ctor tag?  A ctor arm whose fields are all Binding/Wildcard is
+// fully decided by its tag (switch-dispatchable); literal sub-patterns,
+// nested ctors, nested tuples — and top-level literal arms — need the
+// fall-through if-else chain running check_*_nested_tags.
+fn catch_pattern_needs_chain(pat: Pattern) -> Bool {
+    match pat {
+        Pattern::Literal { .. } => true,
+        Pattern::Constructor { fields, .. } => {
+            let mut needs = false
+            for f in fields {
+                match f {
+                    Pattern::Binding { .. } => {},
+                    Pattern::Wildcard { .. } => {},
+                    _ => { needs = true },
+                }
+            }
+            needs
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            let mut needs = false
+            for nf in fields {
+                match nf.pattern {
+                    Pattern::Binding { .. } => {},
+                    Pattern::Wildcard { .. } => {},
+                    _ => { needs = true },
+                }
+            }
+            needs
+        },
+        _ => false,
+    }
+}
+
+// #246: the scrutinee type matching a literal pattern's kind.  Only feeds
+// gen_literal_pattern_cond's scrut_ty parameter (which dispatches on the
+// LiteralValue kind, not the type — this keeps the signature honest).
+fn literal_value_type(v: LiteralValue) -> Type {
+    match v {
+        LiteralValue::IntVal(_) => Type::IntType,
+        LiteralValue::BoolVal(_) => Type::BoolType,
+        LiteralValue::StrVal(_) => Type::StrType,
+        LiteralValue::FloatVal(_) => Type::FloatType,
+    }
+}
+
 fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchArm>) -> LLVMValueRef {
     if arms.len() == 0 {
         return LLVMConstPointerNull(ctx.ptr_type)
@@ -5438,9 +5484,17 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
     // Also detect guarded arms: a switch gives each tag exactly one target with
     // no fall-through, but a false guard must fall through to the NEXT arm, so
     // guarded catches are lowered as an if-else chain (#206).
+    // #246: the same fall-through requirement holds for arms whose pattern
+    // carries refutable tests beyond the top-level ctor tag — literal or
+    // nested-ctor sub-patterns (`MyErr(0)` vs `MyErr(n)` puts the SAME tag on
+    // two arms: a duplicate switch case, and the literal was never compared)
+    // and top-level literal arms (previously swallowed by the simple path's
+    // first-arm fallback).  Route all of these through the if-else chain,
+    // which runs the full check_*_nested_tags per arm.
     let mut has_constructor = false
     let mut constructor_count = 0
     let mut has_guard = false
+    let mut has_refutable_extra = false
     for arm in arms {
         match arm.pattern {
             Pattern::Constructor { .. } => { has_constructor = true; constructor_count = constructor_count + 1 },
@@ -5451,10 +5505,12 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
             some(_) => { has_guard = true },
             none => {},
         }
+        if catch_pattern_needs_chain(arm.pattern) { has_refutable_extra = true }
     }
 
-    // Simple path: single arm or no constructors, no guards — bind and execute directly
-    if (!has_constructor || (arms.len() == 1)) && !has_guard {
+    // Simple path: single arm or no constructors, no guards, no refutable
+    // sub-tests — bind and execute directly
+    if (!has_constructor || (arms.len() == 1)) && !has_guard && !has_refutable_extra {
         let arm = arms[0]
         match arm.pattern {
             Pattern::Binding { name, .. } => {
@@ -5483,8 +5539,10 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
     // Guarded catch arms: if-else chain (#206).  A switch gives each tag exactly
     // one target with no fall-through, but a false guard must fall through to the
     // NEXT arm.  Lower as a linear if-else chain (same strategy as
-    // gen_match_if_else for guarded enum matches).
-    if has_guard {
+    // gen_match_if_else for guarded enum matches).  #246: arms with refutable
+    // sub-tests (nested ctor tags / literal sub-patterns / top-level literals)
+    // take the same chain — a false nested test must also fall through.
+    if has_guard || has_refutable_extra {
         let current_fn = match ctx.current_fn {
             some(f) => f,
             none => panic("LLVM codegen: catch arms outside function"),
@@ -5534,6 +5592,16 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
                             let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.ctor.${cname}")
                             gen_ctor_tag_test(ctx, error_val, cname, qualifier, arm_bb, next_bb, current_fn)
                             LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                            // #246 Phase 1: check nested ctor tags / literal
+                            // sub-patterns before binding (gen_match_if_else parity).
+                            let ei_check = find_enum_by_variant(ctx, cname, qualifier)
+                            match ei_check {
+                                some(enum_info_c) => {
+                                    check_positional_fields_nested_tags(ctx, error_val, enum_info_c, fields, next_bb, current_fn)
+                                },
+                                none => {},
+                            }
+                            // Phase 2: all nested tags verified — bind fields
                             bind_constructor_fields(ctx, error_val, cname, qualifier, fields)
                             emit_match_arm_body(ctx, arm, catch_merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
                             if is_last == false {
@@ -5548,7 +5616,38 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
                             let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.ctor.${cname}")
                             gen_ctor_tag_test(ctx, error_val, cname, qualifier, arm_bb, next_bb, current_fn)
                             LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                            // #246 Phase 1: check nested ctor tags / literal
+                            // sub-patterns before binding (gen_match_if_else parity).
+                            let ei_check_n = find_enum_by_variant(ctx, cname, qualifier)
+                            match ei_check_n {
+                                some(enum_info_c) => match enum_info_c.variants.get(cname) {
+                                    some(vi_c) => {
+                                        check_named_fields_nested_tags(ctx, error_val, enum_info_c, vi_c.field_names, nfields, next_bb, current_fn)
+                                    },
+                                    none => {},
+                                },
+                                none => {},
+                            }
+                            // Phase 2: all nested tags verified — bind fields
                             bind_named_constructor_fields(ctx, error_val, cname, qualifier, nfields)
+                            emit_match_arm_body(ctx, arm, catch_merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                            if is_last == false {
+                                LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                                open_block = true
+                            } else {
+                                open_block = false
+                            }
+                        },
+                        Pattern::Literal { value, .. } => {
+                            // #246: top-level literal arm (fail<Int>/fail<Str>/…
+                            // payloads) — compare against the error value, fall
+                            // through to the NEXT arm on mismatch (previously the
+                            // simple path executed the first arm unconditionally).
+                            let next_bb = if is_last { catch_default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.next") }
+                            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.lit")
+                            let cond_i1 = gen_literal_pattern_cond(ctx, error_val, literal_value_type(value), value)
+                            discard(LLVMBuildCondBr(ctx.builder, cond_i1, arm_bb, next_bb))
+                            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                             emit_match_arm_body(ctx, arm, catch_merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
                             if is_last == false {
                                 LLVMPositionBuilderAtEnd(ctx.builder, next_bb)

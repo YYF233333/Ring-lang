@@ -101,6 +101,14 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 - **derived clone 签名与 checker scheme 对齐**（接收 dict 参数 body 忽略；LLVM 靠静默多传参掩盖 = audit #248）
 - **trait 方法序 / supertrait DFS 序**：从 `hir.ring` 单一来源消费（`scan_trait_method_order` / `collect_all_supertraits`）
 
+**已定语义对齐细节（step 6 落地，2026-07-12 沉淀）**：
+- **abort/catch = inline setjmp/longjmp**：C 用 `<setjmp.h>` 标准宏（clang 自动处理 Win-x64 帧指针 ABI；LLVM 侧是手工 `_setjmp` + frameaddress，同一管线路径）；setjmp 只出现在 if 完整控制表达式位（C11 7.13.1.1p5）
+- **tail-resumptive = evidence struct** `{i64 count, slots...}`（typeid 21），slot 序走 `hir::effect_op_slot` 契约；B-096 drop / B-097 default 合并 / B-161 sibling 重定向 / B-100 Fix 7 逐条对齐
+- **default evidence**：C 为独立合成函数 `__ring_default_evidence_init()` + static 全局（LLVM 在 main entry 内联构造），语义相同的形态偏离
+- **cleanup stack 按嵌套函数隔离**（`c_push_fn`/`c_pop_fn` 保存清空/恢复）——对 LLVM 的有意正确性偏离（LLVM gen_lambda 泄漏 = audit #253）
+- **catch 穷尽失败发 `ring_panic`**（LLVM unreachable）——match 家族同款稳健性偏离；evidence drop 按唯一 C 变量名记账（嵌套同 effect 不双 free）；`<setjmp.h>` 无条件进 preamble（确定性优先）
+- **LLVM_SKIP 重评估遗留处置（后续波）**：default_effect_topo / exhaustive_generic_payload / map_hof / map_ufcs_bug 四用例 C 下 PASS——需 runner 支持"LLVM 例外但 C 跑"的分化后挪出；其余同构失败条目保持 SKIP（共享层缺陷，证据在 audit #219/#220/#221）
+
 ### 2.2 移植顺序（叶到根，每步 golden 子集验收）
 
 1. 模块骨架：codegen_c_ctx / 类型布局映射 / runtime 函数声明生成

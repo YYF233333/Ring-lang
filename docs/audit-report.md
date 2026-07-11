@@ -75,15 +75,35 @@
 
 ## LLVM Codegen
 
-### #246 catch arm 完全无 Phase-1 嵌套检查（LLVM 独有，疑似 wrong-code）[high] [judgment] [open]
+### #251 abort handler 的 arm body 从不执行——checker 放行非恒等 body 但 codegen 忽略 [high] [judgment] [open]
 
-> 2026-07-11 #245 worker 范围外发现，从 feedback 分诊入表。#245（match 路径）已修，catch 是同族但独立的 lowering 路径，声明面更宽。
+> 2026-07-12 B-163 step 6 worker 实测确认（双后端一致，共享设计缺陷；C 侧 faithful port 保持 diff=0）。
 
-LLVM catch lowering（`codegen_llvm_expr.ring` guarded 链 ~L5527 及其下 enum dispatch 路径）对 ctor arm 只做顶层 tag 测试即直接 bind——match 路径早有的 `check_nested_ctor_tags` 从未接入 catch：**连嵌套 ctor tag 都不查**，literal 子模式同样不查。`catch { MyErr(0) => .., MyErr(n) => .. }` 形状预计 wrong-code（agent 未实测，修复时先复现确认）。C 后端 catch 是 step 6 stub 不受影响——**step 6 移植时必须直接接入 `check_c_nested_ctor_tags`，勿复制此缺陷**（已注记 plan §2.5）。
+`handle { body } with { fail.raise(e) => <arm> }` 的实现是「raise 的值直接成为 handle 结果」——**arm body 从不执行**（LLVM `gen_handle_expr` 注释自述 "the catch path simply returns the error value"）。arm body 非恒等时（如 `fail.raise(e) => match e {...}` 做映射），checker 类型检查通过，但运行时拿到原始 error 值——enum 指针被当 Int 打印出垃圾数字（step 6 用例开发中实测）= 静默 wrong-code。
 
-**修复方向**：catch arm 的模式测试接入 `check_nested_ctor_tags`（#245 修复后该函数已覆盖 tag/literal/tuple 递归全族）；先写复现用例确认 wrong-code 形态；回归用例 expected 手写。可与 B-163 step 6（C 侧 catch）同波做，两后端语义对齐 diff=0 验收。
+**修复方向**（二选一，涉及语义设计需讨论）：① codegen 真正执行 arm body（abort 路径把 error 绑定进 arm 作用域求值——两后端同改）；② checker 限制 abort effect 的 arm body 只允许恒等形（贫化但诚实）。倾向 ①（用户可见语义应与写下的代码一致）。修复时新增回归用例 expected 手写。
 
-发现者：#245 worker（feedback 分诊）
+发现者：step 6 worker（feedback 分诊）
+
+### #252 catch 顶层 TuplePattern / OrPattern 在 LLVM 链路径是静默空分支 [medium] [judgment] [open]
+
+> 2026-07-12 B-163 step 6 worker 发现（#246 修复时的相邻观察，未扩面）。
+
+#246 修复覆盖了 ctor 嵌套 + 顶层 literal，但 LLVM catch 链路径对顶层 tuple/or-pattern arm 仍是 `_ => {}` 空分支——若 checker 放行此类 arm（`fail<(Int,Str)>` 的 tuple 模式），LLVM 侧静默跳过该 arm；C 侧 `emit_c_match_arm` 天然支持，双后端不对称。
+
+**修复方向**：先复核 checker 是否放行 catch arm 顶层 tuple/or-pattern——不放行则本条降级关闭；放行则 LLVM 链路径补支持（对照 match 路径现成逻辑），差分验收。
+
+发现者：step 6 worker（feedback 分诊）
+
+### #253 LLVM gen_lambda 不隔离 handle_cleanup_stack——lambda 内 return 错误发射 catch pop [medium] [judgment] [open] [deferred: B-163p2-retire]
+
+> 2026-07-12 B-163 step 6 worker 发现（C 侧以 `c_push_fn`/`c_pop_fn` 隔离，有意正确性偏离；LLVM 侧未动）。
+
+嵌套函数（lambda/dict getter/thunk）是独立栈帧，lambda body 里的 `return` 不得 pop 外层函数的 catch frame。LLVM `gen_lambda` 未保存/清空 `handle_cleanup_stack`——handler body 的 lambda 内含显式 `return` 时，会在 lambda 帧里错误发射 `ring_catch_pop`（栈不平衡 → 后续 catch 行为未定义）。触发面窄（handler body 内 lambda 显式 return）。
+
+**修复方向**：`gen_lambda` 进入时保存并清空 cleanup stack、退出时恢复（对齐 C 侧 bracket）；或不修随 Phase 2 退役消亡。
+
+发现者：step 6 worker（feedback 分诊）
 
 ### #247 合法 match 程序触发 module verification failed（IR 与文本形式不一致，行为正确）[medium] [judgment] [open]
 
@@ -176,6 +196,8 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 `effect_custom_and_fail.ring`（"fail on bad port"）和 `effect_custom_multi_effect.ring`（"log called twice"）runtime assertion 失败。custom effect handler 与 fail effect 交互时 evidence 传递或 handler 栈有误。
 
+> **2026-07-12 差分证据（B-163 step 6 重评估）**：两用例在 C 后端**同构失败**（同 assertion）——缺陷定位收窄至 HIR/checker/perceus **共享层**，codegen 单侧嫌疑排除。原「pre-existing LLVM backend bugs」归类作废。
+
 **LLVM_SKIP**：`effect_custom_and_fail.ring`、`effect_custom_multi_effect.ring`。修好后移除。
 
 发现者：B-151 CI
@@ -184,6 +206,8 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 `exhaustive_generic_payload.ring` runtime assertion "some-false" 失败。泛型 enum payload 在穷尽 match 的某个分支 codegen 有误（可能是 tag 比较或 payload 提取问题）。
 
+> **2026-07-12 差分证据（B-163 step 6 重评估）**：该用例在 C 后端 **PASS**（all tests passed）——与 #219/#221 的同构失败相反，此缺陷是 **LLVM codegen 单侧**（大概率已被 #245 嵌套模式修复顺带修好或与之同族）。后续波把它从 LLVM_SKIP 挪出实测 LLVM 现状；仍挂则维持单侧归因。
+
 **LLVM_SKIP**：`exhaustive_generic_payload.ring`。修好后移除。
 
 发现者：B-151 CI
@@ -191,6 +215,8 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 ### #221 struct match pattern + tuple eq dispatch runtime crash [medium] [judgment] [open]
 
 三个用例 runtime assertion 失败：`struct_match_pattern.ring`（"y-axis"）、`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。struct 的 match pattern 和 tuple 的 eq 比较在 LLVM 后端有 codegen 问题。
+
+> **2026-07-12 差分证据（B-163 step 6 重评估）**：三用例在 C 后端**同构失败**（同 assertion）——缺陷在**共享层**（tuple `==` 派发 / struct pattern 的 HIR 下沉），非 LLVM codegen。「LLVM 后端 codegen 问题」表述作废。
 
 **LLVM_SKIP**：`struct_match_pattern.ring`、`tuple_eq.ring`、`tuple_eq_struct.ring`。修好后移除。
 

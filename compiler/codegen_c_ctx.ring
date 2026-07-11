@@ -11,7 +11,7 @@
 
 use types::{Type, EffectRow}
 use ast::{Span}
-use hir::{HDictDef, TraitBound}
+use hir::{HDictDef, TraitBound, HEffectOp}
 
 // Per-function registration info (forward-declare pass).
 // total_params = ring params + trait-bound dict params + evidence params —
@@ -41,6 +41,16 @@ pub struct CEnumVariantInfo {
 pub struct CEnumInfo {
     pub variants: Map<Str, CEnumVariantInfo>,
     pub max_fields: Int
+}
+
+// Step 6: one enclosing handle-expr / try-catch scope (port of
+// codegen_llvm_ctx::HandleCleanup).  A `return` inside the body must pop the
+// catch frame and drop the handler evidence structs before returning (#173);
+// ev_drop_vars holds the hoisted C variable names (unique per handle — no
+// name-based double free on nested handles for the same effect).
+pub struct CHandleCleanup {
+    pub needs_catch_pop: Bool,
+    pub ev_drop_vars: List<Str>
 }
 
 pub struct CCtx {
@@ -114,6 +124,16 @@ pub struct CCtx {
     pub lambda_counter: Int,
     pub dictwrap_counter: Int,
 
+    // ---- step 6: effect handler / catch state ----
+    // Effect op declarations (slot-order contract, hir::effect_op_slot).
+    pub effect_ops: Map<Str, List<HEffectOp>>,
+    // B-097 default evidence: effect name -> C global variable name (a
+    // `static void*` initialised by __ring_default_evidence_init before
+    // ring_main runs).  c_lookup_evidence falls back to it off handle scope.
+    pub default_evidence: Map<Str, Str>,
+    // Enclosing handle/try scopes for `return`-path cleanup (#173).
+    pub handle_cleanup_stack: List<CHandleCleanup>,
+
     // ---- loop context ----
     // The C statement that implements Ring `continue` for the innermost loop:
     // "continue;" for while loops (cond re-evaluated at the top) or
@@ -169,6 +189,9 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         fn_original_param_types: map_new(),
         lambda_counter: 0,
         dictwrap_counter: 0,
+        effect_ops: map_new(),
+        default_evidence: map_new(),
+        handle_cleanup_stack: [],
         loop_continue_stmt: "",
         in_loop: false,
         emit_lines: emit_lines,
@@ -306,7 +329,13 @@ pub struct CEmitState {
     pub in_loop: Bool,
     pub loop_continue_stmt: Str,
     pub last_line: Int,
-    pub last_file: Str
+    pub last_file: Str,
+    // Step 6: a nested function is a fresh C frame — a `return` inside a
+    // lambda must NOT pop the enclosing function's catch frames (the frames
+    // belong to the outer C stack frame).  Saved + cleared per nested
+    // emission.  (Deliberate correctness deviation: the LLVM backend leaks
+    // the enclosing stack into lambda bodies — see worker_feedback.)
+    pub handle_cleanup_stack: List<CHandleCleanup>
 }
 
 pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
@@ -321,7 +350,8 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
         in_loop: ctx.in_loop,
         loop_continue_stmt: ctx.loop_continue_stmt,
         last_line: ctx.last_line,
-        last_file: ctx.last_file
+        last_file: ctx.last_file,
+        handle_cleanup_stack: ctx.handle_cleanup_stack
     }
     ctx.cur_decls = []
     ctx.cur_body = []
@@ -334,6 +364,7 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
     ctx.loop_continue_stmt = ""
     ctx.last_line = -1
     ctx.last_file = ""
+    ctx.handle_cleanup_stack = []
     saved
 }
 
@@ -357,6 +388,7 @@ pub fn c_pop_fn(mut ctx: CCtx, c_name: Str, params_str: Str, saved: CEmitState) 
     ctx.loop_continue_stmt = saved.loop_continue_stmt
     ctx.last_line = saved.last_line
     ctx.last_file = saved.last_file
+    ctx.handle_cleanup_stack = saved.handle_cleanup_stack
 }
 
 // ============================================================

@@ -14,8 +14,8 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
 use ast::{Span}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
-    HTraitMethod, TraitBound, evidence_param_name, trait_bound_param_name,
-    variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
+    HTraitMethod, HEffectOp, TraitBound, evidence_param_name, trait_bound_param_name,
+    default_evidence_name, variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
     default_method_self_name, scan_trait_method_order, collect_all_supertraits,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, TypeKind}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
@@ -24,7 +24,8 @@ use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
     get_or_assign_c_typeid, is_runtime_symbol, fresh_tmp, fresh_i64, fresh_dbl,
     fresh_label, c_push_fn, c_pop_fn, c_global_cstr}
 use codegen_c_expr::{gen_c_expr, emit_c_stmt, c_resolve_dict_ref,
-    resolve_c_static_dict, ensure_c_dict_getter, gen_c_closure_call}
+    resolve_c_static_dict, ensure_c_dict_getter, gen_c_closure_call,
+    emit_c_default_evidence_init}
 use effect_analysis::{extract_effect_names, collect_fn_callees}
 
 // ============================================================
@@ -60,6 +61,13 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     scan_fn_mut_params_c(program.decls, ctx.fn_mut_params)
     compute_transitive_effect_closure_c(program.decls, ctx.local_fn_effects)
 
+    // Step 6: effect op declarations (slot-order contract) + B-097 default
+    // evidence globals.  The globals must be registered BEFORE the body pass
+    // so c_lookup_evidence's off-scope fallback resolves to them; the init
+    // function that populates them is emitted after the body pass.
+    register_effect_ops_c(program.decls, ctx.effect_ops)
+    register_c_default_evidence(ctx)
+
     // First pass: prototypes + registries (enum variant ctors are declared
     // AND defined here — their bodies depend on nothing but the registries).
     // Also pre-registers every impl trait dict's build fn (dict_build_fns) so
@@ -86,6 +94,11 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     }
 
     // Per-type drop functions (emit_drop_functions) are step 7.
+
+    // B-097: default evidence init fn (port of build_default_evidence_all —
+    // the LLVM backend builds these inline in main's entry block; C uses a
+    // synthesised init fn called from main before ring_main).
+    emit_c_default_evidence_init(ctx)
 
     // C main() wrapper.
     emit_c_main_wrapper(ctx)
@@ -118,6 +131,7 @@ fn c_preamble() -> List<Str> {
         "#include <stdint.h>",
         "#include <stddef.h>",
         "#include <math.h>",
+        "#include <setjmp.h>",
         "",
         "#define RING_INT(v)    ((void*)(uintptr_t)((((uint64_t)(int64_t)(v)) << 1) | 1u))",
         "#define RING_BOOL(v)   RING_INT(v)",
@@ -353,7 +367,7 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
                 // checker; `::` sanitizes to `__` in c_mangle_fn.
                 c_forward_declare(ctx, md)
             },
-            HDecl::Effect { .. } => {},       // effect evidence structs: step 6
+            HDecl::Effect { .. } => {},       // ops registry: register_effect_ops_c
             HDecl::ExternFn { .. } => {},     // declared lazily at call sites
             HDecl::ExternType { .. } => {},
             HDecl::TypeAlias { .. } => {},
@@ -718,9 +732,8 @@ fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: St
 // ============================================================
 // C main() wrapper — parity with emit_c_main_common:
 //   ring_runtime_init(argc, argv) → [drop registrations: step 7] →
-//   ring_main(default evidence…) or test functions → return 0.
-// Default evidence structs (B-097) are step 6 — NULL for now (the runtime
-// handles io/fail without evidence).
+//   __ring_default_evidence_init (B-097, when any effect has all-default
+//   ops) → ring_main(default evidence…) or test functions → return 0.
 // ============================================================
 
 fn emit_c_main_wrapper(mut ctx: CCtx) {
@@ -728,12 +741,25 @@ fn emit_c_main_wrapper(mut ctx: CCtx) {
     let mut lines: List<Str> = []
     lines.push("int main(int argc, char** argv) {")
     lines.push("    ring_runtime_init(argc, argv);")
+    if ctx.default_evidence.len() > 0 {
+        lines.push("    __ring_default_evidence_init();")
+    }
     match ctx.functions.get("ring_main") {
         some(_) => {
             let mut args: List<Str> = []
             match ctx.fn_evidence_params.get("ring_main") {
                 some(evs) => {
-                    for _e in evs { args.push("RING_UNIT") }
+                    // B-097: pass the default evidence global for effects that
+                    // have one; NULL for io/fail/unknown effects (the runtime
+                    // handles those without evidence).  ep is "__ring_ev_<eff>"
+                    // (prefix = 10 chars — same extraction as lookup_evidence).
+                    for ep in evs {
+                        let effect_name = ep.slice(10, ep.len())
+                        match ctx.default_evidence.get(effect_name) {
+                            some(g) => args.push(g),
+                            none => args.push("RING_UNIT"),
+                        }
+                    }
                 },
                 none => {},
             }
@@ -749,6 +775,49 @@ fn emit_c_main_wrapper(mut ctx: CCtx) {
     lines.push("    return 0;")
     lines.push("}")
     ctx.fn_defs.push(lines.join("\n"))
+}
+
+// ============================================================
+// Step 6: effect registries.
+// ============================================================
+
+// Port of register_effect_ops_llvm — effect name -> declared ops (slot order).
+fn register_effect_ops_c(decls: List<HDecl>, mut effect_ops: Map<Str, List<HEffectOp>>) {
+    for decl in decls {
+        match decl {
+            HDecl::Effect { name, ops, .. } => {
+                effect_ops.insert(name, ops)
+            },
+            HDecl::ModBlock { decls: md, .. } => {
+                register_effect_ops_c(md, effect_ops)
+            },
+            _ => {},
+        }
+    }
+}
+
+// B-097: register one `static void*` global per effect whose ops ALL have
+// default bodies (build_default_evidence_all's selection rule).  The global
+// name comes from the shared hir::default_evidence_name convention,
+// sanitized to the C identifier set.  Sorted for deterministic output.
+fn register_c_default_evidence(mut ctx: CCtx) {
+    let mut effect_names: List<Str> = []
+    for entry in ctx.effect_ops.entries() {
+        let (ename, ops) = entry
+        let mut all_have_defaults = true
+        for op in ops {
+            if !op.has_default { all_have_defaults = false }
+        }
+        if all_have_defaults && ops.len() > 0 {
+            effect_names.push(ename)
+        }
+    }
+    effect_names.sort()
+    for ename in effect_names {
+        let g = c_sanitize(default_evidence_name(ename))
+        ctx.globals.push("static void* ${g} = 0;")
+        ctx.default_evidence.insert(ename, g)
+    }
 }
 
 // ============================================================
