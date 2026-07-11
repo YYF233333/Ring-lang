@@ -1107,9 +1107,10 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 全部 E2E + llvm_diff 通过；自举一致
 
 
-### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [queued]
+### B-158 `get_or_declare_runtime_fn` 与 Ring 编译函数同名 LLVM 冲突 [bugfix] [P2] [M] [judgment] [queued] [deferred: B-163p2-retire]
 
 > 2026-06-29 B-152 P0 worker 发现。
+> **2026-07-11 分诊注记（worker feedback 回流）**：本条目机制是 LLVM 后端特有（`get_or_declare_runtime_fn` 的 module 级声明冲突）——**随 B-163 Phase 2 LLVM 后端退役消亡，不单独修**。C 后端在 steps 1-3 已结构性解决同类问题：撞 runtime 符号表的 prelude Ring 函数定义加 `__ring` 后缀，调用点经 CFnInfo.c_name 透明解析。残余愿望（ring_sb_* C++ 函数删除）归 B-152 P5（RIIR runtime 收官），不归本条。Phase 2 退役清单执行时确认删除本条目。
 
 **现象**：Ring 编译的函数（如 `ring_string_builder`）已存在于 LLVM module 中时，`get_or_declare_runtime_fn` 再声明同名但函数类型不同的外部函数，LLVM 自动加 `.XX` 后缀，导致链接时 undefined symbol。
 

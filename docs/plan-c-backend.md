@@ -77,6 +77,16 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 
 **不变量（省心清单）**：HIR 之前全链路（Lexer→Checker→HIR）、Perceus RC pass、verify_rc、dict_lower/andor_lower、runtime——全部零改动。换的只是 HIR 之后的发射层。
 
+**已定语义对齐细节（steps 1-3 落地，2026-07-11 从 worker feedback 沉淀；Phase 2 改写 design.md 后端章节时取用）**：
+- **Float `!=`**：发射 `(a<b||a>b)`——LLVM ONE 是 ordered（NaN→false），C `!=` 对 NaN 是 unordered-true，直译会翻转 NaN 语义
+- **整数 `+`/`-`/`*`**：经 `RING_IADD` 等无符号 wrap 宏——LLVM 无 nsw 标志 = wrap 语义，C 有符号溢出是 UB；除零 guard 照抄 B-148
+- **`#line` 默认开**，`--no-c-lines` 关（人读生成码用）；实测自编译级用例 ~636 条指令
+- **符号冲突**：撞 ring_runtime 符号表的 prelude Ring 函数（map_new 等 3 处）定义加 `__ring` 后缀，调用点经 CFnInfo.c_name 透明解析（LLVM 后端靠 module 自动重命名兜底，C 是硬链接错误，必须显式）
+- **局部变量全部提升到函数顶部声明**（LLVM entry-alloca 等价物）——一次性绕开 C 块作用域坑（跨块临时、goto 跨声明、shadowing）；for 的 `continue` 映射 `goto __ring_incr_N`（增量 + binding drop 序列），while 直接 `continue`
+- **未移植构造 stub 策略**：prelude 全量流经后端（单文件模式 checker 前置整个 std），未移植构造发射为编译期干净的 runtime-panic stub（interned 去重消息，grep `c_stub_` 列全）；副作用 = clang 2 条良性 divzero warning（stub 死代码，运行不可达，stub 清零后消失）
+- **exec_sync**：std 早有声明但 native 从未实现，steps 1-3 补上（Windows `_spawnvp` + 手动 argv 引号 / POSIX fork+execvp），clang shell-out 前提；clang 失败 → `exit_process(1)`（对照 audit #242：LLVM 后端 emit 失败漏 exit）
+- clang 调用参数 `-std=c11 -O2 -c`；`--out-dir` 显式给出时 .c/.o 进该目录，否则落源文件旁（对齐 LLVM 单文件行为）
+
 ### 2.2 移植顺序（叶到根，每步 golden 子集验收）
 
 1. 模块骨架：codegen_c_ctx / 类型布局映射 / runtime 函数声明生成
