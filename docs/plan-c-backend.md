@@ -126,6 +126,7 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 
 1. **trait-bounded impl 方法 dict 转发 bug（B-152 P3 遗留，step 5 时调查）**：`impl<K: Hash + Eq, V> Map` 这类 trait-bounded impl 块的方法调用，codegen 在某些场景下未正确传递 Hash/Eq dict，double bootstrap 崩溃。P3 被迫保留 Map 的 `method_to_runtime` 映射 + ring_runtime.cpp C++ bootstrap shim（shim 内联 hash/eq，仅支持 tagged Int/Bool + Str key），导致 P3 验收「~30 个 ring_map_* 删除」未闭环。移植 step 5（trait dict / evidence passing）时定位该 bug 在共享层（dict_lower/checker，则必须修）还是 codegen_llvm 层（则 C 后端勿复制即可）；修好后删除 Map 的 `method_to_runtime` 条目 + 全部 ring_map_* bootstrap shim，Map 方法直走 Ring 代码路径。audit-report #93/#123 的 delegate dict 转发残留可能同根，一并核对。
 2. **trait_method_order 不复制双层注册模式**：现 LLVM 后端要求新增 trait 在 `builtins.ring`（checker 层）与 `codegen_llvm.ring:scan_trait_decls`（codegen 层 `trait_method_order`）两处独立注册，漏一处即 panic（B-152 P3 Hash trait 实测踩中）——违反「跨阶段共享约定放 hir.ring」开发约定。C 后端实现 trait dispatch 时方法序必须从 checker/hir 层单一来源导出，不得在 codegen_c 中再硬编码一份。
+3. **step 6 catch arm 必须接入嵌套模式检查（audit #246，2026-07-11 #245 worker 发现）**：LLVM catch lowering 对 ctor arm 只做顶层 tag 测试即 bind——`check_nested_ctor_tags` 从未接入 catch 路径，嵌套 ctor tag / literal 子模式全都不查（`catch { MyErr(0) => .., MyErr(n) => .. }` 疑似 wrong-code）。C 后端移植 catch（step 6）时**直接接入 `check_c_nested_ctor_tags`**（#245 修复后已覆盖 tag/literal/tuple 递归全族），勿 faithful port 此缺陷；LLVM 侧同步修复见 #246，两后端 diff=0 验收。
 
 ---
 

@@ -75,20 +75,25 @@
 
 ## LLVM Codegen
 
-### #245 共享 wrong-code：ctor 模式嵌套 literal 子模式不比较值（双后端一致）[critical] [judgment] [open]
+### #246 catch arm 完全无 Phase-1 嵌套检查（LLVM 独有，疑似 wrong-code）[high] [judgment] [open]
 
-> 2026-07-11 B-163 step 4 worker 发现（全量 sweep + faithful port 对照），从 feedback 分诊入表。**双后端共享，差分套件抓不到（diff=0 恰恰是病征）**。
+> 2026-07-11 #245 worker 范围外发现，从 feedback 分诊入表。#245（match 路径）已修，catch 是同族但独立的 lowering 路径，声明面更宽。
 
-```ring
-match o { some(0) => "zero", some(n) => "n=${n}", none => "none" }
-```
-`some(7)` 在 LLVM 与 C 后端**都输出 "zero"**——`check_nested_ctor_tags`（codegen_llvm_expr，及 step 4 的 C port）对 `Pattern::Literal` 是 no-op：只查 ctor tag、不发射字面量值比较，首个 `some(_)` 形 arm 吞掉一切同 tag 值。同族 gap：tuple 元素位的 ctor 子模式只查一层 tag 不递归内层（`(Neg(Lit(n)), _)` 的 Lit 不验证）。tuple 顶层 literal 元素 B-087 已修，ctor 字段位漏网。
+LLVM catch lowering（`codegen_llvm_expr.ring` guarded 链 ~L5527 及其下 enum dispatch 路径）对 ctor arm 只做顶层 tag 测试即直接 bind——match 路径早有的 `check_nested_ctor_tags` 从未接入 catch：**连嵌套 ctor tag 都不查**，literal 子模式同样不查。`catch { MyErr(0) => .., MyErr(n) => .. }` 形状预计 wrong-code（agent 未实测，修复时先复现确认）。C 后端 catch 是 step 6 stub 不受影响——**step 6 移植时必须直接接入 `check_c_nested_ctor_tags`，勿复制此缺陷**（已注记 plan §2.5）。
 
-**影响**：常用模式写法产出 wrong-code = 直接违反「编译器是最终权威 / 失真必须响」。**oracle 污染**：golden .expected 由 LLVM oracle 生成，凡含此 pattern 的用例已把错误行为烤入快照——修复后受影响用例需 `--update-golden` 重生成并人工核对语义。
+**修复方向**：catch arm 的模式测试接入 `check_nested_ctor_tags`（#245 修复后该函数已覆盖 tag/literal/tuple 递归全族）；先写复现用例确认 wrong-code 形态；回归用例 expected 手写。可与 B-163 step 6（C 侧 catch）同波做，两后端语义对齐 diff=0 验收。
 
-**修复方向**：① 两后端 `check_nested_ctor_tags` 族同改——ctor 字段位 literal 子模式发射值比较、tuple 元素位 ctor 子模式递归检查（策略逻辑先在 LLVM 侧改，C 侧对照移植，保持 diff=0）；② 排查 checker 穷尽性层对嵌套 literal 的处理是否同样漏（`some(0)`/`some(n)` 的覆盖判定）；③ 新增回归 e2e（手写 expected，不经 oracle）+ 受影响 golden 重生成核对；④ 动 match codegen → golden ×3 全套。
+发现者：#245 worker（feedback 分诊）
 
-发现者：step 4 worker（feedback 分诊）
+### #247 合法 match 程序触发 module verification failed（IR 与文本形式不一致，行为正确）[medium] [judgment] [open]
+
+> 2026-07-11 #245 worker 范围外发现（基线 `44e69f9` 对照确认预存在，与 #245 修复无关）。
+
+`fn f(o: Int?) -> Str { match o { some(n) => "n=${n}", none => "none" } }` + main 两次调用即触发 `LLVM module verification failed (1 errors)`。怪异点：dump 的 ring_output.ll 经 clang 解析编译**无错**——in-memory module 与文本形式不一致（疑似空 block / 游离 block 类，#198 builder 簿记家族）；运行输出正确。
+
+**影响**：verify 信道被既有噪声污染——verify 失败无法作为硬门槛（见 #242 扩注的 fail-stop 决策依赖）。**修复方向**：最小复现 → `LLVMVerifyModule` 的具体错误文本定位（action=2 会打到 stderr，先抓全错误内容）→ 定位发射游离/空 block 的路径。注：LLVM 后端 Phase 2 退役后本条随之消亡，但它 gate 着 verify fail-stop 决策，且 Phase 1 期间 LLVM 是 oracle——oracle 自身 verify 不过削弱差分可信度。
+
+发现者：#245 worker（feedback 分诊）
 
 ### #243 LLVM gen_direct_call 全局 functions map 先于局部 named_values——潜伏 miscompile [medium] [mechanical] [open]
 
@@ -117,6 +122,8 @@ match o { some(0) => "zero", some(n) => "n=${n}", none => "none" }
 `codegen_llvm.ring:1759-1764`：`LLVMTargetMachineEmitToFile` 失败只 `eprintln("Failed to emit object file")` 后正常返回，进程 exit 0——脚本/CI 假绿隐患。典型事故：dist-llvm rebuild 时 emit 失败但脚本继续链接旧 main.o，用旧编译器却以为是新的。Python runner 靠 ".o file not found" 兜底，但直接调 ring.exe 的脚本（CLAUDE.md 常用命令、rebuild 流程）无此防护。对照：cli.ring 全部 lex/parse/check 错误路径正确 `exit_process(1)`；C 后端 `codegen_c.ring:69` clang 失败正确 `exit_process(1)`。
 
 **修复方向**（解法唯一）：emit 失败分支加 `exit_process(1)`，对齐 C 后端先例。同函数 verify 失败（L1746，注释明示 attempting emit anyway）与 pass 失败（L1753）是故意继续的既有行为，**保持不动**。注：本条属 codegen_llvm，若不修将随 B-163 Phase 2 LLVM 后端退役消亡；但 Phase 1 期间 LLVM 仍是主力构建路径 + 差分 oracle，1 行修复值得做。
+
+> **2026-07-11 扩注（#245 worker [观察] 分诊）——verify 失败 fail-stop 拍板点**：invalid IR（duplicate switch case）下 "attempting emit anyway" 实测会**挂死 ring.exe 进程**（滞留占文件锁），违背「失真必须响」。建议 verify 失败直接 fail-stop（exit 非零）而非继续 emit——**但被 #247 gate**：现存在合法程序触发 verification failed 的既有噪声（行为正确的假阳性），先修 #247 才能启用 fail-stop，否则合法程序编译失败。执行序：#247 根因修复 → verify fail-stop（届时本条 emit/verify 两处一并收口）。方向待用户确认。
 
 发现者：Phase 0 worker（feedback 分诊）
 
