@@ -115,3 +115,37 @@ tracked 的 `compiler/llvm-addon/binding.gyp` include/lib 路径是 `C:/software
 ## [通知] 冻结 JS 编译器 emit 失败时 exit code 仍为 0（2026-07-10，Phase 0 worker）
 
 `node compiler/dist/main.js build … --out-dir=<不存在的目录>` 时报 `Failed to emit object file` 但**进程退出码为 0**——脚本/CI 层面假绿隐患。冻结产物已不再更新可不修，但现源码 cli.ring 是否同病未查证，建议列入 audit 待验。
+
+## [通知] B-163 step 4 实现要点与取舍（2026-07-11，step 4 worker）
+
+struct/enum 构造 + 字段访问/赋值 + match/if-let 已落地（codegen_c_ctx/codegen_c/codegen_c_expr）。关键取舍：
+
+1. **match 编译 = 统一 if/goto 测试链**（`gen_c_match_expr`）：LLVM 后端自己的注释说 tag-switch 是"purely an optimization for guard-free enum matches"、if-else 链是通用下沉——C 侧只移植了通用链（plan §2.1 的 if/goto+label 形态），guard/嵌套 tag 检查/or-pattern/tuple 模式的策略逻辑逐一对照 `gen_match_if_else` 族移植。已知两个语义边角与 LLVM 不同：① 病态程序中"非末位 wildcard/binding + 后续 ctor arm"——LLVM switch 路径把 wildcard 提升进 default 块（源序违反），C 按源序（更正确）；② 穷尽失败 panic 消息：LLVM switch 路径走 `ring_match_fail`（带 enum 名+tag），C 统一 `match exhaustion failure #N`（= LLVM if-else 链的消息）。两者都只在 checker 保证不可达的路径上可观测。
+2. **typeid 分配时机**：C 在 forward pass（enum/struct ctor 注册时）分配，LLVM 在 body 发射时 lazy 分配——数值可能不同但 typeid 本就 per-binary，各自内部一致（List=4/Map=5/user≥64/Result=64 约定对齐）。另外 C 侧把 **Option 的 typeid 显式钉死为 8**（RING_TYPEID_OPTION）：LLVM 后端没钉，若走到 `Option::some{...}` named-construct 路径会 get_or_assign 出 user typeid、与 ctor 的常量 8 不一致（病态路径，未实测触发；C 侧防御性钉死）。
+3. **struct ctor 声明时机**：C 在整个 forward pass 之后统一 declare+define（fn 恒胜 struct ctor 抢 `ring_<Name>`，与 decl 顺序无关）；LLVM 在 pass 2 逐 decl 发射 ctor，理论上存在"调用点先于 struct decl 发射时 functions map 查不到"的顺序敏感（未见实际触发，备查）。enum ctor 两侧都在 forward pass 注册（first-come-wins）。
+4. **record row 访问 default 分支**：LLVM 发 `unreachable`（UB），C 发 `ring_panic`——允许性偏离，只在类型系统被绕过时可观测，更稳健。
+5. **derived_impls 归属修正**：generate_c 里旧注释把 derived_impls 标为 step 4——实际 derived Eq/Ord/Debug/Clone 全部经 trait dict dispatch 消费，属 step 5，注释已改。当前 struct/enum 的 `==`（非 Builtin dispatch）仍走 stub。
+6. 验收 sweep 现状（步 4 后全量）：llvm golden 84/213 pass、e2e 256/380 pass，其余失败全部是 step 5/6 stub panic（closure 53 / try-catch 20 / Eq-Ord dispatch 21 / effect handler 14 / dict dispatch 9 / 其他 derived-method 缺失）+ 1 个 drop_basic（见下条）。C_SKIP 维持空集（延续 steps 1-3 惯例：失败可见，不用 skip 遮蔽）。
+
+## [通知] C 侧修复：调用位名字解析局部遮蔽全局；LLVM 后端同序 bug 潜伏未动（2026-07-11，step 4 worker）
+
+全量 sweep 撞到 clang 硬错误：`std/list.ring` `List.fold` 体内 `f(acc, elem)` 被解析到用户程序的全局 `fn f(x)`（单参）——`gen_c_direct_call` 原先查全局 functions map 先于局部 named_values，任何用户程序定义与 prelude HOF 参数同名的 fn（f/pred 等）都会整文件编译失败。已修：调用位与 `gen_c_ident` 一致改为局部作用域优先（局部闭包参数命中 step 5 closure stub）。**LLVM 后端 `gen_direct_call` 是同样的倒序**（functions map 先于 named_values closure 分支），同场景下会对 1 参函数发射 2 实参的 `LLVMBuildCall2`——LLVM-C 不校验、静默生成错 call，只因这些 prelude HOF 死代码从未被执行而未爆（正是 plan §0.1"产物不可审计"的又一活标本，clang 前端当场抓出）。按纪律未动 LLVM 侧，建议随 step 5 closure call 落地时顺带修或直接等退役。
+
+## [通知] C 侧修复：同名 impl 方法 C 重定义（first-wins）；根因是 mangling 歧义（2026-07-11，step 4 worker）
+
+`result_basic.ring`（用户自定义 `enum Result` + `impl Result { and_then }`）与 prelude `std/result.ring` 的 `impl Result` 同名方法都 mangle 成 `ring_Result_and_then`——C 是硬重定义错误。LLVM 后端"通过"纯属侥幸：forward pass 对重名注册去重后，第二个 body 被 append 进第一个函数成死块，所有调用点都走第一个（prelude）定义，恰好两实现语义相同。C 侧已按等效语义修复：`CCtx.emitted_fns` 集合，第一个定义胜、后续同名 body 跳过。**根因是 checker 级 mangling 歧义**（用户 enum 遮蔽 builtin/prelude 类型时 codegen 身份没有区分），两后端共享；顺带发现 `c_declare_fn`/LLVM forward_declare 对重名的 `fn_evidence_params` 是 last-wins（body/proto 是 first-wins）——若重名双方 effect 行不同，调用点 evidence 实参数可能与原型不匹配（现有用例未触发）。建议列 audit。
+
+## [通知] 共享 wrong-code bug：ctor 嵌套 literal 子模式不比较值（双后端一致复现）（2026-07-11，step 4 worker）
+
+```ring
+match o {
+    some(0) => "zero",
+    some(n) => "n=${n}",
+    none => "none",
+}
+```
+`tag(some(7))` 在 **LLVM 与 C 两个后端都输出 "zero"**——`check_nested_ctor_tags`（及 C port）对 Pattern::Literal 是 no-op，只查 ctor tag 不比字面量值，首个 `some(_)` 形 arm 吞掉一切 some。tuple 模式的顶层 literal 元素 #B-087 已修，但 ctor 字段位的 literal 漏网。同族 gap：tuple 元素位的 ctor 子模式只查一层 tag、不递归内层（`(Neg(Lit(n)), _)` 的 Lit 不验证）。C 侧按纪律 faithful port 保留同行为（diff=0 优先）；这是 checker 穷尽性/codegen 双侧都涉及的语义 bug，须单独立项修（两后端同改 + 回归用例），未自行动手。复现文件可用上例直接构造。
+
+## [通知] drop_basic 在 C 后端静默错输出——step 7 前的已知窗口（2026-07-11，step 4 worker）
+
+`drop_basic.ring`（用户 `impl Drop`）在 C 后端不 panic、输出少一行 "dropping file"：scope-end 的 `ring_drop` 正常发射，但用户 drop 函数的生成与 `ring_register_drop` 注册属 step 7（emit_drop_functions），当前 runtime 对未注册 typeid 直接 free 不调用户 drop。这是"静默失真"而非"响亮失败"（违背失真必须响，但窗口随 step 7 关闭）。全量 sweep 中它是唯一非 stub 失败，勿误判为 step 4 回归。

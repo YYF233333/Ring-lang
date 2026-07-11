@@ -13,11 +13,13 @@
 
 use types::{Type, Effect, EffectRow, effect_kind_name}
 use ast::{Span}
-use hir::{HExpr, HStmt, HDecl, HParam, HProgram, TraitBound,
-    evidence_param_name, trait_bound_param_name, compare_by_first, hexpr_type}
-use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, new_c_ctx, c_emit, c_raw,
-    c_param, c_mangle_fn, c_mangle_method, c_line_directive, rt_use,
-    rt_use_raw, get_or_assign_c_typeid, is_runtime_symbol}
+use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
+    TraitBound, evidence_param_name, trait_bound_param_name, variant_ctor_name,
+    compare_by_first, hexpr_type}
+use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
+    new_c_ctx, c_emit, c_raw, c_param, c_mangle_fn, c_mangle_method,
+    c_line_directive, rt_use, rt_use_raw, get_or_assign_c_typeid,
+    is_runtime_symbol}
 use codegen_c_expr::{gen_c_expr, emit_c_stmt}
 use effect_analysis::{extract_effect_names, collect_fn_callees}
 
@@ -32,10 +34,12 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
 
     // B-091: auto-boxed mut-cell def_ids (closure write-through capture).
     for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
-    // B-144: extern type names (RC exclusion decisions — consumed from step 4).
+    // B-144: extern type names (RC exclusion decisions — consumed in step 7's
+    // emit_drop_functions, field_rc_skip flags).
     for en in program.extern_type_names { ctx.extern_types.insert(en) }
     // program.drop_types (step 7), program.static_dicts (step 5),
-    // program.derived_impls (step 4): not consumed yet.
+    // program.derived_impls (step 5 — derived Eq/Ord/Debug/Clone methods are
+    // consumed through trait dict dispatch, which is step 5): not consumed yet.
 
     // Built-in enums (Option/Result ctors — Option layout {i64 tag, ptr payload}).
     c_register_builtin_enums(ctx)
@@ -46,8 +50,15 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     scan_fn_mut_params_c(program.decls, ctx.fn_mut_params)
     compute_transitive_effect_closure_c(program.decls, ctx.local_fn_effects)
 
-    // First pass: prototypes + registries.
+    // First pass: prototypes + registries (enum variant ctors are declared
+    // AND defined here — their bodies depend on nothing but the registries).
     c_forward_declare(ctx, program.decls)
+
+    // Struct constructors after the whole forward pass: a Ring fn sharing the
+    // struct's name wins the ring_<Name> symbol regardless of declaration
+    // order (the LLVM backend gets this by emitting struct ctors in pass 2,
+    // after every fn was declared).
+    c_declare_struct_ctors(ctx, program.decls)
 
     // Second pass: function bodies.
     for decl in program.decls {
@@ -153,6 +164,23 @@ fn c_register_builtin_enums(mut ctx: CCtx) {
     rt_use(ctx, "ring_alloc", 2)
     rt_use(ctx, "ring_Option_none", 0)
 
+    // Enum registry entries — match / if-let compile against these tags and
+    // layouts (register_builtin_enums parity: some=0/none=1, Ok=0/Err=1).
+    let mut option_variants: Map<Str, CEnumVariantInfo> = map_new()
+    option_variants.insert("some", CEnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
+    option_variants.insert("none", CEnumVariantInfo { tag: 1, field_count: 0, field_names: [] })
+    ctx.enum_types.insert("Option", CEnumInfo { variants: option_variants, max_fields: 1 })
+
+    let mut result_variants: Map<Str, CEnumVariantInfo> = map_new()
+    result_variants.insert("Ok", CEnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
+    result_variants.insert("Err", CEnumVariantInfo { tag: 1, field_count: 1, field_names: ["value"] })
+    ctx.enum_types.insert("Result", CEnumInfo { variants: result_variants, max_fields: 1 })
+
+    // Pin Option's typeid to the runtime's fixed RING_TYPEID_OPTION (8) so
+    // ANY future typeid request for "Option" (e.g. a named-construct path)
+    // agrees with ring_Option_some/the runtime Option makers.
+    ctx.type_to_typeid.insert("Option", 8)
+
     ctx.functions.insert("ring_Option_some", CFnInfo { c_name: "ring_Option_some", total_params: 1 })
     ctx.functions.insert("ring_Option_none", CFnInfo { c_name: "ring_Option_none", total_params: 0 })
     ctx.functions.insert("ring_Result_Ok", CFnInfo { c_name: "ring_Result_Ok", total_params: 1 })
@@ -225,10 +253,12 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
                 let mut fnames: List<Str> = []
                 for f in fields { fnames.push(f.name) }
                 ctx.struct_types.insert(name, CStructInfo { field_names: fnames })
-                // Struct constructor fn + C struct layout emission: step 4.
+                // The ring_<Name> constructor fn is declared AFTER the whole
+                // forward pass (c_declare_struct_ctors) — fns win collisions.
             },
-            HDecl::Enum { .. } => {
-                // Variant constructors + tag registry: step 4.
+            HDecl::Enum { name, variants, .. } => {
+                register_c_enum_info(ctx, name, variants)
+                c_emit_enum_ctors(ctx, name, variants)
             },
             HDecl::Const { name, .. } => {
                 // Const = zero-arg lazy getter (same scheme as the LLVM backend).
@@ -263,6 +293,124 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
             HDecl::Sig { .. } => {},
         }
     }
+}
+
+// ============================================================
+// Enum registration + variant constructors (ports of register_enum_info /
+// forward_declare_enum_ctors / emit_enum_constructors).  Tags are assigned in
+// declaration order; the value layout is { int64_t tag, void* f0, ... } —
+// see codegen_c_ctx::CEnumInfo.  Constructors are declared AND defined in the
+// forward pass: their bodies only need the registry + typeid, and this keeps
+// the declare-time collision skip and the definition in one place.
+// ============================================================
+
+fn register_c_enum_info(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) {
+    let mut max_fields = 0
+    let mut variant_map: Map<Str, CEnumVariantInfo> = map_new()
+    let mut tag = 0
+    for v in variants {
+        let fc = v.fields.len()
+        if fc > max_fields {
+            max_fields = fc
+        }
+        let fnames = match v.field_names {
+            some(names) => names,
+            none => {
+                let mut ns: List<Str> = []
+                for _j in 0..fc { ns.push("") }
+                ns
+            },
+        }
+        variant_map.insert(v.name, CEnumVariantInfo { tag: tag, field_count: fc, field_names: fnames })
+        tag = tag + 1
+    }
+    ctx.enum_types.insert(name, CEnumInfo { variants: variant_map, max_fields: max_fields })
+}
+
+fn c_emit_enum_ctors(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) {
+    let max_fields = match ctx.enum_types.get(name) {
+        some(ei) => ei.max_fields,
+        none => panic("C codegen: enum '${name}' not registered"),
+    }
+    rt_use(ctx, "ring_alloc", 2)
+    let tid = get_or_assign_c_typeid(ctx, name)
+    let mut tag = 0
+    for v in variants {
+        let key = c_mangle_fn(variant_ctor_name(name, v.name))
+        let vtag = tag
+        tag = tag + 1
+        // First-come-wins within the forward pass (forward_declare_enum_ctors
+        // skip parity) — also prevents a duplicate C definition.
+        if ctx.functions.contains_key(key) {
+            continue
+        }
+        let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { key }
+        ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: v.fields.len() })
+        let mut no_ev: List<Str> = []
+        ctx.fn_evidence_params.insert(key, no_ev)
+
+        let mut ps: List<Str> = []
+        for i in 0..v.fields.len() { ps.push("void* a${i}") }
+        let params_str = if ps.len() == 0 { "void" } else { ps.join(", ") }
+        ctx.fn_protos.push("void* ${c_name}(${params_str});")
+
+        let mut def: List<Str> = []
+        def.push("void* ${c_name}(${params_str}) {")
+        def.push("    void* p = ring_alloc((int64_t)(sizeof(int64_t) + ${max_fields} * sizeof(void*)), ${tid});")
+        def.push("    *(int64_t*)p = ${vtag};")
+        for i in 0..v.fields.len() {
+            def.push("    ((void**)p)[${i + 1}] = a${i};")
+        }
+        def.push("    return p;")
+        def.push("}")
+        ctx.fn_defs.push(def.join("\n"))
+    }
+}
+
+// Struct constructors — declared+defined after the forward pass so that any
+// Ring fn with the struct's name keeps the ring_<Name> symbol (LLVM parity:
+// emit_struct_constructor's already-declared skip runs in pass 2).
+fn c_declare_struct_ctors(mut ctx: CCtx, decls: List<HDecl>) {
+    for decl in decls {
+        match decl {
+            HDecl::Struct { name, fields, .. } => {
+                c_emit_struct_ctor(ctx, name, fields)
+            },
+            HDecl::ModBlock { decls: md, .. } => {
+                c_declare_struct_ctors(ctx, md)
+            },
+            _ => {},
+        }
+    }
+}
+
+fn c_emit_struct_ctor(mut ctx: CCtx, name: Str, fields: List<HStructField>) {
+    let key = c_mangle_fn(name)
+    if ctx.functions.contains_key(key) {
+        // A fn (or enum ctor) already owns this symbol — skip (LLVM parity).
+        return
+    }
+    let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { key }
+    ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: fields.len() })
+    let mut no_ev: List<Str> = []
+    ctx.fn_evidence_params.insert(key, no_ev)
+
+    rt_use(ctx, "ring_alloc", 2)
+    let tid = get_or_assign_c_typeid(ctx, name)
+    let mut ps: List<Str> = []
+    for i in 0..fields.len() { ps.push("void* a${i}") }
+    let params_str = if ps.len() == 0 { "void" } else { ps.join(", ") }
+    ctx.fn_protos.push("void* ${c_name}(${params_str});")
+
+    let mut def: List<Str> = []
+    def.push("void* ${c_name}(${params_str}) {")
+    def.push("    void* p = ring_alloc((int64_t)(${fields.len()} * sizeof(void*)), ${tid});")
+    for i in 0..fields.len() {
+        def.push("    ((void**)p)[${i}] = a${i};")
+    }
+    def.push("    return p;")
+    def.push("}")
+    ctx.fn_defs.push(def.join("\n"))
 }
 
 fn c_declare_fn(mut ctx: CCtx, mangled: Str, effect_key: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>) {
@@ -381,6 +529,13 @@ fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: Effec
         some(fi) => fi.c_name,
         none => panic("C codegen: function '${mangled}' not forward-declared"),
     }
+
+    // First definition wins (see CCtx.emitted_fns): a later decl with the
+    // same mangled name (user enum shadowing a prelude type's impl) would be
+    // a C redefinition error; call sites all resolve to the first symbol,
+    // matching the LLVM backend's effective behaviour.
+    if ctx.emitted_fns.contains(c_name) { return }
+    ctx.emitted_fns.insert(c_name)
 
     let saved = begin_c_fn(ctx, mangled)
 
