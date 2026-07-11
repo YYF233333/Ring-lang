@@ -95,15 +95,35 @@ LLVM catch lowering（`codegen_llvm_expr.ring` guarded 链 ~L5527 及其下 enum
 
 发现者：#245 worker（feedback 分诊）
 
-### #243 LLVM gen_direct_call 全局 functions map 先于局部 named_values——潜伏 miscompile [medium] [mechanical] [open]
+### #249 LLVM lazy dict getter 的 decl-order 缺陷：dispatch 位先于 impl 块时手写 dict 被忽略 [medium] [judgment] [open] [deferred: B-163p2-retire]
 
-> 2026-07-11 step 4 worker 发现（C 侧同 bug 被 clang arity 硬错误当场抓出并已修，LLVM 侧按纪律未动）。
+> 2026-07-11 step 5 worker 发现（C 侧以 forward-pass 预注册有意偏离规避，LLVM 侧未动）。
 
-`codegen_llvm_expr.ring` `gen_direct_call`：调用位名字解析先查全局 functions map 再查局部 named_values（closure 分支）——与语言作用域规则相反。用户程序定义与 prelude HOF 参数同名的全局 fn（如 `fn f(x)`）时，`List.fold` 体内 `f(acc, elem)` 被解析到全局 f，对 1 参函数发射 2 实参 `LLVMBuildCall2`。LLVM-C 不校验、静默生成错 call；现有用例中该 prelude HOF 恰为死代码故未爆——用户程序若真调用该 HOF 即活 miscompile。C 后端已修（局部作用域优先，`2b85e9f`），**两后端现不对称**：同场景 C 正确、LLVM 错，差分套件若撞上会以 FAIL 形式暴露。
+`resolve_static_dict_by_name` 是 lazy 的：某 trait dispatch 位在 decl 顺序上先于其 `impl` 块时，getter 先以 runtime builtin fallback 形态创建；随后 `emit_trait_dict` 的 memoised getter 注册发现同名已存在直接 return existing——**手写 dict 的 build fn 成为死代码、该 dispatch 走 tag-only fallback**（用户 impl 实质被忽略）。decl-order 敏感，实践少触发（impl 通常先于使用）。C 后端不受影响（`CCtx.dict_build_fns` forward pass 预注册，与 decl 顺序无关）。
 
-**修复方向**（解法唯一）：`gen_direct_call` 查找顺序对齐 C 侧（局部 named_values 先于 functions map）。建议随 step 5 顺带修或等 Phase 2 退役——但 Phase 1 期间 LLVM 是差分 oracle，修掉可消除不对称。
+**修复方向**：LLVM 侧对齐 C 的预注册方案；或不修随 Phase 2 退役消亡。Phase 1 期间它是 oracle——若差分撞到 decl-order 形状会以 diff FAIL 暴露（C 对 LLVM 错）。
 
-发现者：step 4 worker（feedback 分诊）
+发现者：step 5 worker（feedback 分诊）
+
+### #248 LLVM derived clone 签名与 checker scheme 契约不一致（静默多传参）[low] [judgment] [open] [deferred: B-163p2-retire]
+
+> 2026-07-11 step 5 worker 发现（clang 在 C 侧把它变成硬错误而暴露；C 侧已修，LLVM 未动）。
+
+checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[T: Clone]` bounds 的 scheme → 调用位按 scheme 传 dict 参数；LLVM `emit_clone_fn` 却用 empty_bounds 生成单参函数——调用位多传 1 个 dict 参数，LLVM-C 不校验、x64 调用约定下静默无害（plan §0.1「类型系统真空」实例）。C 侧修复 = clone 签名与 scheme 对齐（接收 dict 参数，body 忽略）。
+
+**修复方向**：`emit_clone_fn` 传 `di.bounds` 对齐 scheme；或不修随 Phase 2 退役消亡。Phase 1 期间动 LLVM derived 区的任何改动需先修此项。
+
+发现者：step 5 worker（feedback 分诊）
+
+### #250 `--target=llvm` 单文件模式不遵守 `--out-dir`（双后端 CLI 不对称）[low] [mechanical] [open]
+
+> 2026-07-11 step 5 worker 发现（.o 落源文件旁，手动 Move-Item 绕过）。
+
+`ring.exe build foo.ring --target=llvm --out-dir=<dir>` 单文件模式下 .o 落源文件旁；C 后端（steps 1-3 起）正确遵守 `out_dir_set`。project mode 两者都遵守。
+
+**修复方向**（解法唯一）：LLVM 单文件路径消费 `out_dir_set`，对齐 C 后端行为。注意 Python runner 的 LLVM 单文件路径当前依赖"源旁 .o"现状（runner 取舍已备案），修复时同步调整 runner。
+
+发现者：step 5 worker（feedback 分诊）
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]
 

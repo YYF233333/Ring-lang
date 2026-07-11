@@ -2266,6 +2266,20 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
         none => {},
     }
 
+    // #243: LOCAL scope first — a closure/fn-value param or local shadows any
+    // module-level fn of the same name (language scoping; gen_ident already
+    // resolves references local-first).  Without this a prelude HOF body like
+    // List.fold's `f(acc, elem)` binds to a user's global `fn f` and silently
+    // emits an arity-mismatched call.  Aligns with the C backend
+    // (codegen_c_expr::gen_c_direct_call, fixed in 2b85e9f).
+    match ctx.named_values.get(name) {
+        some(alloca) => {
+            let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "clos"))
+            return gen_closure_call(ctx, closure_ptr, arg_vals)
+        },
+        none => {},
+    }
+
     // Look up in functions map — try module-aware resolution first
     let mangled = llvm_resolve_fn(ctx, name)
     let found_fn = find_function_in_ctx(ctx, mangled, name)
@@ -2292,36 +2306,27 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
             LLVMBuildCall2(ctx.builder, fn_ty, fn_info.fn_val, arg_vals, fresh_name(ctx, "call"))
         },
         none => {
-            // Not a known function — might be a closure variable (lambda parameter)
-            match ctx.named_values.get(name) {
-                some(alloca) => {
-                    let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "clos"))
-                    gen_closure_call(ctx, closure_ptr, arg_vals)
-                },
-                none => {
-                    // Try runtime function with ring_ prefix as final fallback
-                    let rt_fallback = "ring_${name}"
-                    match ctx.rt_fns.get(rt_fallback) {
-                        some(_) => {
-                            if rt_fallback == "ring_assert" {
-                                let first = match arg_vals.get(0) { some(v) => v, none => panic("ring_assert: missing arg 0") }
-                                let second = match arg_vals.get(1) { some(v) => v, none => panic("ring_assert: missing arg 1") }
-                                let bool_i1 = unbox_to_i1(ctx, first)
-                                let bool_i64 = LLVMBuildZExt(ctx.builder, bool_i1, ctx.i64_type, fresh_name(ctx, "az"))
-                                arg_vals = [bool_i64, second]
-                            }
-                            return gen_runtime_call(ctx, rt_fallback, arg_vals)
-                        },
-                        none => {},
+            // Try runtime function with ring_ prefix as final fallback
+            let rt_fallback = "ring_${name}"
+            match ctx.rt_fns.get(rt_fallback) {
+                some(_) => {
+                    if rt_fallback == "ring_assert" {
+                        let first = match arg_vals.get(0) { some(v) => v, none => panic("ring_assert: missing arg 0") }
+                        let second = match arg_vals.get(1) { some(v) => v, none => panic("ring_assert: missing arg 1") }
+                        let bool_i1 = unbox_to_i1(ctx, first)
+                        let bool_i64 = LLVMBuildZExt(ctx.builder, bool_i1, ctx.i64_type, fresh_name(ctx, "az"))
+                        arg_vals = [bool_i64, second]
                     }
-                    // B-152: unknown extern fn → declare as external + call (linker resolves).
-                    // All Ring extern fns use ptr (void*) ABI for all params and return.
-                    let mut param_types: List<LLVMTypeRef> = []
-                    for _ in arg_vals { param_types.push(ctx.ptr_type) }
-                    let _ = get_or_declare_runtime_fn(ctx, name, param_types, ctx.ptr_type)
-                    gen_runtime_call(ctx, name, arg_vals)
+                    return gen_runtime_call(ctx, rt_fallback, arg_vals)
                 },
+                none => {},
             }
+            // B-152: unknown extern fn → declare as external + call (linker resolves).
+            // All Ring extern fns use ptr (void*) ABI for all params and return.
+            let mut param_types: List<LLVMTypeRef> = []
+            for _ in arg_vals { param_types.push(ctx.ptr_type) }
+            let _ = get_or_declare_runtime_fn(ctx, name, param_types, ctx.ptr_type)
+            gen_runtime_call(ctx, name, arg_vals)
         },
     }
 }

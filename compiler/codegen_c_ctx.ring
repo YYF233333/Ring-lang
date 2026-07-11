@@ -11,6 +11,7 @@
 
 use types::{Type, EffectRow}
 use ast::{Span}
+use hir::{HDictDef, TraitBound}
 
 // Per-function registration info (forward-declare pass).
 // total_params = ring params + trait-bound dict params + evidence params —
@@ -87,6 +88,32 @@ pub struct CCtx {
     pub type_to_typeid: Map<Str, Int>,
     pub next_user_typeid: Int,
 
+    // ---- step 5: trait dict / closure registries ----
+    // Trait method slot order + supertrait edges — populated from the SHARED
+    // hir.ring scan (scan_trait_method_order, plan §2.5 #2: single source, no
+    // per-backend registry).
+    pub trait_method_order: Map<Str, List<Str>>,
+    pub trait_supertraits: Map<Str, List<Str>>,
+    // B-104 D4 static dict singleton definitions (HProgram.static_dicts).
+    pub static_dict_defs: Map<Str, HDictDef>,
+    // Dict names whose ring_dict_build_<name> build fn exists (impl trait
+    // dicts pre-registered in the forward pass + derived trait dicts) — the
+    // memoised getter routes through the build fn instead of the runtime
+    // builtin fallback.  Pre-registration makes getter contents independent
+    // of decl order (the LLVM backend's lazy variant is order-sensitive).
+    pub dict_build_fns: Set<Str>,
+    // Dict names whose memoised getter ring_dict_init_<name> was emitted.
+    pub dict_getters: Set<Str>,
+    // #214 (fn value with dicts): per-fn trait bounds + original (pre-mono)
+    // param types, keyed by C mangled name — gen_c_dict_closure_wrapper
+    // computes concrete dict names from these when the checker did not
+    // resolve dict_closure_dicts for an identifier position.
+    pub fn_trait_bounds: Map<Str, List<TraitBound>>,
+    pub fn_original_param_types: Map<Str, List<Type>>,
+    // Module-wide counters for synthesised functions (deterministic order).
+    pub lambda_counter: Int,
+    pub dictwrap_counter: Int,
+
     // ---- loop context ----
     // The C statement that implements Ring `continue` for the innermost loop:
     // "continue;" for while loops (cond re-evaluated at the top) or
@@ -133,6 +160,15 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         boxed_vars: set_new(),
         type_to_typeid: map_new(),
         next_user_typeid: 64,
+        trait_method_order: map_new(),
+        trait_supertraits: map_new(),
+        static_dict_defs: map_new(),
+        dict_build_fns: set_new(),
+        dict_getters: set_new(),
+        fn_trait_bounds: map_new(),
+        fn_original_param_types: map_new(),
+        lambda_counter: 0,
+        dictwrap_counter: 0,
         loop_continue_stmt: "",
         in_loop: false,
         emit_lines: emit_lines,
@@ -248,6 +284,79 @@ fn c_unique_local(mut ctx: CCtx, ring_name: Str) -> Str {
     }
     ctx.used_locals.insert(cname)
     cname
+}
+
+// ============================================================
+// Nested function emission bracket (step 5) — the C analogue of the LLVM
+// backend's builder-position save/restore.  Lambdas, dict getters, thunks and
+// derived methods are synthesised MID-emission of another function: push the
+// live per-function state, emit the nested function, assemble it into
+// fn_defs, pop.  Module-wide counters (tmp/str/label) are NOT reset — names
+// stay unique across functions (existing invariant).
+// ============================================================
+
+pub struct CEmitState {
+    pub cur_decls: List<Str>,
+    pub cur_body: List<Str>,
+    pub used_locals: Set<Str>,
+    pub named_values: Map<Str, Str>,
+    pub indent: Int,
+    pub in_function: Bool,
+    pub current_fn_name: Str,
+    pub in_loop: Bool,
+    pub loop_continue_stmt: Str,
+    pub last_line: Int,
+    pub last_file: Str
+}
+
+pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
+    let saved = CEmitState {
+        cur_decls: ctx.cur_decls,
+        cur_body: ctx.cur_body,
+        used_locals: ctx.used_locals,
+        named_values: ctx.named_values,
+        indent: ctx.indent,
+        in_function: ctx.in_function,
+        current_fn_name: ctx.current_fn_name,
+        in_loop: ctx.in_loop,
+        loop_continue_stmt: ctx.loop_continue_stmt,
+        last_line: ctx.last_line,
+        last_file: ctx.last_file
+    }
+    ctx.cur_decls = []
+    ctx.cur_body = []
+    ctx.used_locals = set_new()
+    ctx.named_values = map_new()
+    ctx.indent = 1
+    ctx.in_function = true
+    ctx.current_fn_name = fn_name
+    ctx.in_loop = false
+    ctx.loop_continue_stmt = ""
+    ctx.last_line = -1
+    ctx.last_file = ""
+    saved
+}
+
+// Assemble the nested function into fn_defs and restore the outer state.
+// The caller pushes the prototype itself (params differ per synthesis kind).
+pub fn c_pop_fn(mut ctx: CCtx, c_name: Str, params_str: Str, saved: CEmitState) {
+    let mut def: List<Str> = []
+    def.push("void* ${c_name}(${params_str}) {")
+    for d in ctx.cur_decls { def.push(d) }
+    for l in ctx.cur_body { def.push(l) }
+    def.push("}")
+    ctx.fn_defs.push(def.join("\n"))
+    ctx.cur_decls = saved.cur_decls
+    ctx.cur_body = saved.cur_body
+    ctx.used_locals = saved.used_locals
+    ctx.named_values = saved.named_values
+    ctx.indent = saved.indent
+    ctx.in_function = saved.in_function
+    ctx.current_fn_name = saved.current_fn_name
+    ctx.in_loop = saved.in_loop
+    ctx.loop_continue_stmt = saved.loop_continue_stmt
+    ctx.last_line = saved.last_line
+    ctx.last_file = saved.last_file
 }
 
 // ============================================================
@@ -646,6 +755,9 @@ fn rt_sig(name: Str) -> Str? {
     if name == "ring_assert" { return some("ip>p") }
     if name == "ring_json_stringify" { return some("p>p") }
     if name == "ring_match_fail" { return some("piip>p") }
+    // Trait dicts (step 5)
+    if name == "ring_get_builtin_dict" { return some("p>p") }
+    if name == "ring_cl_cmp_str" { return some("ppp>p") }
     // Option
     if name == "ring_Option_unwrap_or" { return some("pp>p") }
     if name == "ring_Option_unwrap" { return some("p>p") }

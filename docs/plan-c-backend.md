@@ -92,7 +92,14 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 - **typeid 分配时机**：C 在 forward pass 分配（LLVM lazy）——数值可能与 LLVM 不同，typeid 本就 per-binary 各自内部一致；**Option typeid 钉死 8**（RING_TYPEID_OPTION，LLVM 未钉，C 防御性对齐 ctor 常量）
 - **struct ctor**：forward pass 后统一 declare+define，fn 恒胜 struct ctor 抢 `ring_<Name>`（decl 顺序无关）；enum ctor forward pass 注册 first-come-wins
 - **record row 访问 default 分支**：C 发 `ring_panic`（LLVM 发 `unreachable` UB）——更稳健的允许性偏离
-- **调用位名字解析局部作用域优先**（named_values 先于 functions map，语言作用域规则；LLVM 倒序 = audit #243）；**同名 mangled impl 方法 first-wins**（`CCtx.emitted_fns`，与 LLVM 符号 uniquing 等效语义；根因 mangling 歧义 = audit #244）
+- **调用位名字解析局部作用域优先**（named_values 先于 functions map，语言作用域规则；LLVM 侧 #243 已随 step 5 修复对齐）；**同名 mangled impl 方法 first-wins**（`CCtx.emitted_fns`，与 LLVM 符号 uniquing 等效语义；根因 mangling 歧义 = audit #244）
+
+**已定语义对齐细节（step 5 落地，2026-07-11 沉淀）**：
+- **closure ABI**：`{fn_ptr, env}` 对（typeid 7）+ `{i64 count, slots...}` env（typeid 15），布局与 LLVM/runtime 一致；调用位渲染为函数指针 cast 调用，cast 形参数由调用位决定（与 LLVM call-site fn_ty 同构）。裸函数值（零 dict）统一包 thunk closure（LLVM FnType fallback parity）
+- **嵌套函数发射 bracket**：`c_push_fn`/`c_pop_fn`（LLVM builder save/restore 的 C 等价物，#198 家族防护）
+- **impl trait dict build fn 预注册**（对 LLVM lazy 链的**有意偏离**）：forward pass 预注册全部 impl trait dict（`CCtx.dict_build_fns`），getter 内容与 decl 顺序无关——规避 LLVM 的 decl-order 缺陷（audit #249）；derived dict 按 LLVM 同序 emit，手写 impl 优先
+- **derived clone 签名与 checker scheme 对齐**（接收 dict 参数 body 忽略；LLVM 靠静默多传参掩盖 = audit #248）
+- **trait 方法序 / supertrait DFS 序**：从 `hir.ring` 单一来源消费（`scan_trait_method_order` / `collect_all_supertraits`）
 
 ### 2.2 移植顺序（叶到根，每步 golden 子集验收）
 
@@ -124,8 +131,8 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 
 ### 2.5 移植注意事项（B-152 P3 反馈回流，2026-07-10 Discussion 拍板）
 
-1. **trait-bounded impl 方法 dict 转发 bug（B-152 P3 遗留，step 5 时调查）**：`impl<K: Hash + Eq, V> Map` 这类 trait-bounded impl 块的方法调用，codegen 在某些场景下未正确传递 Hash/Eq dict，double bootstrap 崩溃。P3 被迫保留 Map 的 `method_to_runtime` 映射 + ring_runtime.cpp C++ bootstrap shim（shim 内联 hash/eq，仅支持 tagged Int/Bool + Str key），导致 P3 验收「~30 个 ring_map_* 删除」未闭环。移植 step 5（trait dict / evidence passing）时定位该 bug 在共享层（dict_lower/checker，则必须修）还是 codegen_llvm 层（则 C 后端勿复制即可）；修好后删除 Map 的 `method_to_runtime` 条目 + 全部 ring_map_* bootstrap shim，Map 方法直走 Ring 代码路径。audit-report #93/#123 的 delegate dict 转发残留可能同根，一并核对。
-2. **trait_method_order 不复制双层注册模式**：现 LLVM 后端要求新增 trait 在 `builtins.ring`（checker 层）与 `codegen_llvm.ring:scan_trait_decls`（codegen 层 `trait_method_order`）两处独立注册，漏一处即 panic（B-152 P3 Hash trait 实测踩中）——违反「跨阶段共享约定放 hir.ring」开发约定。C 后端实现 trait dispatch 时方法序必须从 checker/hir 层单一来源导出，不得在 codegen_c 中再硬编码一份。
+1. ~~trait-bounded impl 方法 dict 转发 bug（B-152 P3 遗留，step 5 时调查）~~ **✅ 调查完成（2026-07-11 step 5）**：HEAD 无法复现——双后端五场景 probe + Map Ring 路径 probe 全绿，共享层无缺陷。闭环实验（删 Map method_to_runtime + ring_map_* shim → 关 B-152 P3 遗留验收）**留 step 9 自编译后做**（self-compile via C 是最终判据）。
+2. ~~trait_method_order 不复制双层注册模式~~ **✅ 落地（2026-07-11 step 5）**：trait 方法序单一来源 = `hir.ring`（`scan_trait_method_order` 内建 seed + `collect_all_supertraits` DFS 序跨阶段契约），C 后端零本地注册表。**注意**：LLVM 侧私有副本（`scan_trait_decls` / `collect_all_supertraits_llvm`）未切换（避免触碰重编敏感面，逻辑逐字一致），Phase 2 随退役删除；在此之前新增内建 trait 需 hir.ring seed + LLVM 副本两处同步。
 3. **step 6 catch arm 必须接入嵌套模式检查（audit #246，2026-07-11 #245 worker 发现）**：LLVM catch lowering 对 ctor arm 只做顶层 tag 测试即 bind——`check_nested_ctor_tags` 从未接入 catch 路径，嵌套 ctor tag / literal 子模式全都不查（`catch { MyErr(0) => .., MyErr(n) => .. }` 疑似 wrong-code）。C 后端移植 catch（step 6）时**直接接入 `check_c_nested_ctor_tags`**（#245 修复后已覆盖 tag/literal/tuple 递归全族），勿 faithful port 此缺陷；LLVM 侧同步修复见 #246，两后端 diff=0 验收。
 
 ---

@@ -357,6 +357,76 @@ pub fn default_method_self_name(type_name: Str) -> Str {
     "__ring_self_${type_name}"
 }
 
+// B-163 step 5 (plan §2.5 #2): trait dict SLOT ORDER is a cross-stage contract
+// (dict emitters fill slot i, dispatch sites GEP slot i) — the single source
+// lives HERE, not per-backend.  Both maps are derived from HDecl::Trait decls
+// plus the built-in trait seeds; a backend must consume these instead of
+// hardcoding its own registry (the LLVM backend's private scan_trait_decls
+// predates this and is retired with the backend in B-163 Phase 2).
+pub fn scan_trait_method_order(decls: List<HDecl>, mut trait_method_order: Map<Str, List<Str>>, mut trait_supertraits: Map<Str, List<Str>>) {
+    for decl in decls {
+        match decl {
+            HDecl::Trait { name, methods, supertraits, .. } => {
+                let mut method_names: List<Str> = []
+                for m in methods {
+                    method_names.push(m.name)
+                }
+                trait_method_order.insert(name, method_names)
+                trait_supertraits.insert(name, supertraits)
+            },
+            HDecl::ModBlock { decls: md, .. } => {
+                scan_trait_method_order(md, trait_method_order, trait_supertraits)
+            },
+            _ => {},
+        }
+    }
+    // Built-in traits that never appear as HDecl::Trait.
+    if trait_method_order.get("Eq").is_none() {
+        trait_method_order.insert("Eq", ["eq", "ne"])
+    }
+    if trait_method_order.get("Clone").is_none() {
+        trait_method_order.insert("Clone", ["clone"])
+    }
+    if trait_method_order.get("Ord").is_none() {
+        trait_method_order.insert("Ord", ["cmp"])
+    }
+    if trait_method_order.get("Debug").is_none() {
+        trait_method_order.insert("Debug", ["debug"])
+    }
+    if trait_method_order.get("Hash").is_none() {
+        trait_method_order.insert("Hash", ["hash"])
+    }
+}
+
+// Transitive supertrait closure in deterministic DFS order — the ORDER is a
+// cross-stage contract too: default trait method functions take supertrait
+// dicts as leading params in exactly this order (declarer and every caller
+// must agree).  Mirrors codegen_llvm.ring::collect_all_supertraits_llvm.
+pub fn collect_all_supertraits(trait_supertraits: Map<Str, List<Str>>, trait_name: Str) -> List<Str> {
+    let mut result: List<Str> = []
+    let mut visited: Set<Str> = set_new()
+    let mut stack: List<Str> = []
+    match trait_supertraits.get(trait_name) {
+        some(supers) => {
+            for st in supers { stack.push(st) }
+        },
+        none => {},
+    }
+    while stack.len() > 0 {
+        let current = stack.pop().unwrap()
+        if visited.contains(current) { continue }
+        visited.insert(current)
+        result.push(current)
+        match trait_supertraits.get(current) {
+            some(parent_supers) => {
+                for ps in parent_supers { stack.push(ps) }
+            },
+            none => {},
+        }
+    }
+    result
+}
+
 pub const ENUM_TAG_FIELD: Str = "_tag"
 pub const OPTION_SOME_TAG: Str = "some"
 pub const OPTION_NONE_TAG: Str = "none"
