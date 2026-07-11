@@ -15,20 +15,23 @@
 // pattern tests jump to the next arm's label on mismatch (plan §2.1:
 // if/goto+label, no SSA, no phi).
 //
-// Constructs beyond step 4 (closures, trait dicts, effect handlers, catch)
-// compile to a runtime-panic stub — the emitted C always compiles; executing
-// an unported construct panics with a precise message.  This is required
-// because single-file compilation prepends the whole std prelude to
-// program.decls (checker.ring load_prelude), so prelude bodies flow through
-// this backend from step 1.
+// Step 6 adds effect handlers (tail-resumptive + abort), try/catch and
+// default evidence — see the "Step 6" section below for the mechanism notes.
+//
+// Constructs beyond the current step compile to a runtime-panic stub — the
+// emitted C always compiles; executing an unported construct panics with a
+// precise message.  This is required because single-file compilation prepends
+// the whole std prelude to program.decls (checker.ring load_prelude), so
+// prelude bodies flow through this backend from step 1.
 
 use types::{Type, EffectRow, type_to_builtin_name, BUILTIN_RANGE}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
-    HLetDestructureBinding, HStructFieldInit, DictRef, TraitDispatch, DictDispatchInfo,
+    HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
+    TraitDispatch, DictDispatchInfo, effect_op_slot,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
     trait_dict_name, trait_bound_param_name, evidence_param_name, is_extern_handle_type}
-use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, c_emit, c_raw,
+use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_param, c_mangle_fn,
     c_mangle_method, c_sanitize, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
     c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid,
@@ -127,12 +130,12 @@ pub fn gen_c_expr(mut ctx: CCtx, expr: HExpr) -> Str {
         HExpr::IfExpr { condition, then_branch, else_branch, .. } =>
             gen_c_if_expr(ctx, condition, then_branch, else_branch),
         HExpr::StringInterp { parts, .. } => gen_c_string_interp(ctx, parts),
-        HExpr::TryCatch { .. } => c_stub_expr(ctx, "try/catch"),
-        HExpr::HandleExpr { .. } => c_stub_expr(ctx, "effect handler"),
+        HExpr::TryCatch { body, arms, .. } => gen_c_try_catch(ctx, body, arms),
+        HExpr::HandleExpr { body, handlers, .. } => gen_c_handle_expr(ctx, body, handlers),
         HExpr::Lambda { params, return_type, body, ty, .. } =>
             gen_c_lambda(ctx, params, return_type, body, ty),
-        HExpr::EffectOp { effect_name, op_name, .. } =>
-            c_stub_expr(ctx, "effect op (${effect_name}.${op_name})"),
+        HExpr::EffectOp { effect_name, op_name, args, .. } =>
+            gen_c_effect_op(ctx, effect_name, op_name, args),
         HExpr::RangeExpr { start, end, inclusive, .. } =>
             gen_c_range_expr(ctx, start, end, inclusive),
         HExpr::ListLit { elements, .. } => gen_c_list_lit(ctx, elements),
@@ -152,8 +155,10 @@ pub fn gen_c_expr(mut ctx: CCtx, expr: HExpr) -> Str {
         },
         HExpr::UnsafeBlock { body, .. } => gen_c_expr(ctx, body),
         HExpr::ReturnExpr { value, .. } => {
-            // return in expression position (B-113).  handle/try cleanup stack
-            // is a step-6 concern (no handle/catch emitted before then).
+            // return in expression position (B-113).  #173/#193: walk the
+            // handle/try cleanup stack before returning (same order as the
+            // LLVM backend: cleanup first, then evaluate the value).
+            emit_c_cleanup_walk(ctx)
             match value {
                 some(v) => {
                     let val = gen_c_expr(ctx, v)
@@ -1543,12 +1548,403 @@ fn gen_c_ord_dispatch(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, dispa
 }
 
 fn c_lookup_evidence(mut ctx: CCtx, ep_name: Str) -> Str {
-    // Evidence param in scope → pass it; default evidence (B-097) is step 6 —
-    // NULL for io/fail/unhandled effects (runtime handles those).
+    // Evidence param/handle binding in scope → pass it; else fall back to the
+    // B-097 default evidence global (populated by __ring_default_evidence_init
+    // before ring_main); else NULL for io/fail/unhandled effects (the runtime
+    // handles those without evidence).  Port of lookup_evidence.
     match ctx.named_values.get(ep_name) {
         some(cv) => cv,
-        none => "RING_UNIT",
+        none => {
+            // ep_name is "__ring_ev_<eff>" — prefix is 10 chars (same
+            // extraction as the LLVM backend's lookup_evidence).
+            let effect_name = ep_name.slice(10, ep_name.len())
+            match ctx.default_evidence.get(effect_name) {
+                some(g) => g,
+                none => "RING_UNIT",
+            }
+        },
     }
+}
+
+// ============================================================
+// Step 6: effect handlers (tail-resumptive + abort) + try/catch.
+//
+// Mechanism is the LLVM backend's, rendered as C text (plan §2.1: read the
+// existing implementation first, map it verbatim):
+//   * fail/abort   = setjmp/longjmp.  ring_catch_push() allocates a runtime
+//     catch frame; the standard C `setjmp` macro (not the raw _setjmp symbol —
+//     clang's <setjmp.h> handles the Windows x64 frame-pointer ABI that the
+//     LLVM backend passes by hand via @llvm.frameaddress) arms its jmp_buf;
+//     `fail.raise` calls ring_raise = longjmp into the innermost frame.
+//   * tail-resumptive handler ops = evidence structs.  An evidence struct is
+//     { int64_t count, void* slot0, ... } (typeid 21, RING_TYPEID_EVIDENCE);
+//     slot k holds op k's {fn_ptr, env} closure (slot order = declaration
+//     order via hir::effect_op_slot).  Handler arms become closures via
+//     gen_c_lambda; an effect op dispatches by loading its slot and calling
+//     the closure — the arm's return value IS the resume value.
+//   * setjmp non-volatile-local caveat: all Ring locals are hoisted to the
+//     function top and clang marks setjmp returns_twice, forcing the same
+//     conservative spill treatment the LLVM backend gets from entry-block
+//     allocas + returns_twice on _setjmp.  See worker_feedback step 6.
+// ============================================================
+
+// Register the four runtime catch-frame helpers.
+fn rt_use_catch_fns(mut ctx: CCtx) {
+    rt_use(ctx, "ring_catch_push", 0)
+    rt_use(ctx, "ring_catch_get_buf", 1)
+    rt_use(ctx, "ring_catch_get_error", 1)
+    rt_use(ctx, "ring_catch_pop", 0)
+}
+
+// #173/#193: walk the enclosing handle/try scopes innermost-first, popping
+// catch frames and dropping handler evidence — a `return` inside a body must
+// not skip the normal-path epilogue.  Port of emit_return's cleanup walk.
+fn emit_c_cleanup_walk(mut ctx: CCtx) {
+    let n = ctx.handle_cleanup_stack.len()
+    for i in 0..n {
+        match ctx.handle_cleanup_stack.get(n - 1 - i) {
+            some(cleanup) => {
+                if cleanup.needs_catch_pop {
+                    rt_use(ctx, "ring_catch_pop", 0)
+                    c_emit(ctx, "ring_catch_pop();")
+                }
+                for ev in cleanup.ev_drop_vars {
+                    rt_use(ctx, "ring_drop", 1)
+                    c_emit(ctx, "ring_drop(${ev});")
+                }
+            },
+            none => {},
+        }
+    }
+}
+
+// B-096: drop each non-abort evidence struct at handle scope end.
+fn emit_c_evidence_drops(mut ctx: CCtx, ev_vars: List<Str>) {
+    for ev in ev_vars {
+        rt_use(ctx, "ring_drop", 1)
+        c_emit(ctx, "ring_drop(${ev});")
+    }
+}
+
+// TryCatch — inline setjmp (B-089 G-b port of gen_try_catch).  Body and catch
+// arms execute in the current C stack frame, sharing all hoisted locals.
+fn gen_c_try_catch(mut ctx: CCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
+    rt_use_catch_fns(ctx)
+    let frame = fresh_tmp(ctx)
+    let buf = fresh_tmp(ctx)
+    let res = fresh_tmp(ctx)
+    let catch_lbl = fresh_label(ctx, "catch")
+    let merge_lbl = fresh_label(ctx, "cmerge")
+
+    c_emit(ctx, "${frame} = ring_catch_push();")
+    c_emit(ctx, "${buf} = ring_catch_get_buf(${frame});")
+    // setjmp must be the whole controlling expression of the if (C11
+    // 7.13.1.1p5) — never assigned to a temporary.
+    c_emit(ctx, "if (setjmp(*(jmp_buf*)${buf}) != 0) goto ${catch_lbl};")
+
+    // --- normal path: body inline, pop frame ---
+    // #173: a `return` inside the body must pop this catch frame.
+    ctx.handle_cleanup_stack.push(CHandleCleanup { needs_catch_pop: true, ev_drop_vars: [] })
+    let body_val = gen_c_expr(ctx, body)
+    let _popped = ctx.handle_cleanup_stack.pop()
+    c_emit(ctx, "${res} = ${body_val};")
+    c_emit(ctx, "ring_catch_pop();")
+    c_emit(ctx, "goto ${merge_lbl};")
+
+    // --- catch path: get error, pop frame, run catch arms inline ---
+    c_raw(ctx, "${catch_lbl}:;")
+    let err = fresh_tmp(ctx)
+    c_emit(ctx, "${err} = ring_catch_get_error(${frame});")
+    c_emit(ctx, "ring_catch_pop();")
+    // Catch arms reuse the unified match test-and-fall-through chain — this
+    // runs the FULL nested pattern check (ctor tags at every depth, literal
+    // sub-patterns, guards) per arm, so audit #246's LLVM defect (top-level
+    // tag test only) is NOT ported.
+    for arm in arms {
+        emit_c_match_arm(ctx, arm, err, res, merge_lbl)
+    }
+    // Exhaustion default: the checker guarantees catch-arm exhaustiveness, so
+    // this is unreachable in well-typed programs.  C panics (same stable
+    // deviation from LLVM `unreachable` as gen_c_match_expr).
+    ctx.match_counter = ctx.match_counter + 1
+    let msg = gen_c_str_lit(ctx, "catch exhaustion failure #${ctx.match_counter}")
+    rt_use(ctx, "ring_panic", 1)
+    c_emit(ctx, "ring_panic(${msg});")
+
+    c_raw(ctx, "${merge_lbl}:;")
+    res
+}
+
+// Handle expression — port of gen_handle_expr.  Builds one evidence struct
+// per handled effect; a fail.raise handler is the abort form (setjmp, the
+// raised value IS the handle result).
+fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>) -> Str {
+    // Group handlers by effect name.
+    let mut by_effect: Map<Str, List<HEffectHandler>> = map_new()
+    for h in handlers {
+        match by_effect.get(h.effect_name) {
+            some(existing) => existing.push(h),
+            none => {
+                by_effect.insert(h.effect_name, [h])
+            },
+        }
+    }
+
+    let mut has_fail_abort = false
+    // B-096: hoisted C vars holding evidence to drop at scope end.  Stored by
+    // VALUE VARIABLE (unique per handle), not by evidence name — nested
+    // handles for the same effect must not double-free (LLVM alloca parity).
+    let mut ev_drop_vars: List<Str> = []
+    // B-100 Fix 7: save outer evidence bindings so post-handle code sees the
+    // outer evidence again (not this handle's dropped struct).
+    let mut saved_ev_entries: List<(Str, Str)> = []
+
+    let mut sorted_by_effect = by_effect.entries()
+    sorted_by_effect.sort_by(compare_by_first)
+    for entry in sorted_by_effect {
+        let (effect_name, hs) = entry
+        let ev_name = evidence_param_name(effect_name)
+
+        let mut is_fail_abort = false
+        for h in hs {
+            if effect_name == "fail" && h.op_name == "raise" {
+                has_fail_abort = true
+                is_fail_abort = true
+            }
+        }
+
+        match ctx.named_values.get(ev_name) {
+            some(outer_cv) => saved_ev_entries.push((ev_name, outer_cv)),
+            none => {},
+        }
+
+        if is_fail_abort {
+            // fail.raise routes through setjmp/ring_raise, not evidence —
+            // keep a null placeholder for ABI uniformity (callees still
+            // receive an evidence ptr param for the effect).
+            let cv = c_local(ctx, ev_name)
+            c_emit(ctx, "${cv} = RING_UNIT;")
+        } else {
+            // B-090 (D1): build the real N-slot evidence struct BEFORE
+            // rebinding ev_name — arm closures capture the OUTER evidence.
+            let ev_val = build_c_handler_evidence(ctx, effect_name, hs)
+            let cv = c_local(ctx, ev_name)
+            c_emit(ctx, "${cv} = ${ev_val};")
+            ev_drop_vars.push(cv)
+        }
+    }
+
+    if has_fail_abort {
+        // Abort (fail.raise) handler: inline setjmp like gen_c_try_catch; the
+        // catch path's error value (= the raised value) IS the result.
+        rt_use_catch_fns(ctx)
+        let frame = fresh_tmp(ctx)
+        let buf = fresh_tmp(ctx)
+        let res = fresh_tmp(ctx)
+        let catch_lbl = fresh_label(ctx, "hcatch")
+        let merge_lbl = fresh_label(ctx, "hmerge")
+
+        c_emit(ctx, "${frame} = ring_catch_push();")
+        c_emit(ctx, "${buf} = ring_catch_get_buf(${frame});")
+        c_emit(ctx, "if (setjmp(*(jmp_buf*)${buf}) != 0) goto ${catch_lbl};")
+
+        // --- normal path ---
+        ctx.handle_cleanup_stack.push(CHandleCleanup { needs_catch_pop: true, ev_drop_vars: ev_drop_vars })
+        let body_val = gen_c_expr(ctx, body)
+        let _popped = ctx.handle_cleanup_stack.pop()
+        c_emit(ctx, "${res} = ${body_val};")
+        c_emit(ctx, "ring_catch_pop();")
+        emit_c_evidence_drops(ctx, ev_drop_vars)
+        c_emit(ctx, "goto ${merge_lbl};")
+
+        // --- catch path: error value IS the result ---
+        c_raw(ctx, "${catch_lbl}:;")
+        c_emit(ctx, "${res} = ring_catch_get_error(${frame});")
+        c_emit(ctx, "ring_catch_pop();")
+        emit_c_evidence_drops(ctx, ev_drop_vars)
+
+        c_raw(ctx, "${merge_lbl}:;")
+        // B-100 Fix 7: restore outer evidence bindings.
+        for saved in saved_ev_entries {
+            let (sname, scv) = saved
+            ctx.named_values.insert(sname, scv)
+        }
+        res
+    } else {
+        // Non-abort handlers: execute the body with evidence bound.
+        ctx.handle_cleanup_stack.push(CHandleCleanup { needs_catch_pop: false, ev_drop_vars: ev_drop_vars })
+        let result = gen_c_expr(ctx, body)
+        let _popped = ctx.handle_cleanup_stack.pop()
+        // The result may be a pure-constant expression — materialise it
+        // BEFORE the evidence drops (a slot closure may own the value).
+        let res = fresh_tmp(ctx)
+        c_emit(ctx, "${res} = ${result};")
+        emit_c_evidence_drops(ctx, ev_drop_vars)
+        for saved in saved_ev_entries {
+            let (sname, scv) = saved
+            ctx.named_values.insert(sname, scv)
+        }
+        res
+    }
+}
+
+// B-090 (D1) / B-096 / B-097 / B-161: construct the evidence struct for one
+// handled effect (port of build_handler_evidence).
+// Layout: { int64_t count, void* slot0, ... }, typeid 21 (RING_TYPEID_EVIDENCE)
+// — drop_evidence (runtime) reads the leading count and ring_drop's each
+// non-null closure slot.  Slot k = op k's closure (declaration order).
+fn build_c_handler_evidence(mut ctx: CCtx, effect_name: Str, hs: List<HEffectHandler>) -> Str {
+    // Slot count = #ops declared on the effect; fall back to the handler
+    // count only for unregistered effects (unreachable for checked code).
+    let n_slots = match ctx.effect_ops.get(effect_name) {
+        some(ops) => ops.len(),
+        none => hs.len(),
+    }
+
+    rt_use(ctx, "ring_alloc", 2)
+    let ev = fresh_tmp(ctx)
+    c_emit(ctx, "${ev} = ring_alloc((int64_t)(sizeof(int64_t) + ${n_slots} * sizeof(void*)), 21);")
+    c_emit(ctx, "*(int64_t*)${ev} = ${n_slots};")
+    // Null-init every slot (unhandled ops without defaults stay null).
+    for i in 0..n_slots {
+        c_emit(ctx, "((void**)${ev})[${i + 1}] = 0;")
+    }
+
+    // One closure per handler arm, stored at its declared op slot.  The arm's
+    // return value is the resume value (tail-resumptive), so the closure
+    // simply returns its body.
+    let mut handled_ops: Set<Str> = set_new()
+    for h in hs {
+        handled_ops.insert(h.op_name)
+        let slot_idx = effect_op_slot(ctx.effect_ops, effect_name, h.op_name)
+        let idx = if slot_idx >= 0 { slot_idx } else { 0 }
+        let arm_ret_ty = hexpr_type(h.body)
+        let arm_closure = gen_c_lambda(ctx, h.params, arm_ret_ty, h.body, arm_ret_ty)
+        c_emit(ctx, "((void**)${ev})[${idx + 1}] = ${arm_closure};")
+    }
+
+    // B-097: merge default bodies for unhandled ops.  B-161: bind ev_name to
+    // THIS evidence while generating the default-body closures, so sibling op
+    // calls inside a default body dispatch through the handler's overrides
+    // (not the outer/default evidence).
+    let ev_name = evidence_param_name(effect_name)
+    let saved_ev = ctx.named_values.get(ev_name)
+    ctx.named_values.insert(ev_name, ev)
+
+    match ctx.effect_ops.get(effect_name) {
+        some(all_ops) => {
+            for op in all_ops {
+                if op.has_default && handled_ops.contains(op.name) == false {
+                    match op.default_body {
+                        some(dbody) => {
+                            let didx = effect_op_slot(ctx.effect_ops, effect_name, op.name)
+                            let slot_i = if didx >= 0 { didx } else { 0 }
+                            let dclosure = gen_c_lambda(ctx, op.params, op.return_type, dbody, op.return_type)
+                            c_emit(ctx, "((void**)${ev})[${slot_i + 1}] = ${dclosure};")
+                        },
+                        none => {},
+                    }
+                }
+            }
+        },
+        none => {},
+    }
+
+    // B-161: restore the original evidence binding.
+    match saved_ev {
+        some(old_cv) => ctx.named_values.insert(ev_name, old_cv),
+        none => ctx.named_values.remove(ev_name),
+    }
+
+    ev
+}
+
+// Effect operation — port of gen_effect_op.
+fn gen_c_effect_op(mut ctx: CCtx, effect_name: Str, op_name: Str, args: List<HExpr>) -> Str {
+    if effect_name == "fail" && op_name == "raise" {
+        // Abort: ring_raise longjmps into the innermost catch frame.
+        let mut arg_vals: List<Str> = []
+        for a in args { arg_vals.push(gen_c_expr(ctx, a)) }
+        rt_use(ctx, "ring_raise", 1)
+        let error_val = match arg_vals.get(0) {
+            some(v) => v,
+            none => "RING_UNIT",
+        }
+        c_emit(ctx, "ring_raise(${error_val});")
+        // ring_raise never returns; any following C statements are dead.
+        "RING_UNIT"
+    } else {
+        // B-090 (D1): dispatch through the evidence struct — load the op's
+        // closure from slot effect_op_slot(effect, op) and call it.
+        let ev_name = evidence_param_name(effect_name)
+        let mut arg_vals: List<Str> = []
+        for a in args { arg_vals.push(gen_c_expr(ctx, a)) }
+
+        let ev_val = c_lookup_evidence(ctx, ev_name)
+        let slot_idx = effect_op_slot(ctx.effect_ops, effect_name, op_name)
+        let idx = if slot_idx >= 0 { slot_idx } else { 0 }
+        let cl = fresh_tmp(ctx)
+        c_emit(ctx, "${cl} = ((void**)${ev_val})[${idx + 1}];")
+        gen_c_closure_call(ctx, cl, arg_vals)
+    }
+}
+
+// B-097: build the default evidence structs for every effect whose ops ALL
+// have default bodies (port of build_default_evidence_all).  Emitted as a
+// synthesised init fn called from C main before ring_main — the LLVM backend
+// builds these inline in main's entry block; the semantics are identical
+// (globals are process-lifetime, never dropped).
+pub fn emit_c_default_evidence_init(mut ctx: CCtx) {
+    if ctx.default_evidence.len() == 0 { return }
+    let mut effect_names = ctx.default_evidence.keys()
+    effect_names.sort()
+
+    let init_name = "__ring_default_evidence_init"
+    let saved = c_push_fn(ctx, init_name)
+    rt_use(ctx, "ring_alloc", 2)
+
+    for ename in effect_names {
+        let g = match ctx.default_evidence.get(ename) {
+            some(gn) => gn,
+            none => panic("C codegen: default evidence global missing for '${ename}'"),
+        }
+        match ctx.effect_ops.get(ename) {
+            some(ops) => {
+                let n_slots = ops.len()
+                let ev = fresh_tmp(ctx)
+                c_emit(ctx, "${ev} = ring_alloc((int64_t)(sizeof(int64_t) + ${n_slots} * sizeof(void*)), 21);")
+                c_emit(ctx, "*(int64_t*)${ev} = ${n_slots};")
+                // Store the global BEFORE generating the closures so sibling
+                // op calls inside a default body resolve via the fallback
+                // (LLVM parity: default_evidence is set before gen_lambda).
+                c_emit(ctx, "${g} = ${ev};")
+                // Bind ev_name so collect_c_captures captures the evidence
+                // pointer into default-body closures that call sibling ops.
+                let ev_name = evidence_param_name(ename)
+                ctx.named_values.insert(ev_name, ev)
+
+                for op in ops {
+                    let slot_idx = effect_op_slot(ctx.effect_ops, ename, op.name)
+                    let idx = if slot_idx >= 0 { slot_idx } else { 0 }
+                    match op.default_body {
+                        some(dbody) => {
+                            let dclosure = gen_c_lambda(ctx, op.params, op.return_type, dbody, op.return_type)
+                            c_emit(ctx, "((void**)${ev})[${idx + 1}] = ${dclosure};")
+                        },
+                        none => {
+                            // Unreachable (all_have_defaults) — defensive null.
+                            c_emit(ctx, "((void**)${ev})[${idx + 1}] = 0;")
+                        },
+                    }
+                }
+            },
+            none => {},
+        }
+    }
+
+    c_emit(ctx, "return RING_UNIT;")
+    ctx.fn_protos.push("void* ${init_name}(void);")
+    c_pop_fn(ctx, init_name, "void", saved)
 }
 
 fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, result_ty: Type) -> Str {
@@ -3276,7 +3672,10 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
         },
         HStmt::Return { value, span } => {
             c_line_directive(ctx, span)
-            // handle/try cleanup stack is a step-6 concern (#173).
+            // #173: pop enclosing catch frames + drop handler evidence before
+            // returning (port of emit_return's cleanup walk; cleanup precedes
+            // the value evaluation — LLVM parity).
+            emit_c_cleanup_walk(ctx)
             match value {
                 some(v) => {
                     let val = gen_c_expr(ctx, v)
