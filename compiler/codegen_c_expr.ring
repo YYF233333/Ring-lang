@@ -26,11 +26,14 @@ use types::{Type, EffectRow, type_to_builtin_name, BUILTIN_RANGE}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
     HLetDestructureBinding, HStructFieldInit, DictRef, TraitDispatch, DictDispatchInfo,
-    hexpr_type, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first}
-use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, c_emit, c_raw,
-    fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_mangle_fn,
-    c_mangle_method, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
-    c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid}
+    hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
+    trait_dict_name, trait_bound_param_name, evidence_param_name, is_extern_handle_type}
+use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, c_emit, c_raw,
+    fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_param, c_mangle_fn,
+    c_mangle_method, c_sanitize, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
+    c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid,
+    c_push_fn, c_pop_fn}
+use effect_analysis::{extract_effect_names}
 
 // ============================================================
 // Type predicate helpers (ports of the codegen_llvm_expr private ones)
@@ -126,7 +129,8 @@ pub fn gen_c_expr(mut ctx: CCtx, expr: HExpr) -> Str {
         HExpr::StringInterp { parts, .. } => gen_c_string_interp(ctx, parts),
         HExpr::TryCatch { .. } => c_stub_expr(ctx, "try/catch"),
         HExpr::HandleExpr { .. } => c_stub_expr(ctx, "effect handler"),
-        HExpr::Lambda { .. } => c_stub_expr(ctx, "lambda/closure"),
+        HExpr::Lambda { params, return_type, body, ty, .. } =>
+            gen_c_lambda(ctx, params, return_type, body, ty),
         HExpr::EffectOp { effect_name, op_name, .. } =>
             c_stub_expr(ctx, "effect op (${effect_name}.${op_name})"),
         HExpr::RangeExpr { start, end, inclusive, .. } =>
@@ -134,7 +138,11 @@ pub fn gen_c_expr(mut ctx: CCtx, expr: HExpr) -> Str {
         HExpr::ListLit { elements, .. } => gen_c_list_lit(ctx, elements),
         HExpr::TupleLit { elements, .. } => gen_c_list_lit(ctx, elements),
         HExpr::IndexExpr { receiver, index, .. } => gen_c_index_expr(ctx, receiver, index),
-        HExpr::DictConstruct { .. } => c_stub_expr(ctx, "dynamic trait dict construction"),
+        // B-104 D4: local construction of a DYNAMIC wrapped dict (dict_lower's
+        // `let __ring_dictlocal_N = …` init) — a fresh owned value, reclaimed
+        // by the binding's Perceus scope-end drop.
+        HExpr::DictConstruct { base_dict, trait_name, inner, .. } =>
+            build_c_wrapped_dict(ctx, base_dict, trait_name, inner),
         HExpr::Clone { inner, .. } => {
             // Perceus value-level clone: eval, ring_dup, yield the same ptr.
             let v = gen_c_expr(ctx, inner)
@@ -172,12 +180,14 @@ fn gen_c_str_lit(mut ctx: CCtx, value: Str) -> Str {
 // ============================================================
 
 fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<Str>?, ty: Type) -> Str {
-    // #B-087 gap 1: polymorphic function used as first-class value with dicts
-    // needs a dict-capturing closure wrapper — step 5.
+    // #B-087 gap 1: a polymorphic function used as a first-class value carries
+    // dict_closure_dicts (the resolved trait dicts for its bounds).  Build a
+    // {thunk, env} closure whose env captures the dicts (+ evidence).
     match dict_closure_dicts {
         some(dicts) => {
             if dicts.len() > 0 {
-                return c_stub_expr(ctx, "fn value with trait dicts (${name})")
+                let lk = match resolved_name { some(rn) => rn, none => name }
+                return gen_c_dict_closure_wrapper(ctx, lk, name, dicts, ty)
             }
         },
         none => {},
@@ -203,7 +213,18 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
             t
         },
         none => {
-            // Module-level function / const reference.
+            // A module-level FUNCTION used as a value: wrap it into the
+            // uniform {thunk, env} closure pair (LLVM parity — a bare fn
+            // pointer would be mis-called through the closure ABI).  The
+            // zero-dict wrapper also forwards evidence and computes concrete
+            // dicts from the fn's trait bounds when needed (#214).
+            match ty {
+                Type::FnType { .. } => {
+                    return gen_c_dict_closure_wrapper(ctx, lookup_name, name, [], ty)
+                },
+                _ => {},
+            }
+            // Module-level const / zero-arg ctor reference.
             let mangled = c_mangle_fn(lookup_name)
             let fn_info = match ctx.functions.get(mangled) {
                 some(fi) => some(fi),
@@ -217,9 +238,9 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
                         c_emit(ctx, "${t} = ${fi.c_name}();")
                         t
                     } else {
-                        // Bare function value (dictless).  The uniform closure
-                        // call ABI is step 5; hand out the raw fn pointer so
-                        // the reference itself is representable.
+                        // Non-FnType-annotated fn reference (checker gap) —
+                        // raw pointer, matching call_zero_arg_or_return's
+                        // bare fn_val return on the LLVM side.
                         let t = fresh_tmp(ctx)
                         c_emit(ctx, "${t} = (void*)${fi.c_name};")
                         t
@@ -229,6 +250,144 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
             }
         },
     }
+}
+
+// #B-087 gap 1 port (gen_dict_closure_wrapper): wrap a direct-ABI function
+// fn(args, dict0..dictM, ev0..evK) into a uniform closure {thunk, env}.
+// The thunk loads the captured dicts/evidence from env and forwards.
+// B-104 D4 RC honesty: env count = dict_count — dict slots are OWNED
+// (ring_dup'd; static singletons are never-drop no-ops), evidence slots are
+// stored AFTER the dicts, OUTSIDE the counted window (handler-scoped, B-096).
+fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> Str {
+    // Resolve the real function.
+    let mangled = c_mangle_fn(lookup_name)
+    let fn_key = if ctx.functions.contains_key(mangled) { mangled } else { c_mangle_fn(name) }
+    let fi = match ctx.functions.get(fn_key) {
+        some(f) => f,
+        none => panic("C codegen: dict-closure wrapper: function '${name}' not found"),
+    }
+
+    // Param count of the FUNCTION VALUE (without dicts/evidence).
+    let param_count = match ty {
+        Type::FnType { params, .. } => params.len(),
+        _ => 0,
+    }
+
+    // Resolve the dicts at this site (current scope).
+    let mut dict_vals: List<Str> = []
+    for dn in dict_names {
+        dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(dn)))
+    }
+
+    // #214: no dict names provided (checker does not resolve dicts for
+    // identifiers outside call arguments) — compute concrete dict names from
+    // the fn's trait bounds + the instantiated FnType.
+    if dict_vals.len() == 0 {
+        match ctx.fn_trait_bounds.get(fn_key) {
+            some(bounds) => {
+                if bounds.len() > 0 {
+                    let concrete_params = match ty {
+                        Type::FnType { params: fps, .. } => fps,
+                        _ => [],
+                    }
+                    let orig_types = match ctx.fn_original_param_types.get(fn_key) {
+                        some(t) => t,
+                        none => [],
+                    }
+                    let mut subst: Map<Str, Str> = map_new()
+                    let mut idx = 0
+                    for ot in orig_types {
+                        if idx < concrete_params.len() {
+                            match ot {
+                                Type::TypeVar { name: tv_name, .. } => {
+                                    match tv_name {
+                                        some(n) => {
+                                            match concrete_params.get(idx) {
+                                                some(cp) => {
+                                                    match type_to_builtin_name(cp) {
+                                                        some(cn) => { subst.insert(n, cn) },
+                                                        none => {},
+                                                    }
+                                                },
+                                                none => {},
+                                            }
+                                        },
+                                        none => {},
+                                    }
+                                },
+                                _ => {},
+                            }
+                        }
+                        idx = idx + 1
+                    }
+                    for b in bounds {
+                        match subst.get(b.type_param) {
+                            some(concrete_name) => {
+                                let dn = trait_dict_name(concrete_name, b.trait_name)
+                                dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(dn)))
+                            },
+                            none => {},
+                        }
+                    }
+                }
+            },
+            none => {},
+        }
+    }
+
+    // Evidence values for the function's effects (current scope).
+    let mut ev_vals: List<Str> = []
+    match ctx.fn_evidence_params.get(fn_key) {
+        some(ev_params) => {
+            for ep in ev_params { ev_vals.push(c_lookup_evidence(ctx, ep)) }
+        },
+        none => {},
+    }
+
+    let captured_count = dict_vals.len() + ev_vals.len()
+
+    // Thunk: fn(env, p0..pN-1) -> forwards (p0.., env slots 1..captured).
+    // Pure text (no temps needed) — env slots read inline.
+    let wn = ctx.dictwrap_counter
+    ctx.dictwrap_counter = wn + 1
+    let thunk_name = "ring_dictwrap_${wn}"
+    let mut sig_parts: List<Str> = ["void* env"]
+    let mut fwd_args: List<Str> = []
+    for i in 0..param_count {
+        sig_parts.push("void* p${i}")
+        fwd_args.push("p${i}")
+    }
+    for i in 0..captured_count {
+        fwd_args.push("((void**)env)[${i + 1}]")
+    }
+    ctx.fn_protos.push("void* ${thunk_name}(${sig_parts.join(", ")});")
+    let mut def: List<Str> = []
+    def.push("void* ${thunk_name}(${sig_parts.join(", ")}) {")
+    def.push("    return ${fi.c_name}(${fwd_args.join(", ")});")
+    def.push("}")
+    ctx.fn_defs.push(def.join("\n"))
+
+    // Env { i64 count(=dict_count), dicts..., evs... } + closure pair.
+    rt_use(ctx, "ring_alloc", 2)
+    let env = fresh_tmp(ctx)
+    c_emit(ctx, "${env} = ring_alloc((int64_t)(sizeof(int64_t) + ${captured_count} * sizeof(void*)), 15);")
+    c_emit(ctx, "*(int64_t*)${env} = ${dict_vals.len()};")
+    let mut slot_idx = 0
+    for dv in dict_vals {
+        rt_use(ctx, "ring_dup", 1)
+        c_emit(ctx, "ring_dup(${dv});")
+        c_emit(ctx, "((void**)${env})[${slot_idx + 1}] = ${dv};")
+        slot_idx = slot_idx + 1
+    }
+    for ev in ev_vals {
+        c_emit(ctx, "((void**)${env})[${slot_idx + 1}] = ${ev};")
+        slot_idx = slot_idx + 1
+    }
+    let cls = fresh_tmp(ctx)
+    c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")
+    c_emit(ctx, "((void**)${cls})[0] = (void*)${thunk_name};")
+    c_emit(ctx, "((void**)${cls})[1] = ${env};")
+    cls
 }
 
 // ============================================================
@@ -245,7 +404,9 @@ fn gen_c_binop(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch:
         _ => {},
     }
 
-    // Trait-dispatched Eq/Ord (non-Builtin) — dict dispatch is step 5.
+    // Trait-dispatched comparisons (Eq / Ord) — MUST take precedence over the
+    // primitive fallback (a generic `x == item` miscompiled as integer compare
+    // silently fails for heap Strs / structs, LLVM parity).
     let is_eq_op = match op { BinOp::Eq => true, BinOp::Neq => true, _ => false }
     let is_ord_op = match op {
         BinOp::Lt => true, BinOp::Lte => true, BinOp::Gt => true, BinOp::Gte => true, _ => false,
@@ -254,7 +415,7 @@ fn gen_c_binop(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch:
         match eq_dispatch {
             some(d) => match d {
                 TraitDispatch::Builtin => {},
-                _ => { return c_stub_expr(ctx, "Eq trait dispatch") },
+                _ => { return gen_c_eq_dispatch(ctx, op, left, right, d) },
             },
             none => {},
         }
@@ -263,7 +424,7 @@ fn gen_c_binop(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch:
         match ord_dispatch {
             some(d) => match d {
                 TraitDispatch::Builtin => {},
-                _ => { return c_stub_expr(ctx, "Ord trait dispatch") },
+                _ => { return gen_c_ord_dispatch(ctx, op, left, right, d) },
             },
             none => {},
         }
@@ -512,20 +673,873 @@ pub fn gen_c_cell_alloc(mut ctx: CCtx, init_val: Str) -> Str {
     t
 }
 
-fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
-    // Step-5 placeholder: Simple refs resolve through scope (dict params /
-    // dict locals when present); Static/Wrapped singletons need the memoised
-    // getter machinery — pass NULL until step 5 (dispatch through them is a
-    // stub anyway).
+// ============================================================
+// Trait dict machinery (step 5) — ports of resolve_dict_ref /
+// resolve_static_dict_by_name / get_or_create_static_dict_getter /
+// build_wrapped_dict / emit_wrapped_method_thunk.
+//
+// Value layouts (shared with the LLVM backend + ring_runtime.cpp):
+//   dict    { int64_t method_count, void* m0, ... }   typeid 16/17
+//   closure { void* fn_ptr, void* env_ptr }           typeid 7
+//   env     { int64_t count, void* slot0, ... }       typeid 15
+// ============================================================
+
+pub fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
     match dr {
         DictRef::Simple(n) => {
+            // Scope reference: dict param / dict_lower local.  Unknown names
+            // (dict_closure_dicts / derive extra_dicts strings) fall through
+            // to the static singleton chain (LLVM parity).
             match ctx.named_values.get(n) {
+                some(cv) => cv,
+                none => resolve_c_static_dict(ctx, n),
+            }
+        },
+        DictRef::Static(n) => resolve_c_static_dict(ctx, n),
+        DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+            // Post-dict_lower this survives only in BinOp dispatch
+            // extra_dicts resolution (B-121 gap 1 path).
+            build_c_wrapped_dict(ctx, dict, trait_name, inner_dicts)
+        },
+    }
+}
+
+// Borrow the memoised module singleton for a static dict: emit (once) the
+// lazy getter ring_dict_init_<name> and call it.
+pub fn resolve_c_static_dict(mut ctx: CCtx, name: Str) -> Str {
+    let getter = ensure_c_dict_getter(ctx, name)
+    let t = fresh_tmp(ctx)
+    c_emit(ctx, "${t} = ${getter}();")
+    t
+}
+
+// Emit (once) the memoised singleton getter for a static dict.  Getter body
+// decides by REGISTRY, not decl order (dict_build_fns is fully populated in
+// the forward pass — impl dicts + derived dicts — so a use site earlier in
+// decl order than its impl still binds the real dict; the LLVM backend's
+// lazy fallback is decl-order-sensitive there):
+//   * a registered build fn (impl / derived trait dict) → call it;
+//   * a dict_lower wrapped INSTANCE (static_dict_defs, inner != []) →
+//     build_wrapped_dict with the DICT_STATIC typeid;
+//   * otherwise → runtime builtin dict (ring_get_builtin_dict).
+pub fn ensure_c_dict_getter(mut ctx: CCtx, name: Str) -> Str {
+    let getter_name = "ring_dict_init_${c_sanitize(name)}"
+    if ctx.dict_getters.contains(name) {
+        return getter_name
+    }
+    ctx.dict_getters.insert(name)
+    let gvar = "__ring_dictg_${c_sanitize(name)}"
+    ctx.globals.push("static void* ${gvar} = 0;")
+    ctx.fn_protos.push("void* ${getter_name}(void);")
+
+    let saved = c_push_fn(ctx, getter_name)
+    c_emit(ctx, "if (${gvar} == 0) {")
+    ctx.indent = ctx.indent + 1
+    if ctx.dict_build_fns.contains(name) {
+        c_emit(ctx, "${gvar} = ring_dict_build_${c_sanitize(name)}();")
+    } else {
+        let inst_def = match ctx.static_dict_defs.get(name) {
+            some(def) => if def.inner.len() > 0 { some(def) } else { none },
+            none => none,
+        }
+        match inst_def {
+            some(def) => {
+                let mut inner_refs: List<DictRef> = []
+                for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
+                let v = build_c_wrapped_dict_typed(ctx, def.base_dict, def.trait_name, inner_refs, 16)
+                c_emit(ctx, "${gvar} = ${v};")
+            },
+            none => {
+                // Builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq
+                // fallback) — the name STR is allocated once, in the getter.
+                rt_use(ctx, "ring_str_from_cstr", 1)
+                rt_use(ctx, "ring_get_builtin_dict", 1)
+                let g = c_global_cstr(ctx, name)
+                let s = fresh_tmp(ctx)
+                c_emit(ctx, "${s} = ring_str_from_cstr(${g});")
+                c_emit(ctx, "${gvar} = ring_get_builtin_dict(${s});")
+            },
+        }
+    }
+    ctx.indent = ctx.indent - 1
+    c_emit(ctx, "}")
+    c_emit(ctx, "return ${gvar};")
+    c_pop_fn(ctx, getter_name, "void", saved)
+    getter_name
+}
+
+// Recover "<Type>" from a dict name "__<Type>_<Trait>" (port of
+// wrapped_dict_target_type).
+fn c_wrapped_dict_target_type(dict_name: Str, trait_name: Str) -> Str {
+    let mut s = dict_name
+    if s.starts_with("__") { s = s.slice(2, s.len()) }
+    let suffix = "_${trait_name}"
+    if s.ends_with(suffix) {
+        s.slice(0, s.len() - suffix.len())
+    } else {
+        s
+    }
+}
+
+// #B-087 gap 2 port (build_wrapped_dict): a wrapper trait dict for a
+// parameterized type whose impl methods take the inner type-param dicts as
+// trailing params.  Each method slot is a {thunk, env} closure whose env
+// captures the inner dicts (+ evidence).  B-104 D4 RC honesty: env count =
+// inner_count, inners ring_dup'd (static singletons no-op), evidence outside
+// the counted window.
+pub fn build_c_wrapped_dict(mut ctx: CCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>) -> Str {
+    build_c_wrapped_dict_typed(ctx, dict_name, trait_name, inner_dicts, 17)
+}
+
+pub fn build_c_wrapped_dict_typed(mut ctx: CCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>, dict_tid: Int) -> Str {
+    // Resolve the inner dicts at this site.
+    let mut inner_vals: List<Str> = []
+    for d in inner_dicts {
+        inner_vals.push(c_resolve_dict_ref(ctx, d))
+    }
+
+    let target_type = c_wrapped_dict_target_type(dict_name, trait_name)
+    let method_order = match ctx.trait_method_order.get(trait_name) {
+        some(order) => order,
+        none => [],
+    }
+    let method_count = method_order.len()
+    let inner_count = inner_vals.len()
+
+    rt_use(ctx, "ring_alloc", 2)
+    let dict = fresh_tmp(ctx)
+    c_emit(ctx, "${dict} = ring_alloc((int64_t)(sizeof(int64_t) + ${method_count} * sizeof(void*)), ${dict_tid});")
+    c_emit(ctx, "*(int64_t*)${dict} = ${method_count};")
+
+    for i in 0..method_count {
+        match method_order.get(i) {
+            some(method_name) => {
+                let mangled = c_mangle_method(target_type, method_name)
+                match ctx.functions.get(mangled) {
+                    some(fi) => {
+                        let ev_params = match ctx.fn_evidence_params.get(mangled) {
+                            some(ev) => ev,
+                            none => [],
+                        }
+                        let evidence_count = ev_params.len()
+                        // Base arity includes trailing evidence + inner dicts;
+                        // dispatch passes only the user-visible leading args (#174).
+                        let dispatch_arity = fi.total_params - inner_count - evidence_count
+                        let thunk = ensure_c_wrapped_method_thunk(ctx, fi.c_name, dispatch_arity, inner_count, evidence_count)
+
+                        let env_total = inner_count + evidence_count
+                        let env = fresh_tmp(ctx)
+                        c_emit(ctx, "${env} = ring_alloc((int64_t)(sizeof(int64_t) + ${env_total} * sizeof(void*)), 15);")
+                        c_emit(ctx, "*(int64_t*)${env} = ${inner_count};")
+                        let mut sj = 0
+                        for iv in inner_vals {
+                            rt_use(ctx, "ring_dup", 1)
+                            c_emit(ctx, "ring_dup(${iv});")
+                            c_emit(ctx, "((void**)${env})[${sj + 1}] = ${iv};")
+                            sj = sj + 1
+                        }
+                        for ep in ev_params {
+                            let ev = c_lookup_evidence(ctx, ep)
+                            c_emit(ctx, "((void**)${env})[${sj + 1}] = ${ev};")
+                            sj = sj + 1
+                        }
+
+                        let cls = fresh_tmp(ctx)
+                        c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")
+                        c_emit(ctx, "((void**)${cls})[0] = (void*)${thunk};")
+                        c_emit(ctx, "((void**)${cls})[1] = ${env};")
+                        c_emit(ctx, "((void**)${dict})[${i + 1}] = ${cls};")
+                    },
+                    none => {
+                        c_emit(ctx, "((void**)${dict})[${i + 1}] = RING_UNIT;")
+                    },
+                }
+            },
+            none => {},
+        }
+    }
+
+    dict
+}
+
+// Per-method wrapper thunk: fn(env, a0..a_{K-1}) that loads evidence (env
+// slots inner_count+1..) then inner dicts (env slots 1..inner_count) and
+// calls the real method (a0.., ev0.., inner0..) — #174 forwarding order.
+// Memoised by name (same method → same inner/ev counts).
+fn ensure_c_wrapped_method_thunk(mut ctx: CCtx, method_c_name: Str, dispatch_arity: Int, inner_count: Int, evidence_count: Int) -> Str {
+    let thunk_name = "${method_c_name}__wrapthunk"
+    if ctx.emitted_fns.contains(thunk_name) {
+        return thunk_name
+    }
+    ctx.emitted_fns.insert(thunk_name)
+
+    let mut sig_parts: List<Str> = ["void* env"]
+    let mut fwd_args: List<Str> = []
+    for i in 0..dispatch_arity {
+        sig_parts.push("void* p${i}")
+        fwd_args.push("p${i}")
+    }
+    for j in 0..evidence_count {
+        fwd_args.push("((void**)env)[${inner_count + j + 1}]")
+    }
+    for j in 0..inner_count {
+        fwd_args.push("((void**)env)[${j + 1}]")
+    }
+    ctx.fn_protos.push("void* ${thunk_name}(${sig_parts.join(", ")});")
+    let mut def: List<Str> = []
+    def.push("void* ${thunk_name}(${sig_parts.join(", ")}) {")
+    def.push("    return ${method_c_name}(${fwd_args.join(", ")});")
+    def.push("}")
+    ctx.fn_defs.push(def.join("\n"))
+    thunk_name
+}
+
+// ============================================================
+// Lambda (closure) — port of gen_lambda + collect_captures family.
+// Env layout { i64 count, ptr cap0, ... } (typeid 15, B-084); the closure
+// pair {fn_ptr, env_ptr} is typeid 7.  B-098: every capture is OWNED — the
+// env takes its own reference (ring_dup at construction), released by
+// drop_closure_env.  B-144: extern-handle captures skip the dup (raw foreign
+// pointers outside Ring RC; ring_drop on them is a no-op).
+// ============================================================
+
+fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HExpr, ty: Type) -> Str {
+    // Capture collection runs against the ENCLOSING scope (named_values of
+    // the function being emitted) — before the nested push.
+    let mut captures: List<Str> = []
+    collect_c_captures(ctx, body, params, captures)
+    let mut extern_typed: Set<Str> = set_new()
+    collect_c_extern_typed_names(body, ctx.extern_types, extern_typed)
+
+    let ln = ctx.lambda_counter
+    ctx.lambda_counter = ln + 1
+    let lambda_name = "ring_c_lambda_${ln}"
+
+    // ---- nested emission: the lambda function itself ----
+    let saved = c_push_fn(ctx, lambda_name)
+    let mut sig_parts: List<Str> = ["void* env"]
+    // Extract captures from env (slot i+1; slot 0 is the count).
+    for i in 0..captures.len() {
+        match captures.get(i) {
+            some(cap_name) => {
+                let cv = c_local(ctx, cap_name)
+                c_emit(ctx, "${cv} = ((void**)env)[${i + 1}];")
+            },
+            none => {},
+        }
+    }
+    // Bind regular params.
+    for p in params {
+        let pv = c_param(ctx, p.name)
+        sig_parts.push("void* ${pv}")
+    }
+    let val = gen_c_expr(ctx, body)
+    c_emit(ctx, "return ${val};")
+    let params_str = sig_parts.join(", ")
+    ctx.fn_protos.push("void* ${lambda_name}(${params_str});")
+    c_pop_fn(ctx, lambda_name, params_str, saved)
+
+    // ---- construction site: env alloc + capture stores + closure pair ----
+    rt_use(ctx, "ring_alloc", 2)
+    let env = fresh_tmp(ctx)
+    c_emit(ctx, "${env} = ring_alloc((int64_t)(sizeof(int64_t) + ${captures.len()} * sizeof(void*)), 15);")
+    c_emit(ctx, "*(int64_t*)${env} = ${captures.len()};")
+    for i in 0..captures.len() {
+        match captures.get(i) {
+            some(cap_name) => {
+                let cv = match ctx.named_values.get(cap_name) {
+                    some(v) => v,
+                    none => panic("C codegen: captured variable not found: ${cap_name}"),
+                }
+                if extern_typed.contains(cap_name) == false {
+                    rt_use(ctx, "ring_dup", 1)
+                    c_emit(ctx, "ring_dup(${cv});")
+                }
+                c_emit(ctx, "((void**)${env})[${i + 1}] = ${cv};")
+            },
+            none => {},
+        }
+    }
+    let cls = fresh_tmp(ctx)
+    c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")
+    c_emit(ctx, "((void**)${cls})[0] = (void*)${lambda_name};")
+    c_emit(ctx, "((void**)${cls})[1] = ${env};")
+    cls
+}
+
+// Decide whether a bare variable name should be captured (port of
+// consider_capture_name): not a lambda param, not a known module fn, and
+// present in the enclosing scope's named_values.
+fn consider_c_capture_name(ctx: CCtx, name: Str, resolved_name: Str?, params: List<HParam>, mut captures: List<Str>) {
+    let lookup_name = match resolved_name {
+        some(rn) => rn,
+        none => name,
+    }
+    let mut is_param = false
+    for p in params {
+        if p.name == lookup_name || p.name == name { is_param = true }
+    }
+    if is_param { return }
+    let is_fn = if ctx.functions.contains_key(c_mangle_fn(lookup_name)) {
+        true
+    } else {
+        ctx.functions.contains_key(c_mangle_fn(name))
+    }
+    if is_fn { return }
+    let is_local = match ctx.named_values.get(lookup_name) {
+        some(_) => true,
+        none => ctx.named_values.get(name).is_some(),
+    }
+    if is_local {
+        let mut already = false
+        for c in captures {
+            if c == lookup_name || c == name { already = true }
+        }
+        if already == false {
+            captures.push(lookup_name)
+        }
+    }
+}
+
+// #B-087 gap 3: capture the dict param a trait dispatch routes through.
+fn collect_c_dispatch_dict(ctx: CCtx, dispatch: TraitDispatch?, params: List<HParam>, mut captures: List<Str>) {
+    match dispatch {
+        some(d) => match d {
+            TraitDispatch::Dict { param } => consider_c_capture_name(ctx, param, none, params, captures),
+            TraitDispatch::Direct { dict, extra_dicts } => {
+                consider_c_capture_name(ctx, dict, none, params, captures)
+                for ed in extra_dicts { collect_c_dictref_names(ctx, ed, params, captures) }
+            },
+            TraitDispatch::Builtin => {},
+        },
+        none => {},
+    }
+}
+
+fn collect_c_dictref_names(ctx: CCtx, dr: DictRef, params: List<HParam>, mut captures: List<Str>) {
+    match dr {
+        DictRef::Simple(name) => consider_c_capture_name(ctx, name, none, params, captures),
+        // B-104 D4: module-level singleton — resolved globally, never captured.
+        DictRef::Static(_) => {},
+        DictRef::Wrapped { dict, inner_dicts, .. } => {
+            consider_c_capture_name(ctx, dict, none, params, captures)
+            for inner in inner_dicts { collect_c_dictref_names(ctx, inner, params, captures) }
+        },
+    }
+}
+
+// Collect free variable names referenced in a lambda body (port of
+// collect_captures).
+fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures: List<Str>) {
+    match expr {
+        HExpr::Ident { name, resolved_name, .. } => {
+            consider_c_capture_name(ctx, name, resolved_name, params, captures)
+        },
+        HExpr::BinOp { left, right, eq_dispatch, ord_dispatch, .. } => {
+            collect_c_captures(ctx, left, params, captures)
+            collect_c_captures(ctx, right, params, captures)
+            collect_c_dispatch_dict(ctx, eq_dispatch, params, captures)
+            collect_c_dispatch_dict(ctx, ord_dispatch, params, captures)
+        },
+        HExpr::UnaryOp { operand, .. } => {
+            collect_c_captures(ctx, operand, params, captures)
+        },
+        HExpr::Call { callee, args, resolved_dicts, dict_dispatch, effects, .. } => {
+            collect_c_captures(ctx, callee, params, captures)
+            for a in args { collect_c_captures(ctx, a, params, captures) }
+            for d in resolved_dicts { collect_c_dictref_names(ctx, d, params, captures) }
+            match dict_dispatch {
+                some(dd) => consider_c_capture_name(ctx, dd.dict_param, none, params, captures),
+                none => {},
+            }
+            // B-145: evidence params forwarded by calls inside the body must
+            // be captured (only ones actually in named_values are).
+            let call_ev_names = extract_effect_names(effects)
+            for en in call_ev_names {
+                consider_c_capture_name(ctx, evidence_param_name(en), none, params, captures)
+            }
+        },
+        HExpr::DictConstruct { inner, .. } => {
+            for d in inner { collect_c_dictref_names(ctx, d, params, captures) }
+        },
+        HExpr::FieldAccess { receiver, .. } => {
+            collect_c_captures(ctx, receiver, params, captures)
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for s in stmts { collect_c_captures_stmt(ctx, s, params, captures) }
+            match tail {
+                some(t) => collect_c_captures(ctx, t, params, captures),
+                none => {},
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            collect_c_captures(ctx, condition, params, captures)
+            collect_c_captures(ctx, then_branch, params, captures)
+            match else_branch {
+                some(eb) => collect_c_captures(ctx, eb, params, captures),
+                none => {},
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_c_captures(ctx, scrutinee, params, captures)
+            for arm in arms {
+                match arm.guard {
+                    some(g) => collect_c_captures(ctx, g, params, captures),
+                    none => {},
+                }
+                collect_c_captures(ctx, arm.body, params, captures)
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(e) => collect_c_captures(ctx, e, params, captures),
+                    _ => {},
+                }
+            }
+        },
+        HExpr::StructLit { fields, spread, .. } => {
+            for f in fields { collect_c_captures(ctx, f.value, params, captures) }
+            match spread {
+                some(sp) => collect_c_captures(ctx, sp, params, captures),
+                none => {},
+            }
+        },
+        HExpr::ListLit { elements, .. } => {
+            for e in elements { collect_c_captures(ctx, e, params, captures) }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for e in elements { collect_c_captures(ctx, e, params, captures) }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_c_captures(ctx, receiver, params, captures)
+            collect_c_captures(ctx, index, params, captures)
+        },
+        HExpr::Lambda { body: lb, .. } => {
+            collect_c_captures(ctx, lb, params, captures)
+        },
+        HExpr::NamedVariantConstruct { fields: nvc_fields, spread: nvc_spread, .. } => {
+            for f in nvc_fields { collect_c_captures(ctx, f.value, params, captures) }
+            match nvc_spread {
+                some(sp) => collect_c_captures(ctx, sp, params, captures),
+                none => {},
+            }
+        },
+        HExpr::TryCatch { body: tc_body, arms: tc_arms, .. } => {
+            collect_c_captures(ctx, tc_body, params, captures)
+            for arm in tc_arms {
+                match arm.guard {
+                    some(g) => collect_c_captures(ctx, g, params, captures),
+                    none => {},
+                }
+                collect_c_captures(ctx, arm.body, params, captures)
+            }
+        },
+        HExpr::HandleExpr { body: he_body, .. } => {
+            collect_c_captures(ctx, he_body, params, captures)
+        },
+        HExpr::EffectOp { effect_name: eo_eff, args: eo_args, .. } => {
+            for a in eo_args { collect_c_captures(ctx, a, params, captures) }
+            // B-090: a non-fail effect op dispatches through its evidence —
+            // capture the evidence param.  fail routes through ring_raise.
+            if eo_eff != "fail" {
+                consider_c_capture_name(ctx, evidence_param_name(eo_eff), none, params, captures)
+            }
+        },
+        HExpr::RangeExpr { start: rs, end: re, .. } => {
+            collect_c_captures(ctx, rs, params, captures)
+            collect_c_captures(ctx, re, params, captures)
+        },
+        HExpr::Clone { inner, .. } => collect_c_captures(ctx, inner, params, captures),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => collect_c_captures(ctx, v, params, captures),
+            none => {},
+        },
+        HExpr::UnsafeBlock { body, .. } => collect_c_captures(ctx, body, params, captures),
+        _ => {},
+    }
+}
+
+fn collect_c_captures_stmt(ctx: CCtx, stmt: HStmt, params: List<HParam>, mut captures: List<Str>) {
+    match stmt {
+        HStmt::Let { init, .. } => collect_c_captures(ctx, init, params, captures),
+        HStmt::Var { init, .. } => collect_c_captures(ctx, init, params, captures),
+        HStmt::Assign { target, value, .. } => {
+            collect_c_captures(ctx, target, params, captures)
+            collect_c_captures(ctx, value, params, captures)
+        },
+        HStmt::ExprStmt { expr, .. } => collect_c_captures(ctx, expr, params, captures),
+        HStmt::Return { value, .. } => match value {
+            some(v) => collect_c_captures(ctx, v, params, captures),
+            none => {},
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_c_captures(ctx, condition, params, captures)
+            collect_c_captures(ctx, body, params, captures)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_c_captures(ctx, iterable, params, captures)
+            collect_c_captures(ctx, body, params, captures)
+        },
+        HStmt::LetDestructure { init, .. } => {
+            collect_c_captures(ctx, init, params, captures)
+        },
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            collect_c_captures(ctx, expr, params, captures)
+            collect_c_captures(ctx, then_block, params, captures)
+            match else_block {
+                some(eb) => collect_c_captures(ctx, eb, params, captures),
+                none => {},
+            }
+        },
+        // B-084 #131: Perceus branch-balancing may place a Drop/Dup for an
+        // outer-scope variable inside the lambda body — treat as a use.
+        HStmt::Drop { name, .. } => {
+            consider_c_capture_name(ctx, name, none, params, captures)
+        },
+        HStmt::Dup { name, .. } => {
+            consider_c_capture_name(ctx, name, none, params, captures)
+        },
+        _ => {},
+    }
+}
+
+// B-144: names whose Ident use in the body has an extern-handle type — the
+// lambda construction skips ring_dup for these captures.  (Set intersection
+// with the capture list happens at the use site: extern_typed ∩ captures.)
+fn collect_c_extern_typed_names(expr: HExpr, externs: Set<Str>, mut out: Set<Str>) {
+    match expr {
+        HExpr::Ident { name, resolved_name, ty, .. } => {
+            if is_extern_handle_type(ty, externs) {
+                let lookup = match resolved_name { some(rn) => rn, none => name }
+                out.insert(lookup)
+            }
+        },
+        HExpr::BinOp { left, right, .. } => {
+            collect_c_extern_typed_names(left, externs, out)
+            collect_c_extern_typed_names(right, externs, out)
+        },
+        HExpr::UnaryOp { operand, .. } => collect_c_extern_typed_names(operand, externs, out),
+        HExpr::Call { callee, args, .. } => {
+            collect_c_extern_typed_names(callee, externs, out)
+            for a in args { collect_c_extern_typed_names(a, externs, out) }
+        },
+        HExpr::FieldAccess { receiver, .. } => collect_c_extern_typed_names(receiver, externs, out),
+        HExpr::Block { stmts, tail, .. } => {
+            for s in stmts { collect_c_extern_typed_names_stmt(s, externs, out) }
+            match tail {
+                some(t) => collect_c_extern_typed_names(t, externs, out),
+                none => {},
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            collect_c_extern_typed_names(condition, externs, out)
+            collect_c_extern_typed_names(then_branch, externs, out)
+            match else_branch {
+                some(eb) => collect_c_extern_typed_names(eb, externs, out),
+                none => {},
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_c_extern_typed_names(scrutinee, externs, out)
+            for arm in arms {
+                match arm.guard {
+                    some(g) => collect_c_extern_typed_names(g, externs, out),
+                    none => {},
+                }
+                collect_c_extern_typed_names(arm.body, externs, out)
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(e) => collect_c_extern_typed_names(e, externs, out),
+                    _ => {},
+                }
+            }
+        },
+        HExpr::StructLit { fields, spread, .. } => {
+            for f in fields { collect_c_extern_typed_names(f.value, externs, out) }
+            match spread {
+                some(sp) => collect_c_extern_typed_names(sp, externs, out),
+                none => {},
+            }
+        },
+        HExpr::ListLit { elements, .. } => {
+            for e in elements { collect_c_extern_typed_names(e, externs, out) }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for e in elements { collect_c_extern_typed_names(e, externs, out) }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_c_extern_typed_names(receiver, externs, out)
+            collect_c_extern_typed_names(index, externs, out)
+        },
+        HExpr::Lambda { body: lb, .. } => collect_c_extern_typed_names(lb, externs, out),
+        HExpr::NamedVariantConstruct { fields: nvc_fields, spread: nvc_spread, .. } => {
+            for f in nvc_fields { collect_c_extern_typed_names(f.value, externs, out) }
+            match nvc_spread {
+                some(sp) => collect_c_extern_typed_names(sp, externs, out),
+                none => {},
+            }
+        },
+        HExpr::TryCatch { body: tc_body, arms: tc_arms, .. } => {
+            collect_c_extern_typed_names(tc_body, externs, out)
+            for arm in tc_arms {
+                match arm.guard {
+                    some(g) => collect_c_extern_typed_names(g, externs, out),
+                    none => {},
+                }
+                collect_c_extern_typed_names(arm.body, externs, out)
+            }
+        },
+        HExpr::HandleExpr { body: he_body, .. } => collect_c_extern_typed_names(he_body, externs, out),
+        HExpr::EffectOp { args: eo_args, .. } => {
+            for a in eo_args { collect_c_extern_typed_names(a, externs, out) }
+        },
+        HExpr::RangeExpr { start: rs, end: re, .. } => {
+            collect_c_extern_typed_names(rs, externs, out)
+            collect_c_extern_typed_names(re, externs, out)
+        },
+        HExpr::Clone { inner, .. } => collect_c_extern_typed_names(inner, externs, out),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => collect_c_extern_typed_names(v, externs, out),
+            none => {},
+        },
+        HExpr::UnsafeBlock { body, .. } => collect_c_extern_typed_names(body, externs, out),
+        _ => {},
+    }
+}
+
+fn collect_c_extern_typed_names_stmt(stmt: HStmt, externs: Set<Str>, mut out: Set<Str>) {
+    match stmt {
+        HStmt::Let { init, .. } => collect_c_extern_typed_names(init, externs, out),
+        HStmt::Var { init, .. } => collect_c_extern_typed_names(init, externs, out),
+        HStmt::Assign { target, value, .. } => {
+            collect_c_extern_typed_names(target, externs, out)
+            collect_c_extern_typed_names(value, externs, out)
+        },
+        HStmt::ExprStmt { expr, .. } => collect_c_extern_typed_names(expr, externs, out),
+        HStmt::Return { value, .. } => match value {
+            some(v) => collect_c_extern_typed_names(v, externs, out),
+            none => {},
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_c_extern_typed_names(condition, externs, out)
+            collect_c_extern_typed_names(body, externs, out)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_c_extern_typed_names(iterable, externs, out)
+            collect_c_extern_typed_names(body, externs, out)
+        },
+        HStmt::LetDestructure { init, .. } => collect_c_extern_typed_names(init, externs, out),
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            collect_c_extern_typed_names(expr, externs, out)
+            collect_c_extern_typed_names(then_block, externs, out)
+            match else_block {
+                some(eb) => collect_c_extern_typed_names(eb, externs, out),
+                none => {},
+            }
+        },
+        _ => {},
+    }
+}
+
+// ============================================================
+// Closure calls + dict dispatch (step 5)
+// ============================================================
+
+// Uniform closure ABI: closure = {fn_ptr, env_ptr}; call fn(env, args...).
+pub fn gen_c_closure_call(mut ctx: CCtx, closure_val: Str, arg_vals: List<Str>) -> Str {
+    let mut cast_tys: List<Str> = ["void*"]
+    let mut call_args: List<Str> = ["((void**)${closure_val})[1]"]
+    for a in arg_vals {
+        cast_tys.push("void*")
+        call_args.push(a)
+    }
+    let t = fresh_tmp(ctx)
+    c_emit(ctx, "${t} = ((void* (*)(${cast_tys.join(", ")}))(((void**)${closure_val})[0]))(${call_args.join(", ")});")
+    t
+}
+
+// Extract the trait name from a dict param name __ring_<typeparam>_<Trait>.
+fn c_trait_name_from_dict_param(dict_param: Str) -> Str? {
+    let prefix = "__ring_"
+    if !dict_param.starts_with(prefix) { return none }
+    let rest = dict_param.slice(prefix.len(), dict_param.len())
+    match rest.index_of("_") {
+        some(us) => some(rest.slice(us + 1, rest.len())),
+        none => none,
+    }
+}
+
+// Extract the trait name from a static dict name __<TypeName>_<TraitName>
+// by longest-suffix match against known trait names (sorted scan — audit
+// #237 determinism discipline).
+fn c_trait_name_from_static_dict(ctx: CCtx, dict_param: Str) -> Str? {
+    if !dict_param.starts_with("__") { return none }
+    let body = dict_param.slice(2, dict_param.len())
+    let mut best_match: Str? = none
+    let mut best_len = 0
+    let mut sorted = ctx.trait_method_order.entries()
+    sorted.sort_by(compare_by_first)
+    for entry in sorted {
+        let (tn, _methods) = entry
+        let suffix = "_${tn}"
+        if body.ends_with(suffix) && tn.len() > best_len {
+            best_match = some(tn)
+            best_len = tn.len()
+        }
+    }
+    best_match
+}
+
+// Fallback ordering for built-in traits.
+fn c_builtin_method_index(method: Str) -> Int {
+    if method == "eq" { 0 }
+    else if method == "ne" { 1 }
+    else if method == "clone" { 0 }
+    else if method == "cmp" { 0 }
+    else if method == "debug" { 0 }
+    else { 0 }
+}
+
+// Slot index of a method within a trait's dict — authoritative order =
+// ctx.trait_method_order (hir.ring scan_trait_method_order, single source).
+fn get_c_trait_method_index(ctx: CCtx, dict_param: Str, method: Str) -> Int {
+    let trait_name_opt = match c_trait_name_from_dict_param(dict_param) {
+        some(tn) => some(tn),
+        none => c_trait_name_from_static_dict(ctx, dict_param),
+    }
+    match trait_name_opt {
+        some(trait_name) => {
+            match ctx.trait_method_order.get(trait_name) {
+                some(order) => {
+                    let mut idx = 0
+                    for m in order {
+                        if m == method { return idx }
+                        idx = idx + 1
+                    }
+                    c_builtin_method_index(method)
+                },
+                none => c_builtin_method_index(method),
+            }
+        },
+        none => c_builtin_method_index(method),
+    }
+}
+
+// Trait method call through a dict param (port of gen_dict_dispatch_call):
+// load the dict, read the method's closure slot, call through it.
+fn gen_c_dict_dispatch_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, dd: DictDispatchInfo) -> Str {
+    // Receiver from callee (FieldAccess) or first arg.
+    let mut call_args: List<Str> = []
+    let mut other_arg_start = 0
+    match callee {
+        HExpr::FieldAccess { receiver, .. } => {
+            call_args.push(gen_c_expr(ctx, receiver))
+        },
+        _ => {
+            match args.get(0) {
+                some(a) => {
+                    call_args.push(gen_c_expr(ctx, a))
+                    other_arg_start = 1
+                },
+                none => {},
+            }
+        },
+    }
+    for i in other_arg_start..args.len() {
+        match args.get(i) {
+            some(a) => call_args.push(gen_c_expr(ctx, a)),
+            none => {},
+        }
+    }
+
+    // Dict param in scope; missing (delegate-expanded static dict name, B-121
+    // gap 2) → static singleton chain.
+    let dict_ptr = match ctx.named_values.get(dd.dict_param) {
+        some(cv) => cv,
+        none => resolve_c_static_dict(ctx, dd.dict_param),
+    }
+    let method_idx = get_c_trait_method_index(ctx, dd.dict_param, dd.method)
+    let cls = fresh_tmp(ctx)
+    c_emit(ctx, "${cls} = ((void**)${dict_ptr})[${method_idx + 1}];")
+    gen_c_closure_call(ctx, cls, call_args)
+}
+
+// ============================================================
+// Eq / Ord trait dispatch (ports of gen_eq_dispatch_llvm / gen_ord_dispatch_llvm)
+// ============================================================
+
+fn resolve_c_dispatch_dict(mut ctx: CCtx, dispatch: TraitDispatch, trait_name_hint: Str?) -> Str {
+    match dispatch {
+        TraitDispatch::Dict { param } => {
+            match ctx.named_values.get(param) {
                 some(cv) => cv,
                 none => "RING_UNIT",
             }
         },
-        _ => "RING_UNIT",
+        TraitDispatch::Direct { dict, extra_dicts } => {
+            if extra_dicts.len() == 0 {
+                c_resolve_dict_ref(ctx, DictRef::Simple(dict))
+            } else {
+                // B-121 gap 1: bind inner type-param dicts via a wrapped dict.
+                match trait_name_hint {
+                    some(tn) => build_c_wrapped_dict(ctx, dict, tn, extra_dicts),
+                    none => c_resolve_dict_ref(ctx, DictRef::Simple(dict)),
+                }
+            }
+        },
+        TraitDispatch::Builtin => "RING_UNIT",
     }
+}
+
+fn gen_c_eq_dispatch(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
+    let lhs = gen_c_expr(ctx, left)
+    let rhs = gen_c_expr(ctx, right)
+    let dict_ptr = resolve_c_dispatch_dict(ctx, dispatch, some("Eq"))
+    let cls = fresh_tmp(ctx)
+    c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")  // eq = slot 0
+    let result = gen_c_closure_call(ctx, cls, [lhs, rhs])
+    match op {
+        BinOp::Neq => {
+            // The eq closure's Bool box is INTERNAL on the Neq path: unbox,
+            // drop (no-op for tagged scalars — kept for correctness), negate.
+            let raw = fresh_i64(ctx)
+            c_emit(ctx, "${raw} = RING_UNTAG(${result});")
+            rt_use(ctx, "ring_drop", 1)
+            c_emit(ctx, "ring_drop(${result});")
+            let t = fresh_tmp(ctx)
+            c_emit(ctx, "${t} = RING_BOOL(1 - ${raw});")
+            t
+        },
+        _ => result,
+    }
+}
+
+fn gen_c_ord_dispatch(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
+    let lhs = gen_c_expr(ctx, left)
+    let rhs = gen_c_expr(ctx, right)
+    let dict_ptr = resolve_c_dispatch_dict(ctx, dispatch, some("Ord"))
+    let cls = fresh_tmp(ctx)
+    c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")  // cmp = slot 0
+    let result = gen_c_closure_call(ctx, cls, [lhs, rhs])
+    // The cmp INT box is INTERNAL — unbox, drop, compare against 0.
+    let raw = fresh_i64(ctx)
+    c_emit(ctx, "${raw} = RING_UNTAG(${result});")
+    rt_use(ctx, "ring_drop", 1)
+    c_emit(ctx, "ring_drop(${result});")
+    let cmp = match op {
+        BinOp::Lt => "<",
+        BinOp::Lte => "<=",
+        BinOp::Gt => ">",
+        BinOp::Gte => ">=",
+        _ => "==",
+    }
+    let t = fresh_tmp(ctx)
+    c_emit(ctx, "${t} = RING_BOOL(${raw} ${cmp} 0);")
+    t
 }
 
 fn c_lookup_evidence(mut ctx: CCtx, ep_name: Str) -> Str {
@@ -538,9 +1552,16 @@ fn c_lookup_evidence(mut ctx: CCtx, ep_name: Str) -> Str {
 }
 
 fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, result_ty: Type) -> Str {
-    // Dict dispatch (trait method through dict param) — step 5.
+    // Dict dispatch (trait method through dict param).  B-118: Unit-returning
+    // dispatch must yield RING_UNIT, not the ABI return value.
     match dict_dispatch {
-        some(_) => { return c_stub_expr(ctx, "trait dict dispatch call") },
+        some(dd) => {
+            let raw = gen_c_dict_dispatch_call(ctx, callee, args, dd)
+            if is_unit_type(result_ty) {
+                return "RING_UNIT"
+            }
+            return raw
+        },
         none => {},
     }
 
@@ -609,8 +1630,9 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
             gen_c_method_call(ctx, recv_val, recv_type, field, arg_vals, dict_vals)
         },
         _ => {
-            // Closure value call — uniform closure ABI is step 5.
-            c_stub_expr(ctx, "closure call")
+            // Closure value call through the uniform {fn_ptr, env} ABI.
+            let closure_val = gen_c_expr(ctx, callee)
+            gen_c_closure_call(ctx, closure_val, arg_vals)
         },
     }
     // B-118: Unit-typed call results must be null, never the ABI
@@ -709,11 +1731,10 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
     // module-level fn of the same name (language scoping; gen_c_ident already
     // resolves references local-first).  Without this, a prelude HOF body
     // like List.fold's `f(acc, elem)` binds to a user's global `fn f` —
-    // clang then hard-errors on the arity mismatch (the LLVM backend has the
-    // same inverted order and silently emits the mismatched call; recorded in
-    // worker_feedback).  Real closure calls are step 5 — stub until then.
+    // clang then hard-errors on the arity mismatch (audit #243 fixed the
+    // LLVM backend's inverted order to match).
     match ctx.named_values.get(name) {
-        some(_) => { return c_stub_expr(ctx, "closure call (${name})") },
+        some(cv) => { return gen_c_closure_call(ctx, cv, arg_vals) },
         none => {},
     }
 
