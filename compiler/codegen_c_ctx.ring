@@ -20,10 +20,26 @@ pub struct CFnInfo {
     pub total_params: Int
 }
 
-// Struct field layout registration (field ORDER is the C struct layout;
-// actual struct emission is step 4 — steps 1-3 only need the registry).
+// Struct field layout registration (field ORDER is the C struct layout:
+// field i lives at ((void**)ptr)[i] — every slot is one boxed void*).
 pub struct CStructInfo {
     pub field_names: List<Str>
+}
+
+// Enum variant registration (port of codegen_llvm_ctx::EnumVariantInfo,
+// minus the field_rc_skip flags — those are consumed by emit_drop_functions,
+// which is step 7).  Value layout mirrors the LLVM backend exactly:
+//   { int64_t tag, void* field0, ..., void* field(max_fields-1) }
+// tag at *(int64_t*)ptr, payload field i at ((void**)ptr)[i + 1].
+pub struct CEnumVariantInfo {
+    pub tag: Int,
+    pub field_count: Int,
+    pub field_names: List<Str>
+}
+
+pub struct CEnumInfo {
+    pub variants: Map<Str, CEnumVariantInfo>,
+    pub max_fields: Int
 }
 
 pub struct CCtx {
@@ -48,6 +64,7 @@ pub struct CCtx {
     pub tmp_counter: Int,
     pub str_counter: Int,
     pub label_counter: Int,
+    pub match_counter: Int,
 
     // ---- registries ----
     pub named_values: Map<Str, Str>,           // ring var name -> C var name
@@ -56,8 +73,15 @@ pub struct CCtx {
     pub local_fn_effects: Map<Str, EffectRow>,
     pub fn_mut_params: Map<Str, List<Bool>>,
     pub struct_types: Map<Str, CStructInfo>,
+    pub enum_types: Map<Str, CEnumInfo>,
     pub rt_protos: Map<Str, Str>,              // runtime fn name -> full C prototype line
     pub cstr_cache: Map<Str, Str>,             // interned message -> global cstr name
+    // C names whose definition has been emitted.  First definition wins:
+    // duplicate mangled names (user `enum Result` impl methods colliding with
+    // the prelude's `Result` impl) are a single LLVM module symbol there
+    // (LLVM auto-uniques; the later body lands in a dead block) — in C a
+    // second definition is a hard clang error, so later bodies are skipped.
+    pub emitted_fns: Set<Str>,
     pub extern_types: Set<Str>,
     pub boxed_vars: Set<Int>,
     pub type_to_typeid: Map<Str, Int>,
@@ -94,14 +118,17 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         tmp_counter: 0,
         str_counter: 0,
         label_counter: 0,
+        match_counter: 0,
         named_values: map_new(),
         functions: map_new(),
         fn_evidence_params: map_new(),
         local_fn_effects: map_new(),
         fn_mut_params: map_new(),
         struct_types: map_new(),
+        enum_types: map_new(),
         rt_protos: map_new(),
         cstr_cache: map_new(),
+        emitted_fns: set_new(),
         extern_types: set_new(),
         boxed_vars: set_new(),
         type_to_typeid: map_new(),
@@ -286,7 +313,7 @@ pub fn c_interned_cstr(mut ctx: CCtx, s: Str) -> Str {
 }
 
 // ============================================================
-// Unsupported-construct stubs (steps 4-8 features reached through prelude
+// Unsupported-construct stubs (steps 5-8 features reached through prelude
 // bodies).  The emitted C compiles fine; executing the statement panics at
 // runtime with a precise message.  Golden-subset cases never reach these.
 // ============================================================

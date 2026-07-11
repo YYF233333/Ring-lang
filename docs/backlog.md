@@ -1076,7 +1076,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 **Phase 0 ✅（2026-07-10）**：链式重放 21 代完成（方案 A，JS 锚点 0bd7822 → HEAD）。「执行层污染」假设**推翻**——B-155 为现行源码活 RC bug（已回填 B-155 条目，改写为方向 C 审计）。干净 dist-llvm@HEAD = `1e2bc9d`。**注意**：Phase 1 验收「.c 文本字节一致」被 B-155 gate，方向 C 审计需在 Phase 1 收尾前完成（并行不冲突）。
 
 **Phase 1**：C 后端实现（叶到根九步，见 plan §2.2）。移植期间 LLVM 后端保留为差分 oracle——双后端同用例输出 diff = 0。
-> **进度（2026-07-10）**：steps 1–3 ✅（`4edc7a1`+`ba76b67`，golden 子集 14/14 三重判据全绿：C==.expected、双后端 diff=0、.c ×2 字节一致）+ 双后端差分 harness ✅（`4314e1a`，run_tests.py `--backend=c`/`--suite diff`/`C_SKIP`/`--filter`，diff opt-in）。exec_sync runtime 已补实现（此前 std 声明但 native 从未实现）。**下一步 = step 4**（struct/enum 构造 + 字段访问 + match），随后 step 5（closure/trait dict/evidence，含 §2.5 两注意项）。未移植面 grep `c_stub_` 可列全；step 4 接口已备好（CStructInfo/typeid 分配器在 ctx）。
+> **进度（2026-07-10）**：steps 1–3 ✅（`4edc7a1`+`ba76b67`，golden 子集 14/14 三重判据全绿：C==.expected、双后端 diff=0、.c ×2 字节一致）+ 双后端差分 harness ✅（`4314e1a`，run_tests.py `--backend=c`/`--suite diff`/`C_SKIP`/`--filter`，diff opt-in）。exec_sync runtime 已补实现（此前 std 声明但 native 从未实现）。
+> **进度（2026-07-11）**：step 4 ✅（`2b85e9f`，struct/enum 构造 + 字段访问/赋值 + match/if-let + record row 访问；golden 28 + e2e 47 子集三重判据全绿，diff 82/0；全量 C sweep：llvm 84/213、e2e 256/380，余项全为 step 5/6 stub + drop_basic step 7 窗口）。sweep 逼出两个 C 侧修复（调用位局部作用域优先、同名 impl first-wins）并分诊出 audit **#243**（LLVM 同序潜伏 miscompile）/ **#244**（mangling 歧义根因）/ **#245**（**critical 共享 wrong-code**：ctor 嵌套 literal 不比值，双后端一致，oracle 污染面）。**下一步 = #245 插队修复**（wrong-code 污染 golden oracle，越晚修受污染面越大；与 step 5 同文件强制串行，先修后推进）→ 随后 step 5（closure/trait dict/evidence，含 §2.5 两注意项）。未移植面 grep `c_stub_` 可列全。
 
 **Phase 2**：B-100 (Z) 策略 parity 认证 → LLVM-C 后端 tag `llvm-c-backend-final` 归档删除 → dist-c/（.c 文本）成为 stage 0 信任锚 → CI bootstrap 重启（文本 diff）→ 文档 bookkeeping（清单见 plan §3）。
 

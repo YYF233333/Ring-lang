@@ -75,6 +75,41 @@
 
 ## LLVM Codegen
 
+### #245 共享 wrong-code：ctor 模式嵌套 literal 子模式不比较值（双后端一致）[critical] [judgment] [open]
+
+> 2026-07-11 B-163 step 4 worker 发现（全量 sweep + faithful port 对照），从 feedback 分诊入表。**双后端共享，差分套件抓不到（diff=0 恰恰是病征）**。
+
+```ring
+match o { some(0) => "zero", some(n) => "n=${n}", none => "none" }
+```
+`some(7)` 在 LLVM 与 C 后端**都输出 "zero"**——`check_nested_ctor_tags`（codegen_llvm_expr，及 step 4 的 C port）对 `Pattern::Literal` 是 no-op：只查 ctor tag、不发射字面量值比较，首个 `some(_)` 形 arm 吞掉一切同 tag 值。同族 gap：tuple 元素位的 ctor 子模式只查一层 tag 不递归内层（`(Neg(Lit(n)), _)` 的 Lit 不验证）。tuple 顶层 literal 元素 B-087 已修，ctor 字段位漏网。
+
+**影响**：常用模式写法产出 wrong-code = 直接违反「编译器是最终权威 / 失真必须响」。**oracle 污染**：golden .expected 由 LLVM oracle 生成，凡含此 pattern 的用例已把错误行为烤入快照——修复后受影响用例需 `--update-golden` 重生成并人工核对语义。
+
+**修复方向**：① 两后端 `check_nested_ctor_tags` 族同改——ctor 字段位 literal 子模式发射值比较、tuple 元素位 ctor 子模式递归检查（策略逻辑先在 LLVM 侧改，C 侧对照移植，保持 diff=0）；② 排查 checker 穷尽性层对嵌套 literal 的处理是否同样漏（`some(0)`/`some(n)` 的覆盖判定）；③ 新增回归 e2e（手写 expected，不经 oracle）+ 受影响 golden 重生成核对；④ 动 match codegen → golden ×3 全套。
+
+发现者：step 4 worker（feedback 分诊）
+
+### #243 LLVM gen_direct_call 全局 functions map 先于局部 named_values——潜伏 miscompile [medium] [mechanical] [open]
+
+> 2026-07-11 step 4 worker 发现（C 侧同 bug 被 clang arity 硬错误当场抓出并已修，LLVM 侧按纪律未动）。
+
+`codegen_llvm_expr.ring` `gen_direct_call`：调用位名字解析先查全局 functions map 再查局部 named_values（closure 分支）——与语言作用域规则相反。用户程序定义与 prelude HOF 参数同名的全局 fn（如 `fn f(x)`）时，`List.fold` 体内 `f(acc, elem)` 被解析到全局 f，对 1 参函数发射 2 实参 `LLVMBuildCall2`。LLVM-C 不校验、静默生成错 call；现有用例中该 prelude HOF 恰为死代码故未爆——用户程序若真调用该 HOF 即活 miscompile。C 后端已修（局部作用域优先，`2b85e9f`），**两后端现不对称**：同场景 C 正确、LLVM 错，差分套件若撞上会以 FAIL 形式暴露。
+
+**修复方向**（解法唯一）：`gen_direct_call` 查找顺序对齐 C 侧（局部 named_values 先于 functions map）。建议随 step 5 顺带修或等 Phase 2 退役——但 Phase 1 期间 LLVM 是差分 oracle，修掉可消除不对称。
+
+发现者：step 4 worker（feedback 分诊）
+
+### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]
+
+> 2026-07-11 step 4 worker 发现（C 侧硬重定义错误暴露；已按 LLVM 等效语义 first-wins 缓解，根因未修）。
+
+用户自定义 `enum Result` + `impl Result { and_then }` 与 prelude `std/result.ring` 的同名方法都 mangle 成 `ring_Result_and_then`——codegen 身份未区分用户类型与被遮蔽的 prelude 类型。LLVM 后端「通过」纯属侥幸（forward pass 重名去重后第二个 body 成死块，调用点全走 prelude 定义，恰好语义相同）；C 后端 `2b85e9f` 起 `CCtx.emitted_fns` first-wins（等效语义，同样是缓解不是修复）。**次生 wrinkle**：`c_declare_fn`/LLVM forward_declare 对重名的 `fn_evidence_params` 是 last-wins（body/proto 是 first-wins）——重名双方 effect 行不同时调用点 evidence 实参数与原型不匹配（现有用例未触发）。
+
+**修复方向**：checker/mangling 层给用户定义类型与 prelude/builtin 类型不同的 codegen 身份（如模块前缀入 mangled name），两后端消费同一来源；歧义存在期间至少发 W/E 级诊断（用户 enum 遮蔽 prelude 类型名）。涉及 checker + hir 共享约定，需设计判断。
+
+发现者：step 4 worker（feedback 分诊）
+
 ### #242 finalize_llvm_module emit 失败后进程退出码仍为 0 [medium] [mechanical] [open]
 
 > 2026-07-11 从 worker feedback 分诊入表（Phase 0 worker 发现冻结 JS 版同病 → 现源码查证同病）。

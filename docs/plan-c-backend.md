@@ -87,6 +87,13 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 - **exec_sync**：std 早有声明但 native 从未实现，steps 1-3 补上（Windows `_spawnvp` + 手动 argv 引号 / POSIX fork+execvp），clang shell-out 前提；clang 失败 → `exit_process(1)`（对照 audit #242：LLVM 后端 emit 失败漏 exit）
 - clang 调用参数 `-std=c11 -O2 -c`；`--out-dir` 显式给出时 .c/.o 进该目录，否则落源文件旁（对齐 LLVM 单文件行为）
 
+**已定语义对齐细节（step 4 落地，2026-07-11 沉淀）**：
+- **match = 统一 if/goto 测试链**（`gen_c_match_expr`，LLVM `gen_match_if_else` 的 C 渲染；LLVM tag-switch 自注明是纯优化，未移植）。两个允许性偏离（均只在 checker 保证不可达路径可观测）：① 非末位 wildcard + 后续 ctor arm 的病态程序，C 按源序（LLVM switch 路径违反源序提升 wildcard 进 default）；② 穷尽失败 panic 消息 C 统一 `match exhaustion failure #N`（LLVM switch 路径带 enum 名+tag）
+- **typeid 分配时机**：C 在 forward pass 分配（LLVM lazy）——数值可能与 LLVM 不同，typeid 本就 per-binary 各自内部一致；**Option typeid 钉死 8**（RING_TYPEID_OPTION，LLVM 未钉，C 防御性对齐 ctor 常量）
+- **struct ctor**：forward pass 后统一 declare+define，fn 恒胜 struct ctor 抢 `ring_<Name>`（decl 顺序无关）；enum ctor forward pass 注册 first-come-wins
+- **record row 访问 default 分支**：C 发 `ring_panic`（LLVM 发 `unreachable` UB）——更稳健的允许性偏离
+- **调用位名字解析局部作用域优先**（named_values 先于 functions map，语言作用域规则；LLVM 倒序 = audit #243）；**同名 mangled impl 方法 first-wins**（`CCtx.emitted_fns`，与 LLVM 符号 uniquing 等效语义；根因 mangling 歧义 = audit #244）
+
 ### 2.2 移植顺序（叶到根，每步 golden 子集验收）
 
 1. 模块骨架：codegen_c_ctx / 类型布局映射 / runtime 函数声明生成

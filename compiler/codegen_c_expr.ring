@@ -1,4 +1,4 @@
-// B-163 C backend — expression + statement emission (steps 2-3).
+// B-163 C backend — expression + statement emission (steps 2-4).
 // Port of codegen_llvm_expr.ring / codegen_llvm_stmt.ring onto plain C text.
 //
 // Emission protocol: gen_c_expr emits C statements into ctx.cur_body and
@@ -7,22 +7,30 @@
 // into a hoisted temporary so evaluation ORDER exactly mirrors the LLVM
 // backend's SSA sequencing (plan §2.1: statement-ised expressions + temps).
 //
-// Constructs beyond steps 1-3 (match, struct/enum construction & field
-// access, closures, trait dicts, effect handlers) compile to a runtime-panic
-// stub — the emitted C always compiles; executing an unported construct
-// panics with a precise message.  This is required because single-file
-// compilation prepends the whole std prelude to program.decls (checker.ring
-// load_prelude), so prelude bodies flow through this backend from step 1.
+// Step 4 adds struct/enum construction, field access/assignment, match and
+// if-let.  Match compiles through ONE unified test-and-fall-through chain —
+// the C rendering of the LLVM backend's gen_match_if_else (which the LLVM
+// side documents as the general lowering; its tag-switch is "kept purely as
+// an optimization for guard-free enum matches").  Arm order = source order,
+// pattern tests jump to the next arm's label on mismatch (plan §2.1:
+// if/goto+label, no SSA, no phi).
+//
+// Constructs beyond step 4 (closures, trait dicts, effect handlers, catch)
+// compile to a runtime-panic stub — the emitted C always compiles; executing
+// an unported construct panics with a precise message.  This is required
+// because single-file compilation prepends the whole std prelude to
+// program.decls (checker.ring load_prelude), so prelude bodies flow through
+// this backend from step 1.
 
 use types::{Type, EffectRow, type_to_builtin_name, BUILTIN_RANGE}
-use ast::{BinOp, UnaryOp, Pattern}
+use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
-    HLetDestructureBinding, DictRef, TraitDispatch, DictDispatchInfo,
-    hexpr_type, is_fresh_owned_bool_value}
-use codegen_c_ctx::{CCtx, CFnInfo, c_emit, c_raw, fresh_tmp, fresh_i64,
-    fresh_dbl, fresh_label, c_local, c_mangle_fn, c_mangle_method,
-    c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
-    c_line_directive, rt_use, rt_known_arity}
+    HLetDestructureBinding, HStructFieldInit, DictRef, TraitDispatch, DictDispatchInfo,
+    hexpr_type, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first}
+use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, c_emit, c_raw,
+    fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_mangle_fn,
+    c_mangle_method, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
+    c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid}
 
 // ============================================================
 // Type predicate helpers (ports of the codegen_llvm_expr private ones)
@@ -106,12 +114,12 @@ pub fn gen_c_expr(mut ctx: CCtx, expr: HExpr) -> Str {
             gen_c_call(ctx, callee, args, resolved_dicts, dict_dispatch, ty),
         HExpr::FieldAccess { receiver, field, ty, .. } =>
             gen_c_field_access(ctx, receiver, field, ty),
-        HExpr::StructLit { name, .. } =>
-            c_stub_expr(ctx, "struct literal (${name})"),
-        HExpr::NamedVariantConstruct { enum_name, variant_name, .. } =>
-            c_stub_expr(ctx, "enum construction (${enum_name}::${variant_name})"),
-        HExpr::MatchExpr { .. } =>
-            c_stub_expr(ctx, "match expression"),
+        HExpr::StructLit { name, fields, spread, .. } =>
+            gen_c_struct_lit(ctx, name, fields, spread),
+        HExpr::NamedVariantConstruct { enum_name, variant_name, fields, spread, .. } =>
+            gen_c_variant_construct(ctx, enum_name, variant_name, fields, spread),
+        HExpr::MatchExpr { scrutinee, arms, .. } =>
+            gen_c_match_expr(ctx, scrutinee, arms),
         HExpr::Block { stmts, tail, .. } => gen_c_block(ctx, stmts, tail),
         HExpr::IfExpr { condition, then_branch, else_branch, .. } =>
             gen_c_if_expr(ctx, condition, then_branch, else_branch),
@@ -697,6 +705,18 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
         none => {},
     }
 
+    // LOCAL scope first: a closure/fn-value param or local shadows any
+    // module-level fn of the same name (language scoping; gen_c_ident already
+    // resolves references local-first).  Without this, a prelude HOF body
+    // like List.fold's `f(acc, elem)` binds to a user's global `fn f` —
+    // clang then hard-errors on the arity mismatch (the LLVM backend has the
+    // same inverted order and silently emits the mismatched call; recorded in
+    // worker_feedback).  Real closure calls are step 5 — stub until then.
+    match ctx.named_values.get(name) {
+        some(_) => { return c_stub_expr(ctx, "closure call (${name})") },
+        none => {},
+    }
+
     // Ring function lookup.
     let mangled = c_mangle_fn(name)
     match ctx.functions.get(mangled) {
@@ -717,27 +737,21 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
             t
         },
         none => {
-            // Closure variable (lambda param) — step 5.
-            match ctx.named_values.get(name) {
-                some(_) => c_stub_expr(ctx, "closure call (${name})"),
-                none => {
-                    // Runtime fallback: ring_<name> if it's a known runtime fn.
-                    let rt_fallback = "ring_${name}"
-                    match rt_known_arity(rt_fallback) {
-                        some(_) => {
-                            if rt_fallback == "ring_assert" {
-                                let first = match arg_vals.get(0) { some(v) => v, none => panic("ring_assert: missing arg 0") }
-                                let second = match arg_vals.get(1) { some(v) => v, none => panic("ring_assert: missing arg 1") }
-                                return gen_c_runtime_call(ctx, "ring_assert", ["RING_COND(${first})", second])
-                            }
-                            gen_c_runtime_call(ctx, rt_fallback, arg_vals)
-                        },
-                        none => {
-                            // B-152: unknown extern fn — declare with the uniform
-                            // boxed ABI and let the linker resolve.
-                            gen_c_runtime_call(ctx, name, arg_vals)
-                        },
+            // Runtime fallback: ring_<name> if it's a known runtime fn.
+            let rt_fallback = "ring_${name}"
+            match rt_known_arity(rt_fallback) {
+                some(_) => {
+                    if rt_fallback == "ring_assert" {
+                        let first = match arg_vals.get(0) { some(v) => v, none => panic("ring_assert: missing arg 0") }
+                        let second = match arg_vals.get(1) { some(v) => v, none => panic("ring_assert: missing arg 1") }
+                        return gen_c_runtime_call(ctx, "ring_assert", ["RING_COND(${first})", second])
                     }
+                    gen_c_runtime_call(ctx, rt_fallback, arg_vals)
+                },
+                none => {
+                    // B-152: unknown extern fn — declare with the uniform
+                    // boxed ABI and let the linker resolve.
+                    gen_c_runtime_call(ctx, name, arg_vals)
                 },
             }
         },
@@ -1099,8 +1113,8 @@ fn gen_c_method_call(mut ctx: CCtx, recv: Str, recv_type: Type, method: Str, arg
 }
 
 // ============================================================
-// Field access — steps 1-3 cover TUPLE access only (tuples are runtime
-// lists); struct/enum/record field access is step 4.
+// Field access — tuple (runtime list), record row type (typeid switch) and
+// struct/enum (slot read).  Ports of gen_field_access / gen_record_field_access.
 // ============================================================
 
 fn gen_c_field_access(mut ctx: CCtx, receiver: HExpr, field: Str, ty: Type) -> Str {
@@ -1118,9 +1132,906 @@ fn gen_c_field_access(mut ctx: CCtx, receiver: HExpr, field: Str, ty: Type) -> S
             c_emit(ctx, "${t} = ring_list_get(${recv_val}, ${idx});")
             t
         },
-        Type::RecordType { .. } => c_stub_expr(ctx, "record field access (.${field})"),
-        _ => c_stub_expr(ctx, "struct field access (.${field})"),
+        Type::RecordType { .. } => gen_c_record_field_access(ctx, recv_val, field),
+        _ => {
+            let type_name = match recv_type {
+                Type::StructType { name, .. } => name,
+                Type::EnumType { name, .. } => name,
+                _ => panic("C codegen: field access on non-struct type, field: ${field}"),
+            }
+            match ctx.struct_types.get(type_name) {
+                some(info) => {
+                    let mut field_idx = -1
+                    for i in 0..info.field_names.len() {
+                        if info.field_names[i] == field {
+                            field_idx = i
+                        }
+                    }
+                    if field_idx < 0 {
+                        panic("C codegen: field '${field}' not found in struct '${type_name}'")
+                    }
+                    // B-098: a struct field read is a BORROW (no dup); the field
+                    // value still belongs to the struct.  If it escapes, the
+                    // borrow-inference pass wraps it in HExpr::Clone.
+                    let t = fresh_tmp(ctx)
+                    c_emit(ctx, "${t} = ((void**)${recv_val})[${field_idx}];")
+                    t
+                },
+                none => panic("C codegen: struct type '${type_name}' not registered"),
+            }
+        },
     }
+}
+
+// Row-type (RecordType) field access: the static type is e.g. {name: Str} but
+// the runtime value is a concrete struct.  Read the typeid from the heap
+// header at ptr-4 and dispatch over all registered structs that contain the
+// requested field (port of gen_record_field_access; candidates sorted by
+// struct name — audit #237 determinism discipline).
+fn gen_c_record_field_access(mut ctx: CCtx, recv_val: Str, field: Str) -> Str {
+    let mut candidates: List<(Str, Int)> = []  // (struct name, field idx)
+    let mut sorted = ctx.struct_types.entries()
+    sorted.sort_by(compare_by_first)
+    for entry in sorted {
+        let (sname, sinfo) = entry
+        for i in 0..sinfo.field_names.len() {
+            if sinfo.field_names[i] == field {
+                candidates.push((sname, i))
+            }
+        }
+    }
+
+    if candidates.len() == 0 {
+        panic("C codegen: no registered struct has field '${field}' for row-type access")
+    }
+
+    let t = fresh_tmp(ctx)
+
+    // Single candidate: skip the typeid dispatch — read the slot directly.
+    if candidates.len() == 1 {
+        let (_cname, cidx) = candidates[0]
+        c_emit(ctx, "${t} = ((void**)${recv_val})[${cidx}];")
+        return t
+    }
+
+    // Read typeid from the heap header ([rc:u32 | typeid:u32] at ptr-8).
+    let tid = fresh_i64(ctx)
+    c_emit(ctx, "${tid} = (int64_t)*(uint32_t*)((char*)${recv_val} - 4);")
+    let done_lbl = fresh_label(ctx, "row_done")
+    for cand in candidates {
+        let (cname, cidx) = cand
+        let ctid = get_or_assign_c_typeid(ctx, cname)
+        c_emit(ctx, "if (${tid} == ${ctid}) { ${t} = ((void**)${recv_val})[${cidx}]; goto ${done_lbl}; }")
+    }
+    // Default: the type checker guarantees a matching struct (LLVM emits
+    // unreachable here); panic instead of UB for robustness.
+    let g = c_interned_cstr(ctx, "row-type field access: no matching struct typeid")
+    rt_use(ctx, "ring_panic", 1)
+    rt_use(ctx, "ring_str_from_cstr", 1)
+    c_emit(ctx, "ring_panic(ring_str_from_cstr(${g}));")
+    c_raw(ctx, "${done_lbl}:;")
+    t
+}
+
+// ============================================================
+// Struct literal (port of gen_struct_lit).  Layout: N boxed slots, field i at
+// ((void**)ptr)[i]; allocated via ring_alloc with the struct's typeid.
+// ============================================================
+
+fn gen_c_struct_lit(mut ctx: CCtx, name: Str, fields: List<HStructFieldInit>, spread: HExpr?) -> Str {
+    match ctx.struct_types.get(name) {
+        some(info) => {
+            rt_use(ctx, "ring_alloc", 2)
+            let n = info.field_names.len()
+            let tid = get_or_assign_c_typeid(ctx, name)
+            let t = fresh_tmp(ctx)
+            c_emit(ctx, "${t} = ring_alloc((int64_t)(${n} * sizeof(void*)), ${tid});")
+
+            // Spread copies the source struct's field pointers first (B-098):
+            // non-overridden copies alias the source's owned references, so the
+            // new struct takes its OWN reference (ring_dup) to avoid double-free;
+            // overridden copies are dead — skip the dup to avoid leaking.
+            match spread {
+                some(spread_expr) => {
+                    let mut overridden: Set<Str> = set_new()
+                    for f in fields { overridden.insert(f.name) }
+                    let spread_val = gen_c_expr(ctx, spread_expr)
+                    rt_use(ctx, "ring_dup", 1)
+                    for i in 0..info.field_names.len() {
+                        let fv = fresh_tmp(ctx)
+                        c_emit(ctx, "${fv} = ((void**)${spread_val})[${i}];")
+                        if overridden.contains(info.field_names[i]) == false {
+                            c_emit(ctx, "ring_dup(${fv});")
+                        }
+                        c_emit(ctx, "((void**)${t})[${i}] = ${fv};")
+                    }
+                },
+                none => {},
+            }
+
+            // Explicitly specified fields (override spread values).
+            for f in fields {
+                let val = gen_c_expr(ctx, f.value)
+                let mut field_idx = -1
+                for i in 0..info.field_names.len() {
+                    if info.field_names[i] == f.name {
+                        field_idx = i
+                    }
+                }
+                if field_idx < 0 {
+                    panic("C codegen: field '${f.name}' not found in struct '${name}'")
+                }
+                c_emit(ctx, "((void**)${t})[${field_idx}] = ${val};")
+            }
+
+            t
+        },
+        none => panic("C codegen: struct type '${name}' not registered for literal"),
+    }
+}
+
+// ============================================================
+// Named variant construction (port of gen_named_variant_construct).
+// Layout: { int64_t tag, void* f0, ..., void* f(max_fields-1) }.
+// ============================================================
+
+fn gen_c_variant_construct(mut ctx: CCtx, enum_name: Str, variant_name: Str, fields: List<HStructFieldInit>, spread: HExpr?) -> Str {
+    match ctx.enum_types.get(enum_name) {
+        some(enum_info) => {
+            match enum_info.variants.get(variant_name) {
+                some(vi) => {
+                    rt_use(ctx, "ring_alloc", 2)
+                    let tid = get_or_assign_c_typeid(ctx, enum_name)
+                    let t = fresh_tmp(ctx)
+                    c_emit(ctx, "${t} = ring_alloc((int64_t)(sizeof(int64_t) + ${enum_info.max_fields} * sizeof(void*)), ${tid});")
+                    c_emit(ctx, "*(int64_t*)${t} = ${vi.tag};")
+
+                    // Spread: same RC semantics as struct spread (B-098).
+                    match spread {
+                        some(spread_expr) => {
+                            let mut overridden: Set<Str> = set_new()
+                            for f in fields { overridden.insert(f.name) }
+                            let spread_val = gen_c_expr(ctx, spread_expr)
+                            rt_use(ctx, "ring_dup", 1)
+                            for i in 0..vi.field_names.len() {
+                                let fv = fresh_tmp(ctx)
+                                c_emit(ctx, "${fv} = ((void**)${spread_val})[${i + 1}];")
+                                if overridden.contains(vi.field_names[i]) == false {
+                                    c_emit(ctx, "ring_dup(${fv});")
+                                }
+                                c_emit(ctx, "((void**)${t})[${i + 1}] = ${fv};")
+                            }
+                        },
+                        none => {},
+                    }
+
+                    // Explicitly specified fields, resolved by declared name.
+                    for i in 0..fields.len() {
+                        match fields.get(i) {
+                            some(f) => {
+                                let val = gen_c_expr(ctx, f.value)
+                                let mut field_idx = i
+                                for fi in 0..vi.field_names.len() {
+                                    if vi.field_names[fi] == f.name {
+                                        field_idx = fi
+                                    }
+                                }
+                                c_emit(ctx, "((void**)${t})[${field_idx + 1}] = ${val};")
+                            },
+                            none => {},
+                        }
+                    }
+
+                    t
+                },
+                none => panic("C codegen: variant '${variant_name}' not found in enum '${enum_name}'"),
+            }
+        },
+        none => {
+            // Not a registered enum — try the variant constructor function
+            // (hir.ring variant_ctor_name convention; LLVM fallback parity).
+            let ctor_key = c_mangle_fn(variant_ctor_name(enum_name, variant_name))
+            match ctx.functions.get(ctor_key) {
+                some(fi) => {
+                    let mut args: List<Str> = []
+                    for f in fields {
+                        args.push(gen_c_expr(ctx, f.value))
+                    }
+                    let t = fresh_tmp(ctx)
+                    c_emit(ctx, "${t} = ${fi.c_name}(${args.join(", ")});")
+                    t
+                },
+                none => panic("C codegen: enum '${enum_name}' not registered for variant construct"),
+            }
+        },
+    }
+}
+
+// ============================================================
+// Match expression — the C rendering of gen_match_if_else (the LLVM
+// backend's general lowering; its guard-free enum tag-switch is a pure
+// optimization with the same semantics for well-formed matches).  Arms are
+// tested in source order; a failed pattern test / nested tag check / guard
+// jumps to the next arm's label; a matched arm assigns the result temp and
+// jumps to the end label.  Fall-through past the last arm = exhaustion panic.
+// ============================================================
+
+fn gen_c_match_expr(mut ctx: CCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
+    let scrut = gen_c_expr(ctx, scrutinee)
+    ctx.match_counter = ctx.match_counter + 1
+    let match_id = ctx.match_counter
+    let res = fresh_tmp(ctx)
+    let end_lbl = fresh_label(ctx, "mend")
+
+    for arm in arms {
+        emit_c_match_arm(ctx, arm, scrut, res, end_lbl)
+    }
+
+    // Exhaustion default (gen_match_if_else parity: the checker guarantees
+    // exhaustiveness, so this is unreachable in well-typed programs).
+    let msg = gen_c_str_lit(ctx, "match exhaustion failure #${match_id}")
+    rt_use(ctx, "ring_panic", 1)
+    c_emit(ctx, "ring_panic(${msg});")
+
+    c_raw(ctx, "${end_lbl}:;")
+    res
+}
+
+// One arm: pattern tests (fail → next label) → binds → guard → body.
+fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl: Str) {
+    let next_lbl = fresh_label(ctx, "mnext")
+    let mut next_used = false
+
+    match arm.pattern {
+        Pattern::Wildcard { .. } => {},
+        Pattern::Binding { name: bname, .. } => {
+            let bv = c_local(ctx, bname)
+            c_emit(ctx, "${bv} = ${scrut};")
+        },
+        Pattern::Literal { value, .. } => {
+            emit_c_literal_fail_test(ctx, scrut, value, next_lbl)
+            next_used = true
+        },
+        Pattern::Constructor { name: cname, qualifier, fields, .. } => {
+            // Phase 0: outer tag test (unresolvable ctor = unconditional match,
+            // mirroring gen_ctor_tag_test's best-effort branch).
+            if emit_c_ctor_tag_fail_test(ctx, scrut, cname, qualifier, next_lbl) {
+                next_used = true
+            }
+            // Phase 1: nested constructor tags (only when the enum resolves —
+            // struct patterns skip this, LLVM parity).
+            match find_c_enum_by_variant(ctx, cname, qualifier) {
+                some(_ei) => {
+                    if check_c_positional_fields_nested_tags(ctx, scrut, fields, next_lbl) {
+                        next_used = true
+                    }
+                },
+                none => {},
+            }
+            // Phase 2: bind fields.
+            bind_c_constructor_fields(ctx, scrut, cname, qualifier, fields)
+        },
+        Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
+            if emit_c_ctor_tag_fail_test(ctx, scrut, cname, qualifier, next_lbl) {
+                next_used = true
+            }
+            match find_c_enum_by_variant(ctx, cname, qualifier) {
+                some(ei) => match ei.variants.get(cname) {
+                    some(vi) => {
+                        if check_c_named_fields_nested_tags(ctx, scrut, vi.field_names, nfields, next_lbl) {
+                            next_used = true
+                        }
+                    },
+                    none => {},
+                },
+                none => {},
+            }
+            bind_c_named_constructor_fields(ctx, scrut, cname, qualifier, nfields)
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            // Match if ANY alternative matches: non-last alternatives jump to
+            // the shared body label on match; the last uses a fail test so an
+            // all-miss falls to the next arm.  Alternatives are ctor tags or
+            // literals (#181); field bindings across alternatives unsupported.
+            let body_lbl = fresh_label(ctx, "mor")
+            let mut body_used = false
+            let nalts = patterns.len()
+            for k in 0..nalts {
+                match patterns.get(k) {
+                    some(alt) => {
+                        if k == nalts - 1 {
+                            match alt {
+                                Pattern::Constructor { name: an, qualifier: aq, .. } => {
+                                    if emit_c_ctor_tag_fail_test(ctx, scrut, an, aq, next_lbl) {
+                                        next_used = true
+                                    }
+                                },
+                                Pattern::NamedConstructor { name: an, qualifier: aq, .. } => {
+                                    if emit_c_ctor_tag_fail_test(ctx, scrut, an, aq, next_lbl) {
+                                        next_used = true
+                                    }
+                                },
+                                Pattern::Literal { value, .. } => {
+                                    emit_c_literal_fail_test(ctx, scrut, value, next_lbl)
+                                    next_used = true
+                                },
+                                _ => {},
+                            }
+                        } else {
+                            match alt {
+                                Pattern::Constructor { name: an, qualifier: aq, .. } => {
+                                    emit_c_ctor_tag_match_test(ctx, scrut, an, aq, body_lbl)
+                                    body_used = true
+                                },
+                                Pattern::NamedConstructor { name: an, qualifier: aq, .. } => {
+                                    emit_c_ctor_tag_match_test(ctx, scrut, an, aq, body_lbl)
+                                    body_used = true
+                                },
+                                Pattern::Literal { value, .. } => {
+                                    emit_c_literal_match_test(ctx, scrut, value, body_lbl)
+                                    body_used = true
+                                },
+                                _ => {},
+                            }
+                        }
+                    },
+                    none => {},
+                }
+            }
+            if body_used {
+                c_raw(ctx, "${body_lbl}:;")
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            rt_use(ctx, "ring_list_get", 2)
+            // Phase 1: ctor sub-patterns' tags AND literal sub-patterns' values
+            // (#B-087: a literal element must compare, not match-any).
+            for j in 0..elements.len() {
+                match elements.get(j) {
+                    some(elem_pat) => {
+                        match elem_pat {
+                            Pattern::Constructor { name: cn, qualifier: cq, .. } => {
+                                let ev = fresh_tmp(ctx)
+                                c_emit(ctx, "${ev} = ring_list_get(${scrut}, ${j});")
+                                if emit_c_ctor_tag_fail_test(ctx, ev, cn, cq, next_lbl) {
+                                    next_used = true
+                                }
+                            },
+                            Pattern::NamedConstructor { name: cn, qualifier: cq, .. } => {
+                                let ev = fresh_tmp(ctx)
+                                c_emit(ctx, "${ev} = ring_list_get(${scrut}, ${j});")
+                                if emit_c_ctor_tag_fail_test(ctx, ev, cn, cq, next_lbl) {
+                                    next_used = true
+                                }
+                            },
+                            Pattern::Literal { value, .. } => {
+                                let ev = fresh_tmp(ctx)
+                                c_emit(ctx, "${ev} = ring_list_get(${scrut}, ${j});")
+                                emit_c_literal_fail_test(ctx, ev, value, next_lbl)
+                                next_used = true
+                            },
+                            _ => {},
+                        }
+                    },
+                    none => {},
+                }
+            }
+            // Phase 2: all checks passed — bind.
+            for j2 in 0..elements.len() {
+                match elements.get(j2) {
+                    some(elem_pat2) => {
+                        match elem_pat2 {
+                            Pattern::Wildcard { .. } => {},
+                            _ => {
+                                let fv = fresh_tmp(ctx)
+                                c_emit(ctx, "${fv} = ring_list_get(${scrut}, ${j2});")
+                                bind_c_nested_pattern(ctx, fv, elem_pat2)
+                            },
+                        }
+                    },
+                    none => {},
+                }
+            }
+        },
+    }
+
+    // Guard (emit_match_arm_body parity): evaluated after binds; a false
+    // guard falls through to the next arm.  B-104 D1 Stage 2: a fresh-owned
+    // Bool guard box is fully consumed by the untag — drop it once, before
+    // the branch, so BOTH edges see it released.
+    match arm.guard {
+        some(g) => {
+            let gv = gen_c_expr(ctx, g)
+            let flag = fresh_i64(ctx)
+            c_emit(ctx, "${flag} = RING_COND(${gv});")
+            if is_fresh_owned_bool_value(g) {
+                rt_use(ctx, "ring_drop", 1)
+                c_emit(ctx, "ring_drop(${gv});")
+            }
+            c_emit(ctx, "if (!${flag}) goto ${next_lbl};")
+            next_used = true
+        },
+        none => {},
+    }
+
+    // Body.
+    let bv = gen_c_expr(ctx, arm.body)
+    c_emit(ctx, "${res} = ${bv};")
+    c_emit(ctx, "goto ${end_lbl};")
+    if next_used {
+        c_raw(ctx, "${next_lbl}:;")
+    }
+}
+
+// ============================================================
+// Pattern-test helpers (ports of gen_literal_pattern_cond / gen_ctor_tag_test
+// / check_nested_ctor_tags / check_*_fields_nested_tags).
+// ============================================================
+
+// Fresh str-literal equality flag: allocate the literal, compare, drop the
+// literal (#162: gen_str_lit allocates RC=1; drop after comparison).
+fn emit_c_str_eq_flag(mut ctx: CCtx, scrut: Str, s: Str) -> Str {
+    let lit = gen_c_str_lit(ctx, s)
+    rt_use(ctx, "ring_str_eq", 2)
+    rt_use(ctx, "ring_drop", 1)
+    let flag = fresh_i64(ctx)
+    c_emit(ctx, "${flag} = ring_str_eq(${scrut}, ${lit});")
+    c_emit(ctx, "ring_drop(${lit});")
+    flag
+}
+
+fn emit_c_literal_fail_test(mut ctx: CCtx, scrut: Str, value: LiteralValue, fail_lbl: Str) {
+    match value {
+        LiteralValue::IntVal(n) => {
+            c_emit(ctx, "if (RING_UNTAG(${scrut}) != ${n}) goto ${fail_lbl};")
+        },
+        LiteralValue::BoolVal(b) => {
+            let lit = if b { "1" } else { "0" }
+            c_emit(ctx, "if (RING_UNTAG(${scrut}) != ${lit}) goto ${fail_lbl};")
+        },
+        LiteralValue::StrVal(s) => {
+            let flag = emit_c_str_eq_flag(ctx, scrut, s)
+            c_emit(ctx, "if (!${flag}) goto ${fail_lbl};")
+        },
+        LiteralValue::FloatVal(f) => {
+            // Ordered-equal (LLVM OEQ parity): C == on doubles is false for NaN.
+            rt_use(ctx, "ring_unbox_float", 1)
+            c_emit(ctx, "if (!(ring_unbox_float(${scrut}) == ${f})) goto ${fail_lbl};")
+        },
+    }
+}
+
+fn emit_c_literal_match_test(mut ctx: CCtx, scrut: Str, value: LiteralValue, match_lbl: Str) {
+    match value {
+        LiteralValue::IntVal(n) => {
+            c_emit(ctx, "if (RING_UNTAG(${scrut}) == ${n}) goto ${match_lbl};")
+        },
+        LiteralValue::BoolVal(b) => {
+            let lit = if b { "1" } else { "0" }
+            c_emit(ctx, "if (RING_UNTAG(${scrut}) == ${lit}) goto ${match_lbl};")
+        },
+        LiteralValue::StrVal(s) => {
+            let flag = emit_c_str_eq_flag(ctx, scrut, s)
+            c_emit(ctx, "if (${flag}) goto ${match_lbl};")
+        },
+        LiteralValue::FloatVal(f) => {
+            rt_use(ctx, "ring_unbox_float", 1)
+            c_emit(ctx, "if (ring_unbox_float(${scrut}) == ${f}) goto ${match_lbl};")
+        },
+    }
+}
+
+// Tag test, fail edge: jump to fail_lbl when the scrutinee's tag differs.
+// Returns true when a test was emitted.  An unresolvable variant matches
+// unconditionally (no test) — gen_ctor_tag_test best-effort parity.
+fn emit_c_ctor_tag_fail_test(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?, fail_lbl: Str) -> Bool {
+    match find_c_enum_by_variant(ctx, cname, qualifier) {
+        some(ei) => match ei.variants.get(cname) {
+            some(vi) => {
+                c_emit(ctx, "if (*(int64_t*)${scrut} != ${vi.tag}) goto ${fail_lbl};")
+                true
+            },
+            none => false,
+        },
+        none => false,
+    }
+}
+
+// Tag test, match edge (or-pattern alternatives): jump to match_lbl when the
+// tag matches.  An unresolvable variant branches unconditionally (LLVM parity).
+fn emit_c_ctor_tag_match_test(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?, match_lbl: Str) {
+    match find_c_enum_by_variant(ctx, cname, qualifier) {
+        some(ei) => match ei.variants.get(cname) {
+            some(vi) => c_emit(ctx, "if (*(int64_t*)${scrut} == ${vi.tag}) goto ${match_lbl};"),
+            none => c_emit(ctx, "goto ${match_lbl};"),
+        },
+        none => c_emit(ctx, "goto ${match_lbl};"),
+    }
+}
+
+// Consume an ignored Bool result (codebase `discard` idiom).
+fn discard_c_bool(b: Bool) {
+    // intentionally empty
+}
+
+// Recursively check nested constructor tags within a pattern; a mismatch
+// jumps to fail_lbl.  Returns true when any test was emitted.
+fn check_c_nested_ctor_tags(mut ctx: CCtx, val: Str, pat: Pattern, fail_lbl: Str) -> Bool {
+    match pat {
+        Pattern::Constructor { name: cname, qualifier, fields, .. } => {
+            match find_c_enum_by_variant(ctx, cname, qualifier) {
+                some(ei) => match ei.variants.get(cname) {
+                    some(vi) => {
+                        c_emit(ctx, "if (*(int64_t*)${val} != ${vi.tag}) goto ${fail_lbl};")
+                        for i in 0..fields.len() {
+                            match fields.get(i) {
+                                some(fp) => {
+                                    let fv = fresh_tmp(ctx)
+                                    c_emit(ctx, "${fv} = ((void**)${val})[${i + 1}];")
+                                    discard_c_bool(check_c_nested_ctor_tags(ctx, fv, fp, fail_lbl))
+                                },
+                                none => {},
+                            }
+                        }
+                        true
+                    },
+                    none => false,
+                },
+                none => false,
+            }
+        },
+        Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
+            match find_c_enum_by_variant(ctx, cname, qualifier) {
+                some(ei) => match ei.variants.get(cname) {
+                    some(vi) => {
+                        c_emit(ctx, "if (*(int64_t*)${val} != ${vi.tag}) goto ${fail_lbl};")
+                        for i in 0..nfields.len() {
+                            match nfields.get(i) {
+                                some(nf) => {
+                                    let mut field_idx = i
+                                    for fi in 0..vi.field_names.len() {
+                                        if vi.field_names[fi] == nf.name {
+                                            field_idx = fi
+                                        }
+                                    }
+                                    let fv = fresh_tmp(ctx)
+                                    c_emit(ctx, "${fv} = ((void**)${val})[${field_idx + 1}];")
+                                    discard_c_bool(check_c_nested_ctor_tags(ctx, fv, nf.pattern, fail_lbl))
+                                },
+                                none => {},
+                            }
+                        }
+                        true
+                    },
+                    none => false,
+                },
+                none => false,
+            }
+        },
+        _ => false,
+    }
+}
+
+// Phase-1 nested-tag checking for positional constructor fields (port of
+// check_positional_fields_nested_tags).  Returns true when any test emitted.
+fn check_c_positional_fields_nested_tags(mut ctx: CCtx, scrut: Str, fields: List<Pattern>, fail_lbl: Str) -> Bool {
+    let mut used = false
+    for j in 0..fields.len() {
+        match fields.get(j) {
+            some(fp) => {
+                match fp {
+                    Pattern::Binding { .. } => {},
+                    Pattern::Wildcard { .. } => {},
+                    _ => {
+                        let fv = fresh_tmp(ctx)
+                        c_emit(ctx, "${fv} = ((void**)${scrut})[${j + 1}];")
+                        if check_c_nested_ctor_tags(ctx, fv, fp, fail_lbl) {
+                            used = true
+                        }
+                    },
+                }
+            },
+            none => {},
+        }
+    }
+    used
+}
+
+// Phase-1 nested-tag checking for named constructor fields (port of
+// check_named_fields_nested_tags): resolve each named field's declared slot.
+fn check_c_named_fields_nested_tags(mut ctx: CCtx, scrut: Str, field_names: List<Str>, named_fields: List<NamedPatternField>, fail_lbl: Str) -> Bool {
+    let mut used = false
+    for j in 0..named_fields.len() {
+        match named_fields.get(j) {
+            some(nf) => {
+                match nf.pattern {
+                    Pattern::Binding { .. } => {},
+                    Pattern::Wildcard { .. } => {},
+                    _ => {
+                        let mut fidx = j
+                        for fi in 0..field_names.len() {
+                            if field_names[fi] == nf.name {
+                                fidx = fi
+                            }
+                        }
+                        let fv = fresh_tmp(ctx)
+                        c_emit(ctx, "${fv} = ((void**)${scrut})[${fidx + 1}];")
+                        if check_c_nested_ctor_tags(ctx, fv, nf.pattern, fail_lbl) {
+                            used = true
+                        }
+                    },
+                }
+            },
+            none => {},
+        }
+    }
+    used
+}
+
+// ============================================================
+// Pattern binding helpers (ports of bind_nested_pattern /
+// bind_constructor_fields / bind_named_constructor_fields).
+// ============================================================
+
+fn bind_c_nested_pattern(mut ctx: CCtx, val: Str, pat: Pattern) {
+    match pat {
+        Pattern::Binding { name, .. } => {
+            let cv = c_local(ctx, name)
+            c_emit(ctx, "${cv} = ${val};")
+        },
+        Pattern::Wildcard { .. } => {},
+        Pattern::Literal { .. } => {},
+        Pattern::OrPattern { .. } => {},
+        Pattern::Constructor { name, qualifier, fields, .. } => {
+            match find_c_enum_by_variant(ctx, name, qualifier) {
+                some(_ei) => {
+                    for i in 0..fields.len() {
+                        match fields.get(i) {
+                            some(fp) => {
+                                let fv = fresh_tmp(ctx)
+                                c_emit(ctx, "${fv} = ((void**)${val})[${i + 1}];")
+                                bind_c_nested_pattern(ctx, fv, fp)
+                            },
+                            none => {},
+                        }
+                    }
+                },
+                none => {},
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            // Tuple is a runtime list — element reads via ring_list_get.
+            rt_use(ctx, "ring_list_get", 2)
+            for i in 0..elements.len() {
+                match elements.get(i) {
+                    some(ep) => {
+                        let ev = fresh_tmp(ctx)
+                        c_emit(ctx, "${ev} = ring_list_get(${val}, ${i});")
+                        bind_c_nested_pattern(ctx, ev, ep)
+                    },
+                    none => {},
+                }
+            }
+        },
+        Pattern::NamedConstructor { name, qualifier, fields, .. } => {
+            match find_c_enum_by_variant(ctx, name, qualifier) {
+                some(ei) => {
+                    // Bind by FIELD NAME: the pattern may list fields in any order.
+                    let fnames = match ei.variants.get(name) {
+                        some(vi) => vi.field_names,
+                        none => [],
+                    }
+                    for i in 0..fields.len() {
+                        match fields.get(i) {
+                            some(nf) => {
+                                let mut field_idx = i
+                                for fi in 0..fnames.len() {
+                                    if fnames[fi] == nf.name {
+                                        field_idx = fi
+                                    }
+                                }
+                                let fv = fresh_tmp(ctx)
+                                c_emit(ctx, "${fv} = ((void**)${val})[${field_idx + 1}];")
+                                bind_c_nested_pattern(ctx, fv, nf.pattern)
+                            },
+                            none => {},
+                        }
+                    }
+                },
+                none => {
+                    // Struct pattern fallback: 0-based slots (no tag field).
+                    match resolve_c_struct_type(ctx, name) {
+                        some(si) => {
+                            for i in 0..fields.len() {
+                                match fields.get(i) {
+                                    some(nf) => {
+                                        let mut field_idx = i
+                                        for fi in 0..si.field_names.len() {
+                                            if si.field_names[fi] == nf.name {
+                                                field_idx = fi
+                                            }
+                                        }
+                                        let fv = fresh_tmp(ctx)
+                                        c_emit(ctx, "${fv} = ((void**)${val})[${field_idx}];")
+                                        bind_c_nested_pattern(ctx, fv, nf.pattern)
+                                    },
+                                    none => {},
+                                }
+                            }
+                        },
+                        none => {},
+                    }
+                },
+            }
+        },
+    }
+}
+
+// Bind a positional constructor pattern's fields (tag already verified).
+fn bind_c_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?, fields: List<Pattern>) {
+    match find_c_enum_by_variant(ctx, cname, qualifier) {
+        some(_ei) => {
+            for i in 0..fields.len() {
+                match fields.get(i) {
+                    some(field_pat) => {
+                        match field_pat {
+                            Pattern::Wildcard { .. } => {},
+                            _ => {
+                                let fv = fresh_tmp(ctx)
+                                c_emit(ctx, "${fv} = ((void**)${scrut})[${i + 1}];")
+                                bind_c_nested_pattern(ctx, fv, field_pat)
+                            },
+                        }
+                    },
+                    none => {},
+                }
+            }
+        },
+        none => {
+            // Struct pattern fallback: 0-based slots (no tag field at index 0).
+            match resolve_c_struct_type(ctx, cname) {
+                some(_si) => {
+                    for i in 0..fields.len() {
+                        match fields.get(i) {
+                            some(field_pat) => {
+                                match field_pat {
+                                    Pattern::Wildcard { .. } => {},
+                                    _ => {
+                                        let fv = fresh_tmp(ctx)
+                                        c_emit(ctx, "${fv} = ((void**)${scrut})[${i}];")
+                                        bind_c_nested_pattern(ctx, fv, field_pat)
+                                    },
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                },
+                none => {},
+            }
+        },
+    }
+}
+
+// Bind a named-constructor pattern's fields by field name (tag verified).
+fn bind_c_named_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?, named_fields: List<NamedPatternField>) {
+    match find_c_enum_by_variant(ctx, cname, qualifier) {
+        some(ei) => match ei.variants.get(cname) {
+            some(vi) => {
+                for i in 0..named_fields.len() {
+                    match named_fields.get(i) {
+                        some(nf) => {
+                            let mut field_idx = i
+                            for fi in 0..vi.field_names.len() {
+                                if vi.field_names[fi] == nf.name {
+                                    field_idx = fi
+                                }
+                            }
+                            match nf.pattern {
+                                Pattern::Wildcard { .. } => {},
+                                _ => {
+                                    let fv = fresh_tmp(ctx)
+                                    c_emit(ctx, "${fv} = ((void**)${scrut})[${field_idx + 1}];")
+                                    bind_c_nested_pattern(ctx, fv, nf.pattern)
+                                },
+                            }
+                        },
+                        none => {},
+                    }
+                }
+            },
+            none => {},
+        },
+        none => {
+            // Struct pattern fallback: 0-based slots.
+            match resolve_c_struct_type(ctx, cname) {
+                some(si) => {
+                    for i in 0..named_fields.len() {
+                        match named_fields.get(i) {
+                            some(nf) => {
+                                let mut field_idx = i
+                                for fi in 0..si.field_names.len() {
+                                    if si.field_names[fi] == nf.name {
+                                        field_idx = fi
+                                    }
+                                }
+                                match nf.pattern {
+                                    Pattern::Wildcard { .. } => {},
+                                    _ => {
+                                        let fv = fresh_tmp(ctx)
+                                        c_emit(ctx, "${fv} = ((void**)${scrut})[${field_idx}];")
+                                        bind_c_nested_pattern(ctx, fv, nf.pattern)
+                                    },
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                },
+                none => {},
+            }
+        },
+    }
+}
+
+// ============================================================
+// Registry lookups (ports of resolve_struct_type / find_enum_by_variant).
+// ============================================================
+
+// Resolve a struct by name with module-qualified fallback: patterns carry
+// bare names ("Pair") while the registry may key "inner::Pair".
+fn resolve_c_struct_type(ctx: CCtx, name: Str) -> CStructInfo? {
+    match ctx.struct_types.get(name) {
+        some(si) => some(si),
+        none => {
+            let suffix = "::${name}"
+            let mut sorted = ctx.struct_types.entries()
+            sorted.sort_by(compare_by_first)
+            let mut result: CStructInfo? = none
+            for entry in sorted {
+                let (k, v) = entry
+                if k.ends_with(suffix) {
+                    result = some(v)
+                }
+            }
+            result
+        },
+    }
+}
+
+// Find the enum containing a variant: explicit qualifier first, then the
+// variant name itself (single-variant enums), then a sorted scan of all
+// registered enums (determinism discipline).
+fn find_c_enum_by_variant(ctx: CCtx, variant_name: Str, qualifier: Str?) -> CEnumInfo? {
+    match qualifier {
+        some(q) => {
+            match ctx.enum_types.get(q) {
+                some(ei) => { return some(ei) },
+                none => {},
+            }
+        },
+        none => {},
+    }
+    match ctx.enum_types.get(variant_name) {
+        some(ei) => {
+            // Verify the enum actually contains this variant (avoid name
+            // collisions like Expr::BinOp vs enum BinOp).
+            if ei.variants.get(variant_name).is_some() {
+                return some(ei)
+            }
+        },
+        none => {},
+    }
+    let mut sorted_enums = ctx.enum_types.entries()
+    sorted_enums.sort_by(compare_by_first)
+    for entry in sorted_enums {
+        let (_ename, einfo) = entry
+        match einfo.variants.get(variant_name) {
+            some(_) => { return some(einfo) },
+            none => {},
+        }
+    }
+    none
 }
 
 // ============================================================
@@ -1339,10 +2250,9 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
             c_line_directive(ctx, span)
             emit_c_let_destructure(ctx, bindings, init)
         },
-        HStmt::IfLet { span, .. } => {
+        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
             c_line_directive(ctx, span)
-            // Constructor-pattern if-let needs enum tag access — step 4.
-            c_stub_stmt(ctx, "if-let statement")
+            emit_c_if_let(ctx, pattern, expr, then_block, else_block)
         },
         // Perceus RC ops (post-RC HIR input — mandatory from step 2 on).
         HStmt::Drop { name, .. } => {
@@ -1400,11 +2310,157 @@ fn emit_c_assign(mut ctx: CCtx, target: HExpr, value: HExpr) {
                 none => panic("C codegen: assign to undefined variable '${name}'"),
             }
         },
-        HExpr::FieldAccess { field, .. } => {
-            // Struct field stores are step 4.
-            c_stub_stmt(ctx, "struct field assignment (.${field})")
+        HExpr::FieldAccess { receiver, field, .. } => {
+            // Port of emit_assign's FieldAccess arm: locate the field slot in
+            // the struct layout and overwrite it (RC balance is the Perceus
+            // pass's responsibility — HIR carries the surrounding dups/drops).
+            let recv_val = gen_c_expr(ctx, receiver)
+            let recv_type = hexpr_type(receiver)
+            let type_name = match recv_type {
+                Type::StructType { name, .. } => name,
+                _ => panic("C codegen: field assign on non-struct type"),
+            }
+            match ctx.struct_types.get(type_name) {
+                some(info) => {
+                    let mut field_idx = -1
+                    for i in 0..info.field_names.len() {
+                        if info.field_names[i] == field {
+                            field_idx = i
+                        }
+                    }
+                    if field_idx < 0 {
+                        panic("C codegen: field '${field}' not found in struct '${type_name}'")
+                    }
+                    c_emit(ctx, "((void**)${recv_val})[${field_idx}] = ${val};")
+                },
+                none => panic("C codegen: struct type '${type_name}' not registered"),
+            }
         },
         _ => panic("C codegen: unsupported assignment target"),
+    }
+}
+
+// ============================================================
+// IfLet — port of emit_if_let: tag test on the scrutinee, then-branch binds
+// the pattern's Binding fields, else-branch optional.  Rendered as a plain C
+// if/else (no labels needed — both branches fall through to the join).
+// ============================================================
+
+fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr, else_block: HExpr?) {
+    let scrut = gen_c_expr(ctx, expr)
+    let scrut_ty = hexpr_type(expr)
+    // Enum name from the scrutinee's type; "Option" fallback for the common
+    // if-let-on-Option case (LLVM parity).
+    let enum_name = match scrut_ty {
+        Type::EnumType { name: en, .. } => en,
+        _ => "Option",
+    }
+
+    match pattern {
+        Pattern::Constructor { name, fields, .. } => {
+            let vi_opt = match ctx.enum_types.get(enum_name) {
+                some(ei) => ei.variants.get(name),
+                none => none,
+            }
+            match vi_opt {
+                some(vi) => {
+                    c_emit(ctx, "if (*(int64_t*)${scrut} == ${vi.tag}) {")
+                    ctx.indent = ctx.indent + 1
+                    for i in 0..fields.len() {
+                        match fields.get(i) {
+                            some(fp) => {
+                                match fp {
+                                    Pattern::Binding { name: bname, .. } => {
+                                        let bv = c_local(ctx, bname)
+                                        c_emit(ctx, "${bv} = ((void**)${scrut})[${i + 1}];")
+                                    },
+                                    _ => {},
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                    discard_c(gen_c_expr(ctx, then_block))
+                    ctx.indent = ctx.indent - 1
+                    match else_block {
+                        some(eb) => {
+                            c_emit(ctx, "} else {")
+                            ctx.indent = ctx.indent + 1
+                            discard_c(gen_c_expr(ctx, eb))
+                            ctx.indent = ctx.indent - 1
+                            c_emit(ctx, "}")
+                        },
+                        none => c_emit(ctx, "}"),
+                    }
+                },
+                none => {
+                    // Variant/enum not resolvable — execute the then block
+                    // unconditionally (LLVM best-effort parity).
+                    discard_c(gen_c_expr(ctx, then_block))
+                },
+            }
+        },
+        Pattern::NamedConstructor { name: cname, fields: nfields, .. } => {
+            let vi_opt = match ctx.enum_types.get(enum_name) {
+                some(ei) => ei.variants.get(cname),
+                none => none,
+            }
+            match vi_opt {
+                some(vi) => {
+                    c_emit(ctx, "if (*(int64_t*)${scrut} == ${vi.tag}) {")
+                    ctx.indent = ctx.indent + 1
+                    for i in 0..nfields.len() {
+                        match nfields.get(i) {
+                            some(nf) => {
+                                let mut field_idx = i
+                                for fi in 0..vi.field_names.len() {
+                                    if vi.field_names[fi] == nf.name {
+                                        field_idx = fi
+                                    }
+                                }
+                                match nf.pattern {
+                                    Pattern::Binding { name: bname, .. } => {
+                                        let bv = c_local(ctx, bname)
+                                        c_emit(ctx, "${bv} = ((void**)${scrut})[${field_idx + 1}];")
+                                    },
+                                    _ => {},
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                    discard_c(gen_c_expr(ctx, then_block))
+                    ctx.indent = ctx.indent - 1
+                    match else_block {
+                        some(eb) => {
+                            c_emit(ctx, "} else {")
+                            ctx.indent = ctx.indent + 1
+                            discard_c(gen_c_expr(ctx, eb))
+                            ctx.indent = ctx.indent - 1
+                            c_emit(ctx, "}")
+                        },
+                        none => c_emit(ctx, "}"),
+                    }
+                },
+                none => {
+                    discard_c(gen_c_expr(ctx, then_block))
+                },
+            }
+        },
+        Pattern::Binding { name: bname, .. } => {
+            // Irrefutable: bind the scrutinee, run then, skip else.
+            let bv = c_local(ctx, bname)
+            c_emit(ctx, "${bv} = ${scrut};")
+            discard_c(gen_c_expr(ctx, then_block))
+        },
+        Pattern::Wildcard { .. } => {
+            discard_c(gen_c_expr(ctx, then_block))
+        },
+        _ => {
+            // #176 parity: unrecognized pattern type — compile-time panic
+            // rather than silently treating as irrefutable.
+            panic("C codegen: unsupported pattern type in if-let")
+        },
     }
 }
 
