@@ -23,19 +23,25 @@ pub struct CFnInfo {
 
 // Struct field layout registration (field ORDER is the C struct layout:
 // field i lives at ((void**)ptr)[i] — every slot is one boxed void*).
+// field_rc_skip (B-104 D1 rule ①, audit #139): fields whose Ring type is (or
+// transitively contains) an extern handle / Ptr<T> — emit_c_drop_functions
+// must not ring_drop them (raw foreign pointers; leak instead of crash).
 pub struct CStructInfo {
-    pub field_names: List<Str>
+    pub field_names: List<Str>,
+    pub field_rc_skip: List<Bool>
 }
 
-// Enum variant registration (port of codegen_llvm_ctx::EnumVariantInfo,
-// minus the field_rc_skip flags — those are consumed by emit_drop_functions,
-// which is step 7).  Value layout mirrors the LLVM backend exactly:
+// Enum variant registration (port of codegen_llvm_ctx::EnumVariantInfo).
+// Value layout mirrors the LLVM backend exactly:
 //   { int64_t tag, void* field0, ..., void* field(max_fields-1) }
 // tag at *(int64_t*)ptr, payload field i at ((void**)ptr)[i + 1].
+// field_rc_skip: same extern-containment flags as CStructInfo, per payload
+// field — consumed by emit_c_drop_functions.
 pub struct CEnumVariantInfo {
     pub tag: Int,
     pub field_count: Int,
-    pub field_names: List<Str>
+    pub field_names: List<Str>,
+    pub field_rc_skip: List<Bool>
 }
 
 pub struct CEnumInfo {
@@ -97,6 +103,15 @@ pub struct CCtx {
     pub boxed_vars: Set<Int>,
     pub type_to_typeid: Map<Str, Int>,
     pub next_user_typeid: Int,
+
+    // ---- step 7: per-type drop functions (emit_c_drop_functions) ----
+    // B-002p1: types with user `impl Drop` — the generated ring_drop_<T> calls
+    // the user drop body BEFORE the recursive field drops.
+    pub drop_types: Set<Str>,
+    // `ring_register_drop(tid, (void*)ring_drop_<T>);` statements, emitted
+    // into C main() right after ring_runtime_init (LLVM parity:
+    // emit_drop_registrations runs in main's entry block).
+    pub drop_registrations: List<Str>,
 
     // ---- step 5: trait dict / closure registries ----
     // Trait method slot order + supertrait edges — populated from the SHARED
@@ -180,6 +195,8 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         boxed_vars: set_new(),
         type_to_typeid: map_new(),
         next_user_typeid: 64,
+        drop_types: set_new(),
+        drop_registrations: [],
         trait_method_order: map_new(),
         trait_supertraits: map_new(),
         static_dict_defs: map_new(),

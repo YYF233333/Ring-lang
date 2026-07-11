@@ -109,6 +109,12 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 - **catch 穷尽失败发 `ring_panic`**（LLVM unreachable）——match 家族同款稳健性偏离；evidence drop 按唯一 C 变量名记账（嵌套同 effect 不双 free）；`<setjmp.h>` 无条件进 preamble（确定性优先）
 - **LLVM_SKIP 重评估遗留处置（后续波）**：default_effect_topo / exhaustive_generic_payload / map_hof / map_ufcs_bug 四用例 C 下 PASS——需 runner 支持"LLVM 例外但 C 跑"的分化后挪出；其余同构失败条目保持 SKIP（共享层缺陷，证据在 audit #219/#220/#221）
 
+**已定语义对齐细节（step 7 落地，2026-07-12 沉淀）**：
+- **emit_c_drop_functions**：struct = 用户 `impl Drop` body 先于字段递归 drop（B-002p1）；enum = tag switch 逐 payload drop；注册序列内联 C main（`ring_runtime_init` 后、`__ring_default_evidence_init` 前，LLVM parity）；struct sorted 先 enum sorted 后（#237 确定性）
+- **容器 skip 集与 LLVM 逐一对齐**：List/Map/Option 走 runtime 固定 tid（4/5/8），Result 两侧均不注册（= audit #256 泄漏，修复待拍板排期）；`field_rc_skip`（extern-handle/Ptr 字段）走 `hir.ring::type_contains_extern_handle` 单一来源
+- **用户 drop 调用补齐 evidence 实参**（default evidence 全局或 RING_UNIT）——对 LLVM under-call（audit #254）的有意正确性偏离
+- RC 消费核对：LLVM 全部 19 处 dup/drop 发射位点已在 steps 2-6 落地，step 7 零修补（明细在 `03abbcc` commit message）
+
 ### 2.2 移植顺序（叶到根，每步 golden 子集验收）
 
 1. 模块骨架：codegen_c_ctx / 类型布局映射 / runtime 函数声明生成

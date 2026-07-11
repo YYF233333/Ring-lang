@@ -112,7 +112,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 ### 已知陷阱
 
-1. **Drop/Clone 冲突**（E0802）：Ring 禁止同时 `impl Drop` + `impl Clone`。内建容器（List/Map/Set）有编译器内建的 Clone，加 `impl Drop` 会触发 E0802。解法：在 codegen 的 `emit_drop_functions` 中为容器生成 custom drop 循环，不用 `impl Drop`
+1. **Drop/Clone 冲突**（E0802）：Ring 禁止同时 `impl Drop` + `impl Clone`。内建容器（List/Map/Set）有编译器内建的 Clone，加 `impl Drop` 会触发 E0802。解法（2026-07-12 修正，B-163 step 7 核实）：容器 drop 由 **runtime 在固定 typeid 上原生处理**（drop_list/drop_map tid 4/5、drop_option tid 8），codegen 的 `emit_drop_functions` **skip 这些 typeid 不生成**（RingList/RingMapStruct 布局是 runtime 私有，per-field drop 会漏 slot buffer）；Set/StringBuilder 是 extern type 不进 struct_types。注意 Result 当前两侧都不处理 = 泄漏（audit #256）
 2. **`let mut` effect 泄漏**：impl 方法中 `let mut i = 0; while i < n { ... i = i + 1 }` 会导致 `mut` effect 泄漏到方法签名。解法：用 `for i in 0..n` 代替 while 循环（range iterator 不泄漏 mut）
 3. **Effect 暴露**：C runtime 函数没有 effect 签名，Ring 方法有。迁移后调用者可能因新暴露的 effect 而编译失败。需检查 HOF 方法（map/filter/fold 等）的 effect 传播
 4. **Typeid 一致性**：用户定义的 struct 会被分配 user typeid（≥64），但 C runtime 的 drop/dup 使用固定 typeid（如 RING_TYPEID_LIST=4）。需在 codegen 中强制分配匹配的 typeid（`get_or_assign_typeid` 特殊化）

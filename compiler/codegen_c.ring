@@ -17,6 +17,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, HEffectOp, TraitBound, evidence_param_name, trait_bound_param_name,
     default_evidence_name, variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
     default_method_self_name, scan_trait_method_order, collect_all_supertraits,
+    type_contains_extern_handle,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, TypeKind}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
     CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_local, c_mangle_fn,
@@ -39,10 +40,12 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
 
     // B-091: auto-boxed mut-cell def_ids (closure write-through capture).
     for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
-    // B-144: extern type names (RC exclusion decisions — consumed in step 7's
-    // emit_drop_functions, field_rc_skip flags).
+    // B-144: extern type names (RC exclusion decisions — field_rc_skip flags
+    // consumed by emit_c_drop_functions).
     for en in program.extern_type_names { ctx.extern_types.insert(en) }
-    // program.drop_types (step 7): not consumed yet.
+    // B-002p1: types with user `impl Drop` (emit_c_drop_functions calls the
+    // user drop body before the recursive field drops).
+    for dt in program.drop_types { ctx.drop_types.insert(dt) }
 
     // B-104 D4: static dict singleton definitions (dict_lower) — the memoised
     // getters build wrapped instances from these.
@@ -93,7 +96,9 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
         emit_c_decl(ctx, decl)
     }
 
-    // Per-type drop functions (emit_drop_functions) are step 7.
+    // Step 7: per-type drop functions (port of emit_drop_functions) + the
+    // ring_register_drop statements consumed by the main wrapper below.
+    emit_c_drop_functions(ctx)
 
     // B-097: default evidence init fn (port of build_default_evidence_all —
     // the LLVM backend builds these inline in main's entry block; C uses a
@@ -201,13 +206,13 @@ fn c_register_builtin_enums(mut ctx: CCtx) {
     // Enum registry entries — match / if-let compile against these tags and
     // layouts (register_builtin_enums parity: some=0/none=1, Ok=0/Err=1).
     let mut option_variants: Map<Str, CEnumVariantInfo> = map_new()
-    option_variants.insert("some", CEnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
-    option_variants.insert("none", CEnumVariantInfo { tag: 1, field_count: 0, field_names: [] })
+    option_variants.insert("some", CEnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"], field_rc_skip: [false] })
+    option_variants.insert("none", CEnumVariantInfo { tag: 1, field_count: 0, field_names: [], field_rc_skip: [] })
     ctx.enum_types.insert("Option", CEnumInfo { variants: option_variants, max_fields: 1 })
 
     let mut result_variants: Map<Str, CEnumVariantInfo> = map_new()
-    result_variants.insert("Ok", CEnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
-    result_variants.insert("Err", CEnumVariantInfo { tag: 1, field_count: 1, field_names: ["value"] })
+    result_variants.insert("Ok", CEnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"], field_rc_skip: [false] })
+    result_variants.insert("Err", CEnumVariantInfo { tag: 1, field_count: 1, field_names: ["value"], field_rc_skip: [false] })
     ctx.enum_types.insert("Result", CEnumInfo { variants: result_variants, max_fields: 1 })
 
     // Pin Option's typeid to the runtime's fixed RING_TYPEID_OPTION (8) so
@@ -333,8 +338,15 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
             },
             HDecl::Struct { name, fields, .. } => {
                 let mut fnames: List<Str> = []
-                for f in fields { fnames.push(f.name) }
-                ctx.struct_types.insert(name, CStructInfo { field_names: fnames })
+                // B-104 D1 rule ① (audit #139): mark fields whose Ring type
+                // is (or transitively contains) an extern handle — the drop
+                // fn must not ring_drop them (register_struct_info parity).
+                let mut frs: List<Bool> = []
+                for f in fields {
+                    fnames.push(f.name)
+                    frs.push(type_contains_extern_handle(f.ty, ctx.extern_types))
+                }
+                ctx.struct_types.insert(name, CStructInfo { field_names: fnames, field_rc_skip: frs })
                 // The ring_<Name> constructor fn is declared AFTER the whole
                 // forward pass (c_declare_struct_ctors) — fns win collisions.
             },
@@ -402,7 +414,13 @@ fn register_c_enum_info(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) 
                 ns
             },
         }
-        variant_map.insert(v.name, CEnumVariantInfo { tag: tag, field_count: fc, field_names: fnames })
+        // B-104 D1 rule ①: extern-containment skip flags per payload field
+        // (register_enum_info parity).
+        let mut frs: List<Bool> = []
+        for ft in v.fields {
+            frs.push(type_contains_extern_handle(ft, ctx.extern_types))
+        }
+        variant_map.insert(v.name, CEnumVariantInfo { tag: tag, field_count: fc, field_names: fnames, field_rc_skip: frs })
         tag = tag + 1
     }
     ctx.enum_types.insert(name, CEnumInfo { variants: variant_map, max_fields: max_fields })
@@ -730,8 +748,160 @@ fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: St
 }
 
 // ============================================================
+// Step 7: per-type drop functions — port of codegen_llvm.ring's
+// emit_drop_functions / emit_drop_registrations.  For every registered
+// struct/enum a `void ring_drop_<T>(void* p)` is generated and registered
+// with the RC runtime (drop_table dispatch on the header typeid):
+//   * structs: [user `impl Drop` body first (B-002p1)] then per-field
+//     ring_drop, skipping extern-handle fields (B-104 D1 rule ①)
+//   * enums: switch on the tag, ring_drop each payload slot of the live
+//     variant (same skip flags)
+//   * List/Map keep the runtime's native drop_list/drop_map (fixed typeids
+//     4/5, registered by ring_runtime_init — the RingList/RingMapStruct
+//     layouts are runtime-private; B-152 P2/P3).  Option/Result keep the
+//     builtin recursion (drop_option; Result has no registered drop — LLVM
+//     parity).  Set/StringBuilder are extern types (not in struct_types).
+// Deviation from the LLVM oracle (recorded in worker_feedback): the user
+// drop call passes RING_UNIT / the default-evidence global for the drop
+// method's evidence params — the LLVM backend builds the call with data_ptr
+// only, under-calling the 2-param fn (the garbage register is never read
+// for io, but C prototypes make arity a hard clang error).
+// ============================================================
+
+fn emit_c_drop_functions(mut ctx: CCtx) {
+    rt_use(ctx, "ring_drop", 1)
+
+    // ---- user structs (sorted; audit #237 determinism) ----
+    let mut struct_names = ctx.struct_types.keys()
+    struct_names.sort()
+    for sname in struct_names {
+        // B-152 P2/P3: runtime-private layouts, native drop at typeid 4/5.
+        if sname == "List" { continue }
+        if sname == "Map" { continue }
+        match ctx.struct_types.get(sname) {
+            some(info) => {
+                let drop_name = "ring_drop_${c_sanitize(sname)}"
+                let mut def: List<Str> = []
+                def.push("void ${drop_name}(void* p) {")
+
+                // B-002p1: user `impl Drop` body runs BEFORE the recursive
+                // field drops (user cleanup can still read the fields).
+                if ctx.drop_types.contains(sname) {
+                    let user_drop_name = c_mangle_method(sname, "drop")
+                    match ctx.functions.get(user_drop_name) {
+                        some(fi) => {
+                            def.push("    ${fi.c_name}(${c_user_drop_args(ctx, user_drop_name, fi.total_params)});")
+                        },
+                        none => {
+                            eprintln("[drop-warn] user drop method '${user_drop_name}' not found for Drop type '${sname}'")
+                        },
+                    }
+                }
+
+                for i in 0..info.field_names.len() {
+                    let skip = match info.field_rc_skip.get(i) { some(s) => s, none => false }
+                    if skip == false {
+                        def.push("    ring_drop(((void**)p)[${i}]);")
+                    }
+                }
+
+                def.push("    (void)p;")
+                def.push("}")
+                ctx.fn_protos.push("void ${drop_name}(void* p);")
+                ctx.fn_defs.push(def.join("\n"))
+
+                let tid = get_or_assign_c_typeid(ctx, sname)
+                ctx.drop_registrations.push("ring_register_drop(${tid}, (void*)${drop_name});")
+            },
+            none => {},
+        }
+    }
+
+    // ---- user enums (sorted) ----
+    let mut enum_names = ctx.enum_types.keys()
+    enum_names.sort()
+    for ename in enum_names {
+        // Built-in enums: Option uses the runtime's drop_option (typeid 8);
+        // Result keeps generic recursion (LLVM parity: both skipped).
+        if ename == "Option" { continue }
+        if ename == "Result" { continue }
+        match ctx.enum_types.get(ename) {
+            some(enum_info) => {
+                let drop_name = "ring_drop_${c_sanitize(ename)}"
+                let mut def: List<Str> = []
+                def.push("void ${drop_name}(void* p) {")
+
+                let mut variant_keys = enum_info.variants.keys()
+                variant_keys.sort()
+                if variant_keys.len() > 0 {
+                    def.push("    switch (*(int64_t*)p) {")
+                    for vname in variant_keys {
+                        match enum_info.variants.get(vname) {
+                            some(vi) => {
+                                def.push("    case ${vi.tag}:")
+                                // Payload fields start at slot 1 (slot 0 = tag).
+                                for fi in 0..vi.field_count {
+                                    let skip = match vi.field_rc_skip.get(fi) { some(s) => s, none => false }
+                                    if skip == false {
+                                        def.push("        ring_drop(((void**)p)[${fi + 1}]);")
+                                    }
+                                }
+                                def.push("        break;")
+                            },
+                            none => {},
+                        }
+                    }
+                    def.push("    default:")
+                    def.push("        break;")
+                    def.push("    }")
+                }
+
+                def.push("    (void)p;")
+                def.push("}")
+                ctx.fn_protos.push("void ${drop_name}(void* p);")
+                ctx.fn_defs.push(def.join("\n"))
+
+                let tid = get_or_assign_c_typeid(ctx, ename)
+                ctx.drop_registrations.push("ring_register_drop(${tid}, (void*)${drop_name});")
+            },
+            none => {},
+        }
+    }
+
+    if ctx.drop_registrations.len() > 0 {
+        rt_use(ctx, "ring_register_drop", 2)
+    }
+}
+
+// Argument list for the user drop call inside ring_drop_<T>: `p` plus a
+// filler for every extra prototype param — trait-bound dicts (none for Drop
+// impls in practice) get RING_UNIT, evidence params get the B-097 default
+// evidence global when the effect has one (io/fail/handler-only effects get
+// RING_UNIT, same convention as the ring_main call below).
+fn c_user_drop_args(ctx: CCtx, user_drop_name: Str, total_params: Int) -> Str {
+    let no_ev: List<Str> = []
+    let ev = match ctx.fn_evidence_params.get(user_drop_name) {
+        some(e) => e,
+        none => no_ev,
+    }
+    let mut args: List<Str> = ["p"]
+    for _i in 1..(total_params - ev.len()) {
+        args.push("RING_UNIT")
+    }
+    // ep is "__ring_ev_<eff>" (prefix = 10 chars — lookup_evidence parity).
+    for ep in ev {
+        let effect_name = ep.slice(10, ep.len())
+        match ctx.default_evidence.get(effect_name) {
+            some(g) => args.push(g),
+            none => args.push("RING_UNIT"),
+        }
+    }
+    args.join(", ")
+}
+
+// ============================================================
 // C main() wrapper — parity with emit_c_main_common:
-//   ring_runtime_init(argc, argv) → [drop registrations: step 7] →
+//   ring_runtime_init(argc, argv) → drop registrations (step 7) →
 //   __ring_default_evidence_init (B-097, when any effect has all-default
 //   ops) → ring_main(default evidence…) or test functions → return 0.
 // ============================================================
@@ -741,6 +911,12 @@ fn emit_c_main_wrapper(mut ctx: CCtx) {
     let mut lines: List<Str> = []
     lines.push("int main(int argc, char** argv) {")
     lines.push("    ring_runtime_init(argc, argv);")
+    // Step 7: register per-type drop functions with the RC runtime BEFORE
+    // any Ring code runs (LLVM parity: emit_drop_registrations precedes the
+    // default-evidence construction in main's entry block).
+    for reg in ctx.drop_registrations {
+        lines.push("    ${reg}")
+    }
     if ctx.default_evidence.len() > 0 {
         lines.push("    __ring_default_evidence_init();")
     }

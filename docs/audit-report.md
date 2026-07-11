@@ -75,6 +75,36 @@
 
 ## LLVM Codegen
 
+### #255 `impl Drop for <enum>` 的用户 drop 从不被调用（两后端一致的既有 gap）[high] [judgment] [open]
+
+> 2026-07-12 B-163 step 7 worker 发现（C 侧按 oracle parity 照搬保持 diff=0，两侧都缺）。
+
+checker 对 enum 的 `impl Drop` 照常收进 `drop_types`（E0801 move 语义生效），但 LLVM `emit_drop_functions` 只在 struct 循环里查 `drop_types` 调用户 drop——enum 循环只做 payload 递归 drop，**用户 drop body 静默不执行**（静默资源泄漏：用户以为 RAII 生效实则没有）。C 侧 step 7 忠实移植同 gap。
+
+**修复方向**（解法明确）：两后端 enum drop fn 里 tag switch 前插用户 drop 调用（对齐 struct 循环的处理）+ E2E 锁定（enum 变体持资源 + impl Drop 触发顺序）。双后端同修保持 diff=0。
+
+发现者：step 7 worker（feedback 分诊）
+
+### #256 Result 壳 RC 归零时 payload 不递归释放（两后端同构泄漏）[high] [judgment] [open]
+
+> 2026-07-12 B-163 step 7 worker 发现（skip 集逐一对齐时暴露）。既有行为，非 step 7 引入。
+
+LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理），但 **runtime 没有 drop_result**（对照：Option 有 drop_option 固定 tid 8）——Result 对象 RC 归零时整壳 free、payload（ok/err 内含的堆对象）不递归 drop = 泄漏。两后端同构。
+
+**修复方向**（二选一，倾向 ①）：① runtime 加 `drop_result` 固定 tid 64（对齐 Option 先例，一致性最好；runtime 改动需同步 bootstrap 考虑）；② 两侧 codegen 取消 skip、为 Result 生成 drop fn（零 runtime 改动但两处发射）。修复后跑 RC 泄漏敏感 golden ×3。
+
+发现者：step 7 worker（feedback 分诊）
+
+### #254 LLVM 用户 drop 调用 under-call（evidence 实参缺失，潜伏炸点）[medium] [judgment] [open] [deferred: B-163p2-retire]
+
+> 2026-07-12 B-163 step 7 worker 发现（C 侧已按正确 arity 补齐 evidence 实参，有意偏离）。
+
+`fn drop(self)` 推断带 `{io}` → 原型两参，但 LLVM `emit_drop_functions` 构建用户 drop 调用只传 data_ptr 一个实参——callee 从垃圾寄存器读 evidence 参，io 路径恰好不读所以不炸。**潜伏条件**：drop 方法带「有 default ops 的自定义 effect」且 body 调 op 时，LLVM 读垃圾 evidence 指针即炸；C 侧正确（default evidence 全局或 RING_UNIT）。
+
+**修复方向**：LLVM 侧调用补齐 evidence 实参对齐 C；或不修随 Phase 2 退役消亡。
+
+发现者：step 7 worker（feedback 分诊）
+
 ### #251 abort handler 的 arm body 从不执行——checker 放行非恒等 body 但 codegen 忽略 [high] [judgment] [open]
 
 > 2026-07-12 B-163 step 6 worker 实测确认（双后端一致，共享设计缺陷；C 侧 faithful port 保持 diff=0）。
@@ -152,6 +182,8 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 用户自定义 `enum Result` + `impl Result { and_then }` 与 prelude `std/result.ring` 的同名方法都 mangle 成 `ring_Result_and_then`——codegen 身份未区分用户类型与被遮蔽的 prelude 类型。LLVM 后端「通过」纯属侥幸（forward pass 重名去重后第二个 body 成死块，调用点全走 prelude 定义，恰好语义相同）；C 后端 `2b85e9f` 起 `CCtx.emitted_fns` first-wins（等效语义，同样是缓解不是修复）。**次生 wrinkle**：`c_declare_fn`/LLVM forward_declare 对重名的 `fn_evidence_params` 是 last-wins（body/proto 是 first-wins）——重名双方 effect 行不同时调用点 evidence 实参数与原型不匹配（现有用例未触发）。
 
 **修复方向**：checker/mangling 层给用户定义类型与 prelude/builtin 类型不同的 codegen 身份（如模块前缀入 mangled name），两后端消费同一来源；歧义存在期间至少发 W/E 级诊断（用户 enum 遮蔽 prelude 类型名）。涉及 checker + hir 共享约定，需设计判断。
+
+> 2026-07-12 同族补充（step 7 worker）：用户 `fn drop_Foo()` mangle 成 `ring_drop_Foo` 会撞 struct Foo 的 drop fn 符号——LLVM 静默 rename 兜底，C 是 clang redefinition 硬错误（更响但报错不友好）。概率极低，随本条 mangling 方案一并解决。
 
 发现者：step 4 worker（feedback 分诊）
 
