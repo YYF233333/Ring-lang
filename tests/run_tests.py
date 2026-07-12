@@ -57,7 +57,6 @@ TIMEOUT_SELFCOMPILE = 900  # seconds, for self-compile / rc self-verify (600 was
 LLVM_SKIP = {
     # Non-tail-resumptive / deep handler patterns
     "default_effect_body_io.ring",
-    "default_effect_topo.ring",
     "mod_effect_evidence.ring",
     # Runtime gaps (clone/iterator/set)
     "api_clone.ring",
@@ -72,16 +71,26 @@ LLVM_SKIP = {
     # Runtime assertion failures (pre-existing LLVM backend bugs)
     "effect_custom_and_fail.ring",
     "effect_custom_multi_effect.ring",
-    "exhaustive_generic_payload.ring",
     "struct_match_pattern.ring",
     "tuple_eq.ring",
     "tuple_eq_struct.ring",
-    # Map runtime crashes (pre-existing, access violation)
-    "map_hof.ring",
-    "map_ufcs_bug.ring",
     # Negative cases: ring.exe behavior differs from in-process checker
     "error_occurs_check.ring",
     "error_tuple_oob.ring",
+}
+
+# Cases broken on the LLVM backend ONLY (pre-existing LLVM backend bugs,
+# audit #219/#220/#221 family) that the C backend runs and PASSes (B-163
+# step 6 re-evaluation). Skipped whenever the LLVM backend is involved:
+# --backend=llvm runs of e2e/llvm suites, and --suite diff (no oracle).
+LLVM_ONLY_SKIP = {
+    # Non-tail-resumptive / deep handler pattern (LLVM)
+    "default_effect_topo.ring",
+    # Runtime assertion failure (LLVM)
+    "exhaustive_generic_payload.ring",
+    # Map runtime crashes (LLVM, access violation)
+    "map_hof.ring",
+    "map_ufcs_bug.ring",
 }
 
 # Cases not yet supported by the C backend (B-163 migration set, independent
@@ -89,9 +98,8 @@ LLVM_SKIP = {
 # migration waves as the C backend gains coverage.
 C_SKIP: set = set()
 
-# The C backend does not support project/module mode yet; module cases are
-# SKIPped under --backend=c and --suite diff until a later wave flips this.
-C_BACKEND_SUPPORTS_MODULES = False
+# B-163 step 8: the C backend supports project/module mode (generate_c_project).
+C_BACKEND_SUPPORTS_MODULES = True
 
 # Windows-specific clang link flags.
 # /MANIFEST:EMBED + /MANIFESTUAC:asInvoker prevents Windows Installer Detection
@@ -456,6 +464,9 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             if name in LLVM_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, str(rel), "LLVM_SKIP"))
                 continue
+            if backend == "llvm" and name in LLVM_ONLY_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, str(rel), "LLVM_ONLY_SKIP"))
+                continue
             if backend == "c" and name in C_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, str(rel), "C_SKIP"))
                 continue
@@ -619,6 +630,9 @@ def run_llvm(ring_exe: str, clang_path: str, collector: ResultCollector,
             if name in LLVM_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, name, "LLVM_SKIP"))
                 continue
+            if backend == "llvm" and name in LLVM_ONLY_SKIP:
+                collector.add(TestResult(TestResult.SKIP, suite, name, "LLVM_ONLY_SKIP"))
+                continue
             if backend == "c" and name in C_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, name, "C_SKIP"))
                 continue
@@ -709,6 +723,10 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 continue
             if name in LLVM_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, rel, "LLVM_SKIP"))
+                continue
+            if name in LLVM_ONLY_SKIP:
+                # C backend runs these, but there is no LLVM oracle to diff against.
+                collector.add(TestResult(TestResult.SKIP, suite, rel, "LLVM_ONLY_SKIP"))
                 continue
             if name in C_SKIP:
                 collector.add(TestResult(TestResult.SKIP, suite, rel, "C_SKIP"))

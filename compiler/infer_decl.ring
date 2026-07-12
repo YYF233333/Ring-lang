@@ -14,7 +14,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type,
-    generalize, resolve_relative_qualifier}
+    generalize, resolve_relative_qualifier, collect_free_vars}
 use infer_helpers::{is_value_type}
 use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits, inject_assoc_types_from_bounds}
 use infer::{infer_block, infer_expr}
@@ -1844,10 +1844,33 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 // Also map effects
                 let mapped_effects = apply_subst_row_map(var_mapping, effects)
 
+                // B-163 step 8: quantify the effect-row vars written back into
+                // the scheme.  The REGISTRATION path quantifies effect tails
+                // (collect_effect_tail_vars, infer_register.ring) — this rebind
+                // path previously stored body-inferred effects whose check-time
+                // vars (row tails + fail<?e>/mut<?T> payload vars, which never
+                // appear in param/return position so var_mapping cannot reach
+                // them) stayed FREE in the scheme.  Free scheme vars survive
+                // instantiate() un-renamed; a cross-module caller unifies them
+                // in ITS OWN var-id space and its later fresh vars collide with
+                // the bindings (symptom: absurd E0301s at unrelated code).
+                // Quantifying gives every call site a fresh instance, matching
+                // the effect-row-polymorphism semantics of the tail vars.
+                let mut row_free: Set<Int> = set_new()
+                collect_free_vars(Type::EffectRowType {
+                    effects: mapped_effects.effects, tail: mapped_effects.tail
+                }, row_free)
+                let mut new_type_vars = list_clone(scheme.type_vars)
+                let mut sorted_row_free = row_free.to_list()
+                sorted_row_free.sort()
+                for v in sorted_row_free {
+                    if new_type_vars.contains(v) == false { new_type_vars.push(v) }
+                }
+
                 let new_type = Type::FnType {
                     params: reg_params, return_type: mapped_ret, effects: mapped_effects
                 }
-                ctx.env.rebind(name, TypeScheme { ..scheme, ty: new_type })
+                ctx.env.rebind(name, TypeScheme { ..scheme, ty: new_type, type_vars: new_type_vars })
             },
             _ => {}
         },

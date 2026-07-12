@@ -163,7 +163,20 @@ pub struct CCtx {
 
     // ---- test decls (#215 parity: no fn main -> C main calls tests) ----
     pub test_fns: List<Str>,
-    pub test_emit_idx: Int
+    pub test_emit_idx: Int,
+
+    // ---- step 8: project (multi-module) mode ----
+    // Current module's mangling prefix during the body pass (mirror of
+    // LlvmCtx.module_prefix).  Registry KEYS keep the LLVM backend's
+    // ring_<prefix>$$_<name> shape so the resolution chain (imports_map →
+    // prefix → bare → precise lookup) ports verbatim; the emitted C symbol
+    // is the sanitized CFnInfo.c_name.
+    pub module_prefix: Str?,
+    // Imported name -> qualified registry key (build_c_imports_map).
+    pub imports_map: Map<Str, Str>,
+    // Names declared by the CURRENT module (fns/structs/enums/consts/...) —
+    // c_resolve_fn qualifies these with module_prefix.
+    pub local_names: Set<Str>
 }
 
 pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
@@ -215,7 +228,10 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         last_line: -1,
         last_file: "",
         test_fns: [],
-        test_emit_idx: 0
+        test_emit_idx: 0,
+        module_prefix: none,
+        imports_map: map_new(),
+        local_names: set_new()
     }
 }
 
@@ -245,6 +261,35 @@ pub fn c_mangle_fn(name: Str) -> Str {
 
 pub fn c_mangle_method(type_name: Str, method_name: Str) -> Str {
     "ring_${c_sanitize(type_name)}_${c_sanitize(method_name)}"
+}
+
+// Module-qualified registry KEY: ring_<prefix>$$_<name> — byte-identical to
+// llvm_mangle_fn_with_prefix so the module resolution logic ports verbatim.
+// NOT a valid C identifier; the emitted symbol is c_sanitize'd in
+// c_declare_fn (CFnInfo.c_name), which every call site resolves through.
+pub fn c_mangle_fn_with_prefix(prefix: Str, name: Str) -> Str {
+    "ring_${prefix}$$_${name}"
+}
+
+// Resolve a function name through module context (port of llvm_resolve_fn):
+// imports_map first (cross-module references), then prefix-qualify names the
+// current module declares, else bare mangling.
+pub fn c_resolve_fn(ctx: CCtx, name: Str) -> Str {
+    match ctx.imports_map.get(name) {
+        some(qualified) => qualified,
+        none => {
+            match ctx.module_prefix {
+                some(prefix) => {
+                    if ctx.local_names.contains(name) {
+                        c_mangle_fn_with_prefix(prefix, name)
+                    } else {
+                        c_mangle_fn(name)
+                    }
+                },
+                none => c_mangle_fn(name),
+            }
+        },
+    }
 }
 
 // ============================================================

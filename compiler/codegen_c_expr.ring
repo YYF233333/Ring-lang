@@ -33,6 +33,7 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
     trait_dict_name, trait_bound_param_name, evidence_param_name, is_extern_handle_type}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_param, c_mangle_fn,
+    c_resolve_fn,
     c_mangle_method, c_sanitize, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
     c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid,
     c_push_fn, c_pop_fn}
@@ -181,6 +182,98 @@ fn gen_c_str_lit(mut ctx: CCtx, value: Str) -> Str {
 }
 
 // ============================================================
+// Step 8: module-aware function lookup (ports of find_fn_precise /
+// find_fn_by_prefix_enumeration / find_fn_by_suffix / find_function_in_ctx
+// from codegen_llvm_expr.ring — registry keys share the LLVM backend's
+// ring_<prefix>$$_<name> shape, so the chains port verbatim).
+// ============================================================
+
+struct CFnLookup {
+    fi: CFnInfo,
+    key: Str
+}
+
+fn c_lookup_key(ctx: CCtx, key: Str) -> CFnLookup? {
+    match ctx.functions.get(key) {
+        some(fi) => some(CFnLookup { fi: fi, key: key }),
+        none => none,
+    }
+}
+
+// Precise function lookup: resolve by name using module infrastructure,
+// falling back to suffix match only as last resort.
+fn c_find_fn_precise(ctx: CCtx, name: Str) -> CFnLookup? {
+    // 1. Precise match via c_resolve_fn (imports_map, module_prefix, bare)
+    let resolved = c_resolve_fn(ctx, name)
+    match c_lookup_key(ctx, resolved) {
+        some(r) => { return some(r) },
+        none => {},
+    }
+    // 2. Bare mangling (builtins / unqualified names)
+    match c_lookup_key(ctx, c_mangle_fn(name)) {
+        some(r) => { return some(r) },
+        none => {},
+    }
+    // 3. All known module prefixes via imports_map values' prefixes
+    match c_find_fn_by_prefix_enumeration(ctx, name) {
+        some(r) => { return some(r) },
+        none => {},
+    }
+    // 4. Suffix fallback (last resort) — first key ending with $$_<name>
+    c_find_fn_by_suffix(ctx, name)
+}
+
+fn c_find_fn_by_prefix_enumeration(ctx: CCtx, name: Str) -> CFnLookup? {
+    let mut seen_prefixes: Set<Str> = set_new()
+    let mut sorted_imports = ctx.imports_map.entries()
+    sorted_imports.sort_by(compare_by_first)
+    for entry in sorted_imports {
+        let (_, qualified) = entry
+        // Extract prefix: everything before "$$_"
+        match qualified.index_of("$$_") {
+            some(sep_idx) => {
+                let prefix_part = qualified.slice(0, sep_idx)
+                if !seen_prefixes.contains(prefix_part) {
+                    seen_prefixes.insert(prefix_part)
+                    match c_lookup_key(ctx, "${prefix_part}$$_${name}") {
+                        some(r) => { return some(r) },
+                        none => {},
+                    }
+                }
+            },
+            none => {},
+        }
+    }
+    none
+}
+
+fn c_find_fn_by_suffix(ctx: CCtx, name: Str) -> CFnLookup? {
+    let suffix = "$$_${name}"
+    let mut sorted_fns = ctx.functions.entries()
+    sorted_fns.sort_by(compare_by_first)
+    for entry in sorted_fns {
+        let (fn_key, fi) = entry
+        if fn_key.ends_with(suffix) {
+            return some(CFnLookup { fi: fi, key: fn_key })
+        }
+    }
+    none
+}
+
+// Multi-strategy lookup given an already-resolved key + the source name.
+fn c_find_function_in_ctx(ctx: CCtx, mangled: Str, name: Str) -> CFnLookup? {
+    match c_lookup_key(ctx, mangled) {
+        some(r) => some(r),
+        none => {
+            match c_lookup_key(ctx, c_mangle_fn(name)) {
+                some(r) => some(r),
+                none => c_find_fn_precise(ctx, name),
+            }
+        },
+    }
+}
+
+// ============================================================
 // Identifiers
 // ============================================================
 
@@ -229,25 +322,38 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
                 },
                 _ => {},
             }
-            // Module-level const / zero-arg ctor reference.
-            let mangled = c_mangle_fn(lookup_name)
-            let fn_info = match ctx.functions.get(mangled) {
-                some(fi) => some(fi),
-                none => ctx.functions.get(c_mangle_fn(name)),
+            // Module-level const / zero-arg ctor reference.  Step 8: module-
+            // aware resolution chain — resolved key → bare name → resolved
+            // name → bare lookup_name → precise lookup (gen_ident parity).
+            let fn_info = match c_lookup_key(ctx, c_resolve_fn(ctx, lookup_name)) {
+                some(r) => some(r),
+                none => match c_lookup_key(ctx, c_mangle_fn(name)) {
+                    some(r) => some(r),
+                    none => match c_lookup_key(ctx, c_resolve_fn(ctx, name)) {
+                        some(r) => some(r),
+                        none => match c_lookup_key(ctx, c_mangle_fn(lookup_name)) {
+                            some(r) => some(r),
+                            none => match c_find_fn_precise(ctx, name) {
+                                some(r) => some(r),
+                                none => c_find_fn_precise(ctx, lookup_name),
+                            },
+                        },
+                    },
+                },
             }
             match fn_info {
-                some(fi) => {
-                    if fi.total_params == 0 {
+                some(lookup) => {
+                    if lookup.fi.total_params == 0 {
                         // Zero-arg const getter / ctor — call it.
                         let t = fresh_tmp(ctx)
-                        c_emit(ctx, "${t} = ${fi.c_name}();")
+                        c_emit(ctx, "${t} = ${lookup.fi.c_name}();")
                         t
                     } else {
                         // Non-FnType-annotated fn reference (checker gap) —
                         // raw pointer, matching call_zero_arg_or_return's
                         // bare fn_val return on the LLVM side.
                         let t = fresh_tmp(ctx)
-                        c_emit(ctx, "${t} = (void*)${fi.c_name};")
+                        c_emit(ctx, "${t} = (void*)${lookup.fi.c_name};")
                         t
                     }
                 },
@@ -264,13 +370,14 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
 // (ring_dup'd; static singletons are never-drop no-ops), evidence slots are
 // stored AFTER the dicts, OUTSIDE the counted window (handler-scoped, B-096).
 fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> Str {
-    // Resolve the real function.
-    let mangled = c_mangle_fn(lookup_name)
-    let fn_key = if ctx.functions.contains_key(mangled) { mangled } else { c_mangle_fn(name) }
-    let fi = match ctx.functions.get(fn_key) {
-        some(f) => f,
+    // Resolve the real function (step 8: module-aware chain, LLVM parity).
+    let mangled = c_resolve_fn(ctx, lookup_name)
+    let found = match c_find_function_in_ctx(ctx, mangled, name) {
+        some(r) => r,
         none => panic("C codegen: dict-closure wrapper: function '${name}' not found"),
     }
+    let fn_key = found.key
+    let fi = found.fi
 
     // Param count of the FUNCTION VALUE (without dicts/evidence).
     let param_count = match ty {
@@ -985,10 +1092,14 @@ fn consider_c_capture_name(ctx: CCtx, name: Str, resolved_name: Str?, params: Li
         if p.name == lookup_name || p.name == name { is_param = true }
     }
     if is_param { return }
-    let is_fn = if ctx.functions.contains_key(c_mangle_fn(lookup_name)) {
+    // Step 8: module-aware fn check (consider_capture_name parity —
+    // resolved lookup_name → bare name → resolved name).
+    let is_fn = if ctx.functions.contains_key(c_resolve_fn(ctx, lookup_name)) {
+        true
+    } else if ctx.functions.contains_key(c_mangle_fn(name)) {
         true
     } else {
-        ctx.functions.contains_key(c_mangle_fn(name))
+        ctx.functions.contains_key(c_resolve_fn(ctx, name))
     }
     if is_fn { return }
     let is_local = match ctx.named_values.get(lookup_name) {
@@ -2134,14 +2245,15 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
         none => {},
     }
 
-    // Ring function lookup.
-    let mangled = c_mangle_fn(name)
-    match ctx.functions.get(mangled) {
-        some(fi) => {
+    // Ring function lookup (step 8: module-aware resolution, gen_direct_call
+    // parity — resolved key first, then bare, then precise cross-module).
+    let mangled = c_resolve_fn(ctx, name)
+    match c_find_function_in_ctx(ctx, mangled, name) {
+        some(lookup) => {
             let mut call_args: List<Str> = []
             for a in arg_vals { call_args.push(a) }
             for dv in dict_vals { call_args.push(dv) }
-            match ctx.fn_evidence_params.get(mangled) {
+            match ctx.fn_evidence_params.get(lookup.key) {
                 some(ev_params) => {
                     for ep in ev_params {
                         call_args.push(c_lookup_evidence(ctx, ep))
@@ -2150,7 +2262,7 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
                 none => {},
             }
             let t = fresh_tmp(ctx)
-            c_emit(ctx, "${t} = ${fi.c_name}(${call_args.join(", ")});")
+            c_emit(ctx, "${t} = ${lookup.fi.c_name}(${call_args.join(", ")});")
             t
         },
         none => {

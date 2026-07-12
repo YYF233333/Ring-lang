@@ -6,6 +6,7 @@ use formatter::{format_human, format_llm}
 use env::{TypeEnv}
 use checker::{check_module}
 use codegen_llvm::{generate_llvm, generate_llvm_project}
+use codegen_c::{generate_c_project}
 use resolver::{ModuleGraph, ModuleId, module_key, module_prefix,
     build_module_graph}
 use exports::{ModuleExports, extract_exports}
@@ -216,6 +217,54 @@ pub fn compile_project_llvm(entry_file: Str, output_path: Str, error_format: Str
 
             generate_llvm_project(modules, entry_prefix, output_path)
             LlvmCompileResult { success: true }
+        },
+    }
+}
+
+// ============================================================
+// B-163 step 8: C-backend multi-file compilation mode.
+// Same pipeline as compile_project_llvm (topo order, per-module
+// perceus_transform), handed to generate_c_project (single .c → clang).
+// ============================================================
+
+pub struct CProjectCompileResult {
+    pub success: Bool
+}
+
+pub fn compile_project_c(entry_file: Str, c_path: Str, o_path: Str, emit_lines: Bool, error_format: Str) -> CProjectCompileResult {
+    match compile_phases(entry_file, error_format) {
+        none => CProjectCompileResult { success: false },
+        some(phases) => {
+            let entry_key = module_key(phases.graph.entry.path_segments)
+
+            // Build list of (module_prefix, HProgram, uses) in topo order
+            let mut modules: List<(Str, HProgram, List<UseDecl>)> = []
+            let mut entry_prefix = ""
+
+            for key in phases.graph.topo_order {
+                match (phases.graph.modules.get(key), phases.module_hirs.get(key), phases.module_asts.get(key)) {
+                    (some(mod_), some(hir), some(ast)) => {
+                        let prefix = module_prefix(mod_.path_segments)
+                        let rc_hir = perceus_transform(hir)
+                        modules.push((prefix, rc_hir, ast.uses))
+                        if key == entry_key {
+                            entry_prefix = prefix
+                        }
+                    },
+                    (some(mod_), some(hir), none) => {
+                        let prefix = module_prefix(mod_.path_segments)
+                        let rc_hir = perceus_transform(hir)
+                        modules.push((prefix, rc_hir, []))
+                        if key == entry_key {
+                            entry_prefix = prefix
+                        }
+                    },
+                    _ => {},
+                }
+            }
+
+            generate_c_project(modules, entry_prefix, c_path, o_path, emit_lines)
+            CProjectCompileResult { success: true }
         },
     }
 }

@@ -5,7 +5,7 @@ use formatter::{format_human, format_llm}
 use checker::{CheckResult, check as check_single}
 use codegen_llvm::{generate_llvm}
 use codegen_c::{generate_c}
-use compiler_mod::{compile_project, compile_project_llvm, verify_project_rc}
+use compiler_mod::{compile_project, compile_project_llvm, compile_project_c, verify_project_rc}
 use parser::{parse}
 use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{verify_rc_program, rc_fatal_count, format_rc_findings}
@@ -84,13 +84,23 @@ pub fn cli_main() {
             }
         } else {
             if parsed.command == "build" {
-                // B-163: multi-file (project) C emission lands in step 8.
+                let out_dir = path_resolve(parsed.out_dir)
                 if parsed.target == "c" {
-                    eprintln("--target=c does not support multi-file (project) mode yet — planned for B-163 step 8; use --target=llvm")
-                    exit_process(1)
+                    // B-163 step 8: multi-file (project) C emission — both the
+                    // .c and the clang-compiled .o land in out_dir (parity with
+                    // the LLVM project branch, which always uses out_dir).
+                    let base = path_basename(file_path).replace(".ring", "")
+                    let c_path = path_join(out_dir, "${base}.c")
+                    let o_path = path_join(out_dir, "${base}.o")
+                    let c_result = compile_project_c(file_path, c_path, o_path, parsed.c_lines, parsed.error_format)
+                    if c_result.success {
+                        // success message printed by generate_c_project
+                    } else {
+                        eprintln("Compilation failed")
+                        exit_process(1)
+                    }
                     return
                 }
-                let out_dir = path_resolve(parsed.out_dir)
                 let out_path = path_join(out_dir, path_basename(file_path).replace(".ring", ".o"))
                 let result = compile_project_llvm(file_path, out_path, parsed.error_format)
                 if result.success {
