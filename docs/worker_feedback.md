@@ -68,7 +68,9 @@
 - **A — 扩大 step 8**：先建立 module-qualified nominal identity 与 resolved export origin 契约，再完成 C project backend。工作量显著增加，但 project mode 不留静默 wrong-code。
 - **B — 收窄 Phase 1 step 8**：只承诺无跨模块同名 nominal type、无歧义 re-export 的 project 子集；对不支持形态 fail-closed，并将完整模块身份另立 P0/P1。函数 key/effect/mut/checker 修复完成后可合入。
 
-当前已停在安全点：主分支未 merge，step 9 未开始；worktree 保留约 `+314/-51` 的未提交修复和临时验证产物。
+**用户决策（2026-07-15）**：选择 **A，彻底修复**。本项恢复执行；step 8 必须同时闭合 module-qualified nominal identity、resolved export origin、alias 后的 mut/ABI 元数据传播，并通过双后端对抗回归与 LLVM self-compile ×3 确定性 gate。完成后停下汇报，不进入 step 9。
+
+决策前停在安全点：主分支未 merge，step 9 未开始；现已复用保留约 `+314/-51` 未提交修复的 worktree 恢复 step 8。
 
 ### 2. 基线确定性已确证 [通知]
 
