@@ -253,6 +253,18 @@ pub fn get_hexpr_root_type(target: HExpr) -> Type {
 // infer_ident (from infer-expr.ts)
 // ============================================================
 
+// Origin metadata is keyed by the lexical binding's DefId, so same-spelled
+// locals cannot inherit an imported or module-level binding's origin.
+fn exact_value_origin(ctx: InferCtx, spelling: Str, scheme: TypeScheme) -> Str {
+    match scheme.def_id {
+        some(def_id) => match ctx.use_aliases.get(def_id) {
+            some(origin) => origin,
+            none => spelling
+        },
+        none => spelling
+    }
+}
+
 pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
     // Resolve relative paths (self::/super::) to actual qualified names
     let mut resolved_qualifier = qualifier
@@ -291,8 +303,9 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             match mod_scheme {
                 some(ms) => {
                     let t = ctx.env.instantiate(ms)
+                    let actual_name = exact_value_origin(ctx, qualified_name, ms)
                     return InferResult {
-                        hexpr: HExpr::Ident { name: qualified_name, resolved_name: none, def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                        hexpr: HExpr::Ident { name: actual_name, resolved_name: none, def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                         subst: subst, effects: EMPTY_ROW
                     }
                 },
@@ -306,8 +319,9 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                         match full_scheme {
                             some(fs) => {
                                 let t = ctx.env.instantiate(fs)
+                                let actual_name = exact_value_origin(ctx, full_qualified, fs)
                                 return InferResult {
-                                    hexpr: HExpr::Ident { name: full_qualified, resolved_name: none, def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                                    hexpr: HExpr::Ident { name: actual_name, resolved_name: none, def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                                     subst: subst, effects: EMPTY_ROW
                                 }
                             },
@@ -363,10 +377,7 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             let mut enum_name: Str? = none
             // Check if this name was imported via use alias (e.g. use super::value)
             // If so, use the qualified name in HIR for correct codegen
-            let actual_name = match ctx.use_aliases.get(name) {
-                some(qualified) => qualified,
-                none => name
-            }
+            let actual_name = exact_value_origin(ctx, name, s)
             match resolved_qualifier {
                 some(q) => {
                     match ctx.env.types.enums.get(q) {
@@ -824,7 +835,7 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
                             some(found_v) => {
                                 if found_v.fields.len() == 0 {
                                     let empty_pats: List<Pattern> = []
-                                    Pattern::Constructor { name: name, qualifier: none, fields: empty_pats, span: span }
+                                    Pattern::Constructor { name: name, qualifier: some(edef.name), fields: empty_pats, span: span }
                                 } else {
                                     pattern
                                 }
@@ -849,14 +860,37 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
             for f in fields {
                 new_fields.push(rewrite_bare_enum_bindings(env, f))
             }
-            Pattern::Constructor { name: name, qualifier: qualifier, fields: new_fields, span: span }
+            let canonical_qualifier = match qualifier {
+                some(q) => match env.types.enums.get(q) {
+                    some(edef) => some(edef.name), none => qualifier
+                },
+                none => env.types.variant_to_enum.get(name)
+            }
+            Pattern::Constructor { name: name, qualifier: canonical_qualifier, fields: new_fields, span: span }
         },
         Pattern::NamedConstructor { name, qualifier, fields, rest, span } => {
             let mut new_fields: List<NamedPatternField> = []
             for f in fields {
                 new_fields.push(NamedPatternField { name: f.name, pattern: rewrite_bare_enum_bindings(env, f.pattern), span: f.span })
             }
-            Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: new_fields, rest: rest, span: span }
+            let canonical_enum = match qualifier {
+                some(q) => match env.types.enums.get(q) {
+                    some(edef) => some(edef.name), none => none
+                },
+                none => env.types.variant_to_enum.get(name)
+            }
+            match canonical_enum {
+                some(ename) => Pattern::NamedConstructor { name: name, qualifier: some(ename), fields: new_fields, rest: rest, span: span },
+                none => {
+                    let struct_lookup = match qualifier {
+                        some(q) => "${q}::${name}", none => name
+                    }
+                    match env.types.structs.get(struct_lookup) {
+                        some(sdef) => Pattern::NamedConstructor { name: sdef.name, qualifier: none, fields: new_fields, rest: rest, span: span },
+                        none => Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: new_fields, rest: rest, span: span }
+                    }
+                }
+            }
         },
         Pattern::OrPattern { patterns, span } => {
             let mut new_pats: List<Pattern> = []

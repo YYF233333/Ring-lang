@@ -2336,8 +2336,8 @@ struct FnLookupResult {
     fn_mangled: Str
 }
 
-// Precise function lookup: resolve by name using module infrastructure,
-// falling back to suffix match only as last resort.
+// Precise function lookup. Checker HIR carries the exact canonical origin;
+// backend-wide prefix/suffix scans would silently select the wrong module.
 fn find_fn_precise(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
     // 1. Precise match via llvm_resolve_fn (checks imports_map, module_prefix, bare)
     let resolved = llvm_resolve_fn(ctx, name)
@@ -2352,56 +2352,6 @@ fn find_fn_precise(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
     match step2 {
         some(fn_val) => { return some(FnLookupResult { fn_val: fn_val, fn_mangled: plain }) },
         none => {},
-    }
-    // 3. Try all known module prefixes via imports_map values' prefixes
-    //    e.g. if imports_map has "foo" → "ring_mod$$_foo", try "ring_mod$$_<name>"
-    let step3 = find_fn_by_prefix_enumeration(ctx, name)
-    match step3 {
-        some(result) => { return some(result) },
-        none => {},
-    }
-    // 4. Suffix fallback (last resort) — find first function ending with $$_<name>
-    find_fn_by_suffix(ctx, name)
-}
-
-// Try all known module prefixes from imports_map to find a function
-fn find_fn_by_prefix_enumeration(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
-    let mut seen_prefixes: Set<Str> = set_new()
-    let mut sorted_imports = ctx.imports_map.entries()
-    sorted_imports.sort_by(compare_by_first)
-    for entry in sorted_imports {
-        let (_, qualified) = entry
-        // Extract prefix: everything before "$$_"
-        let maybe_idx = qualified.index_of("$$_")
-        match maybe_idx {
-            some(sep_idx) => {
-                let prefix_part = qualified.slice(0, sep_idx)
-                if !seen_prefixes.contains(prefix_part) {
-                    seen_prefixes.insert(prefix_part)
-                    let candidate = "${prefix_part}$$_${name}"
-                    let found = ctx.functions.get(candidate)
-                    match found {
-                        some(fn_val) => { return some(FnLookupResult { fn_val: fn_val, fn_mangled: candidate }) },
-                        none => {},
-                    }
-                }
-            },
-            none => {},
-        }
-    }
-    none
-}
-
-// Last-resort suffix match for cross-module resolution
-fn find_fn_by_suffix(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
-    let suffix = "$$_${name}"
-    let mut sorted_fns = ctx.functions.entries()
-    sorted_fns.sort_by(compare_by_first)
-    for entry in sorted_fns {
-        let (fn_name, fn_val) = entry
-        if fn_name.ends_with(suffix) {
-            return some(FnLookupResult { fn_val: fn_val, fn_mangled: fn_name })
-        }
     }
     none
 }
@@ -4403,28 +4353,9 @@ fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cnam
     }
 }
 
-// Helper: resolve a struct type by name, falling back to module-qualified
-// lookup. AST patterns carry bare struct names (e.g. "Pair") while the LLVM
-// struct_types map stores them under their checker-qualified key
-// (e.g. "inner::Pair"). Try the bare key first, then scan for a key ending
-// with "::<name>".
+// Pattern identities are canonicalized by the checker.
 fn resolve_struct_type(ctx: LlvmCtx, name: Str) -> StructFieldInfo? {
-    match ctx.struct_types.get(name) {
-        some(si) => some(si),
-        none => {
-            let suffix = "::${name}"
-            let mut sorted = ctx.struct_types.entries()
-            sorted.sort_by(compare_by_first)
-            let mut result: StructFieldInfo? = none
-            for entry in sorted {
-                let (k, v) = entry
-                if k.ends_with(suffix) {
-                    result = some(v)
-                }
-            }
-            result
-        },
-    }
+    ctx.struct_types.get(name)
 }
 
 // Helper: find enum type info by variant name (or qualifier if present)
@@ -4438,27 +4369,6 @@ fn find_enum_by_variant(ctx: LlvmCtx, variant_name: Str, qualifier: Str?) -> Enu
             }
         },
         none => {},
-    }
-    // Try variant name as enum name (for single-variant enums where variant = type)
-    // Verify the enum actually contains this variant to avoid name collisions
-    // (e.g. Expr::BinOp vs enum BinOp)
-    match ctx.enum_types.get(variant_name) {
-        some(ei) => {
-            if ei.variants.get(variant_name).is_some() {
-                return some(ei)
-            }
-        },
-        none => {},
-    }
-    // Search all registered enums for this variant
-    let mut sorted_enums = ctx.enum_types.entries()
-    sorted_enums.sort_by(compare_by_first)
-    for entry in sorted_enums {
-        let (ename, einfo) = entry
-        match einfo.variants.get(variant_name) {
-            some(_) => { return some(einfo) },
-            none => {},
-        }
     }
     none
 }

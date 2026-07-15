@@ -255,12 +255,75 @@ pub fn c_sanitize(name: Str) -> Str {
     parts.join("")
 }
 
+// Encode a module-qualified registry key as a portable C identifier.
+//
+// Registry keys deliberately keep the LLVM resolver contract
+// (`ring_<module-prefix>$$_<name>`).  Applying c_sanitize to those keys is
+// not injective: both `$` and `_` collapse to `_`, so e.g. modules `a::b`
+// and `a_b` can emit the same linker symbol.  Project symbols use a separate,
+// reversible escape alphabet:
+//   `_` -> `__`, `$` -> `_m`, other non-alnum -> `_x<codepoint>_`.
+// Literal underscores are always escaped, so every escape is unambiguous.
+// The `ringmod_` namespace cannot collide with ordinary Ring functions,
+// whose C symbols always start with `ring_`.
+pub fn c_module_symbol(registry_key: Str) -> Str {
+    let payload = if registry_key.starts_with("ring_") {
+        registry_key.slice(5, registry_key.len())
+    } else {
+        registry_key
+    }
+    let mut parts: List<Str> = ["ringmod_"]
+    for i in 0..payload.len() {
+        let c = payload.char_code_at(i).unwrap_or(95)
+        let alnum = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+        if alnum {
+            parts.push(payload[i])
+        } else if c == 95 {
+            parts.push("__")
+        } else if c == 36 {
+            parts.push("_m")
+        } else {
+            parts.push("_x${c}_")
+        }
+    }
+    parts.join("")
+}
+
+// Only module-qualified registry keys use the reversible project encoding.
+// Single-file symbols and every runtime ABI name retain their byte-for-byte
+// step 1-7 spelling.
+pub fn c_symbol_for_fn_key(registry_key: Str) -> Str {
+    if registry_key.starts_with("ringmod_") {
+        registry_key
+    } else if registry_key.index_of("$$_").is_some() {
+        c_module_symbol(registry_key)
+    } else {
+        c_sanitize(registry_key)
+    }
+}
+
+// Encode any identity-bearing fragment that participates in an emitted C
+// symbol (drop glue, dictionaries, evidence, thunks, etc.).  Non-module names
+// retain the exact step 1-7 ABI spelling; canonical project identities use the
+// same injective encoder as function symbols.
+pub fn c_symbol_fragment(name: Str) -> Str {
+    if name.index_of("$$_").is_some() { c_module_symbol(name) } else { c_sanitize(name) }
+}
+
 pub fn c_mangle_fn(name: Str) -> Str {
-    "ring_${c_sanitize(name)}"
+    if name.index_of("$$_").is_some() {
+        "ring_${name}"
+    } else {
+        "ring_${c_sanitize(name)}"
+    }
 }
 
 pub fn c_mangle_method(type_name: Str, method_name: Str) -> Str {
-    "ring_${c_sanitize(type_name)}_${c_sanitize(method_name)}"
+    if type_name.index_of("$$_").is_some() {
+        c_module_symbol("ring_${type_name}_${method_name}")
+    } else {
+        "ring_${c_sanitize(type_name)}_${c_sanitize(method_name)}"
+    }
 }
 
 // Module-qualified registry KEY: ring_<prefix>$$_<name> — byte-identical to
@@ -268,13 +331,14 @@ pub fn c_mangle_method(type_name: Str, method_name: Str) -> Str {
 // NOT a valid C identifier; the emitted symbol is c_sanitize'd in
 // c_declare_fn (CFnInfo.c_name), which every call site resolves through.
 pub fn c_mangle_fn_with_prefix(prefix: Str, name: Str) -> Str {
-    "ring_${prefix}$$_${name}"
+    if name.index_of("$$_").is_some() { c_mangle_fn(name) } else { "ring_${prefix}$$_${name}" }
 }
 
 // Resolve a function name through module context (port of llvm_resolve_fn):
 // imports_map first (cross-module references), then prefix-qualify names the
 // current module declares, else bare mangling.
 pub fn c_resolve_fn(ctx: CCtx, name: Str) -> Str {
+    if name.index_of("$$_").is_some() { return c_mangle_fn(name) }
     match ctx.imports_map.get(name) {
         some(qualified) => qualified,
         none => {

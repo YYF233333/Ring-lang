@@ -65,7 +65,11 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                     none => {},
                                 }
                             }
-                            let result = check_module(ast, dep_exports, sink)
+                            let current_prefix = match graph.modules.get(key) {
+                                some(mod_) => module_prefix(mod_.path_segments),
+                                none => ""
+                            }
+                            let result = check_module(ast, current_prefix, dep_exports, sink)
                             if sink.has_errors() {
                                 let mod_file = match graph.modules.get(key) { some(m) => m.file_path, none => "" }
                                 if error_format == "llm" {
@@ -91,7 +95,8 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                 match graph.modules.get(key) {
                                     some(mod_) => {
                                         let prefix = module_prefix(mod_.path_segments)
-                                        let exp = extract_exports(key, prefix, ast, result.program, result.env, result.fn_mut_params)
+                                        let exp = extract_exports(key, prefix, ast, result.program, result.env,
+                                            result.fn_mut_params, dep_exports)
                                         module_exports_map.insert(key, exp)
                                     },
                                     none => {},

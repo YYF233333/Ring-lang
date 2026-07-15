@@ -51,7 +51,9 @@ pub struct InferCtx {
     pub fn_bounds_stack: List<List<FnBoundsEntry>>,
     pub loop_depth: Int,
     pub mod_path_stack: List<Str>,
-    pub use_aliases: Map<Str, Str>,
+    // Local binding DefId -> canonical value origin.  DefIds are lexical, so
+    // a same-spelled local binding naturally shadows an imported/module alias.
+    pub use_aliases: Map<Int, Str>,
     pub boxed_vars: Set<Int>,
     pub lambda_depth: Int,
     pub var_lambda_depth: Map<Int, Int>,
@@ -569,8 +571,8 @@ pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<
     let mut result: Map<Int, Type> = map_new()
     let type_var_set: Set<Int> = set_from(scheme.type_vars)
     match (scheme.ty, instantiated_type) {
-        (Type::FnType { params: sp, return_type: sr, .. },
-         Type::FnType { params: ip, return_type: ir, .. }) => {
+        (Type::FnType { params: sp, return_type: sr, effects: se },
+         Type::FnType { params: ip, return_type: ir, effects: ie }) => {
             let mut i = 0
             let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
             while i < limit {
@@ -582,6 +584,7 @@ pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<
                 i = i + 1
             }
             collect_var_mappings(sr, ir, type_var_set, result)
+            collect_effect_var_mappings(se, ie, type_var_set, result)
         },
         _ => {}
     }
@@ -627,8 +630,8 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>,
             },
             _ => {}
         },
-        Type::FnType { params: sp, return_type: sr, .. } => match inst_type {
-            Type::FnType { params: ip, return_type: ir, .. } => {
+        Type::FnType { params: sp, return_type: sr, effects: se } => match inst_type {
+            Type::FnType { params: ip, return_type: ir, effects: ie } => {
                 let mut i = 0
                 let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
                 while i < limit {
@@ -639,6 +642,7 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>,
                     i = i + 1
                 }
                 collect_var_mappings(sr, ir, type_vars, result)
+                collect_effect_var_mappings(se, ie, type_vars, result)
             },
             _ => {}
         },
@@ -672,6 +676,54 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>,
             _ => {}
         },
         _ => {}
+    }
+}
+
+pub fn record_value_origin(mut ctx: InferCtx, local_name: Str, origin: Str) {
+    match ctx.env.lookup(local_name) {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => { ctx.use_aliases.insert(def_id, origin) },
+            none => {}
+        },
+        none => {}
+    }
+}
+
+// Scheme variables may occur exclusively in effect payloads.  They still
+// need an instantiation mapping so SchemeBound resolution can select the
+// correct trait dictionary (and reject an unsatisfied bound) at the call site.
+fn collect_effect_var_mappings(scheme_row: EffectRow, inst_row: EffectRow, type_vars: Set<Int>, mut result: Map<Int, Type>) {
+    match (scheme_row.tail, inst_row.tail) {
+        (some(sid), some(iid)) => {
+            if type_vars.contains(sid) {
+                result.insert(sid, Type::TypeVar { id: iid, name: none })
+            }
+        },
+        _ => {},
+    }
+
+    for scheme_eff in scheme_row.effects {
+        for inst_eff in inst_row.effects {
+            if effects_match_kind(scheme_eff, inst_eff) {
+                match (scheme_eff, inst_eff) {
+                    (Effect::FailEffect { error_type: st }, Effect::FailEffect { error_type: it }) =>
+                        collect_var_mappings(st, it, type_vars, result),
+                    (Effect::MutEffect { state_type: st }, Effect::MutEffect { state_type: it }) =>
+                        collect_var_mappings(st, it, type_vars, result),
+                    (Effect::CustomEffect { type_args: sa, .. }, Effect::CustomEffect { type_args: ia, .. }) => {
+                        let mut i = 0
+                        while i < sa.len() && i < ia.len() {
+                            match (sa.get(i), ia.get(i)) {
+                                (some(st), some(it)) => collect_var_mappings(st, it, type_vars, result),
+                                _ => {},
+                            }
+                            i = i + 1
+                        }
+                    },
+                    _ => {},
+                }
+            }
+        }
     }
 }
 

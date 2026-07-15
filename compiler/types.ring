@@ -366,6 +366,17 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
     }
 }
 
+fn nominal_display_name(identity: Str) -> Str {
+    let parts = identity.split("$$_")
+    if parts.len() > 1 {
+        let module_name = parts.get(0).unwrap_or("").replace("$", "::")
+        let decl_name = parts.get(1).unwrap_or(identity)
+        "${module_name}::${decl_name}"
+    } else {
+        identity
+    }
+}
+
 pub fn type_to_string(t: Type) -> Str {
     match t {
         Type::IntType => BUILTIN_INT,
@@ -387,14 +398,16 @@ pub fn type_to_string(t: Type) -> Str {
             else { "(${ps}) -> ${ret}" }
         },
         Type::StructType { name, type_params, .. } => {
-            if type_params.len() == 0 { name }
-            else { "${name}<${type_params.map(fn(p) { type_to_string(p) }).join(", ")}>" }
+            let display = nominal_display_name(name)
+            if type_params.len() == 0 { display }
+            else { "${display}<${type_params.map(fn(p) { type_to_string(p) }).join(", ")}>" }
         },
         Type::EnumType { name, type_params, .. } => {
+            let display = nominal_display_name(name)
             if name == BUILTIN_OPTION && type_params.len() == 1 {
                 "${type_to_string(type_params.first().unwrap_or(UNIT))}?"
-            } else if type_params.len() == 0 { name }
-            else { "${name}<${type_params.map(fn(p) { type_to_string(p) }).join(", ")}>" }
+            } else if type_params.len() == 0 { display }
+            else { "${display}<${type_params.map(fn(p) { type_to_string(p) }).join(", ")}>" }
         },
         Type::GenericType { base, args } => {
             "${type_to_string(base)}<${args.map(fn(a) { type_to_string(a) }).join(", ")}>"
@@ -430,8 +443,9 @@ pub fn effect_to_string(e: Effect) -> Str {
         Effect::MutEffect { state_type } => "mut<${type_to_string(state_type)}>",
         Effect::FailEffect { error_type } => "fail<${type_to_string(error_type)}>",
         Effect::CustomEffect { name, type_args } => {
-            if type_args.len() == 0 { name }
-            else { "${name}<${type_args.map(fn(a) { type_to_string(a) }).join(", ")}>" }
+            let display = nominal_display_name(name)
+            if type_args.len() == 0 { display }
+            else { "${display}<${type_args.map(fn(a) { type_to_string(a) }).join(", ")}>" }
         },
         Effect::UnsafeEffect => "unsafe"
     }

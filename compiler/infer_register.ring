@@ -6,8 +6,9 @@ use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, Enu
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
-use hir::{compare_by_first}
-use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type, resolve_effect_expr}
+use hir::{compare_by_first, module_item_identity}
+use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type, resolve_effect_expr,
+    record_value_origin}
 use infer_helpers::{is_value_type}
 
 // ============================================================
@@ -120,6 +121,64 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
             Decl::ModBlock { name: "${mod_name}::${name}", uses: uses, decls: decls,
                             required_effects: required_effects, is_pub: is_pub, span: span },
         Decl::AssocType { .. } => decl,  // Associated types are nested inside trait/impl, not prefixed
+        _ => decl
+    }
+}
+
+// Qualify a file-module's top-level declaration with its canonical identity.
+// Unlike prefix_decl_name (inline `mod` scoping), this preserves the resolver's
+// module boundary and cannot collide after backend identifier sanitization.
+pub fn module_prefix_decl_name(module_prefix: Str, decl: Decl) -> Decl {
+    match decl {
+        Decl::Fn { name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span } =>
+            Decl::Fn { name: module_item_identity(module_prefix, name), type_params: type_params, params: params,
+                       return_type: return_type, declared_effects: declared_effects, body: body,
+                       is_pub: is_pub, is_abstract: is_abstract, span: span },
+        Decl::Struct { name, type_params, fields, is_pub, span } =>
+            Decl::Struct { name: module_item_identity(module_prefix, name), type_params: type_params, fields: fields,
+                          is_pub: is_pub, span: span },
+        Decl::Enum { name, type_params, variants, is_pub, span } =>
+            Decl::Enum { name: module_item_identity(module_prefix, name), type_params: type_params, variants: variants,
+                        is_pub: is_pub, span: span },
+        Decl::ExternFn { name, type_params, params, return_type, declared_effects, is_pub, span } =>
+            // ExternFn.name is also its foreign ABI symbol.  Keep that spelling
+            // stable; imported aliases still resolve explicitly to this name.
+            Decl::ExternFn { name: name, type_params: type_params, params: params,
+                            return_type: return_type, declared_effects: declared_effects,
+                            is_pub: is_pub, span: span },
+        Decl::Const { name, type_annotation, init, is_pub, span } =>
+            Decl::Const { name: module_item_identity(module_prefix, name), type_annotation: type_annotation, init: init,
+                         is_pub: is_pub, span: span },
+        Decl::Sig { name, members, is_pub, span } =>
+            Decl::Sig { name: module_item_identity(module_prefix, name), members: members, is_pub: is_pub, span: span },
+        Decl::Impl { target_type, type_params, trait_name, methods, span } => {
+            // Keep the source spelling until registration.  At that point all
+            // local/imported aliases are installed, so the target can be
+            // resolved to the definition's exact nominal identity.
+            Decl::Impl { target_type: target_type, type_params: type_params,
+                         trait_name: trait_name, methods: methods, span: span }
+        },
+        Decl::Trait { name, type_params, supertraits, methods, is_pub, span } =>
+            Decl::Trait { name: module_item_identity(module_prefix, name), type_params: type_params, supertraits: supertraits,
+                         methods: methods, is_pub: is_pub, span: span },
+        Decl::Effect { name, type_params, ops, is_pub, span } =>
+            Decl::Effect { name: module_item_identity(module_prefix, name), type_params: type_params, ops: ops,
+                          is_pub: is_pub, span: span },
+        Decl::ExternType { name, type_params, is_pub, span } =>
+            // Extern types denote foreign ABI identities shared across modules
+            // (for example LLVMBuilderRef). Keep their declared ABI spelling.
+            Decl::ExternType { name: name, type_params: type_params,
+                              is_pub: is_pub, span: span },
+        Decl::TypeAlias { name, type_params, type_expr, is_pub, span } =>
+            Decl::TypeAlias { name: module_item_identity(module_prefix, name), type_params: type_params, type_expr: type_expr,
+                             is_pub: is_pub, span: span },
+        Decl::EffectAlias { name, type_params, effects, is_pub, span } =>
+            Decl::EffectAlias { name: module_item_identity(module_prefix, name), type_params: type_params, effects: effects,
+                               is_pub: is_pub, span: span },
+        Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
+            Decl::ModBlock { name: module_item_identity(module_prefix, name), uses: uses, decls: decls,
+                            required_effects: required_effects, is_pub: is_pub, span: span },
+        Decl::AssocType { .. } => decl,
         _ => decl
     }
 }
@@ -279,6 +338,239 @@ pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
     }
 }
 
+// Register a resolver file-module under canonical declaration identities while
+// retaining source-level short aliases in this module's checker environment.
+// Imported canonical definitions may coexist; aliases are deliberately local.
+pub fn register_module_decls_two_phase(mut ctx: InferCtx, module_prefix: Str, decls: List<Decl>) -> List<Decl> {
+    let mut qualified: List<Decl> = []
+    for decl in decls { qualified.push(module_prefix_decl_name(module_prefix, decl)) }
+
+    let mut deferred_struct_names: List<Str> = []
+    let mut deferred_enum_names: List<Str> = []
+
+    // Nominal declarations must all exist before any field/payload/signature is
+    // resolved.  Their alias keys are display names; StructDef/EnumDef.name is
+    // already canonical and therefore drives unification and backend metadata.
+    for decl in qualified {
+        match decl {
+            Decl::Struct { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            Decl::Enum { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            _ => {}
+        }
+    }
+    insert_file_module_aliases(ctx, module_prefix, decls, false)
+
+    // Match inline-module registration ordering: traits first, then effects and
+    // opaque/type declarations, then values and impls.
+    for decl in qualified {
+        match decl {
+            Decl::Trait { .. } => {
+                register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)
+                insert_file_module_aliases(ctx, module_prefix, decls, false)
+            },
+            _ => {}
+        }
+    }
+    for decl in qualified {
+        match decl {
+            Decl::Effect { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            Decl::EffectAlias { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            Decl::ExternType { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            Decl::TypeAlias { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            Decl::Sig { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            _ => {}
+        }
+    }
+    insert_file_module_aliases(ctx, module_prefix, decls, false)
+    for decl in qualified {
+        match decl {
+            Decl::Struct { .. } => {}, Decl::Enum { .. } => {}, Decl::Trait { .. } => {},
+            Decl::Effect { .. } => {}, Decl::EffectAlias { .. } => {},
+            Decl::ExternType { .. } => {}, Decl::TypeAlias { .. } => {}, Decl::Sig { .. } => {},
+            _ => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)
+        }
+    }
+
+    for decl in qualified { register_phase2_struct(ctx, decl) }
+    for decl in qualified { register_phase2_enum(ctx, decl) }
+    for decl in qualified { register_phase3_delegate(ctx, decl) }
+
+    // Value schemes exist only after the final registration pass.  Binding the
+    // short alias and recording its canonical origin makes HExpr::Ident exact.
+    insert_file_module_aliases(ctx, module_prefix, decls, true)
+    qualified
+}
+
+fn insert_file_module_aliases(mut ctx: InferCtx, module_prefix: Str, decls: List<Decl>, include_values: Bool) {
+    for decl in decls {
+        match decl {
+            Decl::Struct { name, .. } => {
+                let canonical = module_item_identity(module_prefix, name)
+                match ctx.env.types.structs.get(canonical) {
+                    some(def) => { ctx.env.types.structs.insert(name, def) }, none => {}
+                }
+            },
+            Decl::Enum { name, .. } => {
+                let canonical = module_item_identity(module_prefix, name)
+                match ctx.env.types.enums.get(canonical) {
+                    some(def) => { ctx.env.types.enums.insert(name, def) }, none => {}
+                }
+            },
+            Decl::Trait { name, .. } => {
+                let canonical = module_item_identity(module_prefix, name)
+                match ctx.env.trait_reg.traits.get(canonical) {
+                    some(def) => { ctx.env.trait_reg.traits.insert(name, def) }, none => {}
+                }
+            },
+            Decl::Effect { name, .. } => {
+                let canonical = module_item_identity(module_prefix, name)
+                match ctx.env.types.effects.get(canonical) {
+                    some(def) => { ctx.env.types.effects.insert(name, def) }, none => {}
+                }
+            },
+            Decl::EffectAlias { name, .. } => {
+                let canonical = module_item_identity(module_prefix, name)
+                match ctx.env.types.effect_aliases.get(canonical) {
+                    some(def) => { ctx.env.types.effect_aliases.insert(name, def) }, none => {}
+                }
+            },
+            Decl::ExternType { name, .. } => {
+                match ctx.env.types.structs.get(name) {
+                    some(def) => { ctx.env.types.structs.insert(name, def) }, none => {}
+                }
+            },
+            Decl::TypeAlias { name, .. } => {
+                let canonical = module_item_identity(module_prefix, name)
+                match ctx.env.types.type_aliases.get(canonical) {
+                    some(def) => { ctx.env.types.type_aliases.insert(name, def) }, none => {}
+                }
+            },
+            Decl::Sig { name, .. } => {
+                let canonical = module_item_identity(module_prefix, name)
+                match ctx.env.types.sigs.get(canonical) {
+                    some(def) => { ctx.env.types.sigs.insert(name, def) }, none => {}
+                }
+            },
+            Decl::Fn { name, .. } => {
+                if include_values {
+                    let canonical = module_item_identity(module_prefix, name)
+                    match ctx.env.lookup(canonical) {
+                        some(scheme) => {
+                            ctx.env.bind(name, scheme)
+                            record_value_origin(ctx, name, canonical)
+                        }, none => {}
+                    }
+                    match ctx.fn_mut_params.get(canonical) {
+                        some(flags) => { ctx.fn_mut_params.insert(name, flags) }, none => {}
+                    }
+                }
+            },
+            Decl::ExternFn { name, .. } => {
+                if include_values {
+                    match ctx.env.lookup(name) {
+                        some(scheme) => {
+                            ctx.env.bind(name, scheme)
+                        }, none => {}
+                    }
+                }
+            },
+            Decl::Const { name, .. } => {
+                if include_values {
+                    let canonical = module_item_identity(module_prefix, name)
+                    match ctx.env.lookup(canonical) {
+                        some(scheme) => {
+                            ctx.env.bind(name, scheme)
+                            record_value_origin(ctx, name, canonical)
+                        }, none => {}
+                    }
+                }
+            },
+            Decl::ModBlock { name, decls: mod_decls, .. } => {
+                let canonical_mod = module_item_identity(module_prefix, name)
+                insert_inline_display_aliases(ctx, name, canonical_mod, mod_decls, include_values)
+            },
+            _ => {}
+        }
+    }
+}
+
+fn insert_inline_display_aliases(
+    mut ctx: InferCtx, display_mod: Str, canonical_mod: Str,
+    decls: List<Decl>, include_values: Bool
+) {
+    for decl in decls {
+        match decl {
+            Decl::Struct { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.types.structs.get(canonical) {
+                    some(def) => { ctx.env.types.structs.insert(display, def) }, none => {}
+                }
+            },
+            Decl::Enum { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.types.enums.get(canonical) {
+                    some(def) => { ctx.env.types.enums.insert(display, def) }, none => {}
+                }
+            },
+            Decl::Trait { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.trait_reg.traits.get(canonical) {
+                    some(def) => { ctx.env.trait_reg.traits.insert(display, def) }, none => {}
+                }
+            },
+            Decl::Effect { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.types.effects.get(canonical) {
+                    some(def) => { ctx.env.types.effects.insert(display, def) }, none => {}
+                }
+            },
+            Decl::EffectAlias { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.types.effect_aliases.get(canonical) {
+                    some(def) => { ctx.env.types.effect_aliases.insert(display, def) }, none => {}
+                }
+            },
+            Decl::Fn { name, .. } => {
+                if include_values {
+                    let display = "${display_mod}::${name}"
+                    let canonical = "${canonical_mod}::${name}"
+                    match ctx.env.lookup(canonical) {
+                        some(scheme) => {
+                            ctx.env.bind(display, scheme)
+                            record_value_origin(ctx, display, canonical)
+                        }, none => {}
+                    }
+                    match ctx.fn_mut_params.get(canonical) {
+                        some(flags) => { ctx.fn_mut_params.insert(display, flags) }, none => {}
+                    }
+                }
+            },
+            Decl::Const { name, .. } => {
+                if include_values {
+                    let display = "${display_mod}::${name}"
+                    let canonical = "${canonical_mod}::${name}"
+                    match ctx.env.lookup(canonical) {
+                        some(scheme) => {
+                            ctx.env.bind(display, scheme)
+                            record_value_origin(ctx, display, canonical)
+                        }, none => {}
+                    }
+                }
+            },
+            Decl::ModBlock { name, decls: nested, .. } => {
+                insert_inline_display_aliases(ctx, "${display_mod}::${name}",
+                    "${canonical_mod}::${name}", nested, include_values)
+            },
+            _ => {}
+        }
+    }
+}
+
 fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
     match decl {
         Decl::Impl { target_type, type_params, methods, span, .. } => {
@@ -303,8 +595,9 @@ fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
                     for b in tp.bounds {
                         if tp_idx < impl_tv_ids.len() {
                             let tv_id = impl_tv_ids.get(tp_idx).unwrap()
-                            impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name, assoc_constraints: [] })
-                            let supers = collect_all_supertraits(ctx, b.trait_name)
+                            let bound_trait = resolve_trait_identity(ctx, b.trait_name)
+                            impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: bound_trait, assoc_constraints: [] })
+                            let supers = collect_all_supertraits(ctx, bound_trait)
                             for st_name in supers {
                                 impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name, assoc_constraints: [] })
                             }
@@ -313,11 +606,12 @@ fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
                     tp_idx = tp_idx + 1
                 }
 
-                let mut impl_methods_map = match ctx.env.trait_reg.impl_methods.get(target_type) {
+                let canonical_target = resolve_nominal_identity(ctx, target_type)
+                let mut impl_methods_map = match ctx.env.trait_reg.impl_methods.get(canonical_target) {
                     some(m) => m,
                     none => {
                         let mut new_map: Map<Str, TypeScheme> = map_new()
-                        ctx.env.trait_reg.impl_methods.insert(target_type, new_map)
+                        ctx.env.trait_reg.impl_methods.insert(canonical_target, new_map)
                         new_map
                     }
                 }
@@ -325,7 +619,7 @@ fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
                 for m in methods {
                     match m {
                         Decl::Delegate { field, trait_names, span: dspan } => {
-                            register_delegate(ctx, impl_methods_map, impl_tv_ids, target_type,
+                            register_delegate(ctx, impl_methods_map, impl_tv_ids, canonical_target,
                                 field, trait_names, dspan, impl_scheme_bounds, saved, type_params)
                         },
                         _ => {}
@@ -552,6 +846,23 @@ pub fn collect_all_supertraits(ctx: InferCtx, trait_name: Str) -> List<Str> {
     result
 }
 
+pub fn resolve_trait_identity(ctx: InferCtx, trait_name: Str) -> Str {
+    match ctx.env.trait_reg.traits.get(trait_name) {
+        some(def) => def.name,
+        none => trait_name
+    }
+}
+
+pub fn resolve_nominal_identity(ctx: InferCtx, type_name: Str) -> Str {
+    match ctx.env.types.structs.get(type_name) {
+        some(def) => def.name,
+        none => match ctx.env.types.enums.get(type_name) {
+            some(def) => def.name,
+            none => type_name
+        }
+    }
+}
+
 fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, supertraits: List<TypeBound>, methods: List<Decl>, span: Span) {
     let saved = map_clone(ctx.type_param_scope)
     let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
@@ -572,7 +883,7 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                 "Unknown supertrait: ${st.trait_name}", span,
                 DiagnosticContext::TraitError { detail: "unknown supertrait '${st.trait_name}'" })
         } else {
-            supertrait_names.push(st.trait_name)
+            supertrait_names.push(resolve_trait_identity(ctx, st.trait_name))
         }
     }
 
@@ -615,7 +926,7 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                 ctx.type_param_scope.insert(aname, at_var)
                 let mut bound_names: List<Str> = []
                 for b in abounds {
-                    bound_names.push(b.trait_name)
+                    bound_names.push(resolve_trait_identity(ctx, b.trait_name))
                 }
                 let default_ty = match avalue {
                     some(v) => some(resolve_type_expr(ctx, v)),
@@ -682,6 +993,13 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
 // ============================================================
 
 fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) {
+    register_impl_canonical(ctx, resolve_nominal_identity(ctx, target_type), type_params, trait_name, methods, span)
+}
+
+fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) {
+    let resolved_trait_name = match trait_name {
+        some(name) => some(resolve_trait_identity(ctx, name)), none => none
+    }
     let mut impl_methods_map = match ctx.env.trait_reg.impl_methods.get(target_type) {
         some(m) => m,
         none => {
@@ -706,9 +1024,10 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
         for b in tp.bounds {
             if tp_idx < impl_tv_ids.len() {
                 let tv_id = impl_tv_ids.get(tp_idx).unwrap()
-                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name, assoc_constraints: [] })
+                let canonical_bound = resolve_trait_identity(ctx, b.trait_name)
+                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: canonical_bound, assoc_constraints: [] })
                 // Expand supertrait bounds
-                let supers = collect_all_supertraits(ctx, b.trait_name)
+                let supers = collect_all_supertraits(ctx, canonical_bound)
                 for st_name in supers {
                     impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name, assoc_constraints: [] })
                 }
@@ -764,7 +1083,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
         }
     }
 
-    match trait_name {
+    match resolved_trait_name {
         some(tname) => {
             match ctx.env.trait_reg.traits.get(tname) {
                 some(trait_def) => {
@@ -1045,7 +1364,8 @@ fn register_delegate_traits(
     field_type_name: Str, ft: Type
 ) {
     for tname in trait_names {
-        match ctx.env.trait_reg.traits.get(tname) {
+        let canonical_trait = resolve_trait_identity(ctx, tname)
+        match ctx.env.trait_reg.traits.get(canonical_trait) {
             none => {
                 let _ = type_error(ctx.sink, E0501,
                     "Unknown trait: ${tname}",
@@ -1053,21 +1373,21 @@ fn register_delegate_traits(
             },
             some(trait_def) => {
                 // Validate that the field type implements the trait
-                if !has_impl(ctx.env.trait_reg, field_type_name, tname) {
+                if !has_impl(ctx.env.trait_reg, field_type_name, canonical_trait) {
                     let _ = type_error(ctx.sink, E0508,
                         "type '${field_type_name}' (field '${field}') does not implement trait '${tname}'",
                         span, DiagnosticContext::TraitError { detail: "delegate field type missing trait impl" })
                 } else {
                     // Check for conflict: same trait already implemented (hand-written) for this type
-                    if has_impl(ctx.env.trait_reg, target_type, tname) {
+                    if has_impl(ctx.env.trait_reg, target_type, canonical_trait) {
                         let _ = type_error(ctx.sink, E0509,
                             "trait '${tname}' is already implemented for '${target_type}'; cannot delegate the same trait",
                             span, DiagnosticContext::TraitError { detail: "delegate conflicts with existing impl" })
                         continue
                     }
                     // Collect all traits to register: the explicit trait + its supertraits
-                    let mut all_traits_to_register: List<Str> = [tname]
-                    let supers = collect_all_supertraits(ctx, tname)
+                    let mut all_traits_to_register: List<Str> = [canonical_trait]
+                    let supers = collect_all_supertraits(ctx, canonical_trait)
                     for st_name in supers {
                         all_traits_to_register.push(st_name)
                     }
@@ -1412,13 +1732,14 @@ fn register_fn_common(
     for tp in type_params {
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
-            if !ctx.env.trait_reg.traits.contains_key(b.trait_name) {
+            let bound_trait = resolve_trait_identity(ctx, b.trait_name)
+            if !ctx.env.trait_reg.traits.contains_key(bound_trait) {
                 let _ = type_error(ctx.sink, E0501,
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
             }
             if track_fn_bounds {
-                fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: b.trait_name })
+                fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: bound_trait })
             }
             // Build associated type constraint entries from bound's assoc_constraints
             let mut assoc_entries: List<AssocConstraintEntry> = []
@@ -1431,7 +1752,7 @@ fn register_fn_common(
             // check_assoc_constraints unifies these TypeVars with the concrete
             // associated types from the impl, so that return types depending on
             // associated types (e.g. T::Item) resolve to concrete types.
-            match ctx.env.trait_reg.traits.get(b.trait_name) {
+            match ctx.env.trait_reg.traits.get(bound_trait) {
                 some(tdef) => {
                     for atdef in tdef.assoc_types {
                         let already = assoc_entries.any(fn(e) { e.name == atdef.name })
@@ -1448,12 +1769,12 @@ fn register_fn_common(
             }
             match tv {
                 some(t) => match t { Type::TypeVar { id, .. } => {
-                    scheme_bounds.push(SchemeBound { type_var: id, trait_name: b.trait_name, assoc_constraints: assoc_entries })
+                    scheme_bounds.push(SchemeBound { type_var: id, trait_name: bound_trait, assoc_constraints: assoc_entries })
                 }, _ => {} },
                 none => {}
             }
             // Expand supertrait bounds: if T: Ord and Ord: Eq, add T: Eq too
-            let supers = collect_all_supertraits(ctx, b.trait_name)
+            let supers = collect_all_supertraits(ctx, bound_trait)
             for st_name in supers {
                 if track_fn_bounds {
                     fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: st_name })
@@ -1577,6 +1898,21 @@ fn register_sig(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: 
 // Effect alias registration
 // ============================================================
 
+fn canonicalize_effect_alias_body(ctx: InferCtx, effects: List<EffectExpr>) -> List<EffectExpr> {
+    let mut result: List<EffectExpr> = []
+    for eff in effects {
+        let canonical_name = match ctx.env.types.effects.get(eff.name) {
+            some(def) => def.name,
+            none => match ctx.env.types.effect_aliases.get(eff.name) {
+                some(def) => def.name,
+                none => eff.name
+            }
+        }
+        result.push(EffectExpr { name: canonical_name, type_args: eff.type_args, span: eff.span })
+    }
+    result
+}
+
 fn register_effect_alias(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, effects: List<EffectExpr>, span: Span) {
     if ctx.env.types.effect_aliases.contains_key(name) {
         let _ = type_error(ctx.sink, E0207,
@@ -1590,11 +1926,12 @@ fn register_effect_alias(mut ctx: InferCtx, name: Str, type_params: List<TypePar
             let tv = ctx.env.fresh_var()
             match tv { Type::TypeVar { id, .. } => { tp_vars.push(id) }, _ => {} }
         }
+        let canonical_effects = canonicalize_effect_alias_body(ctx, effects)
         ctx.env.types.effect_aliases.insert(name, EffectAliasDef {
             name: name,
             type_params: tp_names,
             type_param_vars: tp_vars,
-            effects: effects,
+            effects: canonical_effects,
             span: span
         })
     }

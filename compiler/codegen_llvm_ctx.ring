@@ -317,7 +317,7 @@ pub fn llvm_mangle_fn(name: Str) -> Str {
 
 // Module-qualified mangling: ring_<prefix>$_<name>
 pub fn llvm_mangle_fn_with_prefix(prefix: Str, name: Str) -> Str {
-    "ring_${prefix}$$_${name}"
+    if name.index_of("$$_").is_some() { llvm_mangle_fn(name) } else { "ring_${prefix}$$_${name}" }
 }
 
 pub fn llvm_mangle_method(type_name: Str, method_name: Str) -> Str {
@@ -326,6 +326,7 @@ pub fn llvm_mangle_method(type_name: Str, method_name: Str) -> Str {
 
 // Resolve a function name through module context: check imports_map, then qualify with prefix
 pub fn llvm_resolve_fn(ctx: LlvmCtx, name: Str) -> Str {
+    if name.index_of("$$_").is_some() { return llvm_mangle_fn(name) }
     // Check imports_map first (cross-module references)
     match ctx.imports_map.get(name) {
         some(qualified) => qualified,

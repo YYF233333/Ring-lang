@@ -88,7 +88,7 @@ fn collect_decl_edges(decl: Decl, registered_fns: Set<Str>, mut graph: Map<Str, 
                 graph.insert(caller, [])
             }
             let mut edges: Set<Str> = set_new()
-            collect_expr_callees(body, registered_fns, edges)
+            collect_expr_callees(body, registered_fns, caller, edges)
             let mut sorted_edges: List<Str> = []
             for e in edges {
                 if e != caller { sorted_edges.push(e) }
@@ -161,7 +161,7 @@ fn prefix_mod_decl(mod_name: Str, decl: Decl) -> Decl {
 // traversal is shared.
 
 enum CalleeMode {
-    TopLevel { registered_fns: Set<Str> },
+    TopLevel { registered_fns: Set<Str>, scope_prefix: Str },
     SelfMethod { method_names: Set<Str> }
 }
 
@@ -170,11 +170,19 @@ fn walk_expr_callees(expr: Expr, mode: CalleeMode, mut callees: Set<Str>) {
         Expr::Call { callee, args, .. } => {
             // TopLevel: check if callee is a direct Ident referencing a registered fn
             match mode {
-                CalleeMode::TopLevel { registered_fns } => {
+                CalleeMode::TopLevel { registered_fns, scope_prefix } => {
                     match callee {
-                        Expr::Ident { name, .. } => {
+                        Expr::Ident { name, qualifier, .. } => {
                             if registered_fns.contains(name) {
                                 callees.insert(name)
+                            } else {
+                                let scoped_name = match qualifier {
+                                    some(q) => "${scope_prefix}${q}::${name}",
+                                    none => "${scope_prefix}${name}"
+                                }
+                                if scope_prefix != "" && registered_fns.contains(scoped_name) {
+                                    callees.insert(scoped_name)
+                                }
                             }
                         },
                         _ => {}
@@ -353,8 +361,27 @@ fn walk_stmt_callees(stmt: Stmt, mode: CalleeMode, mut callees: Set<Str>) {
 }
 
 // Thin wrappers preserving original call-site signatures.
-fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, mut callees: Set<Str>) {
-    walk_expr_callees(expr, CalleeMode::TopLevel { registered_fns: registered_fns }, callees)
+fn fn_scope_prefix(fn_name: Str) -> Str {
+    let inline_parts = fn_name.split("::")
+    if inline_parts.len() > 1 {
+        let mut scope_parts: List<Str> = []
+        for i in 0..inline_parts.len() - 1 {
+            match inline_parts.get(i) { some(p) => scope_parts.push(p), none => {} }
+        }
+        return "${scope_parts.join("::")}::"
+    }
+    let module_parts = fn_name.split("$$_")
+    if module_parts.len() > 1 {
+        return "${module_parts.get(0).unwrap_or("")}$$_"
+    }
+    ""
+}
+
+fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, caller: Str, mut callees: Set<Str>) {
+    walk_expr_callees(expr, CalleeMode::TopLevel {
+        registered_fns: registered_fns,
+        scope_prefix: fn_scope_prefix(caller)
+    }, callees)
 }
 
 // Collect self.method() callees within an AST expression body (B-138).

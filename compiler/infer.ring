@@ -617,10 +617,11 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             let expr_r = infer_expr(ctx, expr, subst)
             let mut s = expr_r.subst
             let expr_type = apply_subst(s, hexpr_type(expr_r.hexpr))
+            let iflet_pattern = rewrite_bare_enum_bindings(ctx.env, pattern)
 
             ctx.env.push_scope()
             let then_result = some({
-                bind_pattern(ctx, pattern, expr_type, s)
+                bind_pattern(ctx, iflet_pattern, expr_type, s)
                 infer_block(ctx, then_block, some(s))
             }) catch { _ => none }
             ctx.env.pop_scope()
@@ -654,7 +655,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
 
                     StmtResult {
                         hstmt: HStmt::IfLet {
-                            pattern: pattern, expr: expr_r.hexpr,
+                            pattern: iflet_pattern, expr: expr_r.hexpr,
                             then_block: then_r.hexpr, else_block: else_hblock, span: span
                         },
                         subst: s,
@@ -2184,7 +2185,8 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
     for arm in arms {
         ctx.env.push_scope()
         let arm_result = some({
-            bind_pattern(ctx, arm.pattern, error_type, s)
+            let catch_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
+            bind_pattern(ctx, catch_pattern, error_type, s)
 
             let mut guard_hexpr: HExpr? = none
             match arm.guard {
@@ -2207,7 +2209,7 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
             s = me.1
             s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
 
-            harms.push(HMatchArm { pattern: arm.pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
+            harms.push(HMatchArm { pattern: catch_pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
             true
         }) catch { _ => none }
         ctx.env.pop_scope()
@@ -2259,6 +2261,10 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     for handler in handlers {
         ctx.env.push_scope()
         let effect_def = ctx.env.types.effects.get(handler.effect_name)
+        let canonical_effect_name = match effect_def {
+            some(ed) => ed.name,
+            none => handler.effect_name
+        }
 
         // Instantiate effect type params with fresh variables for handler
         let mut handler_inst_map: Map<Int, Type> = map_new()
@@ -2315,14 +2321,14 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             some(hbr) => {
                 s = hbr.subst
                 hhandlers.push(HEffectHandler {
-                    effect_name: handler.effect_name, op_name: handler.op_name,
+                    effect_name: canonical_effect_name, op_name: handler.op_name,
                     params: hparams, resume_name: handler.resume_name, body: hbr.hexpr
                 })
             },
             none => fail.raise(CompileError {})
         }
 
-        handled_effects.insert(handler.effect_name)
+        handled_effects.insert(canonical_effect_name)
     }
 
     let resolved_effects = apply_subst_row(s, effects)

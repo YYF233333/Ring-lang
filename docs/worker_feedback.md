@@ -53,3 +53,55 @@
 4. **extern fn project 去重**：extern fn 声明经 `rt_use`/`rt_protos`（Map 去重 + 排序输出），多模块重复声明同一 extern fn 天然合并，无重复 prototype；`extern_type_names` per-module 过滤集直接 union（B-145 结构在 compile_phases 已保证）。
 5. **确定性**：project mode .c ×2 字节一致实测通过（diamond_dep / cross_trait 两用例 SHA256 相等）。
 6. **runner**：新增 `LLVM_ONLY_SKIP` 集（default_effect_topo / exhaustive_generic_payload / map_hof / map_ufcs_bug）——LLVM 后端跑时 SKIP，C 后端跑（全 PASS），diff suite 因无 oracle 也 SKIP。四用例已从 `LLVM_SKIP` 挪出（step 6 遗留处置）。
+
+## [通知] B-163 step 8 canonical identity 收尾 WIP handoff（2026-07-15，额度停止点）
+
+**边界**：本轮只做 step 8 收尾，**step 9 未开始**。用户因额度不足要求停止；以下改动已提交为可恢复 WIP，但最后一轮 bootstrap / 双后端 gate 尚未完成，不应宣称 step 8 已通过最终验收。
+
+### 已实现
+
+1. **统一 file-module identity**：普通函数、const、struct、enum、trait、effect、type/effect alias 等内部 identity 统一为 `<resolver module_prefix>$$_<decl>`；inline module 子项继续用 `::child`。诊断显示通过 `nominal_display_name` 还原为 `a::Type`，不泄漏 `$$_`。`extern fn` 与 `extern type` 保留 raw ABI 名称；后者是 bootstrap 中确认的必要边界（LLVM C-API handle 必须跨源文件同一类型）。
+2. **binding origin 不再按拼写猜测**：`InferCtx.use_aliases` 改为本地 `DefId -> canonical origin`。跨模块 import 会清掉导出模块 DefId、在消费者分配本地 DefId 后记录 origin；局部同名 closure/变量产生新 DefId，自然屏蔽 module/import alias。qualified ident 的 early-return 路径也读取 DefId origin。
+3. **跨模块 export/re-export origin**：`ModuleExports.value_origins` 保存真实定义 origin；named、alias、whole-module、transitive pub use 均转发 payload/origin，不再从 facade path 猜定义模块。fn mutability、impl/inherent/mut method metadata 同步转发。
+4. **nominal / trait / effect 身份**：struct/enum/custom effect/trait 定义均携带 canonical name；impl target 通过 env 中 StructDef/EnumDef 解析，不再用 `contains("::")` 猜是否已限定；supertrait、type-param bounds、SchemeBound/FnBounds/HIR impl trait 均 canonicalize。effect handler/op 使用 EffectDef.name；effect alias body中的 effect 名在定义模块注册时 canonicalize，避免消费者同名 decoy 重绑定。
+5. **pattern identity**：match/catch/if-let 进入 HIR 前递归 canonicalize enum qualifier 与 struct name，覆盖 tuple/or/nested/named patterns。C/LLVM pattern lookup 删除全局“第一个同名 variant/后缀 struct”扫描，要求 exact identity。
+6. **function lookup / SCC**：qualified source call（如 `inner::f`）写入 HIR 时通过 binding DefId 取得 canonical origin；C/LLVM 可达的 module prefix enumeration 与 `$$_name` suffix fallback 已删除。SCC collector 按 caller 的 exact file/inline scope 解析 source callee，恢复 canonical declaration 间的依赖边。
+7. **C symbol injection**：canonical identity 统一经 reversible `c_module_symbol` / `c_symbol_fragment` 编码；函数、方法、ctor、drop、dict、evidence、default thunk 等 identity-bearing 符号不再仅靠 `c_sanitize`，避免 `a::b` 与 `a_b` 冲突。LLVM resolve/mangle 同样识别 canonical name，避免重复加 prefix。
+8. **inline pub use**：parser 允许 ModBlock 内 `pub use`；exports 将 `self`/`super` 相对路径解析为 file-prefix canonical source，并转发 values/origins/types/effects/effect aliases/traits 和相关 metadata。此项为停止前最后补丁，尚未完成最终 bootstrap 验证。
+9. **既有 effect rebind 修复保留**：`rebind_fn_type` 量化 effect row free vars，并保留 var_bounds / associated constraints；runtime runner 的编译优化由 `-O0` 改为 `-O2`。
+
+### 正式回归用例
+
+- nominal struct/enum 同名隔离与 cross-type E0301；enum 不同 tag 顺序 + guarded/nested pattern。
+- same-name trait/impl 隔离；impl metadata、transitive re-export metadata、type rename facade 携带 trait impl。
+- named/module/transitive value re-export origin decoy；module top/import value被局部 closure shadow。
+- 两个 file module 各自 `inner::value` 的 exact qualified call；C project key collision（`a::b` vs `a_b`）。
+- effect alias origin decoy、effect bound rebind/assoc negative、Drop fail effect、effect monomorphic rebind。
+- inline ModBlock pub-use origin。
+
+### 已取得的验证证据（晚期补丁前）
+
+- 使用中间编译器 `ring_new`/`ring_new2` 手动构建并运行：struct/enum isolation、三类 re-export decoy、transitive/same-name metadata、C key collision、effect bound rebind 均在 LLVM+C 得到预期输出；cross nominal 与 assoc negative 得到预期 E0301/E0513；extern ABI、inline module LLVM、cross-module method、pub_use 通过。
+- 诊断显示验证：`cannot unify a::Packet with b::Packet`，无 `$$_` 泄漏。
+- 旧中间编译器对新增测试做语法/基线 check：`module_value_origin_shadow`、`module_nominal_enum_pattern_tags`、`module_inline_fn_origin`、`module_nominal_trait_isolation` 通过；`reexport_type_alias_trait_impl` 与 `module_effect_alias_origin` 在旧行为下按预期失败，证明测试能捕获缺口。inline `pub use` 因旧 parser 不支持而失败，当前源码已补 parser。
+- `git diff --check` 在停止前一轮为 clean；临时 compiler/probe 目录已按用户要求删除。
+
+### 最后 bootstrap 状态（必须照实保留）
+
+stage-0 来源：
+
+- 路径：`C:\Users\Yufeng Ying\Desktop\Ring-lang\.claude\worktrees\agent-a268973c3c61d7b2a\ring.exe`
+- SHA256：`73468AF6B14EE2F97C18D6349C68A66B2C2E371B369BDAC439B6F3AC1B3C8DF2`
+- git：未 tracked，命中 `.gitignore:32 /ring*.exe`
+- mtime：`2026-07-13T00:04:16.1809038+09:00`
+
+两次用 `ring_new2` bootstrap（约 251s / 259s）均因该可执行文件自身仍内置“ExternType canonicalize”旧行为而把各源文件的 LLVM ABI handles 分裂，报大量跨模块 E0301；这属于 stage chicken-and-egg，源码随后已让 ExternType 保留 raw ABI identity。改用上述原始 stage-0 后运行 341s，**exit=1，无 object/最终 compiler 产物**；它已越过 ABI 问题，最后仅报 `exports.ring` inline helper 两处读取不存在的 `TraitRegistry.inherent_methods`。这两个读取随后已删除（同模块 impl 抽取本就负责填充 collector），但依用户停止指令**未重跑**，因此该最后补丁仍未编译验证。
+
+### 续跑顺序（下个 worker 从这里开始）
+
+1. 先用上述 stage-0 对当前 `compiler/main.ring` 做一次 LLVM build 到全新 temp out-dir；不得直接用旧 `ring_new2`，否则会重复 ExternType chicken-and-egg。
+2. 从 runtime C 源显式 `clang -O2 -c` 到 temp，链接临时新 compiler；不要复用来源不明的 runtime object。
+3. 用新 compiler 先跑短 gate：`module_value_origin_shadow`、三类 `reexport_*_origin_decoy`、`module_nominal_enum_pattern_tags`、`module_inline_fn_origin`、`module_nominal_trait_isolation`、`module_effect_alias_origin`、`reexport_type_alias_trait_impl`、`inline_pub_use_origin`。
+4. 对所有正向 gate 分别 LLVM+C build/run，并逐项比较 `.expected`；再跑 E0301/E0513/E0803 等负向 diagnostics，确认输出无 `$$_`。
+5. 再跑 Step 8 metadata/key/effect 旧回归与必要 suite。最终 self-compile ×3 仍由主 agent 按既定边界执行；本 WIP 未执行。
+6. 任一 gate 失败先修 step 8；**不要直接进入 step 9**。

@@ -233,7 +233,7 @@ def ensure_runtime(clang: str) -> bool:
             return True
     cmd = [
         clang, "-c", str(RUNTIME_CPP), "-o", str(RUNTIME_O),
-        "-std=c++17", "-O0", "-D_CRT_SECURE_NO_WARNINGS",
+        "-std=c++17", "-O2", "-D_CRT_SECURE_NO_WARNINGS",
     ]
     try:
         # Use clang++ for C++ files -- clang can link C++ but compiling needs
