@@ -75,3 +75,57 @@
 ### 2. 基线确定性已确证 [通知]
 
 f3394d4 使用基线 ring.exe 连续 LLVM self-compile ×3：三轮 `main.o` 均为 4,958,491 bytes、SHA256 `1CBAA9CD6A94B9E5ABDAE1E61967AAC7632A0A19D3DD512FEC2E6D9C13349871`；三轮 `ring_output.ll` SHA256 均为 `55E93772EA5BBEBC8599DDC817B1247B791B961CBEF672D7EE79ADA08379CF7B`。因此 step 8 最终 merge gate 必须恢复 LLVM ×3 一致，不能直接把不一致归为基线 B-155。
+
+---
+
+## B-163 step 8 方案 A — quota checkpoint / WIP handoff（2026-07-15）
+
+**边界**：用户因额度不足要求当前 bootstrap 结束后立即落档停止。step 8 **尚未完成、尚未 merge**；step 9 未开始。
+
+### 保存点
+
+- worktree：`C:\Users\Yufeng Ying\Desktop\Ring-lang\.claude\worktrees\agent-a268973c3c61d7b2a`
+- branch：`worktree-agent-a268973c3c61d7b2a`
+- base：`68999dd`
+- WIP commit：`d4c1c0a912fdca411f9aedfad01d28f11341c86d`（`wip(step8): canonicalize module identities`）
+- 规模：101 files，1898 insertions / 411 deletions；worktree clean；`git diff --check` clean。
+- `tests/.tmp_step8_fix`、`tests/.tmp_step8_probe_review`、`ring_output.ll` 已清理；正式 regression tests 保留在 commit。
+
+### 已实现但需最新 stage 复验
+
+1. file-module 用户定义普通符号采用 `<resolver module_prefix>$$_<decl>` canonical identity；诊断还原为 `a::Type`。`extern fn` / `extern type` 保留 raw ABI identity。
+2. value origin 改为消费者本地 `DefId -> canonical origin`，导入时重新分配本地 DefId；局部同名 closure/变量不再被 module/import spelling map 劫持。
+3. `ModuleExports` 显式转发真实 value origin；named、alias、whole-module、transitive 与 inline `pub use` 均覆盖，连同 fn-mut / impl / inherent / mut-method metadata。
+4. struct/enum/custom effect/trait、impl target、supertrait、bounds、effect alias body与 handler/op 均 canonicalize。
+5. match/catch/if-let pattern 在 HIR 前解析为 exact enum/struct identity；C/LLVM 删除全局 first-variant、struct suffix、function prefix/suffix correctness fallback。
+6. SCC 按 canonical file/inline scope恢复本地调用边；qualified `inner::f` 经 binding origin进入 HIR。
+7. canonical C 函数、方法、ctor、drop、dict、evidence、default thunk统一走可逆 symbol encoder，覆盖 `a::b` / `a_b` collision。
+8. `rebind_fn_type` effect free vars、SchemeBound/assoc constraints 修复保留；test runner runtime 从 `-O0` 修为 `-O2`。
+
+正式用例覆盖同名 struct/enum 正负例、不同 enum tag 顺序的 guarded/nested match、同名 trait/impl、effect alias decoy、value shadow、两模块各自 inline `inner::f`、三类 re-export decoy、transitive metadata、type rename re-export trait impl、inline pub use、C key collision、effect bound/assoc/E0803。
+
+### 已验证与未验证边界
+
+晚期补丁前，中间编译器 `ring_new` / `ring_new2` 已手动证明：同名 struct/enum isolation 与 E0301、named/module/transitive re-export `111/999`、transitive/same-name metadata `1/7`、key collision `1/2`、effect-bound rebind `9`、extern ABI、cross-module method、pub_use 等在 LLVM/C 得到预期结果；诊断为 `a::Packet` vs `b::Packet`，不泄 `$$_`。
+
+但随后修复了 resolved pattern、binding shadow、trait/SCC/effect alias/inline pub-use 等共享层缺口，**这些最新源码没有成功产出新 compiler**，上述绿灯不能替代最终 gate。
+
+### 最后 bootstrap 状态与 provenance
+
+- stage-0：`C:\Users\Yufeng Ying\Desktop\Ring-lang\.claude\worktrees\agent-a268973c3c61d7b2a\ring.exe`
+- SHA256：`73468AF6B14EE2F97C18D6349C68A66B2C2E371B369BDAC439B6F3AC1B3C8DF2`
+- 未 tracked，命中 `.gitignore:32 /ring*.exe`；mtime `2026-07-13T00:04:16.1809038+09:00`。
+
+两次 `ring_new2` bootstrap（约 251s / 259s）因该 executable 内置旧的 ExternType canonical 行为，把跨文件 LLVM ABI handle 分裂为不同 nominal type，报大量 E0301；源码随后已改为 ExternType raw ABI identity。用上述原始 stage-0 再跑约 341s，`exit=1`、无 object/最终 compiler 产物；已越过 ABI 问题，最后仅报 `exports.ring` inline helper 两处读取不存在的 `TraitRegistry.inherent_methods`。这两个读取随后已删除，但依用户停止指令**未重跑**。
+
+### 恢复顺序
+
+1. 从 WIP worktree `d4c1c0a` 开始；先用上述原始 stage-0 对当前 `compiler/main.ring` 做 LLVM build 到全新 temp out-dir。不要用旧 `ring_new2`，否则重复 ExternType chicken-and-egg。
+2. runtime 从 C 源显式 `clang -O2 -c` 到 temp，链接临时新 compiler；不复用未知 runtime object。
+3. 先跑短 gate：`module_value_origin_shadow`、三类 `reexport_*_origin_decoy`、`module_nominal_enum_pattern_tags`、`module_inline_fn_origin`、`module_nominal_trait_isolation`、`module_effect_alias_origin`、`reexport_type_alias_trait_impl`、`inline_pub_use_origin`。
+4. 正例分别跑 LLVM/C build+run并比较 `.expected`；负例锁 E0301/E0513/E0803，确认诊断无 `$$_`；再跑 step 8 metadata/key/effect 旧回归与必要 suites。
+5. 最终 LLVM self-compile ×3 仍为 step 8 merge gate。任一 gate 失败先修 step 8；禁止直接 merge 或进入 step 9。
+
+### 恢复记录（2026-07-19）
+
+用户确认额度恢复并按原计划续跑。orchestrator 已复核 worktree HEAD 精确为 `d4c1c0a912fdca411f9aedfad01d28f11341c86d`、工作区 clean，原始 stage-0 SHA256 仍为 `73468AF6B14EE2F97C18D6349C68A66B2C2E371B369BDAC439B6F3AC1B3C8DF2`；从恢复顺序第 1 项继续，step 9 继续冻结。
