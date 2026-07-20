@@ -129,3 +129,10 @@ f3394d4 使用基线 ring.exe 连续 LLVM self-compile ×3：三轮 `main.o` 均
 ### 恢复记录（2026-07-19）
 
 用户确认额度恢复并按原计划续跑。orchestrator 已复核 worktree HEAD 精确为 `d4c1c0a912fdca411f9aedfad01d28f11341c86d`、工作区 clean，原始 stage-0 SHA256 仍为 `73468AF6B14EE2F97C18D6349C68A66B2C2E371B369BDAC439B6F3AC1B3C8DF2`；从恢复顺序第 1 项继续，step 9 继续冻结。
+
+## B-163 step 8 — 再次额度停止（2026-07-21）
+
+- 隔离 worktree 已提交安全保存点 `fa22ac2`（`wip(step8): checkpoint module scheme propagation`），worktree clean，主分支未 merge。
+- 本轮成功产出 inline-only bridge，但闭包源码二代仍在 `is_occurs_check` field access panic。最小 probe 已把根因锁定为：file-module canonical binding rebind 后未同步同 DefId 的源码短名 scheme，导致同模块调用读到注册期 EMPTY_ROW/未解析 return var。当前已实现按 DefId 同步 alias 的补丁，尚未重新编译。
+- 仍需先补 inline `pub use` raw ABI extern-fn metadata与 enum ctor 实际用例，再做 stage-0→新 compiler→二代、双后端短 gate、必要 suites、LLVM self-compile ×3。任一项未完成前不得 merge；step 9 继续冻结。
+- 完整 SHA、资源轨迹、对照结果和逐步恢复顺序已写入隔离 worktree的 `docs/worker_feedback.md`。
