@@ -1,6 +1,6 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
-    type_to_string, types_equal, make_option_type, type_to_builtin_name,
+    type_to_string, nominal_display_name, types_equal, make_option_type, type_to_builtin_name,
     row_merge, effects_match_kind}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr}
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
@@ -808,9 +808,10 @@ pub fn resolve_dicts_from_scheme(
             none => {}
         }
         if !found {
+            let trait_display = nominal_display_name(bound.trait_name)
             let _ = type_error(sink, E0503,
-                "Type does not satisfy trait bound '${bound.trait_name}'",
-                span, DiagnosticContext::TraitError { detail: "type does not satisfy '${bound.trait_name}'" })
+                "Type does not satisfy trait bound '${trait_display}'",
+                span, DiagnosticContext::TraitError { detail: "type does not satisfy '${trait_display}'" })
         }
     }
     resolved_dicts
@@ -918,9 +919,11 @@ fn resolve_concrete_type_to_dict_ref(
                     DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
+                let type_display = nominal_display_name(name)
+                let trait_display = nominal_display_name(trait_name)
                 let _ = type_error(sink, E0503,
-                    "Type '${name}' does not implement trait '${trait_name}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${name}' does not satisfy '${trait_name}'" })
+                    "Type '${type_display}' does not implement trait '${trait_display}'",
+                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
                 DictRef::Static(trait_dict_name(name, trait_name))
             }
         },
@@ -937,9 +940,11 @@ fn resolve_concrete_type_to_dict_ref(
                     DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
+                let type_display = nominal_display_name(name)
+                let trait_display = nominal_display_name(trait_name)
                 let _ = type_error(sink, E0503,
-                    "Type '${name}' does not implement trait '${trait_name}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${name}' does not satisfy '${trait_name}'" })
+                    "Type '${type_display}' does not implement trait '${trait_display}'",
+                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
                 DictRef::Static(trait_dict_name(name, trait_name))
             }
         },
@@ -1126,7 +1131,7 @@ fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, 
         return ctx.env.fresh_var()
     }
     if found_types.len() > 1 {
-        let traits_str = found_trait_names.join(", ")
+        let traits_str = found_trait_names.map(fn(name) { nominal_display_name(name) }).join(", ")
         let _ = type_error(ctx.sink, E0512,
             "Ambiguous associated type '${assoc_name}' for '${type_param_name}': found in traits ${traits_str}",
             span, DiagnosticContext::TraitError { detail: "ambiguous associated type" })
@@ -1220,8 +1225,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
         match ctx.env.types.structs.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
+                    let type_display = nominal_display_name(name)
                     let _ = type_error(ctx.sink, E0301,
-                        "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
+                        "Type '${type_display}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
                             actual: "${type_args.len().to_str()} type args",
@@ -1248,8 +1254,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
         match ctx.env.types.enums.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
+                    let type_display = nominal_display_name(name)
                     let _ = type_error(ctx.sink, E0301,
-                        "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
+                        "Type '${type_display}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
                             actual: "${type_args.len().to_str()} type args",
@@ -1275,8 +1282,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
     match ctx.env.types.type_aliases.get(name) {
         some(alias) => {
             if type_args.len() > 0 && type_args.len() != alias.type_params.len() {
+                let type_display = nominal_display_name(name)
                 let _ = type_error(ctx.sink, E0301,
-                    "Type '${name}' expects ${alias.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
+                    "Type '${type_display}' expects ${alias.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                     span, DiagnosticContext::TypeMismatch {
                         expected: "${alias.type_params.len().to_str()} type args",
                         actual: "${type_args.len().to_str()} type args",
@@ -1301,8 +1309,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
         none => {}
     }
 
-    type_error(ctx.sink, E0204, "Unknown type: ${name}", span,
-        DiagnosticContext::OtherContext { detail: some("unknown type '${name}'") })
+    let type_display = nominal_display_name(name)
+    type_error(ctx.sink, E0204, "Unknown type: ${type_display}", span,
+        DiagnosticContext::OtherContext { detail: some("unknown type '${type_display}'") })
 }
 
 // ============================================================
@@ -1376,9 +1385,11 @@ fn bind_constructor_pattern(
                         match resolved_expected {
                             Type::EnumType { name: rname, .. } => {
                                 if rname != ename {
+                                    let enum_display = nominal_display_name(ename)
+                                    let expected_display = nominal_display_name(rname)
                                     let _ = type_error(ctx.sink, E0301,
-                                        "variant '${name}' belongs to enum '${ename}', not '${rname}'",
-                                        span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
+                                        "variant '${name}' belongs to enum '${enum_display}', not '${expected_display}'",
+                                        span, DiagnosticContext::TypeMismatch { expected: expected_display, actual: enum_display, expression: none })
                                 }
                             },
                             Type::TypeVar { .. } => {},
@@ -1455,9 +1466,11 @@ fn bind_named_constructor_pattern(
                             match resolved_expected {
                                 Type::EnumType { name: rname, .. } => {
                                     if rname != ename {
+                                        let enum_display = nominal_display_name(ename)
+                                        let expected_display = nominal_display_name(rname)
                                         let _ = type_error(ctx.sink, E0301,
-                                            "variant '${name}' belongs to enum '${ename}', not '${rname}'",
-                                            span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
+                                            "variant '${name}' belongs to enum '${enum_display}', not '${expected_display}'",
+                                            span, DiagnosticContext::TypeMismatch { expected: expected_display, actual: enum_display, expression: none })
                                     }
                                 },
                                 _ => {}
@@ -1591,8 +1604,9 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                     if enum_def.variant_index.contains_key(variant_name) {
                         return some(enum_def.name)
                     }
+                    let qualifier_display = nominal_display_name(q)
                     let _ = type_error(ctx.sink, E0201,
-                        "'${q}' has no variant '${variant_name}'",
+                        "'${qualifier_display}' has no variant '${variant_name}'",
                         span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
                     return none
                 },
@@ -1612,8 +1626,9 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                     none => {}
                 }
             }
+            let qualifier_display = nominal_display_name(q)
             let _ = type_error(ctx.sink, E0201,
-                "'${q}' has no variant '${variant_name}'",
+                "'${qualifier_display}' has no variant '${variant_name}'",
                 span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
             none
         },

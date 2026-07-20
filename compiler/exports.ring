@@ -1,7 +1,7 @@
 use types::{Type}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use hir::{HProgram, HDecl, compare_by_first, variant_ctor_name}
-use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, EffectAliasDef}
+use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, TypeAliasDef, EffectAliasDef}
 use infer_register::{prefix_decl_name, module_prefix_decl_name}
 
 // ============================================================
@@ -14,6 +14,7 @@ pub struct ModuleExports {
     pub values: Map<Str, TypeScheme>,
     pub value_origins: Map<Str, Str>,
     pub types: Map<Str, TypeDef>,
+    pub type_aliases: Map<Str, TypeAliasDef>,
     pub effects: Map<Str, EffectDef>,
     pub effect_aliases: Map<Str, EffectAliasDef>,
     pub traits: Map<Str, TraitDef>,
@@ -45,6 +46,27 @@ fn export_display_name(identity: Str) -> Str {
 
 fn append_identity(prefix: Str, name: Str) -> Str {
     if prefix.ends_with("$$_") { "${prefix}${name}" } else { "${prefix}::${name}" }
+}
+
+fn identity_leaf(identity: Str) -> Str {
+    let inline_parts = identity.split("::")
+    let inline_leaf = inline_parts.get(inline_parts.len() - 1).unwrap_or(identity)
+    let file_parts = inline_leaf.split("$$_")
+    file_parts.get(file_parts.len() - 1).unwrap_or(inline_leaf)
+}
+
+// Impl declarations deliberately retain their source spelling until the
+// module environment is complete. Export metadata must use the same canonical
+// nominal key that registration chose, otherwise a consumer imports the type
+// but loses all of its inherent methods.
+fn export_nominal_identity(env: TypeEnv, type_name: Str) -> Str {
+    match env.types.structs.get(type_name) {
+        some(def) => def.name,
+        none => match env.types.enums.get(type_name) {
+            some(def) => def.name,
+            none => type_name
+        }
+    }
 }
 
 // Resolve a relative pub-use inside an inline module to the same canonical
@@ -85,7 +107,7 @@ fn inline_use_source_prefix(mod_identity: Str, use_decl: UseDecl) -> Str? {
 fn copy_inline_export(
     source: Str, local: Str, env: TypeEnv, fn_mut_params_map: Map<Str, List<Bool>>,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
-    mut types: Map<Str, TypeDef>, mut effects: Map<Str, EffectDef>,
+    mut types: Map<Str, TypeDef>, mut type_aliases: Map<Str, TypeAliasDef>, mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>, mut traits: Map<Str, TraitDef>,
     mut impl_methods: Map<Str, Map<Str, TypeScheme>>,
     mut inherent_methods: Map<Str, List<Str>>, mut struct_field_orders: Map<Str, List<Str>>,
@@ -114,7 +136,17 @@ fn copy_inline_export(
                 some(methods) => { mut_methods.insert(def.name, methods) }, none => {}
             }
         },
-        none => {}
+        none => {
+            // File-module extern types retain their raw ABI identity instead
+            // of the canonical module identity used by normal nominals.
+            let abi_name = identity_leaf(source)
+            match env.types.structs.get(abi_name) {
+                some(def) => {
+                    if def.is_extern { types.insert(local, TypeDef::StructDef_(def)) }
+                },
+                none => {}
+            }
+        }
     }
     match env.types.enums.get(source) {
         some(def) => {
@@ -127,6 +159,9 @@ fn copy_inline_export(
             }
         },
         none => {}
+    }
+    match env.types.type_aliases.get(source) {
+        some(def) => { type_aliases.insert(local, def) }, none => {}
     }
     match env.types.effects.get(source) {
         some(def) => { effects.insert(local, def) }, none => {}
@@ -147,6 +182,7 @@ fn extract_decl_export(
     mut values: Map<Str, TypeScheme>,
     mut value_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>,
+    mut type_aliases: Map<Str, TypeAliasDef>,
     mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>,
     mut traits: Map<Str, TraitDef>,
@@ -237,20 +273,21 @@ fn extract_decl_export(
             }
         },
         Decl::Impl { target_type, trait_name, methods, .. } => {
-            match env.trait_reg.impl_methods.get(target_type) {
+            let canonical_target = export_nominal_identity(env, target_type)
+            match env.trait_reg.impl_methods.get(canonical_target) {
                 some(methods_map) => {
-                    impl_methods.insert(target_type, map_clone(methods_map))
+                    impl_methods.insert(canonical_target, map_clone(methods_map))
                 },
                 none => {},
             }
-            match env.trait_reg.mut_methods.get(target_type) {
-                some(ms) => { mut_methods.insert(target_type, ms) },
+            match env.trait_reg.mut_methods.get(canonical_target) {
+                some(ms) => { mut_methods.insert(canonical_target, ms) },
                 none => {},
             }
             for m in methods {
                 match m {
                     Decl::Fn { name: mname, .. } => {
-                        let full_name = "${target_type}_${mname}"
+                        let full_name = "${canonical_target}_${mname}"
                         match fn_mut_params_map.get(full_name) {
                             some(flags) => { fn_mut_params.insert(full_name, flags) },
                             none => {},
@@ -268,10 +305,10 @@ fn extract_decl_export(
                         for d in program.decls {
                             match d {
                                 Decl::Struct { name, is_pub, .. } => {
-                                    if name == export_display_name(target_type) && is_pub { is_pub_type = true }
+                                    if name == export_display_name(canonical_target) && is_pub { is_pub_type = true }
                                 },
                                 Decl::Enum { name, is_pub, .. } => {
-                                    if name == export_display_name(target_type) && is_pub { is_pub_type = true }
+                                    if name == export_display_name(canonical_target) && is_pub { is_pub_type = true }
                                 },
                                 _ => {},
                             }
@@ -284,9 +321,9 @@ fn extract_decl_export(
                                     _ => {},
                                 }
                             }
-                            match inherent_methods.get(target_type) {
+                            match inherent_methods.get(canonical_target) {
                                 some(existing) => existing.extend(method_names),
-                                none => { inherent_methods.insert(target_type, method_names) },
+                                none => { inherent_methods.insert(canonical_target, method_names) },
                             }
                         }
                     },
@@ -316,6 +353,15 @@ fn extract_decl_export(
                 }
             }
         },
+        Decl::TypeAlias { name, is_pub, .. } => {
+            if is_pub {
+                let display = export_display_name(name)
+                match env.types.type_aliases.get(name) {
+                    some(adef) => { type_aliases.insert(display, adef) },
+                    none => {},
+                }
+            }
+        },
         Decl::Const { name, is_pub, .. } => {
             if is_pub {
                 let display = export_display_name(name)
@@ -333,7 +379,7 @@ fn extract_decl_export(
                 for subdecl in mod_decls {
                     let prefixed = prefix_decl_name(mod_name, subdecl)
                     extract_decl_export(prefixed, env, fn_mut_params_map, program,
-                        values, value_origins, types, effects, effect_aliases, traits,
+                        values, value_origins, types, type_aliases, effects, effect_aliases, traits,
                         impl_methods, inherent_methods, struct_field_orders,
                         extern_values, mut_methods, fn_mut_params, false)
                 }
@@ -346,15 +392,16 @@ fn extract_decl_export(
                                 for item in names {
                                     let local_name = match item.alias { some(a) => a, none => item.name }
                                     copy_inline_export(append_identity(source_prefix, item.name), "${facade}::${local_name}",
-                                        env, fn_mut_params_map, values, value_origins, types, effects, effect_aliases, traits,
+                                        env, fn_mut_params_map, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
                                         impl_methods, inherent_methods, struct_field_orders, mut_methods, fn_mut_params)
                                 }
                             },
                             UseImport::Module => {
                                 let path = use_decl.path.segments
                                 let item_name = path.get(path.len() - 1).unwrap_or("")
-                                copy_inline_export(append_identity(source_prefix, item_name), "${facade}::${item_name}",
-                                    env, fn_mut_params_map, values, value_origins, types, effects, effect_aliases, traits,
+                                let local_name = match use_decl.alias { some(a) => a, none => item_name }
+                                copy_inline_export(append_identity(source_prefix, item_name), "${facade}::${local_name}",
+                                    env, fn_mut_params_map, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
                                     impl_methods, inherent_methods, struct_field_orders, mut_methods, fn_mut_params)
                             }
                         },
@@ -374,7 +421,7 @@ fn extract_decl_export(
 fn copy_exported_name(
     source: ModuleExports, source_name: Str, local_name: Str,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
-    mut types: Map<Str, TypeDef>, mut effects: Map<Str, EffectDef>,
+    mut types: Map<Str, TypeDef>, mut type_aliases: Map<Str, TypeAliasDef>, mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>, mut traits: Map<Str, TraitDef>,
     mut struct_field_orders: Map<Str, List<Str>>, mut extern_values: Set<Str>,
     mut fn_mut_params: Map<Str, List<Bool>>,
@@ -410,6 +457,9 @@ fn copy_exported_name(
         },
         none => {}
     }
+    match source.type_aliases.get(source_name) {
+        some(def) => { type_aliases.insert(local_name, def) }, none => {}
+    }
     match source.effects.get(source_name) {
         some(def) => { effects.insert(local_name, def) }, none => {}
     }
@@ -440,6 +490,7 @@ pub fn extract_exports(
     let mut values: Map<Str, TypeScheme> = map_new()
     let mut value_origins: Map<Str, Str> = map_new()
     let mut types: Map<Str, TypeDef> = map_new()
+    let mut type_aliases: Map<Str, TypeAliasDef> = map_new()
     let mut effects: Map<Str, EffectDef> = map_new()
     let mut effect_aliases: Map<Str, EffectAliasDef> = map_new()
     let mut traits: Map<Str, TraitDef> = map_new()
@@ -452,7 +503,7 @@ pub fn extract_exports(
     for decl in program.decls {
         let canonical_decl = module_prefix_decl_name(module_prefix, decl)
         extract_decl_export(canonical_decl, env, fn_mut_params_map, program,
-            values, value_origins, types, effects, effect_aliases, traits,
+            values, value_origins, types, type_aliases, effects, effect_aliases, traits,
             impl_methods, inherent_methods, struct_field_orders,
             extern_values, mut_methods, fn_mut_params, true)
     }
@@ -471,7 +522,7 @@ pub fn extract_exports(
                         for item in names {
                             let local_name = match item.alias { some(a) => a, none => item.name }
                             copy_exported_name(source, item.name, local_name,
-                                values, value_origins, types, effects, effect_aliases, traits,
+                                values, value_origins, types, type_aliases, effects, effect_aliases, traits,
                                 struct_field_orders, extern_values, fn_mut_params,
                                 impl_methods, inherent_methods, mut_methods)
                             // Importing an enum also imports its constructors.
@@ -479,7 +530,7 @@ pub fn extract_exports(
                                 some(TypeDef::EnumDef_(edef)) => {
                                     for v in edef.variants {
                                         copy_exported_name(source, v.name, v.name,
-                                            values, value_origins, types, effects, effect_aliases, traits,
+                                            values, value_origins, types, type_aliases, effects, effect_aliases, traits,
                                             struct_field_orders, extern_values, fn_mut_params,
                                             impl_methods, inherent_methods, mut_methods)
                                     }
@@ -492,6 +543,7 @@ pub fn extract_exports(
                         let mut names: Set<Str> = set_new()
                         for entry in source.values.entries() { let (name, _) = entry; names.insert(name) }
                         for entry in source.types.entries() { let (name, _) = entry; names.insert(name) }
+                        for entry in source.type_aliases.entries() { let (name, _) = entry; names.insert(name) }
                         for entry in source.effects.entries() { let (name, _) = entry; names.insert(name) }
                         for entry in source.effect_aliases.entries() { let (name, _) = entry; names.insert(name) }
                         for entry in source.traits.entries() { let (name, _) = entry; names.insert(name) }
@@ -499,7 +551,7 @@ pub fn extract_exports(
                         sorted_names.sort()
                         for name in sorted_names {
                             copy_exported_name(source, name, name,
-                                values, value_origins, types, effects, effect_aliases, traits,
+                                values, value_origins, types, type_aliases, effects, effect_aliases, traits,
                                 struct_field_orders, extern_values, fn_mut_params,
                                 impl_methods, inherent_methods, mut_methods)
                         }
@@ -545,6 +597,7 @@ pub fn extract_exports(
         values: values,
         value_origins: value_origins,
         types: types,
+        type_aliases: type_aliases,
         effects: effects,
         effect_aliases: effect_aliases,
         traits: traits,

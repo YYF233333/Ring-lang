@@ -211,6 +211,12 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                 },
             }
         }
+        let mut sorted_type_aliases = mod_.type_aliases.entries()
+        sorted_type_aliases.sort_by(compare_by_first)
+        for entry in sorted_type_aliases {
+            let (_, adef) = entry
+            ctx.env.types.type_aliases.insert(adef.name, adef)
+        }
         let mut sorted_effects = mod_.effects.entries()
         sorted_effects.sort_by(compare_by_first)
         for entry in sorted_effects {
@@ -388,6 +394,11 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                 none => {},
                             }
 
+                            match mod_.type_aliases.get(item.name) {
+                                some(def) => { ctx.env.types.type_aliases.insert(local_name, def); found = true },
+                                none => {}
+                            }
+
                             match mod_.effects.get(item.name) {
                                 some(def) => { ctx.env.types.effects.insert(local_name, def); found = true },
                                 none => {}
@@ -469,6 +480,12 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                 },
                                 TypeDef::StructDef_(sdef) => { ctx.env.types.structs.insert(name, sdef) },
                             }
+                        }
+                        let mut sorted_mod_type_aliases = mod_.type_aliases.entries()
+                        sorted_mod_type_aliases.sort_by(compare_by_first)
+                        for entry in sorted_mod_type_aliases {
+                            let (name, def) = entry
+                            ctx.env.types.type_aliases.insert(name, def)
                         }
                         let mut sorted_mod_effects = mod_.effects.entries()
                         sorted_mod_effects.sort_by(compare_by_first)

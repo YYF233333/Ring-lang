@@ -113,6 +113,7 @@ pub struct ImplEntry {
 // ============================================================
 
 pub struct TypeAliasDef {
+    pub name: Str,
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
     pub ty: Type

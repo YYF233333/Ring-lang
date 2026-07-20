@@ -261,23 +261,21 @@ pub fn c_sanitize(name: Str) -> Str {
 // (`ring_<module-prefix>$$_<name>`).  Applying c_sanitize to those keys is
 // not injective: both `$` and `_` collapse to `_`, so e.g. modules `a::b`
 // and `a_b` can emit the same linker symbol.  Project symbols use a separate,
-// reversible escape alphabet:
+// reversible escape alphabet over the complete input identity:
 //   `_` -> `__`, `$` -> `_m`, other non-alnum -> `_x<codepoint>_`.
 // Literal underscores are always escaped, so every escape is unambiguous.
+// Do not strip a leading `ring_`: it is also a legal module-prefix spelling,
+// so stripping would alias `ring_a$$_Foo` with `a$$_Foo` when this encoder is
+// used directly on canonical type identities (drop glue, thunks, dictionaries).
 // The `ringmod_` namespace cannot collide with ordinary Ring functions,
 // whose C symbols always start with `ring_`.
 pub fn c_module_symbol(registry_key: Str) -> Str {
-    let payload = if registry_key.starts_with("ring_") {
-        registry_key.slice(5, registry_key.len())
-    } else {
-        registry_key
-    }
     let mut parts: List<Str> = ["ringmod_"]
-    for i in 0..payload.len() {
-        let c = payload.char_code_at(i).unwrap_or(95)
+    for i in 0..registry_key.len() {
+        let c = registry_key.char_code_at(i).unwrap_or(95)
         let alnum = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
         if alnum {
-            parts.push(payload[i])
+            parts.push(registry_key[i])
         } else if c == 95 {
             parts.push("__")
         } else if c == 36 {

@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
-    EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string, effect_to_string}
+    EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string, effect_to_string, nominal_display_name}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
@@ -63,6 +63,42 @@ pub fn insert_mod_aliases(mut ctx: InferCtx, mod_name: Str, decls: List<Decl>, g
                 if !guard || !ctx.env.types.effect_aliases.contains_key(name) {
                     match ctx.env.types.effect_aliases.get(qualified) {
                         some(adef) => { ctx.env.types.effect_aliases.insert(name, adef) },
+                        none => {}
+                    }
+                }
+            },
+            Decl::TypeAlias { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                if !guard || !ctx.env.types.type_aliases.contains_key(name) {
+                    match ctx.env.types.type_aliases.get(qualified) {
+                        some(adef) => { ctx.env.types.type_aliases.insert(name, adef) },
+                        none => {}
+                    }
+                }
+            },
+            Decl::ExternType { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                match ctx.env.types.structs.get(qualified) {
+                    some(def) => {
+                        if !guard || !ctx.env.types.structs.contains_key(name) {
+                            ctx.env.types.structs.insert(name, def)
+                        }
+                    },
+                    none => match ctx.env.types.structs.get(name) {
+                        some(def) => {
+                            // Extern types keep their raw ABI identity, while
+                            // relative imports still need a qualified source key.
+                            ctx.env.types.structs.insert(qualified, def)
+                        },
+                        none => {}
+                    }
+                }
+            },
+            Decl::Sig { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                if !guard || !ctx.env.types.sigs.contains_key(name) {
+                    match ctx.env.types.sigs.get(qualified) {
+                        some(def) => { ctx.env.types.sigs.insert(name, def) },
                         none => {}
                     }
                 }
@@ -535,6 +571,30 @@ fn insert_inline_display_aliases(
                     some(def) => { ctx.env.types.effect_aliases.insert(display, def) }, none => {}
                 }
             },
+            Decl::TypeAlias { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.types.type_aliases.get(canonical) {
+                    some(def) => { ctx.env.types.type_aliases.insert(display, def) }, none => {}
+                }
+            },
+            Decl::ExternType { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.types.structs.get(canonical) {
+                    some(def) => { ctx.env.types.structs.insert(display, def) },
+                    none => match ctx.env.types.structs.get(name) {
+                        some(def) => { ctx.env.types.structs.insert(display, def) }, none => {}
+                    }
+                }
+            },
+            Decl::Sig { name, .. } => {
+                let display = "${display_mod}::${name}"
+                let canonical = "${canonical_mod}::${name}"
+                match ctx.env.types.sigs.get(canonical) {
+                    some(def) => { ctx.env.types.sigs.insert(display, def) }, none => {}
+                }
+            },
             Decl::Fn { name, .. } => {
                 if include_values {
                     let display = "${display_mod}::${name}"
@@ -879,9 +939,10 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
     let mut supertrait_names: List<Str> = []
     for st in supertraits {
         if !ctx.env.trait_reg.traits.contains_key(st.trait_name) {
+            let trait_display = nominal_display_name(st.trait_name)
             let _ = type_error(ctx.sink, E0501,
-                "Unknown supertrait: ${st.trait_name}", span,
-                DiagnosticContext::TraitError { detail: "unknown supertrait '${st.trait_name}'" })
+                "Unknown supertrait: ${trait_display}", span,
+                DiagnosticContext::TraitError { detail: "unknown supertrait '${trait_display}'" })
         } else {
             supertrait_names.push(resolve_trait_identity(ctx, st.trait_name))
         }
@@ -895,8 +956,10 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
         while stack.len() > 0 {
             let current = stack.pop().unwrap()
             if visited.contains(current) {
+                let name_display = nominal_display_name(name)
+                let current_display = nominal_display_name(current)
                 let _ = type_error(ctx.sink, E0506,
-                    "Cyclic supertrait inheritance: '${name}' -> '${current}'", span,
+                    "Cyclic supertrait inheritance: '${name_display}' -> '${current_display}'", span,
                     DiagnosticContext::TraitError { detail: "cyclic supertrait inheritance" })
                 break
             }
@@ -1085,6 +1148,8 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
 
     match resolved_trait_name {
         some(tname) => {
+            let trait_display = nominal_display_name(tname)
+            let target_display = nominal_display_name(target_type)
             match ctx.env.trait_reg.traits.get(tname) {
                 some(trait_def) => {
                     let mut impl_method_names: Set<Str> = set_new()
@@ -1094,7 +1159,7 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                     for tm in trait_def.methods {
                         if !tm.has_default && !impl_method_names.contains(tm.name) {
                             let _ = type_error(ctx.sink, E0502,
-                                "Missing method '${tm.name}' in impl ${tname} for ${target_type}",
+                                "Missing method '${tm.name}' in impl ${trait_display} for ${target_display}",
                                 span, DiagnosticContext::TraitError { detail: "missing method '${tm.name}'" })
                         }
                     }
@@ -1117,7 +1182,7 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                                 },
                                 none => {
                                     let _ = type_error(ctx.sink, E0510,
-                                        "Missing associated type '${atdef.name}' in impl ${tname} for ${target_type}",
+                                        "Missing associated type '${atdef.name}' in impl ${trait_display} for ${target_display}",
                                         span, DiagnosticContext::TraitError { detail: "missing associated type '${atdef.name}'" })
                                 }
                             }
@@ -1134,7 +1199,7 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                         let (aname, _) = entry
                         if !trait_assoc_names.contains(aname) {
                             let _ = type_error(ctx.sink, E0514,
-                                "Unexpected associated type '${aname}' in impl ${tname} for ${target_type}; trait '${tname}' does not declare it",
+                                "Unexpected associated type '${aname}' in impl ${trait_display} for ${target_display}; trait '${trait_display}' does not declare it",
                                 span, DiagnosticContext::TraitError { detail: "unexpected associated type '${aname}'" })
                         }
                     }
@@ -1149,9 +1214,11 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                                         some(cname) => {
                                             for bound_trait in atdef.bounds {
                                                 if !has_impl(ctx.env.trait_reg, cname, bound_trait) {
+                                                    let bound_display = nominal_display_name(bound_trait)
+                                                    let concrete_display = nominal_display_name(cname)
                                                     let _ = type_error(ctx.sink, E0513,
-                                                        "Associated type '${atdef.name}' requires '${bound_trait}', but '${type_to_string(concrete_ty)}' does not implement it",
-                                                        span, DiagnosticContext::TraitError { detail: "associated type bound '${bound_trait}' not satisfied by '${cname}'" })
+                                                        "Associated type '${atdef.name}' requires '${bound_display}', but '${type_to_string(concrete_ty)}' does not implement it",
+                                                        span, DiagnosticContext::TraitError { detail: "associated type bound '${bound_display}' not satisfied by '${concrete_display}'" })
                                                 }
                                             }
                                         },
@@ -1167,9 +1234,10 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                     let all_supertraits = collect_all_supertraits(ctx, tname)
                     for required_st in all_supertraits {
                         if !has_impl(ctx.env.trait_reg, target_type, required_st) {
+                            let required_display = nominal_display_name(required_st)
                             let _ = type_error(ctx.sink, E0505,
-                                "Type '${target_type}' does not implement supertrait '${required_st}' required by '${tname}'",
-                                span, DiagnosticContext::TraitError { detail: "missing supertrait impl '${required_st}'" })
+                                "Type '${target_display}' does not implement supertrait '${required_display}' required by '${trait_display}'",
+                                span, DiagnosticContext::TraitError { detail: "missing supertrait impl '${required_display}'" })
                         }
                     }
 
@@ -1190,8 +1258,8 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                     })
                 },
                 none => { let _ = type_error(ctx.sink, E0501,
-                    "Unknown trait: ${tname}", span,
-                    DiagnosticContext::TraitError { detail: "unknown trait '${tname}'" }) }
+                    "Unknown trait: ${trait_display}", span,
+                    DiagnosticContext::TraitError { detail: "unknown trait '${trait_display}'" }) }
             }
         },
         none => {}
@@ -1313,10 +1381,11 @@ fn register_delegate(
     impl_type_params: List<TypeParam>
 ) {
     // 1. Validate field exists on target struct
+    let target_display = nominal_display_name(target_type)
     match ctx.env.types.structs.get(target_type) {
         none => {
             let _ = type_error(ctx.sink, E0507,
-                "delegate can only be used on struct types, '${target_type}' is not a struct",
+                "delegate can only be used on struct types, '${target_display}' is not a struct",
                 span, DiagnosticContext::TraitError { detail: "delegate on non-struct type" })
         },
         some(struct_def) => {
@@ -1329,7 +1398,7 @@ fn register_delegate(
             match field_type {
                 none => {
                     let _ = type_error(ctx.sink, E0507,
-                        "field '${field}' not found in struct '${target_type}'",
+                        "field '${field}' not found in struct '${target_display}'",
                         span, DiagnosticContext::TraitError { detail: "delegate field not found" })
                 },
                 some(ft) => {
@@ -1365,23 +1434,26 @@ fn register_delegate_traits(
 ) {
     for tname in trait_names {
         let canonical_trait = resolve_trait_identity(ctx, tname)
+        let trait_display = nominal_display_name(canonical_trait)
+        let field_type_display = nominal_display_name(field_type_name)
+        let target_display = nominal_display_name(target_type)
         match ctx.env.trait_reg.traits.get(canonical_trait) {
             none => {
                 let _ = type_error(ctx.sink, E0501,
-                    "Unknown trait: ${tname}",
-                    span, DiagnosticContext::TraitError { detail: "unknown trait '${tname}'" })
+                    "Unknown trait: ${trait_display}",
+                    span, DiagnosticContext::TraitError { detail: "unknown trait '${trait_display}'" })
             },
             some(trait_def) => {
                 // Validate that the field type implements the trait
                 if !has_impl(ctx.env.trait_reg, field_type_name, canonical_trait) {
                     let _ = type_error(ctx.sink, E0508,
-                        "type '${field_type_name}' (field '${field}') does not implement trait '${tname}'",
+                        "type '${field_type_display}' (field '${field}') does not implement trait '${trait_display}'",
                         span, DiagnosticContext::TraitError { detail: "delegate field type missing trait impl" })
                 } else {
                     // Check for conflict: same trait already implemented (hand-written) for this type
                     if has_impl(ctx.env.trait_reg, target_type, canonical_trait) {
                         let _ = type_error(ctx.sink, E0509,
-                            "trait '${tname}' is already implemented for '${target_type}'; cannot delegate the same trait",
+                            "trait '${trait_display}' is already implemented for '${target_display}'; cannot delegate the same trait",
                             span, DiagnosticContext::TraitError { detail: "delegate conflicts with existing impl" })
                         continue
                     }
@@ -1483,8 +1555,9 @@ fn expand_effect_exprs(mut ctx: InferCtx, decl_effects: List<EffectExpr>, mut ex
             some(alias_def) => {
                 // Cycle detection
                 if expanding.contains(eff.name) {
+                    let effect_display = nominal_display_name(eff.name)
                     let _ = type_error(ctx.sink, E0406,
-                        "Cyclic effect alias: '${eff.name}' references itself", eff.span,
+                        "Cyclic effect alias: '${effect_display}' references itself", eff.span,
                         DiagnosticContext::OtherContext { detail: some("cyclic effect alias") })
                 } else {
                     expanding.insert(eff.name)
@@ -1610,9 +1683,12 @@ fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     match ctx.env.lookup(name) {
         some(existing) => match existing.def_id {
             some(did) => match ctx.env.scope.def_spans.get(did) {
-                some(_) => { let _ = type_error(ctx.sink, E0207,
-                    "Duplicate definition: '${name}' is already defined", span,
-                    DiagnosticContext::TypeMismatch { expected: "unique name", actual: name, expression: none }) },
+                some(_) => {
+                    let display = nominal_display_name(name)
+                    let _ = type_error(ctx.sink, E0207,
+                        "Duplicate definition: '${display}' is already defined", span,
+                        DiagnosticContext::TypeMismatch { expected: "unique name", actual: display, expression: none })
+                },
                 none => {}
             },
             none => {}
@@ -1734,9 +1810,10 @@ fn register_fn_common(
         for b in tp.bounds {
             let bound_trait = resolve_trait_identity(ctx, b.trait_name)
             if !ctx.env.trait_reg.traits.contains_key(bound_trait) {
+                let trait_display = nominal_display_name(bound_trait)
                 let _ = type_error(ctx.sink, E0501,
-                    "Unknown trait: ${b.trait_name}", tp.span,
-                    DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
+                    "Unknown trait: ${trait_display}", tp.span,
+                    DiagnosticContext::TraitError { detail: "unknown trait '${trait_display}'" })
             }
             if track_fn_bounds {
                 fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: bound_trait })
@@ -1843,7 +1920,7 @@ fn register_type_alias(mut ctx: InferCtx, name: Str, type_params: List<TypeParam
     ctx.type_param_scope = saved
     let mut tp_names: List<Str> = []
     for tp in type_params { tp_names.push(tp.name) }
-    ctx.env.types.type_aliases.insert(name, TypeAliasDef { type_params: tp_names, type_param_vars: tp_vars, ty: resolved })
+    ctx.env.types.type_aliases.insert(name, TypeAliasDef { name: name, type_params: tp_names, type_param_vars: tp_vars, ty: resolved })
 }
 
 fn register_const(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span: Span) {
@@ -1915,8 +1992,9 @@ fn canonicalize_effect_alias_body(ctx: InferCtx, effects: List<EffectExpr>) -> L
 
 fn register_effect_alias(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, effects: List<EffectExpr>, span: Span) {
     if ctx.env.types.effect_aliases.contains_key(name) {
+        let display = nominal_display_name(name)
         let _ = type_error(ctx.sink, E0207,
-            "Duplicate definition: effect alias '${name}' is already defined", span,
+            "Duplicate definition: effect alias '${display}' is already defined", span,
             DiagnosticContext::OtherContext { detail: some("duplicate effect alias") })
     } else {
         let mut tp_names: List<Str> = []

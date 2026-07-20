@@ -105,3 +105,42 @@ stage-0 来源：
 4. 对所有正向 gate 分别 LLVM+C build/run，并逐项比较 `.expected`；再跑 E0301/E0513/E0803 等负向 diagnostics，确认输出无 `$$_`。
 5. 再跑 Step 8 metadata/key/effect 旧回归与必要 suite。最终 self-compile ×3 仍由主 agent 按既定边界执行；本 WIP 未执行。
 6. 任一 gate 失败先修 step 8；**不要直接进入 step 9**。
+
+---
+
+## B-163 step 8 — 2026-07-21 quota checkpoint（未完成、未 merge）
+
+**停止边界**：用户再次要求额度耗尽前完成手头工作、落档并停止。已停止长编译；本保存点仍属于 step 8，step 9 从未开始。
+
+### 本轮新增修复与正式回归
+
+- 修复 `ModuleExports` 对 public type alias 的直接、named/module/transitive re-export 传播；`TypeAliasDef` 增加 canonical `name`。
+- 修复 inline `pub use self/super` 对 struct/enum/type alias/effect/effect alias/trait/extern type/value等命名空间的传播，并补 module alias 处理。
+- 修复 canonical file-module `main` 的 E0403 检查、`$$_` 用户诊断泄漏、C project symbol 对 `ring_` 前缀模块的碰撞。
+- 修复 export 侧 inherent/mut method metadata：Impl 的 raw `target_type` 先解析到 canonical nominal identity，再读取 registry。正式用例 `module_inherent_method_identity` 锁两个模块同名 `Counter` 的不同 mut/read 方法。
+- SCC 新增 exact qualified/self/super 解析与四个 E0403 负例；源码当前实现为“从 inline roots 沿 caller→callee 的依赖闭包做 leaf-first 预检”，避免普通 file module 全量双检查。
+- 新增正式用例：`c_symbol_ring_prefix_collision`、`inline_pub_use_namespaces`、`module_main_unhandled_effect`、`module_trait_diagnostic_display`、`module_type_alias_direct`、`module_type_alias_reexport`，以及四个 `scc_*` 负例。
+
+### Bootstrap 证据与新根因
+
+1. 原始 stage-0 成功编译 method-export 修复版；随后新编译器自编译在 LLVM codegen 报 `field access on non-struct type: ?..., field: is_occurs_check`。全量 SCC 预检同时造成约 21GB WS / 36GB paged 与 712s 异常轨迹，因此先收窄预检。
+2. 原始 stage-0 成功编译 inline-only 过渡源码：`main.o` 5,153,368 bytes，SHA256 `74076637D931A80B79A8F5FCACC65DA74A6D4E028B18B894ED92EA94F328636E`。以 `-O2` runtime 链接的 `ring_inline_bridge.exe` SHA256 `668AF3F167F9AE0848E03C4CCCD5426834D85AB285CDC9DFCCE83CB8E23ADABD`。
+3. 对照证明用例有效：旧 full-precheck compiler 四个 `scc_*` 均 E0403；inline-only bridge 前三个 E0403，但 `scc_super_top_effect` exit 0。故最终源码改为 inline 依赖闭包，必须包含其 file-root callee。
+4. inline-only bridge 编译闭包源码耗时约 324s 后仍在 `is_occurs_check` panic。静态确认 compiler/std 无 inline ModBlock，故这次失败不是闭包预检执行或 HIR 双检查污染。
+5. 最小 probe 精确定位真正根因：canonical call graph 正确给出 `lib$$_raise_problem` 先于 `lib$$_fail_via_helper`；跨模块直接调用 `raise_problem` 的 typed catch 正常，但同模块 `fail_via_helper -> raise_problem` 丢 fail effect并触发 W0001/panic。`insert_file_module_aliases` 在注册后复制了 canonical scheme 到源码短名；`rebind_fn_type` 只刷新 canonical binding，后继同模块调用仍读取短名的注册期 EMPTY_ROW/未解析 return var。
+6. 当前源码已新增 `rebind_fn_scheme_with_alias`：canonical rebind 后仅在短名与 canonical `def_id` 相同的情况下同步 scheme，覆盖 file top-level 与 inline display alias，避免覆盖 shadow/import。临时给 catch 变量加类型注解的规避已撤销；临时 SCC probe 源已删除。`git diff --check` clean。
+
+### 当前验证边界（务必不要误报完成）
+
+- alias 同步补丁刚落盘，依停止要求**未重新编译**；闭包版源码也尚未产出可执行 compiler。
+- 新编译器的二代自举、定向 LLVM/C gate、必要 suites、LLVM self-compile ×3 确定性 gate全部未完成。
+- 根审另发现 inline `pub use` 的 raw ABI `extern fn` 仍缺 fallback/`extern_values` 与 origin 传播；enum facade constructor 也需实际构造用例确认。两项尚未修，不能 merge。
+- `tests/.tmp_step8_resume` 仅为本轮 probe/build 临时产物，不得提交；正式 tests 与 compiler diff保留在本 WIP checkpoint。
+
+### 下次恢复的最短顺序
+
+1. 先补 inline public re-export 的 raw `extern fn` fallback + `extern_values`/origin，并让 `inline_pub_use_namespaces` 实际调用 runtime extern fn、实际构造 facade enum。
+2. 增加短 alias scheme 两个正式锁：`fail_now -> via_helper` 的 typed catch/E0403 传播；`fn leaf(){1}` 后声明 `Bool` caller 必须 E0301。
+3. 用原始 stage-0（SHA256 见上一个 checkpoint）编当前源码到全新目录；runtime 明确 `-O2` 链接。先验证新增 alias tests与四个 SCC negatives。
+4. 用该 compiler 再编同一源码；必须不再出现 `is_occurs_check` codegen panic，也不应新增 infer_ctx/infer_decl 的虚假 W0001。
+5. 再执行原 checkpoint 的双后端短 gate、必要 suites、最终 LLVM self-compile ×3。全部通过后才允许 merge和 step 8 bookkeeping；完成即停，仍禁止进入 step 9。

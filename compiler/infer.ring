@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, make_option_type, is_option_type, option_inner,
-    type_to_builtin_name, effect_row}
+    type_to_builtin_name, effect_row, nominal_display_name}
 use ast::{Program, Decl, Expr, Stmt, Param, MatchArm, StructFieldInit,
     EffectHandler, StringInterpPart, Pattern, BinOp, UnaryOp, TypeExpr,
     TypeParam, TypeBound, Span, UseDecl, DestructureBinding, span_zero,
@@ -1460,9 +1460,10 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     let effect_def_opt = ctx.env.types.effects.get(effect_name)
     match effect_def_opt {
         none => {
+            let effect_display = nominal_display_name(effect_name)
             let _ = type_error(ctx.sink, E0402,
-                "Unknown effect: ${effect_name}",
-                span, DiagnosticContext::OtherContext { detail: some("effect '${effect_name}' not found") })
+                "Unknown effect: ${effect_display}",
+                span, DiagnosticContext::OtherContext { detail: some("effect '${effect_display}' not found") })
             return InferResult {
                 hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: [], ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
                 subst: subst, effects: EMPTY_ROW
@@ -1477,9 +1478,10 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     let op_opt = effect_def.ops.find(fn(o) { o.name == op_name })
     match op_opt {
         none => {
+            let effect_display = nominal_display_name(canonical_effect_name)
             let _ = type_error(ctx.sink, E0402,
-                "Effect ${canonical_effect_name} has no operation ${op_name}",
-                span, DiagnosticContext::OtherContext { detail: some("no operation '${op_name}' on effect '${canonical_effect_name}'") })
+                "Effect ${effect_display} has no operation ${op_name}",
+                span, DiagnosticContext::OtherContext { detail: some("no operation '${op_name}' on effect '${effect_display}'") })
             return InferResult {
                 hexpr: HExpr::EffectOp { effect_name: canonical_effect_name, op_name: op_name, args: [], ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
                 subst: subst, effects: EMPTY_ROW
@@ -1508,8 +1510,9 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     let inst_ret = apply_subst_map(inst_map, op.return_type)
 
     if args.len() != inst_params.len() {
+        let effect_display = nominal_display_name(effect_name)
         let _ = type_error(ctx.sink, E0301,
-            "Effect operation '${effect_name}.${op_name}' expects ${inst_params.len().to_str()} argument(s), got ${args.len().to_str()}",
+            "Effect operation '${effect_display}.${op_name}' expects ${inst_params.len().to_str()} argument(s), got ${args.len().to_str()}",
             span, DiagnosticContext::TypeMismatch { expected: "${inst_params.len().to_str()} args", actual: "${args.len().to_str()} args", expression: none })
     }
 
@@ -1723,8 +1726,11 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
     if variant_enum.is_none() && resolved_qualifier.is_some() {
         match resolved_qualifier {
-            some(q) => { let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
-                DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) },
+            some(q) => {
+                let qualifier_display = nominal_display_name(q)
+                let _ = type_error(ctx.sink, E0201, "'${qualifier_display}' has no variant '${name}'", span,
+                    DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
+            },
             none => {}
         }
     }

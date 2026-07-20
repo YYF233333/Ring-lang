@@ -366,15 +366,11 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
     }
 }
 
-fn nominal_display_name(identity: Str) -> Str {
-    let parts = identity.split("$$_")
-    if parts.len() > 1 {
-        let module_name = parts.get(0).unwrap_or("").replace("$", "::")
-        let decl_name = parts.get(1).unwrap_or(identity)
-        "${module_name}::${decl_name}"
-    } else {
-        identity
-    }
+// Convert the compiler's canonical module identity back to source spelling.
+// This is shared by every user-facing type/effect/trait diagnostic so the
+// internal `$$_` separator never leaks through error messages.
+pub fn nominal_display_name(identity: Str) -> Str {
+    identity.replace("$$_", "::").replace("$", "::")
 }
 
 pub fn type_to_string(t: Type) -> Str {
