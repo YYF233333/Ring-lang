@@ -1188,7 +1188,10 @@ fn check_extern_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypePara
     let mut i = 0
     for p in params {
         let ptype = match fn_params.get(i) { some(t) => t, none => UNIT }
-        hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: false })
+        // Preserve the declared mutability as project-link metadata. Genuine
+        // FFI marshalling ignores this field, while an exact internal extern
+        // forward must distinguish `mut T` from `T`.
+        hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: p.is_mutable })
         i = i + 1
     }
     let extern_effects = match declared_effects {

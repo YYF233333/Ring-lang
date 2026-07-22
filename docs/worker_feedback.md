@@ -241,3 +241,20 @@ stage-0 来源：
 - facade 前置与 sibling 拓扑注册已经让 `Count` import 可见，但 inline `register_mod_block_items` 的 final short-alias 刷新发生在 `TypeAlias`/`Sig` 尚未注册时；两者随后与 Fn 一起进入 Pass 2。于是 canonical `facade::PublicCount` 虽先于 `read_item` 注册，短名 `PublicCount` 仍不存在，函数签名报 E0204。
 - inline registration 现与 file-module 分层一致：`TypeAlias`/`Sig` 在 remaining value declarations 前独立注册，并在每项后刷新 short aliases；Pass 2 排除二者。这样函数与 alias 的源码先后无关，同时保留 source-ordered alias-on-alias 链。没有把本修复扩大为 forward/cyclic type-alias 图。
 - `ring_bridge.exe` 对 `inline_pub_use_namespaces` 精确 RED：仅 `defs.ring:21 PublicCount` E0204。当前源码以 `infer_register.ring` 为局部 entry，LLVM 与 C+clang target 均 PASS（仅既有 W0001 与无 main 提示）。完整 semantic GREEN 仍需下一代 compiler。
+
+---
+
+## B-163 step 8 — 2026-07-22 mutable extern-forward signature follow-up
+
+### 精确根因与 ABI 边界 [通知]
+
+- bridge compiler 的 unresolved-symbol 复核显示：无 `mut` 的 `discard`/`is_boxed_def` 已被 exact project bridge 消除，剩余 raw `build_cell_alloc`、`build_cell_store`、`gen_llvm_expr`、`unbox_to_i1` 全部都是 `mut LlvmCtx` forward。静态追踪定位到 `check_extern_fn_decl`：它把所有 ExternFn `HParam.is_mutable` 硬编码成 `false`，而普通 Fn HIR 保留 AST `p.is_mutable`；因此 exact signature 必然不相等。差异不是 effect 或 canonical type，也没有放宽 leaf/signature 匹配。
+- ExternFn HIR 现在保留声明的参数 mutability，作为 project-link signature metadata。真实 FFI 的 lazy declaration/marshalling 不读取该字段，现有外部 ABI不变。
+- `mut Int/Float/Bool/Str` 不能安全桥接：普通 Ring Fn 为这类参数使用 CELL ABI，而 ExternFn 注册路径不记录 caller pre-boxing metadata。因此 bridge planner 对任一 mutable value-type parameter 保守返回 none；`mut` struct/context 参数为 reference-shaped，仍可按完整类型、mutability、返回值与 effect 精确匹配。
+
+### 正式回归与局部证据
+
+- 扩展既有 `extern_forward_project_bridge`：新增 `BridgeCtx` 与 `extern fn bridge_ctx(mut ctx: BridgeCtx) -> Int`，provider 提供对应 public Ring Fn，预期双后端输出新增 `5`。
+- 修复前 `ring_bridge.exe` 编译扩展用例后，LLVM object 链接精确失败于 `undefined symbol: bridge_ctx`；普通 `bridge` 已成功桥接，证明新增锁定的是 mutable-signature 缺口。
+- 当前源码以 `compiler/infer_decl.ring` 为局部 entry：LLVM target PASS；C target 成功生成约 5.7 MB C 源，并由 Clang `-std=c11 -c` 编译 PASS。仅出现既有 W0001/无 main 提示。
+- 本 follow-up 未启动完整 compiler bootstrap、全量 suite、自编译或 Step 9。`compiler_mod.ring` 的完整语义 GREEN 与扩展用例 LLVM/C 运行仍由主 agent 的下一代 compiler gate 完成。

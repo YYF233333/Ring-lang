@@ -13,6 +13,7 @@ use exports::{ModuleExports, extract_exports}
 use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{RcFinding, verify_rc_program, rc_fatal_count, format_rc_findings}
 use codes::{E0708}
+use infer_helpers::{is_value_type}
 
 pub struct CompileProjectResult {
     pub success: Bool
@@ -68,6 +69,12 @@ fn project_callable_signature(
     }
     let mut param_types: List<Str> = []
     for p in params {
+        // A normal Ring `mut` value-type parameter uses the CELL ABI, while a
+        // genuine ExternFn does not register caller pre-boxing metadata. Until
+        // the checker can mark a declaration as an internal forward explicitly,
+        // do not bridge this ABI-sensitive shape. Mutable struct/context params
+        // are reference-shaped and safe to compare exactly below.
+        if p.is_mutable && is_value_type(p.ty) { return none }
         let mutability = if p.is_mutable { "mut " } else { "" }
         param_types.push("${mutability}${type_to_string(p.ty)}")
     }
