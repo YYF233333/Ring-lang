@@ -135,7 +135,10 @@ fn is_builtin_collection(ty: Type) -> Bool {
 // Main expression dispatch
 // ============================================================
 
-pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
+// LLVM construction has no Ring runtime effect. Keep the exported row closed:
+// gen_handle_expr's effect-polymorphic sort_by would otherwise leave a phantom
+// tail in the inferred signature and break codegen_llvm_stmt's exact forward.
+pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef with {} {
     match expr {
         HExpr::IntLit { value, .. } => gen_int_lit(ctx, value),
         HExpr::FloatLit { value, .. } => gen_float_lit(ctx, value),

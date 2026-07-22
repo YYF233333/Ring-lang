@@ -40,7 +40,7 @@ extern fn LLVMBuildIntToPtr(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty:
 extern fn LLVMBuildPtrToInt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 
 // Forward declaration to break circular dependency with codegen_llvm_expr
-extern fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef
+extern fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef with {}
 extern fn unbox_to_i1(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef
 extern fn unbox_int(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef
 extern fn box_int(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef

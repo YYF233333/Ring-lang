@@ -258,3 +258,19 @@ stage-0 来源：
 - 修复前 `ring_bridge.exe` 编译扩展用例后，LLVM object 链接精确失败于 `undefined symbol: bridge_ctx`；普通 `bridge` 已成功桥接，证明新增锁定的是 mutable-signature 缺口。
 - 当前源码以 `compiler/infer_decl.ring` 为局部 entry：LLVM target PASS；C target 成功生成约 5.7 MB C 源，并由 Clang `-std=c11 -c` 编译 PASS。仅出现既有 W0001/无 main 提示。
 - 本 follow-up 未启动完整 compiler bootstrap、全量 suite、自编译或 Step 9。`compiler_mod.ring` 的完整语义 GREEN 与扩展用例 LLVM/C 运行仍由主 agent 的下一代 compiler gate 完成。
+
+---
+
+## B-163 step 8 — 2026-07-22 gen_llvm_expr pure-effect contract follow-up
+
+### 精确差异与修复 [通知]
+
+- `2d56f2d` 产出的 bridge2 自编译 object 中，`build_cell_alloc`、`build_cell_store`、`unbox_to_i1` 均已成功桥接，只剩 raw `gen_llvm_expr`。这排除了 mutability、canonical parameter type 与 dependency 条件；其独有差异是 provider 的 inferred effect row。
+- `gen_llvm_expr` 本体无任何具体 Ring effect。用 bridge2 给 provider 加显式 `with {}` 后，`compiler/codegen_llvm_expr.ring` 整文件 check/LLVM codegen PASS，未出现 E0404 undeclared-effect，证明不存在被隐藏的 io/fail/mut/custom/unsafe effect。
+- 开放 tail 来源是 dispatcher 可达的 `gen_handle_expr`：其 `List.sort_by(compare_by_first)` 走 effect-polymorphic HOF 签名，纯 comparator 仍会给未标注的导出签名留下 phantom row tail。provider 与 `codegen_llvm_stmt` forward 现在都显式声明 `with {}`，把真实的 pure contract 封闭；exact planner 未放宽。
+
+### 最小 RED/GREEN 锁
+
+- 既有 `extern_forward_project_bridge` 新增 `bridge_effect_contract`：provider 内部对局部 Int 列表调用 `sort_by(compare_ints)`，复现相同的纯 HOF tail 形状。
+- 未标注 provider 时，bridge2 LLVM object 链接精确 RED：`undefined symbol: bridge_effect_contract`。provider 加 `with {}`、forward 明确 `with {}` 后，LLVM 与 C 双后端均 build/link/run PASS，输出 `42,5,1,7`。
+- 本 follow-up 未运行完整 bootstrap、全量 suite、自编译或 Step 9；主 agent 仍需用包含本补丁的新 compiler 确认 compiler object 不再含 raw `U gen_llvm_expr`。
