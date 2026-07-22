@@ -170,3 +170,26 @@ stage-0 来源：
 2. 先跑本节三个 alias gates、四个 SCC negatives 和扩充后的 `inline_pub_use_namespaces`；后者必须在 LLVM/C 双后端输出 `7,8,41,9,42`。
 3. 再由第一代新 compiler 编同一源码，确认无 `is_occurs_check` panic/虚假 W0001；随后执行原 checkpoint 的双后端 gate、必要 suites 与 LLVM self-compile ×3。
 4. 所有 Step 8 hard gates 通过后才 merge/bookkeeping；完成即停，禁止进入 Step 9。
+
+---
+
+## B-163 step 8 — 2026-07-22 inline-use lexical registration follow-up
+
+### 根因与修复
+
+- 第一代新 compiler 实跑 `inline_pub_use_namespaces` 后发现：ModBlock `use/pub use` 原先只在 `check_mod_decl`（body checking）绑定；但函数、type alias 等声明的签名已在 `infer_register` 更早解析。因此 export collector 虽能形成 facade，facade 内后续声明仍看不到 `Count`、`RootItem`、`Handle` 等导入。
+- relative-use resolver 已从 `infer_decl` 移到 `infer_ctx` 成为唯一共享实现。`register_mod_block_items` 进入与 `check_mod_decl` 相同的 mod path stack 后，先用同一 canonical identity、namespace binding 与 E0707 冲突规则安装 imports，再注册该 inline module 的所有声明；checking 阶段重新安装正确的词法 binding 并负责报告 diagnostics。注册阶段静默 diagnostics，避免同一个非法 use 报两次，但 ambiguous import 仍采取同一“保留首个、拒绝冲突项”规则。
+- 新增 `InferCtx.file_extern_values`，只由当前源文件的顶层 `ExternFn` AST 填充。relative import 对 file-module raw ABI extern fn 可从 `module$$_name` 精确回退到 ABI `name`，同时不会把 prelude-only extern 伪装成 `super::` 文件成员；与 export collector 的 AST guard 边界一致。
+- `inline_pub_use_namespaces` 再强化：facade 内新增 `pub type PublicCount = Count`，consumer 使用 `facade::PublicCount`，锁定 imports 在 type-alias registration 与后续 fn signature 中均可见。
+
+### 分钟级证据与边界
+
+- RED（第一代 `ring_step8.exe`，修复前二进制）：`PublicCount = Count`、`RootItem`/`RootCount`/`Handle` 均 E0204，`super::parse_int` E0201。
+- 当前源码用同一 compiler 以 `compiler/infer_decl.ring` 为局部 entry 编译：LLVM target PASS（约 40s）；C target 生成并经 clang 编译 PASS（约 38s）。这验证共享 resolver、InferCtx 字段、注册调用链在两后端均通过类型检查/codegen，不是完整 compiler bootstrap。
+- 尚无包含本补丁的新 compiler，因此 semantic GREEN 必须由下一次短 bootstrap 后运行 `inline_pub_use_namespaces` 得到；本轮未启动 compiler self-bootstrap、全量 suite 或后台任务。
+
+### 下一步
+
+1. 从上一代 `ring_step8.exe` 编译当前 compiler 并以 `-O2` runtime 链接下一代。
+2. 首先以 LLVM+C 跑 `inline_pub_use_namespaces`，必须输出 `7,8,41,9,42`；同时跑 `mod_relative_path`、`mod_relative_path_multi`、`error_relative_path_bad_segment`，确认共享 resolver 的 nested super 与错误规则无回归。
+3. 再继续 alias/SCC gates 与二代自举；仍禁止进入 Step 9。

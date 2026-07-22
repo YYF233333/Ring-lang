@@ -1,14 +1,14 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string, effect_to_string, nominal_display_name}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
-    EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
+    EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember, UseDecl}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
 use hir::{compare_by_first, module_item_identity}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type, resolve_effect_expr,
-    record_value_origin}
+    record_value_origin, resolve_mod_uses}
 use infer_helpers::{is_value_type}
 
 // ============================================================
@@ -224,9 +224,18 @@ pub fn module_prefix_decl_name(module_prefix: Str, decl: Decl) -> Decl {
 // (preregister struct/enum only, defer field/variant completion).
 // When none, operates in register_decl mode (complete struct/enum immediately).
 fn register_mod_block_items(
-    mut ctx: InferCtx, mod_name: Str, mod_decls: List<Decl>,
+    mut ctx: InferCtx, mod_name: Str, mod_uses: List<UseDecl>, mod_decls: List<Decl>,
     deferred_struct_names: List<Str>?, deferred_enum_names: List<Str>?
 ) {
+    // Imports are lexically visible to every declaration in the inline module,
+    // including signatures registered before bodies are checked. Keep the
+    // registration path stack identical to check_mod_decl so self/super paths
+    // resolve to the same canonical identities in both phases.
+    let segments = mod_name.split("::")
+    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
+    ctx.mod_path_stack.push(simple_name)
+    resolve_mod_uses(ctx, mod_uses, false)
+
     // Pass 1a: register struct/enum types first
     for d in mod_decls {
         match d {
@@ -291,6 +300,7 @@ fn register_mod_block_items(
             }
         }
     }
+    let _ = ctx.mod_path_stack.pop()
 }
 
 // Dispatch a single declaration to the appropriate registration function.
@@ -318,8 +328,8 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
             preregister_enum(ctx, name, type_params)
             deferred_enum_names.push(name)
         },
-        Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
-            register_mod_block_items(ctx, mod_name, mod_decls, some(deferred_struct_names), some(deferred_enum_names))
+        Decl::ModBlock { name: mod_name, uses: mod_uses, decls: mod_decls, .. } => {
+            register_mod_block_items(ctx, mod_name, mod_uses, mod_decls, some(deferred_struct_names), some(deferred_enum_names))
         },
         _ => register_decl(ctx, decl)
     }
@@ -354,6 +364,13 @@ fn register_phase2_enum(mut ctx: InferCtx, decl: Decl) {
 }
 
 pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
+    ctx.file_extern_values = set_new()
+    for decl in decls {
+        match decl {
+            Decl::ExternFn { name, .. } => { ctx.file_extern_values.insert(name) },
+            _ => {}
+        }
+    }
     let mut deferred_struct_names: List<Str> = []
     let mut deferred_enum_names: List<Str> = []
 
@@ -378,6 +395,13 @@ pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
 // retaining source-level short aliases in this module's checker environment.
 // Imported canonical definitions may coexist; aliases are deliberately local.
 pub fn register_module_decls_two_phase(mut ctx: InferCtx, module_prefix: Str, decls: List<Decl>) -> List<Decl> {
+    ctx.file_extern_values = set_new()
+    for decl in decls {
+        match decl {
+            Decl::ExternFn { name, .. } => { ctx.file_extern_values.insert(name) },
+            _ => {}
+        }
+    }
     let mut qualified: List<Decl> = []
     for decl in decls { qualified.push(module_prefix_decl_name(module_prefix, decl)) }
 
@@ -2052,8 +2076,8 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
             register_effect_alias(ctx, name, type_params, effects, span),
         Decl::Delegate { .. } => {},  // Only valid inside impl blocks, handled by register_impl
         Decl::AssocType { .. } => {},  // Only valid inside trait/impl blocks
-        Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
-            register_mod_block_items(ctx, mod_name, mod_decls, none, none)
+        Decl::ModBlock { name: mod_name, uses: mod_uses, decls: mod_decls, .. } => {
+            register_mod_block_items(ctx, mod_name, mod_uses, mod_decls, none, none)
         }
     }
 }

@@ -1,6 +1,6 @@
 use defs
 
-fn identity(value: facade::Count) -> facade::Count { value }
+fn identity(value: facade::PublicCount) -> facade::PublicCount { value }
 
 fn choice_value(value: facade::Choice) -> Int {
     match value {

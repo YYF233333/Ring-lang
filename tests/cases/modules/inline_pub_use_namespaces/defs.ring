@@ -40,7 +40,9 @@ pub mod facade {
     pub use super::top_value as value
     pub use super::parse_int as parse_number
 
-    pub fn read_item(value: Item) -> Count { value.read() }
+    pub type PublicCount = Count
+
+    pub fn read_item(value: Item) -> PublicCount { value.read() }
     pub fn read_root(value: RootItem) -> RootCount { value.value }
     pub fn signal_value() -> Int with {Signaling} { Signal.value() }
     pub fn keep_handle(value: Handle) -> Handle { value }

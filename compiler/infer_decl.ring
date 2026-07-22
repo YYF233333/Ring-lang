@@ -1,6 +1,6 @@
 use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, type_to_string, effect_to_string, nominal_display_name, effects_match_kind, effect_kind_name}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
-    UseDecl, UseImport, NamedImport, SigMember}
+    UseDecl, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
@@ -9,13 +9,12 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
 use env::{TypeScheme, SchemeBound, apply_subst, apply_subst_map, apply_subst_row_map, find_impl, has_impl}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705, E0707, E0802, E0803}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0802, E0803}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type,
-    generalize, resolve_relative_qualifier, collect_free_vars, free_type_vars_in_env,
-    record_value_origin}
+    generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses}
 use infer_helpers::{is_value_type}
 use infer_register::{register_decls_two_phase, register_module_decls_two_phase,
     resolve_declared_effects, prefix_decl_name, insert_mod_aliases,
@@ -88,7 +87,7 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     insert_mod_aliases(ctx, mod_name, decls, false)
 
     // Resolve use declarations with relative paths (self::/super::)
-    resolve_mod_uses(ctx, uses)
+    resolve_mod_uses(ctx, uses, true)
 
     // Resolve required effects if present
     let mut cap_row: EffectRow? = none
@@ -231,210 +230,6 @@ fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub
         none => {}
     }
     HDecl::Sig { name: name, members: hmembers, is_pub: is_pub, span: span }
-}
-
-// Bind every namespace carried by an inline relative import.  Values, nominal
-// types, aliases, effects and traits deliberately have independent tables; a
-// type-only `pub use self/super::...` must not be rejected merely because the
-// value environment has no entry with that spelling.
-fn import_identity_leaf(identity: Str) -> Str {
-    let inline_parts = identity.split("::")
-    let inline_leaf = inline_parts.get(inline_parts.len() - 1).unwrap_or(identity)
-    let file_parts = inline_leaf.split("$$_")
-    file_parts.get(file_parts.len() - 1).unwrap_or(inline_leaf)
-}
-
-fn canonical_relative_prefix(ctx: InferCtx, resolved_prefix: Str) -> Str {
-    if ctx.mod_path_stack.len() == 0 { return resolved_prefix }
-    let first = ctx.mod_path_stack.get(0).unwrap_or("")
-    let root_parts = first.split("$$_")
-    if root_parts.len() < 2 { return resolved_prefix }
-    if resolved_prefix.index_of("$$_").is_some() { return resolved_prefix }
-    let root = "${root_parts.get(0).unwrap_or("")}$$_"
-    if resolved_prefix == "" { root } else { "${root}${resolved_prefix}" }
-}
-
-fn append_import_identity(prefix: Str, name: Str) -> Str {
-    if prefix == "" { name }
-    else if prefix.ends_with("$$_") { "${prefix}${name}" }
-    else { "${prefix}::${name}" }
-}
-
-fn bind_relative_import(mut ctx: InferCtx, local_name: Str, qualified_name: Str) -> Bool {
-    let mut found = false
-    match ctx.env.lookup(qualified_name) {
-        some(scheme) => {
-            ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
-            if local_name != qualified_name { record_value_origin(ctx, local_name, qualified_name) }
-            found = true
-        },
-        none => {}
-    }
-    match ctx.env.types.structs.get(qualified_name) {
-        some(def) => { ctx.env.types.structs.insert(local_name, def); found = true },
-        none => {
-            let abi_name = import_identity_leaf(qualified_name)
-            match ctx.env.types.structs.get(abi_name) {
-                some(def) => {
-                    if def.is_extern { ctx.env.types.structs.insert(local_name, def); found = true }
-                },
-                none => {}
-            }
-        }
-    }
-    match ctx.env.types.enums.get(qualified_name) {
-        some(def) => { ctx.env.types.enums.insert(local_name, def); found = true }, none => {}
-    }
-    match ctx.env.types.type_aliases.get(qualified_name) {
-        some(def) => { ctx.env.types.type_aliases.insert(local_name, def); found = true }, none => {}
-    }
-    match ctx.env.types.effects.get(qualified_name) {
-        some(def) => { ctx.env.types.effects.insert(local_name, def); found = true }, none => {}
-    }
-    match ctx.env.types.effect_aliases.get(qualified_name) {
-        some(def) => { ctx.env.types.effect_aliases.insert(local_name, def); found = true }, none => {}
-    }
-    match ctx.env.trait_reg.traits.get(qualified_name) {
-        some(def) => { ctx.env.trait_reg.traits.insert(local_name, def); found = true }, none => {}
-    }
-    match ctx.env.types.sigs.get(qualified_name) {
-        some(def) => { ctx.env.types.sigs.insert(local_name, def); found = true }, none => {}
-    }
-    found
-}
-
-fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
-    // Track which qualified source each imported local name came from, for ambiguity detection
-    let mut import_origins: Map<Str, Str> = map_new()
-
-    for use_decl in uses {
-        let segments = use_decl.path.segments
-        if segments.len() == 0 { continue }
-        let first = segments.get(0).unwrap_or("")
-
-        // Check if path starts with relative prefix
-        if first != "self" && first != "super" { continue }
-
-        // Build qualifier from relative segments
-        // First collect self/super prefix, then append remaining intermediate segments
-        let mut qualifier = first
-        let mut name_start_idx = 1
-        let mut i = 1
-        // Collect chained super:: segments (e.g. super::super)
-        while i < segments.len() {
-            let seg = segments.get(i).unwrap_or("")
-            if seg == "super" {
-                qualifier = "${qualifier}::${seg}"
-                name_start_idx = i + 1
-            } else {
-                break
-            }
-            i = i + 1
-        }
-        // Determine how many remaining segments are intermediate path components.
-        // For NamedItems (use super::a::b::{Foo}): ALL remaining segments are path prefix.
-        // For Module (use super::a::b): all remaining except the last are path prefix;
-        //   the last segment is the imported name (handled in the Module branch below).
-        let remaining_end = match use_decl.imports {
-            UseImport::NamedItems { names } => segments.len(),
-            UseImport::Module => {
-                if segments.len() > 0 { segments.len() - 1 } else { 0 }
-            }
-        }
-        while i < remaining_end {
-            let seg = segments.get(i).unwrap_or("")
-            qualifier = "${qualifier}::${seg}"
-            name_start_idx = i + 1
-            i = i + 1
-        }
-
-        // Resolve the relative qualifier against mod_path_stack
-        let resolved = resolve_relative_qualifier(qualifier, ctx.mod_path_stack)
-        match resolved {
-            none => {
-                let _ = type_error(ctx.sink, E0705,
-                    "Cannot use '${qualifier}' — relative path exceeds module nesting depth",
-                    use_decl.path.span,
-                    DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
-                continue
-            },
-            some(prefix) => {
-                let canonical_prefix = canonical_relative_prefix(ctx, prefix)
-                // Rebuild the actual path: prefix + remaining segments
-                match use_decl.imports {
-                    UseImport::NamedItems { names } => {
-                        for item in names {
-                            let local_name = match item.alias {
-                                some(a) => a,
-                                none => item.name
-                            }
-                            let qualified_name = append_import_identity(canonical_prefix, item.name)
-
-                            // Check for ambiguous import
-                            match import_origins.get(local_name) {
-                                some(prev_qualified) => {
-                                    if prev_qualified != qualified_name {
-                                        let prev_display = nominal_display_name(prev_qualified)
-                                        let qualified_display = nominal_display_name(qualified_name)
-                                        let _ = type_error(ctx.sink, E0707,
-                                            "Ambiguous name '${local_name}': imported from both '${prev_display}' and '${qualified_display}'. Use qualified name to disambiguate",
-                                            item.span,
-                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") })
-                                        continue
-                                    }
-                                },
-                                none => {}
-                            }
-
-                            if bind_relative_import(ctx, local_name, qualified_name) {
-                                import_origins.insert(local_name, qualified_name)
-                            } else {
-                                let qualified_display = nominal_display_name(qualified_name)
-                                let _ = type_error(ctx.sink, E0201,
-                                    "Undefined import: ${qualified_display}",
-                                    item.span,
-                                    DiagnosticContext::UndefinedVariable { name: qualified_display, scope_locals: none })
-                            }
-                        }
-                    },
-                    UseImport::Module => {
-                        // use super::name — single name import (last segment is the name)
-                        if name_start_idx < segments.len() {
-                            let name = segments.get(segments.len() - 1).unwrap_or("")
-                            let local_name = match use_decl.alias { some(a) => a, none => name }
-                            let qualified_name = append_import_identity(canonical_prefix, name)
-
-                            // Check for ambiguous import
-                            match import_origins.get(local_name) {
-                                some(prev_qualified) => {
-                                    if prev_qualified != qualified_name {
-                                        let prev_display = nominal_display_name(prev_qualified)
-                                        let qualified_display = nominal_display_name(qualified_name)
-                                        let _ = type_error(ctx.sink, E0707,
-                                            "Ambiguous name '${local_name}': imported from both '${prev_display}' and '${qualified_display}'. Use qualified name to disambiguate",
-                                            use_decl.path.span,
-                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") })
-                                        continue
-                                    }
-                                },
-                                none => {}
-                            }
-
-                            if bind_relative_import(ctx, local_name, qualified_name) {
-                                import_origins.insert(local_name, qualified_name)
-                            } else {
-                                let qualified_display = nominal_display_name(qualified_name)
-                                let _ = type_error(ctx.sink, E0201,
-                                    "Undefined import: ${qualified_display}",
-                                    use_decl.path.span,
-                                    DiagnosticContext::UndefinedVariable { name: qualified_display, scope_locals: none })
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {
@@ -1907,7 +1702,7 @@ fn precheck_inline_fn_in_mod(
     let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
     ctx.mod_path_stack.push(simple_name)
     insert_mod_aliases(ctx, mod_name, decls, false)
-    resolve_mod_uses(ctx, uses)
+    resolve_mod_uses(ctx, uses, true)
     let prev_unsafe_allowed = ctx.mod_unsafe_allowed
     match required_effects {
         some(req_effs) => {
