@@ -231,3 +231,13 @@ stage-0 来源：
 - `error_extern_forward_ambiguous` 包含两个签名相容且都直接依赖 forward 模块的 provider，要求 E0708。
 - 旧 `ring_step8.exe` 对正例 LLVM/C 都生成 raw `bridge` 引用；两后端 object 链接均以 `undefined symbol: bridge` 失败，证明正例有效 RED。旧 compiler 对歧义负例错误接受（exit 0），同样为有效 RED。
 - 当前源码的 `codegen_llvm_ctx.ring`、`codegen_c_ctx.ring` LLVM partial compile PASS。`compiler_mod.ring` 旧锚 partial build 在 180 秒边界被终止，只出现既有 parser W0001，无遗留进程；未重跑长探针。完整语义 GREEN 需下一代 compiler build 后由主 agent验证。
+
+---
+
+## B-163 step 8 — 2026-07-22 inline alias registration ordering follow-up
+
+### 根因与修复 [通知]
+
+- facade 前置与 sibling 拓扑注册已经让 `Count` import 可见，但 inline `register_mod_block_items` 的 final short-alias 刷新发生在 `TypeAlias`/`Sig` 尚未注册时；两者随后与 Fn 一起进入 Pass 2。于是 canonical `facade::PublicCount` 虽先于 `read_item` 注册，短名 `PublicCount` 仍不存在，函数签名报 E0204。
+- inline registration 现与 file-module 分层一致：`TypeAlias`/`Sig` 在 remaining value declarations 前独立注册，并在每项后刷新 short aliases；Pass 2 排除二者。这样函数与 alias 的源码先后无关，同时保留 source-ordered alias-on-alias 链。没有把本修复扩大为 forward/cyclic type-alias 图。
+- `ring_bridge.exe` 对 `inline_pub_use_namespaces` 精确 RED：仅 `defs.ring:21 PublicCount` E0204。当前源码以 `infer_register.ring` 为局部 entry，LLVM 与 C+clang target 均 PASS（仅既有 W0001 与无 main 提示）。完整 semantic GREEN 仍需下一代 compiler。

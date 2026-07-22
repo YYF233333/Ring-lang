@@ -348,6 +348,25 @@ fn register_mod_block_items(
             _ => {}
         }
     }
+    // Pass 1b-3: aliases/signatures must exist before any value declaration
+    // resolves its parameter/return types. Refresh short aliases after each
+    // declaration so source-ordered alias chains can feed the next alias;
+    // functions remain declaration-order independent from all aliases.
+    for d in mod_decls {
+        match d {
+            Decl::TypeAlias { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                insert_mod_aliases(ctx, mod_name, mod_decls, true)
+            },
+            Decl::Sig { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                insert_mod_aliases(ctx, mod_name, mod_decls, true)
+            },
+            _ => {}
+        }
+    }
     // Final aliases: all names available for remaining declarations
     insert_mod_aliases(ctx, mod_name, mod_decls, true)
     // Pass 2: register everything else (functions, impls, consts, etc.)
@@ -359,6 +378,8 @@ fn register_mod_block_items(
             Decl::Effect { .. } => {},
             Decl::EffectAlias { .. } => {},
             Decl::ExternType { .. } => {},
+            Decl::TypeAlias { .. } => {},
+            Decl::Sig { .. } => {},
             Decl::ModBlock { .. } => {},
             _ => {
                 let prefixed = prefix_decl_name(mod_name, d)
