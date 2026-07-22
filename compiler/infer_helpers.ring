@@ -1,6 +1,6 @@
 use types::{Type, Effect, EffectRow,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
-    type_to_string, types_equal,
+    type_to_string, nominal_display_name, types_equal,
     type_to_builtin_name}
 use ast::{Expr, Pattern, Span, NamedPatternField}
 use hir::{HExpr, HStmt, TraitDispatch, DictRef,
@@ -253,6 +253,18 @@ pub fn get_hexpr_root_type(target: HExpr) -> Type {
 // infer_ident (from infer-expr.ts)
 // ============================================================
 
+// Origin metadata is keyed by the lexical binding's DefId, so same-spelled
+// locals cannot inherit an imported or module-level binding's origin.
+fn exact_value_origin(ctx: InferCtx, spelling: Str, scheme: TypeScheme) -> Str {
+    match scheme.def_id {
+        some(def_id) => match ctx.use_aliases.get(def_id) {
+            some(origin) => origin,
+            none => spelling
+        },
+        none => spelling
+    }
+}
+
 pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
     // Resolve relative paths (self::/super::) to actual qualified names
     let mut resolved_qualifier = qualifier
@@ -291,8 +303,9 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             match mod_scheme {
                 some(ms) => {
                     let t = ctx.env.instantiate(ms)
+                    let actual_name = exact_value_origin(ctx, qualified_name, ms)
                     return InferResult {
-                        hexpr: HExpr::Ident { name: qualified_name, resolved_name: none, def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                        hexpr: HExpr::Ident { name: actual_name, resolved_name: none, def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                         subst: subst, effects: EMPTY_ROW
                     }
                 },
@@ -306,8 +319,9 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                         match full_scheme {
                             some(fs) => {
                                 let t = ctx.env.instantiate(fs)
+                                let actual_name = exact_value_origin(ctx, full_qualified, fs)
                                 return InferResult {
-                                    hexpr: HExpr::Ident { name: full_qualified, resolved_name: none, def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                                    hexpr: HExpr::Ident { name: actual_name, resolved_name: none, def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                                     subst: subst, effects: EMPTY_ROW
                                 }
                             },
@@ -325,7 +339,8 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
         none => {
             match resolved_qualifier {
                 some(q) => {
-                    let _ = type_error(ctx.sink, E0201, "'${q}' has no member '${name}'", span,
+                    let qualifier_display = nominal_display_name(q)
+                    let _ = type_error(ctx.sink, E0201, "'${qualifier_display}' has no member '${name}'", span,
                         DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
                     return InferResult {
                         hexpr: HExpr::Ident { name: name, resolved_name: none, def_id: none, dict_closure_dicts: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
@@ -363,10 +378,7 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             let mut enum_name: Str? = none
             // Check if this name was imported via use alias (e.g. use super::value)
             // If so, use the qualified name in HIR for correct codegen
-            let actual_name = match ctx.use_aliases.get(name) {
-                some(qualified) => qualified,
-                none => name
-            }
+            let actual_name = exact_value_origin(ctx, name, s)
             match resolved_qualifier {
                 some(q) => {
                     match ctx.env.types.enums.get(q) {
@@ -374,12 +386,16 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                             if enum_def.variant_index.contains_key(name) {
                                 enum_name = some(enum_def.name)
                             } else {
-                                let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
+                                let qualifier_display = nominal_display_name(q)
+                                let _ = type_error(ctx.sink, E0201, "'${qualifier_display}' has no variant '${name}'", span,
                                     DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
                             }
                         },
-                        none => { let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
-                            DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) }
+                        none => {
+                            let qualifier_display = nominal_display_name(q)
+                            let _ = type_error(ctx.sink, E0201, "'${qualifier_display}' has no variant '${name}'", span,
+                                DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
+                        }
                     }
                 },
                 none => { enum_name = ctx.env.types.variant_to_enum.get(name) }
@@ -466,6 +482,7 @@ pub fn is_tuple_type(t: Type) -> Bool {
 
 pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_code: Str, subst: UnionFind, span: Span, op: Str, is_builtin: Bool) -> TraitDispatch {
     if is_builtin { return TraitDispatch::Builtin }
+    let trait_display = nominal_display_name(trait_name)
 
     match resolved {
         Type::TypeVar { id, .. } => {
@@ -494,8 +511,8 @@ pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, er
                 none => {}
             }
             let _ = type_error(ctx.sink, error_code,
-                "Type does not implement ${trait_name}, cannot use '${op}'",
-                span, DiagnosticContext::TraitError { detail: "type does not implement ${trait_name}" })
+                "Type does not implement ${trait_display}, cannot use '${op}'",
+                span, DiagnosticContext::TraitError { detail: "type does not implement ${trait_display}" })
             TraitDispatch::Builtin
         },
         Type::StructType { name, type_params, .. } => {
@@ -504,8 +521,8 @@ pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, er
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
             let _ = type_error(ctx.sink, error_code,
-                "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
-                span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_name}" })
+                "Type '${type_to_string(resolved)}' does not implement ${trait_display}, cannot use '${op}'",
+                span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_display}" })
             TraitDispatch::Builtin
         },
         Type::EnumType { name, type_params, .. } => {
@@ -514,14 +531,14 @@ pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, er
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
             let _ = type_error(ctx.sink, error_code,
-                "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
-                span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_name}" })
+                "Type '${type_to_string(resolved)}' does not implement ${trait_display}, cannot use '${op}'",
+                span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_display}" })
             TraitDispatch::Builtin
         },
         _ => {
             let _ = type_error(ctx.sink, error_code,
-                "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
-                span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_name}" })
+                "Type '${type_to_string(resolved)}' does not implement ${trait_display}, cannot use '${op}'",
+                span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_display}" })
             TraitDispatch::Builtin
         }
     }
@@ -786,8 +803,11 @@ pub fn lookup_trait_method(mut ctx: InferCtx, type_name: Str, method: Str, span:
                             some(found_method) => {
                                 match found_trait_name {
                                     some(prev_trait) => {
+                                        let type_display = nominal_display_name(type_name)
+                                        let prev_display = nominal_display_name(prev_trait)
+                                        let trait_display = nominal_display_name(impl_entry.trait_name)
                                         let _ = type_error(ctx.sink, E0504,
-                                            "Ambiguous method '${method}' on '${type_name}': found in trait '${prev_trait}' and '${impl_entry.trait_name}'",
+                                            "Ambiguous method '${method}' on '${type_display}': found in trait '${prev_display}' and '${trait_display}'",
                                             span, DiagnosticContext::OtherContext { detail: some("disambiguate by calling TraitName::${method}") })
                                         return found_type
                                     },
@@ -824,7 +844,7 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
                             some(found_v) => {
                                 if found_v.fields.len() == 0 {
                                     let empty_pats: List<Pattern> = []
-                                    Pattern::Constructor { name: name, qualifier: none, fields: empty_pats, span: span }
+                                    Pattern::Constructor { name: name, qualifier: some(edef.name), fields: empty_pats, span: span }
                                 } else {
                                     pattern
                                 }
@@ -849,14 +869,37 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
             for f in fields {
                 new_fields.push(rewrite_bare_enum_bindings(env, f))
             }
-            Pattern::Constructor { name: name, qualifier: qualifier, fields: new_fields, span: span }
+            let canonical_qualifier = match qualifier {
+                some(q) => match env.types.enums.get(q) {
+                    some(edef) => some(edef.name), none => qualifier
+                },
+                none => env.types.variant_to_enum.get(name)
+            }
+            Pattern::Constructor { name: name, qualifier: canonical_qualifier, fields: new_fields, span: span }
         },
         Pattern::NamedConstructor { name, qualifier, fields, rest, span } => {
             let mut new_fields: List<NamedPatternField> = []
             for f in fields {
                 new_fields.push(NamedPatternField { name: f.name, pattern: rewrite_bare_enum_bindings(env, f.pattern), span: f.span })
             }
-            Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: new_fields, rest: rest, span: span }
+            let canonical_enum = match qualifier {
+                some(q) => match env.types.enums.get(q) {
+                    some(edef) => some(edef.name), none => none
+                },
+                none => env.types.variant_to_enum.get(name)
+            }
+            match canonical_enum {
+                some(ename) => Pattern::NamedConstructor { name: name, qualifier: some(ename), fields: new_fields, rest: rest, span: span },
+                none => {
+                    let struct_lookup = match qualifier {
+                        some(q) => "${q}::${name}", none => name
+                    }
+                    match env.types.structs.get(struct_lookup) {
+                        some(sdef) => Pattern::NamedConstructor { name: sdef.name, qualifier: none, fields: new_fields, rest: rest, span: span },
+                        none => Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: new_fields, rest: rest, span: span }
+                    }
+                }
+            }
         },
         Pattern::OrPattern { patterns, span } => {
             let mut new_pats: List<Pattern> = []

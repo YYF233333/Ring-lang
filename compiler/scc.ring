@@ -88,7 +88,7 @@ fn collect_decl_edges(decl: Decl, registered_fns: Set<Str>, mut graph: Map<Str, 
                 graph.insert(caller, [])
             }
             let mut edges: Set<Str> = set_new()
-            collect_expr_callees(body, registered_fns, edges)
+            collect_expr_callees(body, registered_fns, caller, edges)
             let mut sorted_edges: List<Str> = []
             for e in edges {
                 if e != caller { sorted_edges.push(e) }
@@ -161,8 +161,53 @@ fn prefix_mod_decl(mod_name: Str, decl: Decl) -> Decl {
 // traversal is shared.
 
 enum CalleeMode {
-    TopLevel { registered_fns: Set<Str> },
+    TopLevel { registered_fns: Set<Str>, scope_prefix: Str },
     SelfMethod { method_names: Set<Str> }
+}
+
+fn scc_file_root(scope_prefix: Str) -> Str {
+    let parts = scope_prefix.split("$$_")
+    if parts.len() > 1 { "${parts.get(0).unwrap_or("")}$$_" } else { "" }
+}
+
+fn scc_inline_scope(scope_prefix: Str) -> List<Str> {
+    let mut scope = scope_prefix
+    if scope.ends_with("::") { scope = scope.slice(0, scope.len() - 2) }
+    let root_parts = scope.split("$$_")
+    let inline_text = if root_parts.len() > 1 {
+        root_parts.get(1).unwrap_or("")
+    } else {
+        scope
+    }
+    if inline_text == "" { [] } else { inline_text.split("::") }
+}
+
+fn scc_join_name(root: Str, inline_parts: List<Str>, name: Str) -> Str {
+    if inline_parts.len() == 0 { return "${root}${name}" }
+    "${root}${inline_parts.join("::")}::${name}"
+}
+
+// `self` preserves the current inline scope; each leading `super` removes one
+// level.  Returning none on over-pop prevents a bogus fallback edge.
+fn resolve_relative_callee(scope_prefix: Str, qualifier: Str, name: Str) -> Str? {
+    let root = scc_file_root(scope_prefix)
+    let mut inline_parts = scc_inline_scope(scope_prefix)
+    let qualifier_parts = qualifier.split("::")
+    let mut index = 0
+    if qualifier_parts.get(0).unwrap_or("") == "self" {
+        index = 1
+    } else {
+        while index < qualifier_parts.len() && qualifier_parts.get(index).unwrap_or("") == "super" {
+            if inline_parts.len() == 0 { return none }
+            inline_parts.pop()
+            index = index + 1
+        }
+    }
+    while index < qualifier_parts.len() {
+        inline_parts.push(qualifier_parts.get(index).unwrap_or(""))
+        index = index + 1
+    }
+    some(scc_join_name(root, inline_parts, name))
 }
 
 fn walk_expr_callees(expr: Expr, mode: CalleeMode, mut callees: Set<Str>) {
@@ -170,11 +215,41 @@ fn walk_expr_callees(expr: Expr, mode: CalleeMode, mut callees: Set<Str>) {
         Expr::Call { callee, args, .. } => {
             // TopLevel: check if callee is a direct Ident referencing a registered fn
             match mode {
-                CalleeMode::TopLevel { registered_fns } => {
+                CalleeMode::TopLevel { registered_fns, scope_prefix } => {
                     match callee {
-                        Expr::Ident { name, .. } => {
-                            if registered_fns.contains(name) {
-                                callees.insert(name)
+                        Expr::Ident { name, qualifier, .. } => {
+                            match qualifier {
+                                some(q) => {
+                                    if q == "self" || q.starts_with("self::") || q == "super" || q.starts_with("super::") {
+                                        match resolve_relative_callee(scope_prefix, q, name) {
+                                            some(exact_name) => {
+                                                if registered_fns.contains(exact_name) { callees.insert(exact_name) }
+                                            },
+                                            none => {}
+                                        }
+                                    } else {
+                                        let root = scc_file_root(scope_prefix)
+                                        let root_candidate = scc_join_name(root, q.split("::"), name)
+                                        if registered_fns.contains(root_candidate) {
+                                            callees.insert(root_candidate)
+                                        } else {
+                                            let mut current_parts = scc_inline_scope(scope_prefix)
+                                            current_parts.extend(q.split("::"))
+                                            let current_candidate = scc_join_name(root, current_parts, name)
+                                            if registered_fns.contains(current_candidate) { callees.insert(current_candidate) }
+                                        }
+                                    }
+                                },
+                                none => {
+                                    let root = scc_file_root(scope_prefix)
+                                    let scoped_name = scc_join_name(root, scc_inline_scope(scope_prefix), name)
+                                    if registered_fns.contains(scoped_name) {
+                                        callees.insert(scoped_name)
+                                    } else {
+                                        let root_name = "${root}${name}"
+                                        if registered_fns.contains(root_name) { callees.insert(root_name) }
+                                    }
+                                }
                             }
                         },
                         _ => {}
@@ -353,8 +428,27 @@ fn walk_stmt_callees(stmt: Stmt, mode: CalleeMode, mut callees: Set<Str>) {
 }
 
 // Thin wrappers preserving original call-site signatures.
-fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, mut callees: Set<Str>) {
-    walk_expr_callees(expr, CalleeMode::TopLevel { registered_fns: registered_fns }, callees)
+fn fn_scope_prefix(fn_name: Str) -> Str {
+    let inline_parts = fn_name.split("::")
+    if inline_parts.len() > 1 {
+        let mut scope_parts: List<Str> = []
+        for i in 0..inline_parts.len() - 1 {
+            match inline_parts.get(i) { some(p) => scope_parts.push(p), none => {} }
+        }
+        return "${scope_parts.join("::")}::"
+    }
+    let module_parts = fn_name.split("$$_")
+    if module_parts.len() > 1 {
+        return "${module_parts.get(0).unwrap_or("")}$$_"
+    }
+    ""
+}
+
+fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, caller: Str, mut callees: Set<Str>) {
+    walk_expr_callees(expr, CalleeMode::TopLevel {
+        registered_fns: registered_fns,
+        scope_prefix: fn_scope_prefix(caller)
+    }, callees)
 }
 
 // Collect self.method() callees within an AST expression body (B-138).

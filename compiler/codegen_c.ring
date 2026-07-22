@@ -12,7 +12,7 @@
 // runs (Phase 1 hard acceptance).
 
 use types::{Type, Effect, EffectRow, effect_kind_name}
-use ast::{Span}
+use ast::{Span, UseDecl, UseImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, HEffectOp, TraitBound, evidence_param_name, trait_bound_param_name,
     default_evidence_name, variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
@@ -21,13 +21,16 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, TypeKind}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
     CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_local, c_mangle_fn,
-    c_mangle_method, c_sanitize, c_line_directive, rt_use, rt_use_raw,
+    c_mangle_fn_with_prefix, c_mangle_method, c_sanitize, c_symbol_for_fn_key, c_symbol_fragment,
+    c_line_directive,
+    rt_use, rt_use_raw,
     get_or_assign_c_typeid, is_runtime_symbol, fresh_tmp, fresh_i64, fresh_dbl,
     fresh_label, c_push_fn, c_pop_fn, c_global_cstr}
 use codegen_c_expr::{gen_c_expr, emit_c_stmt, c_resolve_dict_ref,
     resolve_c_static_dict, ensure_c_dict_getter, gen_c_closure_call,
     emit_c_default_evidence_init}
 use effect_analysis::{extract_effect_names, collect_fn_callees}
+use resolver::{module_prefix}
 
 // ============================================================
 // generate_c — main entry point (single-file).
@@ -109,6 +112,106 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     emit_c_main_wrapper(ctx)
 
     // Assemble + write + compile.
+    c_write_and_compile(ctx, c_path, o_path)
+}
+
+// ============================================================
+// generate_c_project — multi-module entry point (step 8; mirror of
+// generate_llvm_project).  All modules' HIR merged into ONE C translation
+// unit (plan §2.1: single .c, B-105 split deferred).  modules: list of
+// (module_prefix, post-RC HProgram, use decls) in topo order; entry_prefix
+// names the module whose `main` the C main() wrapper calls.
+// ============================================================
+
+pub fn generate_c_project(
+    modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str,
+    c_path: Str, o_path: Str, emit_lines: Bool,
+    extern_forward_bridges: Map<Str, Str>
+) {
+    let mut ctx = new_c_ctx(emit_lines)
+    ctx.extern_forward_bridges = extern_forward_bridges
+
+    // Scan pass over ALL modules (generate_llvm_project parity, same union
+    // rules).  #134: boxed_vars is deliberately NOT unioned here — def_ids
+    // are minted per-module (fresh InferCtx per check_module), so a global
+    // union would mark same-numbered plain locals in other modules; it is
+    // set per-module in the body pass below.
+    for m in modules {
+        let (prefix, program, _uses) = m
+        // B-144: program-level extern type names (per-module filtered set
+        // from compile_phases — union across modules is safe, B-145).
+        for en in program.extern_type_names { ctx.extern_types.insert(en) }
+        // B-002p1: types with user impl Drop (union across modules).
+        for dt in program.drop_types { ctx.drop_types.insert(dt) }
+        // B-104 D4: static dict singletons — instance names deterministically
+        // encode their structure, same-name entries are identical (dedupe).
+        for sd in program.static_dicts { ctx.static_dict_defs.insert(sd.name, sd) }
+        // Trait method slot order + supertraits (hir.ring single source).
+        scan_trait_method_order(program.decls, ctx.trait_method_order, ctx.trait_supertraits)
+        scan_fn_effects_with_prefix_c(program.decls, some(prefix), ctx.local_fn_effects)
+        scan_fn_mut_params_with_prefix_c(program.decls, some(prefix), ctx.fn_mut_params)
+        // B-090: effect-op declaration order (slot contract, all modules).
+        register_effect_ops_c(program.decls, ctx.effect_ops)
+    }
+
+    c_register_builtin_enums(ctx)
+
+    // Prefix/import-aware transitive effect closure.  Bare function names are
+    // not unique across modules, so both caller and callee use the exact same
+    // qualified registry key as forward declarations and body emission.
+    compute_project_effect_closure_c(modules, ctx.local_fn_effects)
+
+    register_c_default_evidence(ctx)
+
+    // First pass: forward declare all modules' functions with their module
+    // prefix (registry keys ring_<prefix>$$_<name>, LLVM key parity; impl
+    // methods / traits / enums stay globally bare, also LLVM parity).
+    for m in modules {
+        let (prefix, program, _uses) = m
+        c_forward_declare_with_prefix(ctx, program.decls, some(prefix))
+    }
+
+    // Struct ctors after the WHOLE forward pass (fns win ring_<Name>).
+    for m in modules {
+        let (_prefix, program, _uses) = m
+        c_declare_struct_ctors(ctx, program.decls)
+    }
+
+    // Derived trait impls before the body pass (builtin Option + per-module).
+    emit_c_builtin_derived_impls(ctx)
+    for m in modules {
+        let (_prefix, program, _uses) = m
+        emit_c_derived_impls(ctx, program.derived_impls)
+    }
+
+    // Second pass: per-module body emission.  module_prefix / boxed_vars /
+    // local_names / imports_map are PER-MODULE state (#134).
+    for m in modules {
+        let (prefix, program, uses) = m
+        ctx.module_prefix = some(prefix)
+        ctx.boxed_vars = program.boxed_vars
+        ctx.local_names = collect_c_module_names(program.decls)
+        ctx.imports_map = build_c_imports_map(uses)
+        for decl in program.decls {
+            emit_c_decl(ctx, decl)
+        }
+    }
+
+    // Clear module context (LLVM parity: only the prefix is reset; the
+    // passes below do registry-keyed lookups, no name resolution).
+    ctx.module_prefix = none
+
+    // Drop functions + default evidence init + C main (entry module's main).
+    emit_c_drop_functions(ctx)
+    emit_c_default_evidence_init(ctx)
+    emit_c_main_wrapper_common(ctx, c_mangle_fn_with_prefix(entry_prefix, "main"), true)
+
+    c_write_and_compile(ctx, c_path, o_path)
+}
+
+// Shared tail of both entry points: assemble the translation unit, write it
+// to disk, shell out to clang (audit #242: emit failure must exit non-zero).
+fn c_write_and_compile(ctx: CCtx, c_path: Str, o_path: Str) {
     let text = assemble_c_file(ctx)
     write_file(c_path, text)
 
@@ -118,6 +221,77 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
         exit_process(1)
     } else {
         print("Compiled: ${o_path}")
+    }
+}
+
+// ============================================================
+// Step 8: module-mode registries (ports of build_imports_map /
+// collect_local_names from codegen_llvm.ring — copied because the originals
+// are module-private and the LLVM backend stays untouched as the oracle).
+// ============================================================
+
+// Imported name -> qualified registry key (ring_<module>$$_<name>).
+fn build_c_imports_map(uses: List<UseDecl>) -> Map<Str, Str> {
+    let mut imap: Map<Str, Str> = map_new()
+    for u in uses {
+        // resolver::module_prefix is the single source of truth for project
+        // registry prefixes (`$` between path segments).
+        let module_name = module_prefix(u.path.segments)
+        match u.imports {
+            UseImport::NamedItems { names } => {
+                for ni in names {
+                    let local_name = match ni.alias {
+                        some(a) => a,
+                        none => ni.name,
+                    }
+                    let qualified = c_mangle_fn_with_prefix(module_name, ni.name)
+                    imap.insert(local_name, qualified)
+                }
+            },
+            UseImport::Module => {
+                // Whole-module import — not used for function resolution.
+            },
+        }
+    }
+    imap
+}
+
+// All names a module declares (fed to c_resolve_fn's prefix decision).
+// Port of collect_local_names — includes types/consts/traits, NOT just fns:
+// the bare-name fallback chain covers unprefixed symbols (struct ctors etc.).
+fn collect_c_module_names(decls: List<HDecl>) -> Set<Str> {
+    let mut names: Set<Str> = set_new()
+    collect_c_module_names_rec(decls, names)
+    names
+}
+
+fn collect_c_module_names_rec(decls: List<HDecl>, mut names: Set<Str>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, .. } => { names.insert(name) },
+            HDecl::Struct { name, .. } => { names.insert(name) },
+            HDecl::Enum { name, .. } => { names.insert(name) },
+            HDecl::Const { name, .. } => { names.insert(name) },
+            HDecl::Trait { name, .. } => { names.insert(name) },
+            HDecl::ExternFn { name, .. } => { names.insert(name) },
+            HDecl::ExternType { name, .. } => { names.insert(name) },
+            HDecl::TypeAlias { name, .. } => { names.insert(name) },
+            HDecl::Impl { target_type, methods, .. } => {
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name: mn, .. } => {
+                            // #177: qualified key matching scan_fn_effects_c
+                            names.insert("${target_type}_${mn}")
+                        },
+                        _ => {},
+                    }
+                }
+            },
+            HDecl::Effect { name, .. } => { names.insert(name) },
+            HDecl::ModBlock { decls: md, .. } => { collect_c_module_names_rec(md, names) },
+            HDecl::Test { .. } => {},
+            HDecl::Sig { .. } => {},
+        }
     }
 }
 
@@ -272,10 +446,25 @@ fn c_register_builtin_enums(mut ctx: CCtx) {
 // ============================================================
 
 fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
+    c_forward_declare_with_prefix(ctx, decls, none)
+}
+
+// Step 8: prefix-aware forward pass (forward_declare_functions_with_prefix
+// parity).  Top-level fns and consts get module-qualified registry keys;
+// impl methods, traits, enums, structs and tests stay globally bare.
+fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?) {
     for decl in decls {
         match decl {
             HDecl::Fn { name, params, effects, trait_bounds, .. } => {
-                c_declare_fn(ctx, c_mangle_fn(name), name, params, effects, trait_bounds)
+                let mangled = match prefix {
+                    some(p) => c_mangle_fn_with_prefix(p, name),
+                    none => c_mangle_fn(name),
+                }
+                let effect_key = match prefix {
+                    some(_) => mangled,
+                    none => name,
+                }
+                c_declare_fn(ctx, mangled, effect_key, params, effects, trait_bounds)
             },
             HDecl::Impl { target_type, trait_name, methods, .. } => {
                 for m in methods {
@@ -301,7 +490,7 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
                         }
                         if has_methods && ctx.dict_build_fns.contains(dict_name) == false {
                             ctx.dict_build_fns.insert(dict_name)
-                            ctx.fn_protos.push("void* ring_dict_build_${c_sanitize(dict_name)}(void);")
+                            ctx.fn_protos.push("void* ring_dict_build_${c_symbol_fragment(dict_name)}(void);")
                         }
                     },
                     none => {},
@@ -323,7 +512,7 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
                                         ev_params.push(evidence_param_name(en))
                                     }
                                     let total = 1 + all_supers.len() + tm.params.len() + ev_params.len()
-                                    let c_name = c_sanitize(default_fn_name)
+                                    let c_name = c_symbol_fragment(default_fn_name)
                                     ctx.functions.insert(default_fn_name, CFnInfo { c_name: c_name, total_params: total })
                                     ctx.fn_evidence_params.insert(default_fn_name, ev_params)
                                     let mut ps: List<Str> = []
@@ -356,9 +545,14 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
             },
             HDecl::Const { name, .. } => {
                 // Const = zero-arg lazy getter (same scheme as the LLVM backend).
-                let mangled = c_mangle_fn(name)
+                // Step 8: module-qualified key in project mode (LLVM parity);
+                // the C symbol is the sanitized key.
+                let mangled = match prefix {
+                    some(p) => c_mangle_fn_with_prefix(p, name),
+                    none => c_mangle_fn(name),
+                }
                 if ctx.functions.contains_key(mangled) == false {
-                    let c_name = if is_runtime_symbol(mangled) { "${mangled}__ring" } else { mangled }
+                    let c_name = if is_runtime_symbol(mangled) { "${mangled}__ring" } else { c_symbol_for_fn_key(mangled) }
                     ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: 0 })
                     let mut no_ev: List<Str> = []
                     ctx.fn_evidence_params.insert(mangled, no_ev)
@@ -377,7 +571,7 @@ fn c_forward_declare(mut ctx: CCtx, decls: List<HDecl>) {
             HDecl::ModBlock { decls: md, .. } => {
                 // Inline-mod decl names are already module-prefixed by the
                 // checker; `::` sanitizes to `__` in c_mangle_fn.
-                c_forward_declare(ctx, md)
+                c_forward_declare_with_prefix(ctx, md, prefix)
             },
             HDecl::Effect { .. } => {},       // ops registry: register_effect_ops_c
             HDecl::ExternFn { .. } => {},     // declared lazily at call sites
@@ -443,7 +637,7 @@ fn c_emit_enum_ctors(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) {
         if ctx.functions.contains_key(key) {
             continue
         }
-        let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { key }
+        let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { c_symbol_for_fn_key(key) }
         ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: v.fields.len() })
         let mut no_ev: List<Str> = []
         ctx.fn_evidence_params.insert(key, no_ev)
@@ -489,7 +683,7 @@ fn c_emit_struct_ctor(mut ctx: CCtx, name: Str, fields: List<HStructField>) {
         // A fn (or enum ctor) already owns this symbol — skip (LLVM parity).
         return
     }
-    let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { key }
+    let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { c_symbol_for_fn_key(key) }
     ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: fields.len() })
     let mut no_ev: List<Str> = []
     ctx.fn_evidence_params.insert(key, no_ev)
@@ -531,10 +725,12 @@ fn c_declare_fn(mut ctx: CCtx, mangled: Str, effect_key: Str, params: List<HPara
     // All call sites resolve through CFnInfo.c_name, so this is transparent;
     // direct calls to such names route through extern_fn_to_runtime first
     // (runtime shim), matching the LLVM backend's behaviour.
+    // Step 8: module-qualified keys carry $$ (LLVM key parity) — the C
+    // symbol is the sanitized key (identity for prefix-less names).
     let c_name = if is_runtime_symbol(mangled) {
         "${mangled}__ring"
     } else {
-        mangled
+        c_symbol_for_fn_key(mangled)
     }
 
     let total = params.len() + trait_bounds.len() + ev_params.len()
@@ -640,7 +836,13 @@ fn end_c_fn(mut ctx: CCtx, mangled: Str, params_str: Str, saved: Map<Str, Str>) 
 fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: EffectRow, body: HExpr, trait_bounds: List<TraitBound>, impl_type: Str?, span: Span) {
     let mangled = match impl_type {
         some(t) => c_mangle_method(t, name),
-        none => c_mangle_fn(name),
+        none => {
+            // Step 8: module-qualified key in project mode (emit_fn_body parity).
+            match ctx.module_prefix {
+                some(prefix) => c_mangle_fn_with_prefix(prefix, name),
+                none => c_mangle_fn(name),
+            }
+        },
     }
     // Definition symbol = CFnInfo.c_name (collision-renamed when needed).
     let c_name = match ctx.functions.get(mangled) {
@@ -670,9 +872,14 @@ fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: Effec
     }
     let effect_key = match impl_type {
         some(t) => "${t}_${name}",
+        none => mangled,
+    }
+    // Single-file scans retain their historical bare keys.
+    let lookup_effect_key = match ctx.module_prefix {
+        some(_) => effect_key,
         none => name,
     }
-    let effective = match ctx.local_fn_effects.get(effect_key) {
+    let effective = match ctx.local_fn_effects.get(lookup_effect_key) {
         some(e) => e,
         none => effects,
     }
@@ -706,7 +913,11 @@ fn emit_c_zero_arg_fn(mut ctx: CCtx, mangled: Str, body: HExpr, span: Span) {
 // ============================================================
 
 fn emit_c_const_body(mut ctx: CCtx, name: Str, init: HExpr, span: Span) {
-    let mangled = c_mangle_fn(name)
+    // Step 8: module-qualified key in project mode (emit_const_body parity).
+    let mangled = match ctx.module_prefix {
+        some(prefix) => c_mangle_fn_with_prefix(prefix, name),
+        none => c_mangle_fn(name),
+    }
     // Not forward-declared — skip (LLVM parity).
     if ctx.functions.contains_key(mangled) == false { return }
     let c_name = match ctx.functions.get(mangled) {
@@ -780,7 +991,7 @@ fn emit_c_drop_functions(mut ctx: CCtx) {
         if sname == "Map" { continue }
         match ctx.struct_types.get(sname) {
             some(info) => {
-                let drop_name = "ring_drop_${c_sanitize(sname)}"
+                let drop_name = "ring_drop_${c_symbol_fragment(sname)}"
                 let mut def: List<Str> = []
                 def.push("void ${drop_name}(void* p) {")
 
@@ -827,7 +1038,7 @@ fn emit_c_drop_functions(mut ctx: CCtx) {
         if ename == "Result" { continue }
         match ctx.enum_types.get(ename) {
             some(enum_info) => {
-                let drop_name = "ring_drop_${c_sanitize(ename)}"
+                let drop_name = "ring_drop_${c_symbol_fragment(ename)}"
                 let mut def: List<Str> = []
                 def.push("void ${drop_name}(void* p) {")
 
@@ -907,6 +1118,13 @@ fn c_user_drop_args(ctx: CCtx, user_drop_name: Str, total_params: Int) -> Str {
 // ============================================================
 
 fn emit_c_main_wrapper(mut ctx: CCtx) {
+    emit_c_main_wrapper_common(ctx, "ring_main", false)
+}
+
+// ring_main_key: registry key of the Ring entry fn ("ring_main" single-file,
+// ring_<entry_prefix>$$_main in project mode).  warn_no_main mirrors
+// emit_c_main_common's project-mode warning.
+fn emit_c_main_wrapper_common(mut ctx: CCtx, ring_main_key: Str, warn_no_main: Bool) {
     rt_use_raw(ctx, "ring_runtime_init", "void ring_runtime_init(int argc, char** argv);")
     let mut lines: List<Str> = []
     lines.push("int main(int argc, char** argv) {")
@@ -920,10 +1138,10 @@ fn emit_c_main_wrapper(mut ctx: CCtx) {
     if ctx.default_evidence.len() > 0 {
         lines.push("    __ring_default_evidence_init();")
     }
-    match ctx.functions.get("ring_main") {
-        some(_) => {
+    match ctx.functions.get(ring_main_key) {
+        some(fi) => {
             let mut args: List<Str> = []
-            match ctx.fn_evidence_params.get("ring_main") {
+            match ctx.fn_evidence_params.get(ring_main_key) {
                 some(evs) => {
                     // B-097: pass the default evidence global for effects that
                     // have one; NULL for io/fail/unknown effects (the runtime
@@ -939,12 +1157,15 @@ fn emit_c_main_wrapper(mut ctx: CCtx) {
                 },
                 none => {},
             }
-            lines.push("    ring_main(${args.join(", ")});")
+            lines.push("    ${fi.c_name}(${args.join(", ")});")
         },
         none => {
             // #215: no fn main — run test functions in declaration order.
             for t in ctx.test_fns {
                 lines.push("    ${t}();")
+            }
+            if ctx.test_fns.len() == 0 && warn_no_main {
+                eprintln("Warning: no main function found in entry module")
             }
         },
     }
@@ -990,7 +1211,7 @@ fn register_c_default_evidence(mut ctx: CCtx) {
     }
     effect_names.sort()
     for ename in effect_names {
-        let g = c_sanitize(default_evidence_name(ename))
+        let g = c_symbol_fragment(default_evidence_name(ename))
         ctx.globals.push("static void* ${g} = 0;")
         ctx.default_evidence.insert(ename, g)
     }
@@ -1005,11 +1226,22 @@ fn register_c_default_evidence(mut ctx: CCtx) {
 // ============================================================
 
 fn scan_fn_effects_c(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRow>) {
+    scan_fn_effects_with_prefix_c(decls, none, local_fn_effects)
+}
+
+// In project mode top-level functions are keyed exactly like the function
+// registry.  Impl methods retain the shared Type_method ABI used by both
+// backends.
+fn scan_fn_effects_with_prefix_c(decls: List<HDecl>, prefix: Str?, mut local_fn_effects: Map<Str, EffectRow>) {
     for decl in decls {
         match decl {
             HDecl::Fn { name, effects, .. } => {
                 if effects.effects.len() > 0 {
-                    local_fn_effects.insert(name, effects)
+                    let key = match prefix {
+                        some(p) => c_mangle_fn_with_prefix(p, name),
+                        none => name,
+                    }
+                    local_fn_effects.insert(key, effects)
                 }
             },
             HDecl::Impl { target_type, methods, .. } => {
@@ -1026,7 +1258,7 @@ fn scan_fn_effects_c(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRo
                 }
             },
             HDecl::ModBlock { decls: md, .. } => {
-                scan_fn_effects_c(md, local_fn_effects)
+                scan_fn_effects_with_prefix_c(md, prefix, local_fn_effects)
             },
             _ => {},
         }
@@ -1058,10 +1290,18 @@ fn mut_param_flags_c(params: List<HParam>) -> List<Bool> {
 }
 
 fn scan_fn_mut_params_c(decls: List<HDecl>, mut fn_mut_params: Map<Str, List<Bool>>) {
+    scan_fn_mut_params_with_prefix_c(decls, none, fn_mut_params)
+}
+
+fn scan_fn_mut_params_with_prefix_c(decls: List<HDecl>, prefix: Str?, mut fn_mut_params: Map<Str, List<Bool>>) {
     for decl in decls {
         match decl {
             HDecl::Fn { name, params, .. } => {
-                fn_mut_params.insert(name, mut_param_flags_c(params))
+                let key = match prefix {
+                    some(p) => c_mangle_fn_with_prefix(p, name),
+                    none => name,
+                }
+                fn_mut_params.insert(key, mut_param_flags_c(params))
             },
             HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
@@ -1075,7 +1315,7 @@ fn scan_fn_mut_params_c(decls: List<HDecl>, mut fn_mut_params: Map<Str, List<Boo
                 }
             },
             HDecl::ModBlock { decls: md, .. } => {
-                scan_fn_mut_params_c(md, fn_mut_params)
+                scan_fn_mut_params_with_prefix_c(md, prefix, fn_mut_params)
             },
             _ => {},
         }
@@ -1106,6 +1346,82 @@ fn compute_transitive_effect_closure_c(decls: List<HDecl>, mut local_fn_effects:
     collect_local_names_rec_c(decls, local_names)
     let mut fn_callees: Map<Str, Set<Str>> = map_new()
     collect_fn_callees(decls, local_names, fn_callees)
+    propagate_transitive_effects_c(fn_callees, local_fn_effects)
+}
+
+// Record whether a callee-analysis key denotes a top-level/module function or
+// a globally-keyed impl method.  `collect_fn_callees` intentionally emits bare
+// HIR names; this metadata lets project mode translate them to registry keys.
+fn collect_project_callable_kinds_c(decls: List<HDecl>, mut top_level: Set<Str>, mut impl_methods: Set<Str>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, .. } => { top_level.insert(name) },
+            HDecl::Impl { target_type, methods, .. } => {
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name, .. } => { impl_methods.insert("${target_type}_${name}") },
+                        _ => {},
+                    }
+                }
+            },
+            HDecl::ModBlock { decls: md, .. } => collect_project_callable_kinds_c(md, top_level, impl_methods),
+            _ => {},
+        }
+    }
+}
+
+fn project_effect_key_c(prefix: Str, name: Str, top_level: Set<Str>, impl_methods: Set<Str>, imports: Map<Str, Str>) -> Str {
+    match imports.get(name) {
+        some(key) => key,
+        none => {
+            if impl_methods.contains(name) {
+                name
+            } else if top_level.contains(name) {
+                c_mangle_fn_with_prefix(prefix, name)
+            } else {
+                name
+            }
+        },
+    }
+}
+
+fn compute_project_effect_closure_c(modules: List<(Str, HProgram, List<UseDecl>)>, mut local_fn_effects: Map<Str, EffectRow>) {
+    let mut qualified_callees: Map<Str, Set<Str>> = map_new()
+    for m in modules {
+        let (prefix, program, uses) = m
+        let imports = build_c_imports_map(uses)
+        let mut top_level: Set<Str> = set_new()
+        let mut impl_methods: Set<Str> = set_new()
+        collect_project_callable_kinds_c(program.decls, top_level, impl_methods)
+
+        // The shared traversal only records names present in local_names.
+        // Imported aliases are callable too, so include them for this module.
+        let mut analysis_names: Set<Str> = set_new()
+        collect_local_names_rec_c(program.decls, analysis_names)
+        let mut sorted_imports = imports.entries()
+        sorted_imports.sort_by(compare_by_first)
+        for entry in sorted_imports { analysis_names.insert(entry.0) }
+
+        let mut bare_callees: Map<Str, Set<Str>> = map_new()
+        collect_fn_callees(program.decls, analysis_names, bare_callees)
+        let mut sorted_callers = bare_callees.entries()
+        sorted_callers.sort_by(compare_by_first)
+        for entry in sorted_callers {
+            let (caller, callees) = entry
+            let caller_key = project_effect_key_c(prefix, caller, top_level, impl_methods, imports)
+            let mut mapped: Set<Str> = set_new()
+            let mut sorted_callees = callees.to_list()
+            sorted_callees.sort()
+            for callee in sorted_callees {
+                mapped.insert(project_effect_key_c(prefix, callee, top_level, impl_methods, imports))
+            }
+            qualified_callees.insert(caller_key, mapped)
+        }
+    }
+    propagate_transitive_effects_c(qualified_callees, local_fn_effects)
+}
+
+fn propagate_transitive_effects_c(fn_callees: Map<Str, Set<Str>>, mut local_fn_effects: Map<Str, EffectRow>) {
     let mut changed = true
     while changed {
         changed = false
@@ -1232,7 +1548,7 @@ fn emit_c_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str, methods: 
     let method_count = method_order.len()
     if method_count == 0 { return }
 
-    let build_fn_name = "ring_dict_build_${c_sanitize(dict_name)}"
+    let build_fn_name = "ring_dict_build_${c_symbol_fragment(dict_name)}"
     if ctx.emitted_fns.contains(build_fn_name) { return }
     ctx.emitted_fns.insert(build_fn_name)
     // Defensive: a dict whose forward pass was skipped (trait_method_order
@@ -1320,7 +1636,7 @@ fn ensure_c_dict_method_thunk(mut ctx: CCtx, method_c_name: Str, method_arity: I
 // B-141: default-method thunk — FORWARDS env (= dict ptr) as self_dict,
 // resolves supertrait dicts statically for the concrete target type.
 fn ensure_c_default_method_thunk(mut ctx: CCtx, default_fn_name: Str, dfi: CFnInfo, target_type: Str, trait_name: Str) -> Str {
-    let thunk_name = "${dfi.c_name}__defaultthunk_${c_sanitize(target_type)}"
+    let thunk_name = "${dfi.c_name}__defaultthunk_${c_symbol_fragment(target_type)}"
     if ctx.emitted_fns.contains(thunk_name) { return thunk_name }
     ctx.emitted_fns.insert(thunk_name)
 
@@ -2236,7 +2552,7 @@ fn emit_c_derived_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str) {
     let method_count = method_order.len()
     if method_count == 0 { return }
 
-    let build_fn_name = "ring_dict_build_${c_sanitize(dict_name)}"
+    let build_fn_name = "ring_dict_build_${c_symbol_fragment(dict_name)}"
     ctx.dict_build_fns.insert(dict_name)
     ctx.emitted_fns.insert(build_fn_name)
     ctx.fn_protos.push("void* ${build_fn_name}(void);")

@@ -12,6 +12,20 @@ pub use builtin_methods::{CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
     OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS,
     STRINGBUILDER_METHODS}
 
+// File-module declaration identity. `$` is not legal in a Ring identifier,
+// while resolver module prefixes use `$` between path segments.  Therefore
+// `$$_` is an unambiguous boundary between a module path and its declaration;
+// inline-module components remain after the declaration as `::child`.
+//
+// This string is an internal identity, never a user-facing display name.
+pub fn module_item_identity(module_prefix: Str, decl_name: Str) -> Str {
+    "${module_prefix}$$_${decl_name}"
+}
+
+pub fn is_module_item_identity(name: Str) -> Bool {
+    name.index_of("$$_").is_some()
+}
+
 pub struct HParam {
     pub name: Str,
     pub ty: Type,

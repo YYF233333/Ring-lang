@@ -1705,6 +1705,7 @@ fn init_llvm_context(module_name: Str) -> LlvmCtx {
         module_prefix: none,
         imports_map: map_new(),
         local_names: set_new(),
+        extern_forward_bridges: map_new(),
         tmp_counter: 0,
         lambda_counter: 0,
         match_counter: 0,
@@ -1841,8 +1842,12 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
 // entry_prefix: module prefix of the entry module (contains main)
 // ============================================================
 
-pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str, output_path: Str) -> Unit {
+pub fn generate_llvm_project(
+    modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str,
+    output_path: Str, extern_forward_bridges: Map<Str, Str>
+) -> Unit {
     let mut ctx = init_llvm_context("ring_project")
+    ctx.extern_forward_bridges = extern_forward_bridges
 
     // Register built-in types
     register_builtin_enums(ctx)

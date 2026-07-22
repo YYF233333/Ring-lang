@@ -1081,7 +1081,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [doing: phase1-step8-module-identity]
+### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [queued: phase1-step9]
 
 > 2026-07-10 立项（Discussion，B-155 泥潭止损 + 后端信道结构性分析）。**完整执行计划见 `docs/plan-c-backend.md`**，执行前必读。
 
@@ -1098,6 +1098,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 > **额度停止点（2026-07-15，未 merge）**：方案 A 的实现与正式对抗用例已在隔离 worktree 提交为 WIP `d4c1c0a`（base `68999dd`，worktree clean）。已覆盖 canonical nominal/trait/effect identity、DefId-bound value origin、resolved pattern、SCC exact scope、named/module/transitive/inline pub-use origin、可逆 C symbol，以及 effect rebind 约束保持；但最后 bootstrap 尚未通过，不能宣称 step 8 完成。原始 stage-0 已越过 ExternType ABI chicken-and-egg，最后仅报 `exports.ring` inline helper 两处不存在字段；两处已删但依停止指令未重跑。完整 provenance、验证边界和续跑顺序见 `docs/worker_feedback.md`；step 9 未开始，恢复时必须先完成 WIP bootstrap 与双后端 gate，禁止直接 merge/进 step 9。
 > **恢复（2026-07-19）**：额度已恢复，按上述保存点与顺序继续 step 8。已复核 WIP HEAD、worktree clean 与原始 stage-0 SHA256；当前先重跑最新源码 bootstrap，再执行定向双后端回归和 LLVM self-compile ×3 gate，仍不进入 step 9。
 > **再次停止点（2026-07-21，未 merge）**：新 WIP checkpoint `fa22ac2` 已提交到原隔离 worktree。已修 method export canonical identity、type alias/export namespaces、C `ring_` prefix symbol collision、module main E0403、exact self/super/qualified SCC 与 inline 依赖闭包；bootstrap 进一步定位到 canonical fn scheme rebind 未同步同 DefId 源码短名，当前补丁已落盘但未重编验证。inline raw ABI extern-fn re-export/enum ctor 用例、二代自举、双后端 gates、LLVM self-compile ×3仍未完成。完整 provenance 与恢复首序见该 worktree `docs/worker_feedback.md`；step 9 未开始。
+> **step 8 ✅（2026-07-23，本 merge commit）**：C project/module codegen、extern/FFI bridge、module-qualified nominal/effect/trait identity、resolved re-export origin、alias 后 mut/ABI metadata 与诊断显示全部收口，`C_BACKEND_SUPPORTS_MODULES = true`。最终门：e2e LLVM 435/0、e2e C 439/0、LLVM golden 219/0、RC 536/0、diff 重跑 543/0；LLVM self-compile 三轮对象 3/3 字节一致。`dist-llvm/main.o` 连编两次二进制零差异，SHA256 `61C49BC9BE7185B3FE94064A5A59E038843E77401414DACFA83208EFE4FD8EF9`。一次 diff 首跑出现两个与 B-155 已知形态相同的间歇 `0xC0000005`；两个用例各独立 ×3 与完整重跑均通过，证据保留在 worker feedback，未静默忽略。**下一步 step 9 仅排队，尚未开始。**
 
 **Phase 2**：B-100 (Z) 策略 parity 认证 → LLVM-C 后端 tag `llvm-c-backend-final` 归档删除 → dist-c/（.c 文本）成为 stage 0 信任锚 → CI bootstrap 重启（文本 diff）→ 文档 bookkeeping（清单见 plan §3）。
 

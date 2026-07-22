@@ -6,10 +6,10 @@ use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
-use infer_decl::{check as infer_check, check_prelude_decl}
+use infer_decl::{check as infer_check, check_module_identity, check_prelude_decl}
 use dict_lower::{lower_dicts}
 use andor_lower::{lower_andor}
-use infer_ctx::{InferCtx, type_error}
+use infer_ctx::{InferCtx, type_error, record_value_origin}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
 use codes::{E0702, E0703, E0705, E0707, E0801}
@@ -20,7 +20,10 @@ use unify::{empty_subst}
 pub struct CheckResult {
     pub program: HProgram,
     pub env: TypeEnv,
-    pub fn_mut_params: Map<Str, List<Bool>>
+    pub fn_mut_params: Map<Str, List<Bool>>,
+    // Source lookup/display name -> canonical value identity.  Re-export
+    // extraction forwards this unchanged instead of guessing from use paths.
+    pub value_origins: Map<Int, Str>
 }
 
 const STD_FILES: List<Str> =
@@ -138,6 +141,8 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         lambda_depth: 0,
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
+        file_extern_values: set_new(),
+        file_extern_types: set_new(),
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
@@ -165,16 +170,17 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     CheckResult {
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
-        fn_mut_params: ctx.fn_mut_params
+        fn_mut_params: ctx.fn_mut_params,
+        value_origins: map_clone(ctx.use_aliases)
     }
 }
 
-pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink: CollectingSink) -> CheckResult {
+pub fn check_module(program: Program, module_prefix: Str, module_exports: List<ModuleExports>, sink: CollectingSink) -> CheckResult {
     let mut ctx = new_infer_ctx(sink)
     let prelude_hdecls = load_prelude(ctx)
     inject_module_exports(ctx, module_exports)
     resolve_uses(ctx, program.uses, module_exports)
-    let hprogram = infer_check(ctx, program)
+    let hprogram = check_module_identity(ctx, program, module_prefix)
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
@@ -187,7 +193,8 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
     CheckResult {
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
-        fn_mut_params: ctx.fn_mut_params
+        fn_mut_params: ctx.fn_mut_params,
+        value_origins: map_clone(ctx.use_aliases)
     }
 }
 
@@ -199,33 +206,36 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             let (name, def) = entry
             match def {
                 TypeDef::StructDef_(sdef) => {
-                    ctx.env.types.structs.insert(name, sdef)
+                    ctx.env.types.structs.insert(sdef.name, sdef)
                 },
                 TypeDef::EnumDef_(edef) => {
-                    ctx.env.types.enums.insert(name, edef)
-                    for v in edef.variants {
-                        ctx.env.types.variant_to_enum.insert(v.name, name)
-                    }
+                    ctx.env.types.enums.insert(edef.name, edef)
                 },
             }
+        }
+        let mut sorted_type_aliases = mod_.type_aliases.entries()
+        sorted_type_aliases.sort_by(compare_by_first)
+        for entry in sorted_type_aliases {
+            let (_, adef) = entry
+            ctx.env.types.type_aliases.insert(adef.name, adef)
         }
         let mut sorted_effects = mod_.effects.entries()
         sorted_effects.sort_by(compare_by_first)
         for entry in sorted_effects {
             let (name, effdef) = entry
-            ctx.env.types.effects.insert(name, effdef)
+            ctx.env.types.effects.insert(effdef.name, effdef)
         }
         let mut sorted_aliases = mod_.effect_aliases.entries()
         sorted_aliases.sort_by(compare_by_first)
         for entry in sorted_aliases {
             let (name, adef) = entry
-            ctx.env.types.effect_aliases.insert(name, adef)
+            ctx.env.types.effect_aliases.insert(adef.name, adef)
         }
         let mut sorted_traits = mod_.traits.entries()
         sorted_traits.sort_by(compare_by_first)
         for entry in sorted_traits {
             let (name, tdef) = entry
-            ctx.env.trait_reg.traits.insert(name, tdef)
+            ctx.env.trait_reg.traits.insert(tdef.name, tdef)
         }
         for impl_ in mod_.trait_impls {
             add_impl(ctx.env.trait_reg, impl_)
@@ -341,7 +351,18 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
 
                             match mod_.values.get(item.name) {
                                 some(scheme) => {
-                                    ctx.env.bind(local_name, scheme)
+                                    // Exported DefIds belong to another module's
+                                    // checker. Allocate a local binding id before
+                                    // attaching the exact canonical origin.
+                                    ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
+                                    match mod_.value_origins.get(item.name) {
+                                        some(origin) => { record_value_origin(ctx, local_name, origin) },
+                                        none => {}
+                                    }
+                                    match mod_.fn_mut_params.get(item.name) {
+                                        some(flags) => { ctx.fn_mut_params.insert(local_name, flags) },
+                                        none => {}
+                                    }
                                     found = true
                                 },
                                 none => {},
@@ -352,22 +373,46 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                     found = true
                                     match tdef {
                                         TypeDef::EnumDef_(edef) => {
+                                            ctx.env.types.enums.insert(local_name, edef)
                                             for v in edef.variants {
                                                 match mod_.values.get(v.name) {
-                                                    some(vscheme) => { ctx.env.bind(v.name, vscheme) },
+                                                    some(vscheme) => {
+                                                        ctx.env.bind(v.name, TypeScheme { ..vscheme, def_id: none })
+                                                        ctx.env.types.variant_to_enum.insert(v.name, edef.name)
+                                                        match mod_.value_origins.get(v.name) {
+                                                            some(origin) => { record_value_origin(ctx, v.name, origin) },
+                                                            none => {}
+                                                        }
+                                                    },
                                                     none => {},
                                                 }
                                             }
                                         },
-                                        _ => {},
+                                        TypeDef::StructDef_(sdef) => {
+                                            ctx.env.types.structs.insert(local_name, sdef)
+                                        },
                                     }
                                 },
                                 none => {},
                             }
 
-                            if mod_.effects.contains_key(item.name) { found = true }
-                            if mod_.effect_aliases.contains_key(item.name) { found = true }
-                            if mod_.traits.contains_key(item.name) { found = true }
+                            match mod_.type_aliases.get(item.name) {
+                                some(def) => { ctx.env.types.type_aliases.insert(local_name, def); found = true },
+                                none => {}
+                            }
+
+                            match mod_.effects.get(item.name) {
+                                some(def) => { ctx.env.types.effects.insert(local_name, def); found = true },
+                                none => {}
+                            }
+                            match mod_.effect_aliases.get(item.name) {
+                                some(def) => { ctx.env.types.effect_aliases.insert(local_name, def); found = true },
+                                none => {}
+                            }
+                            match mod_.traits.get(item.name) {
+                                some(def) => { ctx.env.trait_reg.traits.insert(local_name, def); found = true },
+                                none => {}
+                            }
 
                             if found == false {
                                 let d = make_diag(
@@ -403,24 +448,64 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                 },
                                 none => {}
                             }
-                            ctx.env.bind(name, scheme)
+                            ctx.env.bind(name, TypeScheme { ..scheme, def_id: none })
+                            match mod_.value_origins.get(name) {
+                                some(origin) => { record_value_origin(ctx, name, origin) },
+                                none => {}
+                            }
+                            match mod_.fn_mut_params.get(name) {
+                                some(flags) => { ctx.fn_mut_params.insert(name, flags) },
+                                none => {}
+                            }
                             import_origins.insert(name, mod_key)
                         }
                         let mut sorted_mod_types = mod_.types.entries()
                         sorted_mod_types.sort_by(compare_by_first)
                         for entry in sorted_mod_types {
-                            let (_, tdef) = entry
+                            let (name, tdef) = entry
                             match tdef {
                                 TypeDef::EnumDef_(edef) => {
+                                    ctx.env.types.enums.insert(name, edef)
                                     for v in edef.variants {
                                         match mod_.values.get(v.name) {
-                                            some(vscheme) => { ctx.env.bind(v.name, vscheme) },
+                                            some(vscheme) => {
+                                                ctx.env.bind(v.name, TypeScheme { ..vscheme, def_id: none })
+                                                ctx.env.types.variant_to_enum.insert(v.name, edef.name)
+                                                match mod_.value_origins.get(v.name) {
+                                                    some(origin) => { record_value_origin(ctx, v.name, origin) },
+                                                    none => {}
+                                                }
+                                            },
                                             none => {},
                                         }
                                     }
                                 },
-                                _ => {},
+                                TypeDef::StructDef_(sdef) => { ctx.env.types.structs.insert(name, sdef) },
                             }
+                        }
+                        let mut sorted_mod_type_aliases = mod_.type_aliases.entries()
+                        sorted_mod_type_aliases.sort_by(compare_by_first)
+                        for entry in sorted_mod_type_aliases {
+                            let (name, def) = entry
+                            ctx.env.types.type_aliases.insert(name, def)
+                        }
+                        let mut sorted_mod_effects = mod_.effects.entries()
+                        sorted_mod_effects.sort_by(compare_by_first)
+                        for entry in sorted_mod_effects {
+                            let (name, def) = entry
+                            ctx.env.types.effects.insert(name, def)
+                        }
+                        let mut sorted_mod_aliases = mod_.effect_aliases.entries()
+                        sorted_mod_aliases.sort_by(compare_by_first)
+                        for entry in sorted_mod_aliases {
+                            let (name, def) = entry
+                            ctx.env.types.effect_aliases.insert(name, def)
+                        }
+                        let mut sorted_mod_traits = mod_.traits.entries()
+                        sorted_mod_traits.sort_by(compare_by_first)
+                        for entry in sorted_mod_traits {
+                            let (name, def) = entry
+                            ctx.env.trait_reg.traits.insert(name, def)
                         }
                     },
                 }

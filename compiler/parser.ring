@@ -789,6 +789,20 @@ impl Parser {
                 }
                 continue
             }
+            if self.check(TokenKind::TkPub) && self.peek_at(1).kind == TokenKind::TkUse {
+                self.advance()
+                let use_result: UseDecl? = some(self.parse_use_decl(true)) catch { _ => none }
+                match use_result {
+                    some(ud) => uses.push(ud),
+                    none => {
+                        while !self.at_end() {
+                            if is_decl_start(self.peek().kind) || self.check(TokenKind::TkRBrace) { break }
+                            self.advance()
+                        }
+                    }
+                }
+                continue
+            }
             let maybe_decl: Decl? = self.parse_decl() catch { _ => none }
             match maybe_decl {
                 some(decl) => decls.push(decl),

@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
-use hir::{HEffectOp, HDictDef, TraitBound}
+use hir::{HEffectOp, HDictDef, TraitBound, module_item_identity}
 
 // Re-declare LLVM opaque types to avoid cross-module ESM import issues.
 // These match the declarations in llvm_ffi.ring and unify to the same types.
@@ -170,6 +170,12 @@ pub struct LlvmCtx {
     // Local names: set of names defined in the current module
     pub local_names: Set<Str>,
 
+    // Exact project-internal implementations for raw ExternFn declarations.
+    // Keys are the declaring module's canonical identity (`prefix$$_raw`),
+    // values are canonical public Ring function identities.  Missing entries
+    // remain genuine foreign ABI calls.
+    pub extern_forward_bridges: Map<Str, Str>,
+
     // Counters
     pub tmp_counter: Int,
     pub lambda_counter: Int,
@@ -317,7 +323,7 @@ pub fn llvm_mangle_fn(name: Str) -> Str {
 
 // Module-qualified mangling: ring_<prefix>$_<name>
 pub fn llvm_mangle_fn_with_prefix(prefix: Str, name: Str) -> Str {
-    "ring_${prefix}$$_${name}"
+    if name.index_of("$$_").is_some() { llvm_mangle_fn(name) } else { "ring_${prefix}$$_${name}" }
 }
 
 pub fn llvm_mangle_method(type_name: Str, method_name: Str) -> Str {
@@ -326,6 +332,7 @@ pub fn llvm_mangle_method(type_name: Str, method_name: Str) -> Str {
 
 // Resolve a function name through module context: check imports_map, then qualify with prefix
 pub fn llvm_resolve_fn(ctx: LlvmCtx, name: Str) -> Str {
+    if name.index_of("$$_").is_some() { return llvm_mangle_fn(name) }
     // Check imports_map first (cross-module references)
     match ctx.imports_map.get(name) {
         some(qualified) => qualified,
@@ -333,10 +340,16 @@ pub fn llvm_resolve_fn(ctx: LlvmCtx, name: Str) -> Str {
             // If we have a module prefix and this is a local name, qualify it
             match ctx.module_prefix {
                 some(prefix) => {
-                    if ctx.local_names.contains(name) {
-                        llvm_mangle_fn_with_prefix(prefix, name)
-                    } else {
-                        llvm_mangle_fn(name)
+                    let bridge_key = module_item_identity(prefix, name)
+                    match ctx.extern_forward_bridges.get(bridge_key) {
+                        some(target) => llvm_mangle_fn(target),
+                        none => {
+                            if ctx.local_names.contains(name) {
+                                llvm_mangle_fn_with_prefix(prefix, name)
+                            } else {
+                                llvm_mangle_fn(name)
+                            }
+                        },
                     }
                 },
                 none => llvm_mangle_fn(name),

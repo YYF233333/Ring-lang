@@ -1,12 +1,13 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
-    type_to_string, types_equal, make_option_type, type_to_builtin_name,
+    type_to_string, nominal_display_name, types_equal, make_option_type, type_to_builtin_name,
     row_merge, effects_match_kind}
-use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr}
+use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr,
+    UseDecl, UseImport}
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote, Diagnostic, CollectingSink, Severity, Suggestion, make_diag, make_diagnostic}
-use codes::{E0201, E0204, E0301, E0302, E0407, E0503, E0511, E0512, E0513, E0705}
+use codes::{E0201, E0204, E0301, E0302, E0407, E0503, E0511, E0512, E0513, E0705, E0707}
 use union_find::{UnionFind, new_union_find, uf_find}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
@@ -51,11 +52,18 @@ pub struct InferCtx {
     pub fn_bounds_stack: List<List<FnBoundsEntry>>,
     pub loop_depth: Int,
     pub mod_path_stack: List<Str>,
-    pub use_aliases: Map<Str, Str>,
+    // Local binding DefId -> canonical value origin.  DefIds are lexical, so
+    // a same-spelled local binding naturally shadows an imported/module alias.
+    pub use_aliases: Map<Int, Str>,
     pub boxed_vars: Set<Int>,
     pub lambda_depth: Int,
     pub var_lambda_depth: Map<Int, Int>,
     pub fn_mut_params: Map<Str, List<Bool>>,
+    // Raw ABI extern declarations belonging to the current source file. This
+    // excludes prelude-only externs so `use super::abi_name` cannot invent a
+    // file-module member that the export pass would refuse to expose.
+    pub file_extern_values: Set<Str>,
+    pub file_extern_types: Set<Str>,
     // Default effect handler dependency graph: effect name -> list of effect names it depends on
     pub effect_default_deps: Map<Str, List<Str>>,
     // Qualified associated type scope: "T::Item" -> Type
@@ -88,6 +96,8 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         lambda_depth: 0,
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
+        file_extern_values: set_new(),
+        file_extern_types: set_new(),
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
@@ -569,8 +579,8 @@ pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<
     let mut result: Map<Int, Type> = map_new()
     let type_var_set: Set<Int> = set_from(scheme.type_vars)
     match (scheme.ty, instantiated_type) {
-        (Type::FnType { params: sp, return_type: sr, .. },
-         Type::FnType { params: ip, return_type: ir, .. }) => {
+        (Type::FnType { params: sp, return_type: sr, effects: se },
+         Type::FnType { params: ip, return_type: ir, effects: ie }) => {
             let mut i = 0
             let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
             while i < limit {
@@ -582,6 +592,7 @@ pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<
                 i = i + 1
             }
             collect_var_mappings(sr, ir, type_var_set, result)
+            collect_effect_var_mappings(se, ie, type_var_set, result)
         },
         _ => {}
     }
@@ -627,8 +638,8 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>,
             },
             _ => {}
         },
-        Type::FnType { params: sp, return_type: sr, .. } => match inst_type {
-            Type::FnType { params: ip, return_type: ir, .. } => {
+        Type::FnType { params: sp, return_type: sr, effects: se } => match inst_type {
+            Type::FnType { params: ip, return_type: ir, effects: ie } => {
                 let mut i = 0
                 let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
                 while i < limit {
@@ -639,6 +650,7 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>,
                     i = i + 1
                 }
                 collect_var_mappings(sr, ir, type_vars, result)
+                collect_effect_var_mappings(se, ie, type_vars, result)
             },
             _ => {}
         },
@@ -672,6 +684,54 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>,
             _ => {}
         },
         _ => {}
+    }
+}
+
+pub fn record_value_origin(mut ctx: InferCtx, local_name: Str, origin: Str) {
+    match ctx.env.lookup(local_name) {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => { ctx.use_aliases.insert(def_id, origin) },
+            none => {}
+        },
+        none => {}
+    }
+}
+
+// Scheme variables may occur exclusively in effect payloads.  They still
+// need an instantiation mapping so SchemeBound resolution can select the
+// correct trait dictionary (and reject an unsatisfied bound) at the call site.
+fn collect_effect_var_mappings(scheme_row: EffectRow, inst_row: EffectRow, type_vars: Set<Int>, mut result: Map<Int, Type>) {
+    match (scheme_row.tail, inst_row.tail) {
+        (some(sid), some(iid)) => {
+            if type_vars.contains(sid) {
+                result.insert(sid, Type::TypeVar { id: iid, name: none })
+            }
+        },
+        _ => {},
+    }
+
+    for scheme_eff in scheme_row.effects {
+        for inst_eff in inst_row.effects {
+            if effects_match_kind(scheme_eff, inst_eff) {
+                match (scheme_eff, inst_eff) {
+                    (Effect::FailEffect { error_type: st }, Effect::FailEffect { error_type: it }) =>
+                        collect_var_mappings(st, it, type_vars, result),
+                    (Effect::MutEffect { state_type: st }, Effect::MutEffect { state_type: it }) =>
+                        collect_var_mappings(st, it, type_vars, result),
+                    (Effect::CustomEffect { type_args: sa, .. }, Effect::CustomEffect { type_args: ia, .. }) => {
+                        let mut i = 0
+                        while i < sa.len() && i < ia.len() {
+                            match (sa.get(i), ia.get(i)) {
+                                (some(st), some(it)) => collect_var_mappings(st, it, type_vars, result),
+                                _ => {},
+                            }
+                            i = i + 1
+                        }
+                    },
+                    _ => {},
+                }
+            }
+        }
     }
 }
 
@@ -756,9 +816,10 @@ pub fn resolve_dicts_from_scheme(
             none => {}
         }
         if !found {
+            let trait_display = nominal_display_name(bound.trait_name)
             let _ = type_error(sink, E0503,
-                "Type does not satisfy trait bound '${bound.trait_name}'",
-                span, DiagnosticContext::TraitError { detail: "type does not satisfy '${bound.trait_name}'" })
+                "Type does not satisfy trait bound '${trait_display}'",
+                span, DiagnosticContext::TraitError { detail: "type does not satisfy '${trait_display}'" })
         }
     }
     resolved_dicts
@@ -866,9 +927,11 @@ fn resolve_concrete_type_to_dict_ref(
                     DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
+                let type_display = nominal_display_name(name)
+                let trait_display = nominal_display_name(trait_name)
                 let _ = type_error(sink, E0503,
-                    "Type '${name}' does not implement trait '${trait_name}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${name}' does not satisfy '${trait_name}'" })
+                    "Type '${type_display}' does not implement trait '${trait_display}'",
+                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
                 DictRef::Static(trait_dict_name(name, trait_name))
             }
         },
@@ -885,9 +948,11 @@ fn resolve_concrete_type_to_dict_ref(
                     DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
+                let type_display = nominal_display_name(name)
+                let trait_display = nominal_display_name(trait_name)
                 let _ = type_error(sink, E0503,
-                    "Type '${name}' does not implement trait '${trait_name}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${name}' does not satisfy '${trait_name}'" })
+                    "Type '${type_display}' does not implement trait '${trait_display}'",
+                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
                 DictRef::Static(trait_dict_name(name, trait_name))
             }
         },
@@ -1074,7 +1139,7 @@ fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, 
         return ctx.env.fresh_var()
     }
     if found_types.len() > 1 {
-        let traits_str = found_trait_names.join(", ")
+        let traits_str = found_trait_names.map(fn(name) { nominal_display_name(name) }).join(", ")
         let _ = type_error(ctx.sink, E0512,
             "Ambiguous associated type '${assoc_name}' for '${type_param_name}': found in traits ${traits_str}",
             span, DiagnosticContext::TraitError { detail: "ambiguous associated type" })
@@ -1168,8 +1233,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
         match ctx.env.types.structs.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
+                    let type_display = nominal_display_name(name)
                     let _ = type_error(ctx.sink, E0301,
-                        "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
+                        "Type '${type_display}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
                             actual: "${type_args.len().to_str()} type args",
@@ -1196,8 +1262,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
         match ctx.env.types.enums.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
+                    let type_display = nominal_display_name(name)
                     let _ = type_error(ctx.sink, E0301,
-                        "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
+                        "Type '${type_display}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
                             actual: "${type_args.len().to_str()} type args",
@@ -1223,8 +1290,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
     match ctx.env.types.type_aliases.get(name) {
         some(alias) => {
             if type_args.len() > 0 && type_args.len() != alias.type_params.len() {
+                let type_display = nominal_display_name(name)
                 let _ = type_error(ctx.sink, E0301,
-                    "Type '${name}' expects ${alias.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
+                    "Type '${type_display}' expects ${alias.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                     span, DiagnosticContext::TypeMismatch {
                         expected: "${alias.type_params.len().to_str()} type args",
                         actual: "${type_args.len().to_str()} type args",
@@ -1249,8 +1317,9 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
         none => {}
     }
 
-    type_error(ctx.sink, E0204, "Unknown type: ${name}", span,
-        DiagnosticContext::OtherContext { detail: some("unknown type '${name}'") })
+    let type_display = nominal_display_name(name)
+    type_error(ctx.sink, E0204, "Unknown type: ${type_display}", span,
+        DiagnosticContext::OtherContext { detail: some("unknown type '${type_display}'") })
 }
 
 // ============================================================
@@ -1324,9 +1393,11 @@ fn bind_constructor_pattern(
                         match resolved_expected {
                             Type::EnumType { name: rname, .. } => {
                                 if rname != ename {
+                                    let enum_display = nominal_display_name(ename)
+                                    let expected_display = nominal_display_name(rname)
                                     let _ = type_error(ctx.sink, E0301,
-                                        "variant '${name}' belongs to enum '${ename}', not '${rname}'",
-                                        span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
+                                        "variant '${name}' belongs to enum '${enum_display}', not '${expected_display}'",
+                                        span, DiagnosticContext::TypeMismatch { expected: expected_display, actual: enum_display, expression: none })
                                 }
                             },
                             Type::TypeVar { .. } => {},
@@ -1403,9 +1474,11 @@ fn bind_named_constructor_pattern(
                             match resolved_expected {
                                 Type::EnumType { name: rname, .. } => {
                                     if rname != ename {
+                                        let enum_display = nominal_display_name(ename)
+                                        let expected_display = nominal_display_name(rname)
                                         let _ = type_error(ctx.sink, E0301,
-                                            "variant '${name}' belongs to enum '${ename}', not '${rname}'",
-                                            span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
+                                            "variant '${name}' belongs to enum '${enum_display}', not '${expected_display}'",
+                                            span, DiagnosticContext::TypeMismatch { expected: expected_display, actual: enum_display, expression: none })
                                     }
                                 },
                                 _ => {}
@@ -1539,8 +1612,9 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                     if enum_def.variant_index.contains_key(variant_name) {
                         return some(enum_def.name)
                     }
+                    let qualifier_display = nominal_display_name(q)
                     let _ = type_error(ctx.sink, E0201,
-                        "'${q}' has no variant '${variant_name}'",
+                        "'${qualifier_display}' has no variant '${variant_name}'",
                         span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
                     return none
                 },
@@ -1560,8 +1634,9 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                     none => {}
                 }
             }
+            let qualifier_display = nominal_display_name(q)
             let _ = type_error(ctx.sink, E0201,
-                "'${q}' has no variant '${variant_name}'",
+                "'${qualifier_display}' has no variant '${variant_name}'",
                 span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
             none
         },
@@ -1656,4 +1731,216 @@ pub fn resolve_relative_qualifier(qualifier: Str, mod_path_stack: List<Str>) -> 
         return some("")
     }
     some(resolved_parts.join("::"))
+}
+
+// Bind every namespace carried by an inline relative import. Values, nominal
+// types, aliases, effects and traits deliberately have independent tables; a
+// type-only `pub use self/super::...` must not be rejected merely because the
+// value environment has no entry with that spelling. This resolver is shared
+// by registration and checking so imported names are available in declaration
+// signatures as well as bodies, under exactly the same canonical identities.
+fn import_identity_leaf(identity: Str) -> Str {
+    let inline_parts = identity.split("::")
+    let inline_leaf = inline_parts.get(inline_parts.len() - 1).unwrap_or(identity)
+    let file_parts = inline_leaf.split("$$_")
+    file_parts.get(file_parts.len() - 1).unwrap_or(inline_leaf)
+}
+
+fn canonical_relative_prefix(ctx: InferCtx, resolved_prefix: Str) -> Str {
+    if ctx.mod_path_stack.len() == 0 { return resolved_prefix }
+    let first = ctx.mod_path_stack.get(0).unwrap_or("")
+    let root_parts = first.split("$$_")
+    if root_parts.len() < 2 { return resolved_prefix }
+    if resolved_prefix.index_of("$$_").is_some() { return resolved_prefix }
+    let root = "${root_parts.get(0).unwrap_or("")}$$_"
+    if resolved_prefix == "" { root } else { "${root}${resolved_prefix}" }
+}
+
+fn append_import_identity(prefix: Str, name: Str) -> Str {
+    if prefix == "" { name }
+    else if prefix.ends_with("$$_") { "${prefix}${name}" }
+    else { "${prefix}::${name}" }
+}
+
+fn bind_relative_import(mut ctx: InferCtx, local_name: Str, qualified_name: Str) -> Bool {
+    let mut found = false
+    match ctx.env.lookup(qualified_name) {
+        some(scheme) => {
+            ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
+            if local_name != qualified_name { record_value_origin(ctx, local_name, qualified_name) }
+            found = true
+        },
+        none => {
+            // File-module extern functions retain their raw ABI spelling. Only
+            // declarations from this source file may satisfy the fallback;
+            // prelude externs are intentionally not implicit module members.
+            let abi_name = import_identity_leaf(qualified_name)
+            if ctx.file_extern_values.contains(abi_name) {
+                match ctx.env.lookup(abi_name) {
+                    some(scheme) => {
+                        ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
+                        record_value_origin(ctx, local_name, abi_name)
+                        found = true
+                    },
+                    none => {}
+                }
+            }
+        }
+    }
+    match ctx.env.types.structs.get(qualified_name) {
+        some(def) => { ctx.env.types.structs.insert(local_name, def); found = true },
+        none => {
+            let abi_name = import_identity_leaf(qualified_name)
+            if ctx.file_extern_types.contains(abi_name) {
+                match ctx.env.types.structs.get(abi_name) {
+                    some(def) => {
+                        if def.is_extern { ctx.env.types.structs.insert(local_name, def); found = true }
+                    },
+                    none => {}
+                }
+            }
+        }
+    }
+    match ctx.env.types.enums.get(qualified_name) {
+        some(def) => { ctx.env.types.enums.insert(local_name, def); found = true }, none => {}
+    }
+    match ctx.env.types.type_aliases.get(qualified_name) {
+        some(def) => { ctx.env.types.type_aliases.insert(local_name, def); found = true }, none => {}
+    }
+    match ctx.env.types.effects.get(qualified_name) {
+        some(def) => { ctx.env.types.effects.insert(local_name, def); found = true }, none => {}
+    }
+    match ctx.env.types.effect_aliases.get(qualified_name) {
+        some(def) => { ctx.env.types.effect_aliases.insert(local_name, def); found = true }, none => {}
+    }
+    match ctx.env.trait_reg.traits.get(qualified_name) {
+        some(def) => { ctx.env.trait_reg.traits.insert(local_name, def); found = true }, none => {}
+    }
+    match ctx.env.types.sigs.get(qualified_name) {
+        some(def) => { ctx.env.types.sigs.insert(local_name, def); found = true }, none => {}
+    }
+    found
+}
+
+pub fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>, report_errors: Bool) {
+    // Track which qualified source each imported local name came from, for ambiguity detection.
+    let mut import_origins: Map<Str, Str> = map_new()
+
+    for use_decl in uses {
+        let segments = use_decl.path.segments
+        if segments.len() == 0 { continue }
+        let first = segments.get(0).unwrap_or("")
+        if first != "self" && first != "super" { continue }
+
+        let mut qualifier = first
+        let mut name_start_idx = 1
+        let mut i = 1
+        while i < segments.len() {
+            let seg = segments.get(i).unwrap_or("")
+            if seg == "super" {
+                qualifier = "${qualifier}::${seg}"
+                name_start_idx = i + 1
+            } else {
+                break
+            }
+            i = i + 1
+        }
+        let remaining_end = match use_decl.imports {
+            UseImport::NamedItems { names } => segments.len(),
+            UseImport::Module => {
+                if segments.len() > 0 { segments.len() - 1 } else { 0 }
+            }
+        }
+        while i < remaining_end {
+            let seg = segments.get(i).unwrap_or("")
+            qualifier = "${qualifier}::${seg}"
+            name_start_idx = i + 1
+            i = i + 1
+        }
+
+        let resolved = resolve_relative_qualifier(qualifier, ctx.mod_path_stack)
+        match resolved {
+            none => {
+                if report_errors {
+                    let _ = type_error(ctx.sink, E0705,
+                        "Cannot use '${qualifier}' — relative path exceeds module nesting depth",
+                        use_decl.path.span,
+                        DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
+                }
+                continue
+            },
+            some(prefix) => {
+                let canonical_prefix = canonical_relative_prefix(ctx, prefix)
+                match use_decl.imports {
+                    UseImport::NamedItems { names } => {
+                        for item in names {
+                            let local_name = match item.alias { some(a) => a, none => item.name }
+                            let qualified_name = append_import_identity(canonical_prefix, item.name)
+                            match import_origins.get(local_name) {
+                                some(prev_qualified) => {
+                                    if prev_qualified != qualified_name {
+                                        let prev_display = nominal_display_name(prev_qualified)
+                                        let qualified_display = nominal_display_name(qualified_name)
+                                        if report_errors {
+                                            let _ = type_error(ctx.sink, E0707,
+                                                "Ambiguous name '${local_name}': imported from both '${prev_display}' and '${qualified_display}'. Use qualified name to disambiguate",
+                                                item.span,
+                                                DiagnosticContext::OtherContext { detail: some("ambiguous import") })
+                                        }
+                                        continue
+                                    }
+                                },
+                                none => {}
+                            }
+                            if bind_relative_import(ctx, local_name, qualified_name) {
+                                import_origins.insert(local_name, qualified_name)
+                            } else {
+                                let qualified_display = nominal_display_name(qualified_name)
+                                if report_errors {
+                                    let _ = type_error(ctx.sink, E0201,
+                                        "Undefined import: ${qualified_display}",
+                                        item.span,
+                                        DiagnosticContext::UndefinedVariable { name: qualified_display, scope_locals: none })
+                                }
+                            }
+                        }
+                    },
+                    UseImport::Module => {
+                        if name_start_idx < segments.len() {
+                            let name = segments.get(segments.len() - 1).unwrap_or("")
+                            let local_name = match use_decl.alias { some(a) => a, none => name }
+                            let qualified_name = append_import_identity(canonical_prefix, name)
+                            match import_origins.get(local_name) {
+                                some(prev_qualified) => {
+                                    if prev_qualified != qualified_name {
+                                        let prev_display = nominal_display_name(prev_qualified)
+                                        let qualified_display = nominal_display_name(qualified_name)
+                                        if report_errors {
+                                            let _ = type_error(ctx.sink, E0707,
+                                                "Ambiguous name '${local_name}': imported from both '${prev_display}' and '${qualified_display}'. Use qualified name to disambiguate",
+                                                use_decl.path.span,
+                                                DiagnosticContext::OtherContext { detail: some("ambiguous import") })
+                                        }
+                                        continue
+                                    }
+                                },
+                                none => {}
+                            }
+                            if bind_relative_import(ctx, local_name, qualified_name) {
+                                import_origins.insert(local_name, qualified_name)
+                            } else {
+                                let qualified_display = nominal_display_name(qualified_name)
+                                if report_errors {
+                                    let _ = type_error(ctx.sink, E0201,
+                                        "Undefined import: ${qualified_display}",
+                                        use_decl.path.span,
+                                        DiagnosticContext::UndefinedVariable { name: qualified_display, scope_locals: none })
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -1,22 +1,25 @@
-use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, type_to_string, effect_to_string, effects_match_kind, effect_kind_name}
+use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, type_to_string, effect_to_string, nominal_display_name, effects_match_kind, effect_kind_name}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
-    UseDecl, UseImport, NamedImport, SigMember}
+    UseDecl, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
     collect_extern_type_names, compare_by_first}
-use env::{TypeScheme, apply_subst, apply_subst_map, apply_subst_row_map, find_impl, has_impl}
+use env::{TypeScheme, SchemeBound, apply_subst, apply_subst_map, apply_subst_row_map, find_impl, has_impl}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705, E0707, E0802, E0803}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0802, E0803}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type,
-    generalize, resolve_relative_qualifier}
+    generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses}
 use infer_helpers::{is_value_type}
-use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits, inject_assoc_types_from_bounds}
+use infer_register::{register_decls_two_phase, register_module_decls_two_phase,
+    resolve_declared_effects, prefix_decl_name, insert_mod_aliases,
+    collect_all_supertraits, inject_assoc_types_from_bounds,
+    resolve_trait_identity, resolve_nominal_identity}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block, zonk_expr}
 use derive::{run_derive_pass}
@@ -84,7 +87,7 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     insert_mod_aliases(ctx, mod_name, decls, false)
 
     // Resolve use declarations with relative paths (self::/super::)
-    resolve_mod_uses(ctx, uses)
+    resolve_mod_uses(ctx, uses, true)
 
     // Resolve required effects if present
     let mut cap_row: EffectRow? = none
@@ -136,10 +139,11 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
         // Expand delegates inside mod-scoped impl blocks (same as check_one_decl)
         match prefixed {
             Decl::Impl { target_type, type_params: impl_tps, methods, span: impl_span, .. } => {
+                let canonical_target = resolve_nominal_identity(ctx, target_type)
                 for m in methods {
                     match m {
                         Decl::Delegate { field, trait_names, span: dspan } => {
-                            let delegate_impls = expand_delegate_impls(ctx, target_type, impl_tps, field, trait_names, dspan)
+                            let delegate_impls = expand_delegate_impls(ctx, canonical_target, impl_tps, field, trait_names, dspan)
                             for di in delegate_impls {
                                 // Check capability on delegate-generated impls too
                                 match cap_row {
@@ -182,11 +186,12 @@ fn check_capability(mut ctx: InferCtx, decl: HDecl, cap: EffectRow, mod_span: Sp
 
 fn check_effects_capability(mut ctx: InferCtx, name: Str, effects: EffectRow, cap: EffectRow, span: Span) {
     for eff in effects.effects {
-        let kind = effect_kind_name(eff)
+        let name_display = nominal_display_name(name)
+        let kind_display = effect_to_string(eff)
         let in_cap = cap.effects.any(fn(c) { effects_match_kind(eff, c) })
         if !in_cap {
             let _ = type_error(ctx.sink, E0405,
-                "'${name}' uses effect '${kind}' which is not in the module's requires set",
+                "'${name_display}' uses effect '${kind_display}' which is not in the module's requires set",
                 span,
                 DiagnosticContext::OtherContext { detail: some("capability violation") })
         }
@@ -227,148 +232,6 @@ fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub
     HDecl::Sig { name: name, members: hmembers, is_pub: is_pub, span: span }
 }
 
-fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
-    // Track which qualified source each imported local name came from, for ambiguity detection
-    let mut import_origins: Map<Str, Str> = map_new()
-
-    for use_decl in uses {
-        let segments = use_decl.path.segments
-        if segments.len() == 0 { continue }
-        let first = segments.get(0).unwrap_or("")
-
-        // Check if path starts with relative prefix
-        if first != "self" && first != "super" { continue }
-
-        // Build qualifier from relative segments
-        // First collect self/super prefix, then append remaining intermediate segments
-        let mut qualifier = first
-        let mut name_start_idx = 1
-        let mut i = 1
-        // Collect chained super:: segments (e.g. super::super)
-        while i < segments.len() {
-            let seg = segments.get(i).unwrap_or("")
-            if seg == "super" {
-                qualifier = "${qualifier}::${seg}"
-                name_start_idx = i + 1
-            } else {
-                break
-            }
-            i = i + 1
-        }
-        // Determine how many remaining segments are intermediate path components.
-        // For NamedItems (use super::a::b::{Foo}): ALL remaining segments are path prefix.
-        // For Module (use super::a::b): all remaining except the last are path prefix;
-        //   the last segment is the imported name (handled in the Module branch below).
-        let remaining_end = match use_decl.imports {
-            UseImport::NamedItems { names } => segments.len(),
-            UseImport::Module => {
-                if segments.len() > 0 { segments.len() - 1 } else { 0 }
-            }
-        }
-        while i < remaining_end {
-            let seg = segments.get(i).unwrap_or("")
-            qualifier = "${qualifier}::${seg}"
-            name_start_idx = i + 1
-            i = i + 1
-        }
-
-        // Resolve the relative qualifier against mod_path_stack
-        let resolved = resolve_relative_qualifier(qualifier, ctx.mod_path_stack)
-        match resolved {
-            none => {
-                let _ = type_error(ctx.sink, E0705,
-                    "Cannot use '${qualifier}' — relative path exceeds module nesting depth",
-                    use_decl.path.span,
-                    DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
-                continue
-            },
-            some(prefix) => {
-                // Rebuild the actual path: prefix + remaining segments
-                match use_decl.imports {
-                    UseImport::NamedItems { names } => {
-                        for item in names {
-                            let local_name = match item.alias {
-                                some(a) => a,
-                                none => item.name
-                            }
-                            let qualified_name = if prefix == "" { item.name } else { "${prefix}::${item.name}" }
-
-                            // Check for ambiguous import
-                            match import_origins.get(local_name) {
-                                some(prev_qualified) => {
-                                    if prev_qualified != qualified_name {
-                                        let _ = type_error(ctx.sink, E0707,
-                                            "Ambiguous name '${local_name}': imported from both '${prev_qualified}' and '${qualified_name}'. Use qualified name to disambiguate",
-                                            item.span,
-                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") })
-                                        continue
-                                    }
-                                },
-                                none => {}
-                            }
-
-                            match ctx.env.lookup(qualified_name) {
-                                some(scheme) => {
-                                    ctx.env.bind(local_name, scheme)
-                                    import_origins.insert(local_name, qualified_name)
-                                    // Track alias so codegen emits the qualified name
-                                    if local_name != qualified_name {
-                                        ctx.use_aliases.insert(local_name, qualified_name)
-                                    }
-                                },
-                                none => {
-                                    let _ = type_error(ctx.sink, E0201,
-                                        "Undefined variable: ${qualified_name}",
-                                        item.span,
-                                        DiagnosticContext::UndefinedVariable { name: qualified_name, scope_locals: none })
-                                }
-                            }
-                        }
-                    },
-                    UseImport::Module => {
-                        // use super::name — single name import (last segment is the name)
-                        if name_start_idx < segments.len() {
-                            let name = segments.get(segments.len() - 1).unwrap_or("")
-                            let qualified_name = if prefix == "" { name } else { "${prefix}::${name}" }
-
-                            // Check for ambiguous import
-                            match import_origins.get(name) {
-                                some(prev_qualified) => {
-                                    if prev_qualified != qualified_name {
-                                        let _ = type_error(ctx.sink, E0707,
-                                            "Ambiguous name '${name}': imported from both '${prev_qualified}' and '${qualified_name}'. Use qualified name to disambiguate",
-                                            use_decl.path.span,
-                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") })
-                                        continue
-                                    }
-                                },
-                                none => {}
-                            }
-
-                            match ctx.env.lookup(qualified_name) {
-                                some(scheme) => {
-                                    ctx.env.bind(name, scheme)
-                                    import_origins.insert(name, qualified_name)
-                                    // Track alias so codegen emits the qualified name
-                                    if name != qualified_name {
-                                        ctx.use_aliases.insert(name, qualified_name)
-                                    }
-                                },
-                                none => {
-                                    let _ = type_error(ctx.sink, E0201,
-                                        "Undefined variable: ${qualified_name}",
-                                        use_decl.path.span,
-                                        DiagnosticContext::UndefinedVariable { name: qualified_name, scope_locals: none })
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
@@ -405,8 +268,9 @@ fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_
     let def = match ctx.env.types.structs.get(name) {
         some(d) => d,
         none => {
-            let _ = type_error(ctx.sink, E0204, "struct not found: ${name}", span,
-                DiagnosticContext::OtherContext { detail: some("struct '${name}' was not registered") })
+            let display = nominal_display_name(name)
+            let _ = type_error(ctx.sink, E0204, "struct not found: ${display}", span,
+                DiagnosticContext::OtherContext { detail: some("struct '${display}' was not registered") })
             fail.raise(CompileError {})
         }
     }
@@ -421,8 +285,9 @@ fn check_enum_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pu
     let def = match ctx.env.types.enums.get(name) {
         some(d) => d,
         none => {
-            let _ = type_error(ctx.sink, E0204, "enum not found: ${name}", span,
-                DiagnosticContext::OtherContext { detail: some("enum '${name}' was not registered") })
+            let display = nominal_display_name(name)
+            let _ = type_error(ctx.sink, E0204, "enum not found: ${display}", span,
+                DiagnosticContext::OtherContext { detail: some("enum '${display}' was not registered") })
             fail.raise(CompileError {})
         }
     }
@@ -437,8 +302,9 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
     let def = match ctx.env.types.effects.get(name) {
         some(d) => d,
         none => {
-            let _ = type_error(ctx.sink, E0402, "effect not found: ${name}", span,
-                DiagnosticContext::OtherContext { detail: some("effect '${name}' was not registered") })
+            let display = nominal_display_name(name)
+            let _ = type_error(ctx.sink, E0402, "effect not found: ${display}", span,
+                DiagnosticContext::OtherContext { detail: some("effect '${display}' was not registered") })
             fail.raise(CompileError {})
         }
     }
@@ -510,8 +376,10 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
                         match ctx.env.types.effects.get(eff_name) {
                             some(dep_def) => {
                                 if !dep_def.all_have_defaults {
+                                    let effect_display = nominal_display_name(name)
+                                    let dep_display = nominal_display_name(eff_name)
                                     let _ = type_error(ctx.sink, E0409,
-                                        "Default handler body of effect '${name}' uses effect '${eff_name}' which has no default handler; all-default effects cannot depend on effects without defaults",
+                                        "Default handler body of effect '${effect_display}' uses effect '${dep_display}' which has no default handler; all-default effects cannot depend on effects without defaults",
                                         span,
                                         DiagnosticContext::OtherContext { detail: some("default effect dependency violation") })
                                 } else {
@@ -562,6 +430,14 @@ fn update_impl_method_effects(ctx: InferCtx, target_type: Str, method_name: Str,
 }
 
 fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
+    let canonical_target = resolve_nominal_identity(ctx, target_type)
+    let canonical_trait = match trait_name {
+        some(name) => some(resolve_trait_identity(ctx, name)), none => none
+    }
+    check_impl_decl_canonical(ctx, canonical_target, type_params, canonical_trait, methods, span)
+}
+
+fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
     let saved_tp_scope = map_clone(ctx.type_param_scope)
     let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     for tp in type_params {
@@ -598,11 +474,12 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
             some(tv) => match tv {
                 Type::TypeVar { id, .. } => {
                     for bound in tp.bounds {
+                        let bound_trait = resolve_trait_identity(ctx, bound.trait_name)
                         impl_bounds.push(FnBoundsEntry {
-                            type_param_var_id: id, trait_name: bound.trait_name, type_param_name: tp.name
+                            type_param_var_id: id, trait_name: bound_trait, type_param_name: tp.name
                         })
                         // Expand supertrait bounds
-                        let supers = collect_all_supertraits(ctx, bound.trait_name)
+                        let supers = collect_all_supertraits(ctx, bound_trait)
                         for st_name in supers {
                             impl_bounds.push(FnBoundsEntry {
                                 type_param_var_id: id, trait_name: st_name, type_param_name: tp.name
@@ -623,7 +500,7 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
         match method {
             Decl::AssocType { name: aname, bounds: abounds, value: avalue, .. } => {
                 let mut bound_names: List<Str> = []
-                for b in abounds { bound_names.push(b.trait_name) }
+                for b in abounds { bound_names.push(resolve_trait_identity(ctx, b.trait_name)) }
                 let concrete = match avalue {
                     some(v) => some(resolve_type_expr(ctx, v)),
                     none => none
@@ -740,8 +617,9 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
             if tn == "Drop" {
                 // Drop + Clone conflict: a Drop type cannot also impl Clone
                 if has_impl(ctx.env.trait_reg, target_type, "Clone") {
+                    let target_display = nominal_display_name(target_type)
                     let _ = type_error(ctx.sink, E0802,
-                        "type '${target_type}' cannot implement both Drop and Clone",
+                        "type '${target_display}' cannot implement both Drop and Clone",
                         span, DiagnosticContext::TraitError { detail: "Drop and Clone are mutually exclusive" })
                 }
                 // Drop method must not have fail effect
@@ -770,8 +648,9 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
             // Reverse check: Clone impl on a Drop type
             if tn == "Clone" {
                 if has_impl(ctx.env.trait_reg, target_type, "Drop") || ctx.drop_types.contains(target_type) {
+                    let target_display = nominal_display_name(target_type)
                     let _ = type_error(ctx.sink, E0802,
-                        "type '${target_type}' cannot implement both Drop and Clone",
+                        "type '${target_display}' cannot implement both Drop and Clone",
                         span, DiagnosticContext::TraitError { detail: "Drop and Clone are mutually exclusive" })
                 }
             }
@@ -828,8 +707,9 @@ fn expand_delegate_impls(
                     // Collect all traits to generate: explicit traits + their supertraits
                     let mut all_traits: List<Str> = []
                     for tname in trait_names {
-                        all_traits.push(tname)
-                        let supers = collect_all_supertraits(ctx, tname)
+                        let canonical_trait = resolve_trait_identity(ctx, tname)
+                        all_traits.push(canonical_trait)
+                        let supers = collect_all_supertraits(ctx, canonical_trait)
                         for st_name in supers {
                             // Avoid duplicates
                             if !all_traits.contains(st_name) {
@@ -1115,8 +995,9 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
     let trait_def = match ctx.env.trait_reg.traits.get(name) {
         some(d) => d,
         none => {
-            let _ = type_error(ctx.sink, E0501, "trait not found: ${name}", span,
-                DiagnosticContext::TraitError { detail: "trait '${name}' was not registered" })
+            let display = nominal_display_name(name)
+            let _ = type_error(ctx.sink, E0501, "trait not found: ${display}", span,
+                DiagnosticContext::TraitError { detail: "trait '${display}' was not registered" })
             fail.raise(CompileError {})
         }
     }
@@ -1307,7 +1188,10 @@ fn check_extern_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypePara
     let mut i = 0
     for p in params {
         let ptype = match fn_params.get(i) { some(t) => t, none => UNIT }
-        hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: false })
+        // Preserve the declared mutability as project-link metadata. Genuine
+        // FFI marshalling ignores this field, while an exact internal extern
+        // forward must distinguish `mut T` from `T`.
+        hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: p.is_mutable })
         i = i + 1
     }
     let extern_effects = match declared_effects {
@@ -1429,11 +1313,12 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
             some(tv) => match tv {
                 Type::TypeVar { id, .. } => {
                     for bound in tp.bounds {
+                        let bound_trait = resolve_trait_identity(ctx, bound.trait_name)
                         ctx.current_fn_bounds.push(FnBoundsEntry {
-                            type_param_var_id: id, trait_name: bound.trait_name, type_param_name: tp.name
+                            type_param_var_id: id, trait_name: bound_trait, type_param_name: tp.name
                         })
                         // Expand supertrait bounds: if T: Ord and Ord: Eq, add T: Eq too
-                        let supers = collect_all_supertraits(ctx, bound.trait_name)
+                        let supers = collect_all_supertraits(ctx, bound_trait)
                         for st_name in supers {
                             ctx.current_fn_bounds.push(FnBoundsEntry {
                                 type_param_var_id: id, trait_name: st_name, type_param_name: tp.name
@@ -1590,8 +1475,9 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                     }
                 }
                 if !found {
+                    let fn_display = nominal_display_name(name)
                     let _ = type_error(ctx.sink, E0404,
-                        "Function '${name}' has undeclared effect: ${effect_to_string(inferred_eff)}",
+                        "Function '${fn_display}' has undeclared effect: ${effect_to_string(inferred_eff)}",
                         span,
                         DiagnosticContext::OtherContext { detail: some("effect annotation violation") })
                 }
@@ -1606,7 +1492,7 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     // io/fail/mut are allowed (io is implicit, fail has default handler, mut is Cell-based),
     // but CustomEffect requires an explicit handler and cannot propagate past main.
     // Exception: effects where all ops have default handlers are allowed (auto-injected evidence).
-    if name == "main" {
+    if name == "main" || name.ends_with("$$_main") {
         for eff in final_effects.effects {
             match eff {
                 Effect::CustomEffect { name: eff_name, .. } => {
@@ -1618,14 +1504,15 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                         none => {}
                     }
                     if !skip {
+                        let effect_display = nominal_display_name(eff_name)
                         let effect_notes: List<DiagnosticNote> = [
-                            DiagnosticNote { message: "effect '${eff_name}' is used but not handled in main", span: some(span) },
-                            DiagnosticNote { message: "use 'handle ... with { ${eff_name} { op_name(args) => result } }' to handle this effect", span: none }
+                            DiagnosticNote { message: "effect '${effect_display}' is used but not handled in main", span: some(span) },
+                            DiagnosticNote { message: "use 'handle ... with { ${effect_display} { op_name(args) => result } }' to handle this effect", span: none }
                         ]
                         let _ = type_error_with_notes(ctx.sink, E0403,
-                            "Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main",
+                            "Unhandled effect '${effect_display}' in main function; custom effects must be handled before reaching main",
                             span,
-                            DiagnosticContext::EffectUnhandled { eff: eff_name, in_function: some("main") },
+                            DiagnosticContext::EffectUnhandled { eff: effect_display, in_function: some("main") },
                             effect_notes)
                     }
                 },
@@ -1728,10 +1615,11 @@ fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
     let mut delegate_decls: List<HDecl> = []
     match decl {
         Decl::Impl { target_type, type_params, methods, span, .. } => {
+            let canonical_target = resolve_nominal_identity(ctx, target_type)
             for m in methods {
                 match m {
                     Decl::Delegate { field, trait_names, span: dspan } => {
-                        let delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan)
+                        let delegate_impls = expand_delegate_impls(ctx, canonical_target, type_params, field, trait_names, dspan)
                         for di in delegate_impls { delegate_decls.push(di) }
                     },
                     _ => {}
@@ -1783,10 +1671,11 @@ fn check_one_decl_with_rebind(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HD
     let mut delegate_decls: List<HDecl> = []
     match decl {
         Decl::Impl { target_type, type_params, methods, span, .. } => {
+            let canonical_target = resolve_nominal_identity(ctx, target_type)
             for m in methods {
                 match m {
                     Decl::Delegate { field, trait_names, span: dspan } => {
-                        let delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan)
+                        let delegate_impls = expand_delegate_impls(ctx, canonical_target, type_params, field, trait_names, dspan)
                         for di in delegate_impls { delegate_decls.push(di) }
                     },
                     _ => {}
@@ -1798,6 +1687,144 @@ fn check_one_decl_with_rebind(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HD
 
     hdecls.push(hd)
     for di in delegate_decls { hdecls.push(di) }
+}
+
+// Locate one inline function by its exact canonical SCC node and pre-check it
+// in the same module context used by the final HIR pass.  This lets recursive
+// call-graph ordering cross ModBlock boundaries without flattening the emitted
+// HIR or losing self/super import resolution.
+fn precheck_inline_fn_in_mod(
+    mut ctx: InferCtx,
+    mod_name: Str,
+    uses: List<UseDecl>,
+    decls: List<Decl>,
+    required_effects: List<EffectExpr>?,
+    target_name: Str
+) -> Bool {
+    let segments = mod_name.split("::")
+    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
+    ctx.mod_path_stack.push(simple_name)
+    insert_mod_aliases(ctx, mod_name, decls, false)
+    resolve_mod_uses(ctx, uses, true)
+    let prev_unsafe_allowed = ctx.mod_unsafe_allowed
+    match required_effects {
+        some(req_effs) => {
+            let cap = resolve_declared_effects(ctx, req_effs)
+            ctx.mod_unsafe_allowed = cap.effects.any(fn(e) {
+                match e { Effect::UnsafeEffect => true, _ => false }
+            })
+        },
+        none => { ctx.mod_unsafe_allowed = false }
+    }
+
+    let mut found = false
+    for decl in decls {
+        let prefixed = prefix_decl_name(mod_name, decl)
+        match prefixed {
+            Decl::Fn { name, .. } => {
+                if name == target_name {
+                    let mut discarded: List<HDecl> = []
+                    let result = some(check_one_decl_with_rebind(ctx, prefixed, discarded)) catch { _ => none }
+                    found = true
+                }
+            },
+            Decl::ModBlock { name, uses: nested_uses, decls: nested_decls, required_effects: nested_required, .. } => {
+                if !found && precheck_inline_fn_in_mod(ctx, name, nested_uses, nested_decls, nested_required, target_name) {
+                    found = true
+                }
+            },
+            _ => {}
+        }
+        if found { break }
+    }
+    ctx.mod_unsafe_allowed = prev_unsafe_allowed
+    ctx.mod_path_stack.pop()
+    found
+}
+
+fn precheck_inline_fn(
+    mut ctx: InferCtx, decls: List<Decl>, target_name: Str
+) -> Bool {
+    for decl in decls {
+        match decl {
+            Decl::ModBlock { name, uses, decls: mod_decls, required_effects, .. } => {
+                if precheck_inline_fn_in_mod(ctx, name, uses, mod_decls, required_effects, target_name) { return true }
+            },
+            _ => {}
+        }
+    }
+    false
+}
+
+fn collect_impl_scc_fn_names(
+    decls: List<Decl>, prefix: Str?, mut names: Set<Str>
+) {
+    for decl in decls {
+        match decl {
+            Decl::Impl { methods, .. } => {
+                for method in methods {
+                    match method {
+                        Decl::Fn { name, .. } => {
+                            let full_name = match prefix {
+                                some(p) => "${p}::${name}",
+                                none => name
+                            }
+                            names.insert(full_name)
+                        },
+                        _ => {}
+                    }
+                }
+            },
+            Decl::ModBlock { name, decls: nested, .. } => {
+                let nested_prefix = match prefix {
+                    some(p) => "${p}::${name}",
+                    none => name
+                }
+                collect_impl_scc_fn_names(nested, some(nested_prefix), names)
+            },
+            _ => {}
+        }
+    }
+}
+
+fn inline_dependency_closure(
+    graph: Map<Str, List<Str>>, roots: Set<Str>, blocked: Set<Str>
+) -> Set<Str> {
+    let mut closure: Set<Str> = set_new()
+    let mut pending: List<Str> = []
+    for root in roots {
+        closure.insert(root)
+        pending.push(root)
+    }
+    while pending.len() > 0 {
+        match pending.pop() {
+            some(node) => match graph.get(node) {
+                some(deps) => {
+                    for dep in deps {
+                        if !blocked.contains(dep) && !dep.starts_with("impl::") && !closure.contains(dep) {
+                            closure.insert(dep)
+                            pending.push(dep)
+                        }
+                    }
+                },
+                none => {}
+            },
+            none => {}
+        }
+    }
+    closure
+}
+
+fn precheck_top_level_fn_at(
+    mut ctx: InferCtx, decls: List<Decl>, index: Int
+) {
+    match decls.get(index) {
+        some(decl) => {
+            let mut discarded: List<HDecl> = []
+            let result = some(check_one_decl_with_rebind(ctx, decl, discarded)) catch { _ => none }
+        },
+        none => {}
+    }
 }
 
 // B-122: Rebind a fn's type scheme with resolved return type and effects.
@@ -1812,10 +1839,34 @@ fn check_one_decl_with_rebind(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HD
 // contains TypeVars (e.g., generic identity fn), we build a mapping from
 // check-time var ids to registration-time var ids using param correspondence,
 // so the scheme remains consistent.
+// File modules keep both a canonical value binding (`module$$_name`) and a
+// source-spelled display alias (`name`, or `outer::name` for inline modules).
+// Both bindings share the same DefId.  Refresh the alias together with the
+// canonical scheme; otherwise later functions in the same module keep using
+// the registration-time EMPTY_ROW / unresolved return variables.
+fn rebind_fn_scheme_with_alias(mut ctx: InferCtx, name: Str, scheme: TypeScheme) {
+    ctx.env.rebind(name, scheme)
+
+    let identity_parts = name.split("$$_")
+    if identity_parts.len() < 2 { return }
+    let display = identity_parts.get(1).unwrap_or("")
+    if display == "" { return }
+
+    match ctx.env.lookup(display) {
+        some(alias_scheme) => match (scheme.def_id, alias_scheme.def_id) {
+            (some(canonical_id), some(alias_id)) => {
+                if canonical_id == alias_id { ctx.env.rebind(display, scheme) }
+            },
+            _ => {}
+        },
+        none => {}
+    }
+}
+
 fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_type: Type, effects: EffectRow) {
     match ctx.env.lookup(name) {
         some(scheme) => match scheme.ty {
-            Type::FnType { params: reg_params, return_type: reg_ret, .. } => {
+            Type::FnType { params: reg_params, return_type: reg_ret, effects: reg_effects } => {
                 // Build mapping: check-time var id → registration-time var id
                 // by comparing resolved params with registered params position-by-position.
                 let mut var_mapping: Map<Int, Type> = map_new()
@@ -1838,16 +1889,75 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 // machinery cannot resolve at call sites.
                 build_var_mapping(return_type, reg_ret, var_mapping)
 
+                // Effect payloads participate in the same registration-time
+                // identity contract as params/returns.  In particular, a
+                // bounded T may occur only inside fail<T>/mut<T>/Custom<T>,
+                // including inside an HOF parameter.  Map those check-time
+                // variables back before writing the inferred row into the
+                // scheme so its existing SchemeBound stays attached to T.
+                build_effect_var_mapping(effects, reg_effects, var_mapping)
+
                 // Map the resolved return type back to registration-time vars
                 let mapped_ret = apply_subst_map(var_mapping, return_type)
 
                 // Also map effects
                 let mapped_effects = apply_subst_row_map(var_mapping, effects)
 
+                // Generalize only genuinely new row variables.  Mirroring
+                // infer_ctx::generalize is important here: a monomorphic env
+                // variable (e.g. an unannotated `raise_arg(x)`) must remain
+                // shared, while a body-local/callee-instantiation variable gets
+                // a fresh instance at every call site.
+                let mut row_free: Set<Int> = set_new()
+                collect_free_vars(Type::EffectRowType {
+                    effects: mapped_effects.effects, tail: mapped_effects.tail
+                }, row_free)
+                let env_free = free_type_vars_in_env(ctx.env, empty_subst())
+                let mut new_type_vars = list_clone(scheme.type_vars)
+                let mut new_bounds = list_clone(scheme.bounds)
+                let mut sorted_row_free = row_free.to_list()
+                sorted_row_free.sort()
+                for v in sorted_row_free {
+                    if new_type_vars.contains(v) == false && env_free.contains(v) == false {
+                        new_type_vars.push(v)
+
+                        // instantiate() records trait obligations for fresh
+                        // variables in var_bounds.  Preserve those obligations
+                        // when the propagated effect variable is generalized,
+                        // using the same deterministic reconstruction contract
+                        // as infer_ctx::generalize.  Existing SchemeBounds —
+                        // including associated constraints — are left intact.
+                        match ctx.env.scope.var_bounds.get(v) {
+                            some(traits) => {
+                                let mut sorted_traits = traits.to_list()
+                                sorted_traits.sort()
+                                for trait_name in sorted_traits {
+                                    let exists = new_bounds.any(fn(b) {
+                                        b.type_var == v && b.trait_name == trait_name
+                                    })
+                                    if !exists {
+                                        new_bounds.push(SchemeBound {
+                                            type_var: v,
+                                            trait_name: trait_name,
+                                            assoc_constraints: []
+                                        })
+                                    }
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                }
+
                 let new_type = Type::FnType {
                     params: reg_params, return_type: mapped_ret, effects: mapped_effects
                 }
-                ctx.env.rebind(name, TypeScheme { ..scheme, ty: new_type })
+                rebind_fn_scheme_with_alias(ctx, name, TypeScheme {
+                    ..scheme,
+                    ty: new_type,
+                    type_vars: new_type_vars,
+                    bounds: new_bounds
+                })
             },
             _ => {}
         },
@@ -1875,14 +1985,7 @@ fn build_var_mapping(check_ty: Type, reg_ty: Type, mut mapping: Map<Int, Type>) 
                 i = i + 1
             }
             build_var_mapping(cr, rr, mapping)
-            match (ce.tail, re.tail) {
-                (some(check_tail), some(reg_tail)) => {
-                    if !mapping.contains_key(check_tail) {
-                        mapping.insert(check_tail, Type::TypeVar { id: reg_tail, name: none })
-                    }
-                },
-                _ => {}
-            }
+            build_effect_var_mapping(ce, re, mapping)
         },
         (Type::StructType { type_params: ct, .. }, Type::StructType { type_params: rt, .. }) => {
             let mut i = 0
@@ -1915,6 +2018,41 @@ fn build_var_mapping(check_ty: Type, reg_ty: Type, mut mapping: Map<Int, Type>) 
             }
         },
         _ => {}
+    }
+}
+
+fn build_effect_var_mapping(check_row: EffectRow, reg_row: EffectRow, mut mapping: Map<Int, Type>) {
+    match (check_row.tail, reg_row.tail) {
+        (some(check_tail), some(reg_tail)) => {
+            if !mapping.contains_key(check_tail) {
+                mapping.insert(check_tail, Type::TypeVar { id: reg_tail, name: none })
+            }
+        },
+        _ => {},
+    }
+
+    for check_eff in check_row.effects {
+        for reg_eff in reg_row.effects {
+            if effects_match_kind(check_eff, reg_eff) {
+                match (check_eff, reg_eff) {
+                    (Effect::FailEffect { error_type: ct }, Effect::FailEffect { error_type: rt }) =>
+                        build_var_mapping(ct, rt, mapping),
+                    (Effect::MutEffect { state_type: ct }, Effect::MutEffect { state_type: rt }) =>
+                        build_var_mapping(ct, rt, mapping),
+                    (Effect::CustomEffect { type_args: ca, .. }, Effect::CustomEffect { type_args: ra, .. }) => {
+                        let mut i = 0
+                        while i < ca.len() && i < ra.len() {
+                            match (ca.get(i), ra.get(i)) {
+                                (some(ct), some(rt)) => build_var_mapping(ct, rt, mapping),
+                                _ => {},
+                            }
+                            i = i + 1
+                        }
+                    },
+                    _ => {},
+                }
+            }
+        }
     }
 }
 
@@ -1971,9 +2109,9 @@ fn dfs_detect_cycle(mut ctx: InferCtx, name: Str, mut state: Map<Str, Int>, mut 
                             let mut found_start = false
                             for p in path {
                                 if p == dep { found_start = true }
-                                if found_start { cycle_parts.push(p) }
+                                if found_start { cycle_parts.push(nominal_display_name(p)) }
                             }
-                            cycle_parts.push(dep)
+                            cycle_parts.push(nominal_display_name(dep))
                             let cycle_str = cycle_parts.join(" -> ")
                             let err_span = match effect_spans.get(name) {
                                 some(sp) => sp,
@@ -2002,6 +2140,16 @@ fn dfs_detect_cycle(mut ctx: InferCtx, name: Str, mut state: Map<Str, Int>, mut 
 
 pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     register_decls_two_phase(ctx, program.decls)
+    check_registered(ctx, program)
+}
+
+pub fn check_module_identity(mut ctx: InferCtx, program: Program, module_prefix: Str) -> HProgram {
+    let qualified_decls = register_module_decls_two_phase(ctx, module_prefix, program.decls)
+    let qualified = Program { uses: program.uses, decls: qualified_decls, span: program.span }
+    check_registered(ctx, qualified)
+}
+
+fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
     let derived_impls = run_derive_pass(ctx.env)
 
     // Effect pre-pass: check impl blocks to populate impl_methods with inferred effects.
@@ -2024,7 +2172,9 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     let call_graph = build_call_graph(program.decls, registered_fns)
     let scc_groups = tarjan_scc(call_graph)
 
-    // Build lookup: SCC node name → index in program.decls
+    // Build lookup before the inline pre-pass. Besides driving Phase 2b, this
+    // distinguishes top-level SCC nodes that are already checked exactly once
+    // below from inline nodes that need module-context prechecking.
     let mut fn_name_to_idx: Map<Str, Int> = map_new()
     let mut impl_node_to_idx: Map<Str, Int> = map_new()
     let mut idx = 0
@@ -2043,6 +2193,31 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
             _ => {}
         }
         idx = idx + 1
+    }
+
+    // Inline functions are emitted inside HDecl::ModBlock and therefore have
+    // no direct program.decls index for Phase 2b below. Starting from those
+    // nodes, follow caller -> callee edges and pre-check only that dependency
+    // closure leaf-first. This includes file-root callees reached via super::,
+    // while ordinary file modules with no inline functions do no extra work.
+    let mut impl_fn_names: Set<Str> = set_new()
+    collect_impl_scc_fn_names(program.decls, none, impl_fn_names)
+    let mut inline_roots: Set<Str> = set_new()
+    for name in registered_fns {
+        if !fn_name_to_idx.contains_key(name) && !impl_fn_names.contains(name) {
+            inline_roots.insert(name)
+        }
+    }
+    let precheck_nodes = inline_dependency_closure(call_graph, inline_roots, impl_fn_names)
+    for scc_group in scc_groups {
+        for name in scc_group {
+            if precheck_nodes.contains(name) {
+                match fn_name_to_idx.get(name) {
+                    some(i) => precheck_top_level_fn_at(ctx, program.decls, i),
+                    none => { let _ = precheck_inline_fn(ctx, program.decls, name) }
+                }
+            }
+        }
     }
 
     let mut hdecls: List<HDecl> = []

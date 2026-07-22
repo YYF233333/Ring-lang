@@ -18,7 +18,7 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 
 - **编译器**：Ring 自举。ring.exe 自编译（dist-llvm/ .o 冻结产出 + ring_runtime.cpp → clang 链接）；dist/（冻结 JS 产出）= stage 0 信任锚，但语言快照停在 `0bd7822`（2026-06-27）——只能编该代源码，回退到 HEAD 需链式重放（B-163 Phase 0 实测，2026-07-10）
 - **Runtime**：ring_runtime.cpp（~3600 行 C++ STL wrapper）→ RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 design.md §7.12
-- **LLVM codegen**：codegen_llvm*.ring（5 个模块），ring.exe 直接调用 LLVM-C 22 API
+- **双后端 codegen**：LLVM 后端（codegen_llvm*.ring，LLVM-C 22 API）仍是 native 默认与差分 oracle；C 后端（codegen_c*.ring）已完成 B-163 Phase 1 step 8，支持单文件及 project/module 模式，发射 C11 后调用 clang
 - **测试**：Python test runner（`tests/run_tests.py`），零外部依赖
 - **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
 - **历史**：TS 原始实现归档于 git tag `ts-compiler-final`；JS codegen 后端归档于 `5df6c99`（B-100 Phase 2）
@@ -28,7 +28,8 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 ```
 Ring-lang/
 ├── compiler/          编译器源码（*.ring）+ dist/（冻结的 JS 产出，stage 0 回退）+ dist-llvm/（.o 产出）
-│   ├── codegen_llvm*.ring 唯一 codegen 后端（5 个模块）
+│   ├── codegen_llvm*.ring LLVM native 后端（5 个模块，当前默认/oracle）
+│   ├── codegen_c*.ring    C11 源码后端（B-163 Phase 1，已支持 project/module）
 │   └── llvm_ffi.ring      LLVM-C API 声明（91 extern fn + 13 extern type）
 ├── ring_runtime.cpp   LLVM native backend 的 C ABI runtime（~2200 行 C++ STL wrapper）
 ├── std/               标准库（io/fs/path/process/str/num/list/map/set/result/iterator）
