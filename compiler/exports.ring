@@ -169,13 +169,26 @@ fn copy_inline_export(
         },
         none => {
             // File-module extern types retain their raw ABI identity instead
-            // of the canonical module identity used by normal nominals.
+            // of the canonical module identity used by normal nominals. As
+            // with extern values, require an actual declaration in this file;
+            // a raw prelude extern type is not a `super::` module member.
             let abi_name = identity_leaf(source)
-            match env.types.structs.get(abi_name) {
-                some(def) => {
-                    if def.is_extern { types.insert(local, TypeDef::StructDef_(def)) }
-                },
-                none => {}
+            let mut is_file_extern = false
+            for decl in program.decls {
+                match decl {
+                    Decl::ExternType { name, .. } => {
+                        if name == abi_name { is_file_extern = true }
+                    },
+                    _ => {}
+                }
+            }
+            if is_file_extern {
+                match env.types.structs.get(abi_name) {
+                    some(def) => {
+                        if def.is_extern { types.insert(local, TypeDef::StructDef_(def)) }
+                    },
+                    none => {}
+                }
             }
         }
     }

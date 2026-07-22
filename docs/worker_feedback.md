@@ -193,3 +193,23 @@ stage-0 来源：
 1. 从上一代 `ring_step8.exe` 编译当前 compiler 并以 `-O2` runtime 链接下一代。
 2. 首先以 LLVM+C 跑 `inline_pub_use_namespaces`，必须输出 `7,8,41,9,42`；同时跑 `mod_relative_path`、`mod_relative_path_multi`、`error_relative_path_bad_segment`，确认共享 resolver 的 nested super 与错误规则无回归。
 3. 再继续 alias/SCC gates 与二代自举；仍禁止进入 Step 9。
+
+---
+
+## B-163 step 8 — 2026-07-22 extern-type boundary / forward-facade follow-up
+
+### 边界与顺序修复 [通知]
+
+- raw ABI extern type fallback 现在与 extern value 对称：`InferCtx.file_extern_types` 只由当前文件顶层 `ExternType` AST 填充；relative import 与 export collector 都必须先通过 current-file AST guard，才允许从 canonical identity 回退到 raw ABI identity。这样保留 `ForeignHandle` 正向 facade，同时禁止把 prelude-only `Set` 伪装成 `super::Set` 文件成员。
+- 新增负例 `inline_super_extern_type_boundary`。上一代 `ring_step8.exe` 错误接受并生成 object，确认测试为有效 RED；当前源码需由下一代 compiler 验证 E0201 GREEN。
+- inline module 的两阶段注册语义应与 sibling 源码顺序无关。实现采用有界、稳定排序：同层先注册非 `ModBlock` 声明，再仅依据 sibling `use` 的直接 `super::<sibling>` 首段依赖拓扑注册 ModBlock；无进展/循环依赖保留剩余源码顺序，继续由 checker 产出诊断。`inline_pub_use_namespaces` 已将 facade 移到 private origin 前，上一代 compiler 按预期 RED。
+
+### 有意保留的覆盖边界 [通知]
+
+- 本轮没有建立通用模块依赖图；排序不推导 `self::child`、连续多级 `super::super::...`、任意祖先路径或函数体内的依赖。当前目标仅是消除“facade 直接导入同层后置 sibling”这一注册顺序缺口，避免把 Step 8 收尾扩大成模块系统重构。
+- 循环 sibling facade 不在本修复中求解；稳定回退只保证确定性，语义错误仍由现有 checking 路径处理。
+
+### 分钟级验证
+
+- 当前源码以 `compiler/checker.ring` 为局部 entry：LLVM target PASS，C target 生成并经 clang 编译 PASS；输出仅含既有 W0001 与“无 main”提示。
+- `git diff --check` clean。未运行 bootstrap、全量 suite、自编译或 Step 9；semantic GREEN 仍需下一代 compiler 跑 `inline_pub_use_namespaces` 与 `inline_super_extern_type_boundary`。

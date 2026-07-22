@@ -63,6 +63,7 @@ pub struct InferCtx {
     // excludes prelude-only externs so `use super::abi_name` cannot invent a
     // file-module member that the export pass would refuse to expose.
     pub file_extern_values: Set<Str>,
+    pub file_extern_types: Set<Str>,
     // Default effect handler dependency graph: effect name -> list of effect names it depends on
     pub effect_default_deps: Map<Str, List<Str>>,
     // Qualified associated type scope: "T::Item" -> Type
@@ -96,6 +97,7 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
         file_extern_values: set_new(),
+        file_extern_types: set_new(),
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
@@ -1789,11 +1791,13 @@ fn bind_relative_import(mut ctx: InferCtx, local_name: Str, qualified_name: Str)
         some(def) => { ctx.env.types.structs.insert(local_name, def); found = true },
         none => {
             let abi_name = import_identity_leaf(qualified_name)
-            match ctx.env.types.structs.get(abi_name) {
-                some(def) => {
-                    if def.is_extern { ctx.env.types.structs.insert(local_name, def); found = true }
-                },
-                none => {}
+            if ctx.file_extern_types.contains(abi_name) {
+                match ctx.env.types.structs.get(abi_name) {
+                    some(def) => {
+                        if def.is_extern { ctx.env.types.structs.insert(local_name, def); found = true }
+                    },
+                    none => {}
+                }
             }
         }
     }

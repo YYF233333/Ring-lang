@@ -223,6 +223,71 @@ pub fn module_prefix_decl_name(module_prefix: Str, decl: Decl) -> Decl {
 // When deferred_struct_names/deferred_enum_names are provided (some), operates in phase1 mode
 // (preregister struct/enum only, defer field/variant completion).
 // When none, operates in register_decl mode (complete struct/enum immediately).
+fn inline_mod_leaf(name: Str) -> Str {
+    let inline_parts = name.split("::")
+    let inline_leaf = inline_parts.get(inline_parts.len() - 1).unwrap_or(name)
+    let file_parts = inline_leaf.split("$$_")
+    file_parts.get(file_parts.len() - 1).unwrap_or(inline_leaf)
+}
+
+// Source order must not decide whether `mod facade { use super::origin... }`
+// can see a sibling. Order sibling ModBlocks by their direct super::module
+// dependencies; cycles retain source order and are diagnosed during checking.
+fn order_inline_mod_blocks(decls: List<Decl>) -> List<Decl> {
+    let mut pending: List<Decl> = []
+    let mut sibling_names: Set<Str> = set_new()
+    for decl in decls {
+        match decl {
+            Decl::ModBlock { name, .. } => {
+                pending.push(decl)
+                sibling_names.insert(inline_mod_leaf(name))
+            },
+            _ => {}
+        }
+    }
+
+    let mut ordered: List<Decl> = []
+    let mut completed: Set<Str> = set_new()
+    while pending.len() > 0 {
+        let mut next: List<Decl> = []
+        let mut progressed = false
+        for decl in pending {
+            let mut ready = true
+            match decl {
+                Decl::ModBlock { uses, .. } => {
+                    for use_decl in uses {
+                        let parts = use_decl.path.segments
+                        if parts.len() > 1 && parts.get(0).unwrap_or("") == "super" &&
+                           parts.get(1).unwrap_or("") != "super" {
+                            let dep = parts.get(1).unwrap_or("")
+                            if sibling_names.contains(dep) && !completed.contains(dep) {
+                                ready = false
+                            }
+                        }
+                    }
+                },
+                _ => {}
+            }
+            if ready {
+                match decl {
+                    Decl::ModBlock { name, .. } => { completed.insert(inline_mod_leaf(name)) },
+                    _ => {}
+                }
+                ordered.push(decl)
+                progressed = true
+            } else {
+                next.push(decl)
+            }
+        }
+        if !progressed {
+            for decl in next { ordered.push(decl) }
+            next = []
+        }
+        pending = next
+    }
+    ordered
+}
+
 fn register_mod_block_items(
     mut ctx: InferCtx, mod_name: Str, mod_uses: List<UseDecl>, mod_decls: List<Decl>,
     deferred_struct_names: List<Str>?, deferred_enum_names: List<Str>?
@@ -294,11 +359,16 @@ fn register_mod_block_items(
             Decl::Effect { .. } => {},
             Decl::EffectAlias { .. } => {},
             Decl::ExternType { .. } => {},
+            Decl::ModBlock { .. } => {},
             _ => {
                 let prefixed = prefix_decl_name(mod_name, d)
                 register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
             }
         }
+    }
+    for d in order_inline_mod_blocks(mod_decls) {
+        let prefixed = prefix_decl_name(mod_name, d)
+        register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
     }
     let _ = ctx.mod_path_stack.pop()
 }
@@ -365,9 +435,11 @@ fn register_phase2_enum(mut ctx: InferCtx, decl: Decl) {
 
 pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
     ctx.file_extern_values = set_new()
+    ctx.file_extern_types = set_new()
     for decl in decls {
         match decl {
             Decl::ExternFn { name, .. } => { ctx.file_extern_values.insert(name) },
+            Decl::ExternType { name, .. } => { ctx.file_extern_types.insert(name) },
             _ => {}
         }
     }
@@ -396,9 +468,11 @@ pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
 // Imported canonical definitions may coexist; aliases are deliberately local.
 pub fn register_module_decls_two_phase(mut ctx: InferCtx, module_prefix: Str, decls: List<Decl>) -> List<Decl> {
     ctx.file_extern_values = set_new()
+    ctx.file_extern_types = set_new()
     for decl in decls {
         match decl {
             Decl::ExternFn { name, .. } => { ctx.file_extern_values.insert(name) },
+            Decl::ExternType { name, .. } => { ctx.file_extern_types.insert(name) },
             _ => {}
         }
     }
@@ -447,8 +521,12 @@ pub fn register_module_decls_two_phase(mut ctx: InferCtx, module_prefix: Str, de
             Decl::Struct { .. } => {}, Decl::Enum { .. } => {}, Decl::Trait { .. } => {},
             Decl::Effect { .. } => {}, Decl::EffectAlias { .. } => {},
             Decl::ExternType { .. } => {}, Decl::TypeAlias { .. } => {}, Decl::Sig { .. } => {},
+            Decl::ModBlock { .. } => {},
             _ => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)
         }
+    }
+    for decl in order_inline_mod_blocks(qualified) {
+        register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)
     }
 
     for decl in qualified { register_phase2_struct(ctx, decl) }

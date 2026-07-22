@@ -142,6 +142,7 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
         file_extern_values: set_new(),
+        file_extern_types: set_new(),
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         fn_defaults: map_new(),
