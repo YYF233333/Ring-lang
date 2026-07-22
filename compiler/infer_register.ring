@@ -330,17 +330,34 @@ fn register_mod_block_items(
             _ => {}
         }
     }
-    // Pass 1b-2: effects, effect aliases, extern types
+    // Pass 1b-2: effects must exist under their short names before effect
+    // alias bodies are canonicalized. Otherwise `{Signal}` is stored raw and
+    // can later rebind to a consumer's same-spelled effect.
     for d in mod_decls {
         match d {
             Decl::Effect { .. } => {
                 let prefixed = prefix_decl_name(mod_name, d)
                 register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
             },
+            _ => {}
+        }
+    }
+    insert_mod_aliases(ctx, mod_name, mod_decls, true)
+    // Pass 1b-3: effect aliases remain source ordered so an earlier alias may
+    // feed a later alias, but every body sees all concrete effects above.
+    for d in mod_decls {
+        match d {
             Decl::EffectAlias { .. } => {
                 let prefixed = prefix_decl_name(mod_name, d)
                 register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                insert_mod_aliases(ctx, mod_name, mod_decls, true)
             },
+            _ => {}
+        }
+    }
+    // Pass 1b-4: opaque extern types.
+    for d in mod_decls {
+        match d {
             Decl::ExternType { .. } => {
                 let prefixed = prefix_decl_name(mod_name, d)
                 register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
@@ -348,7 +365,7 @@ fn register_mod_block_items(
             _ => {}
         }
     }
-    // Pass 1b-3: aliases/signatures must exist before any value declaration
+    // Pass 1b-5: aliases/signatures must exist before any value declaration
     // resolves its parameter/return types. Refresh short aliases after each
     // declaration so source-ordered alias chains can feed the next alias;
     // functions remain declaration-order independent from all aliases.
@@ -526,10 +543,27 @@ pub fn register_module_decls_two_phase(mut ctx: InferCtx, module_prefix: Str, de
             _ => {}
         }
     }
+    // Install all concrete effects before canonicalizing any effect-alias body.
+    // The alias body must capture this module's exact effect identity rather
+    // than retain a raw leaf that a downstream decoy can rebind.
     for decl in qualified {
         match decl {
             Decl::Effect { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
-            Decl::EffectAlias { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
+            _ => {}
+        }
+    }
+    insert_file_module_aliases(ctx, module_prefix, decls, false)
+    for decl in qualified {
+        match decl {
+            Decl::EffectAlias { .. } => {
+                register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)
+                insert_file_module_aliases(ctx, module_prefix, decls, false)
+            },
+            _ => {}
+        }
+    }
+    for decl in qualified {
+        match decl {
             Decl::ExternType { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
             Decl::TypeAlias { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),
             Decl::Sig { .. } => register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names),

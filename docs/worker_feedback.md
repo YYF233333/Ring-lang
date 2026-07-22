@@ -274,3 +274,19 @@ stage-0 来源：
 - 既有 `extern_forward_project_bridge` 新增 `bridge_effect_contract`：provider 内部对局部 Int 列表调用 `sort_by(compare_ints)`，复现相同的纯 HOF tail 形状。
 - 未标注 provider 时，bridge2 LLVM object 链接精确 RED：`undefined symbol: bridge_effect_contract`。provider 加 `with {}`、forward 明确 `with {}` 后，LLVM 与 C 双后端均 build/link/run PASS，输出 `42,5,1,7`。
 - 本 follow-up 未运行完整 bootstrap、全量 suite、自编译或 Step 9；主 agent 仍需用包含本补丁的新 compiler 确认 compiler object 不再含 raw `U gen_llvm_expr`。
+
+---
+
+## B-163 step 8 — 2026-07-22 effect-alias origin registration follow-up
+
+### 精确根因与修复 [通知]
+
+- final compiler 在 `module_effect_alias_origin` 报 consumer `with {Bundle}` 未声明 inferred `origin::Signal`。`canonicalize_effect_alias_body` 本身存在，但 file-module 注册把 `Effect` 与 `EffectAlias` 放在同一源码序 pass；注册 origin 的 Bundle 时，canonical `origin$$_Signal` 虽随后会存在，短名 `Signal` 尚未由 `insert_file_module_aliases` 安装，故 alias body 永久保存 raw leaf。consumer 注册同名 decoy 后，该 raw leaf 才错误解析为 consumer Signal。循环检测键不是本例根因。
+- file 与 inline module 注册现在都明确分层：先注册全部 concrete effects，再安装 short aliases，然后 source-order 注册 effect aliases、逐项刷新 alias，最后处理 extern/type declarations。这样 effect-alias body 在定义模块内立即捕获 canonical identity，且不依赖 effect 与 alias 的源码先后。
+- 现有 origin 回归已把 `Bundle` 移到 `Signal` 之前，继续保留 consumer 同名 `Signal` decoy，锁定声明序无关与跨模块 origin identity。
+
+### 分钟级证据与边界
+
+- 修复前 final compiler 对重排后的现有回归仍精确 RED：consumer.ring:9 E0404，undeclared `origin::Signal`。
+- 当前源码以 `compiler/infer_register.ring` 为局部 entry：LLVM target PASS；C target 成功生成并由 Clang `-std=c11 -c` 编译 PASS，仅既有 W0001/无 main 提示。
+- 未运行完整 bootstrap、全量 suite、自编译或 Step 9；semantic GREEN 需主 agent 用下一代 compiler 跑该现有回归的 LLVM/C 两后端。
