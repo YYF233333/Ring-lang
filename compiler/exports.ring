@@ -1,4 +1,4 @@
-use types::{Type}
+use types::{Type, EMPTY_ROW}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use hir::{HProgram, HDecl, compare_by_first, variant_ctor_name}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, TypeAliasDef, EffectAliasDef}
@@ -105,13 +105,14 @@ fn inline_use_source_prefix(mod_identity: Str, use_decl: UseDecl) -> Str? {
 }
 
 fn copy_inline_export(
-    source: Str, local: Str, env: TypeEnv, fn_mut_params_map: Map<Str, List<Bool>>,
+    source: Str, local: Str, env: TypeEnv, fn_mut_params_map: Map<Str, List<Bool>>, program: Program,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>, mut type_aliases: Map<Str, TypeAliasDef>, mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>, mut traits: Map<Str, TraitDef>,
     mut impl_methods: Map<Str, Map<Str, TypeScheme>>,
     mut inherent_methods: Map<Str, List<Str>>, mut struct_field_orders: Map<Str, List<Str>>,
-    mut mut_methods: Map<Str, Set<Str>>, mut fn_mut_params: Map<Str, List<Bool>>
+    mut extern_values: Set<Str>, mut mut_methods: Map<Str, Set<Str>>,
+    mut fn_mut_params: Map<Str, List<Bool>>
 ) {
     match env.lookup(source) {
         some(scheme) => {
@@ -121,7 +122,37 @@ fn copy_inline_export(
                 some(flags) => { fn_mut_params.insert(local, flags) }, none => {}
             }
         },
-        none => {}
+        none => {
+            // File-module ExternFn declarations deliberately retain their raw
+            // foreign ABI name instead of receiving the module$$_ canonical
+            // identity used by Ring functions. Relative inline pub-use paths
+            // are canonical, so fall back to the ABI leaf only when the file
+            // AST proves that leaf is a top-level extern declaration. This
+            // avoids accidentally resolving an unrelated short/import alias.
+            let abi_name = identity_leaf(source)
+            let mut is_file_extern = false
+            for decl in program.decls {
+                match decl {
+                    Decl::ExternFn { name, .. } => {
+                        if name == abi_name { is_file_extern = true }
+                    },
+                    _ => {}
+                }
+            }
+            if is_file_extern {
+                match env.lookup(abi_name) {
+                    some(scheme) => {
+                        values.insert(local, scheme)
+                        value_origins.insert(local, abi_name)
+                        extern_values.insert(local)
+                        match fn_mut_params_map.get(abi_name) {
+                            some(flags) => { fn_mut_params.insert(local, flags) }, none => {}
+                        }
+                    },
+                    none => {}
+                }
+            }
+        }
     }
     match env.types.structs.get(source) {
         some(def) => {
@@ -151,6 +182,38 @@ fn copy_inline_export(
     match env.types.enums.get(source) {
         some(def) => {
             types.insert(local, TypeDef::EnumDef_(def))
+            // A facade enum must carry its constructors even when the source
+            // inline module itself is private. Reconstruct the registration
+            // scheme from the canonical EnumDef instead of consulting the
+            // unqualified variant binding, which may belong to a same-spelled
+            // variant from another enum. The fully-qualified facade binding
+            // gives inference an exact lookup; the legacy leaf binding keeps
+            // named enum imports compatible when it is not already occupied.
+            let enum_params = def.type_param_vars.map(fn(id) {
+                Type::TypeVar { id: id, name: none }
+            })
+            let enum_type = Type::EnumType { name: def.name, type_params: enum_params }
+            for variant in def.variants {
+                let ctor_type = if variant.field_names.is_some() || variant.fields.len() == 0 {
+                    enum_type
+                } else {
+                    Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW }
+                }
+                let ctor_scheme = TypeScheme {
+                    ty: ctor_type,
+                    type_vars: def.type_param_vars,
+                    bounds: [],
+                    def_id: none
+                }
+                let ctor_origin = variant_ctor_name(def.name, variant.name)
+                let facade_ctor = "${local}::${variant.name}"
+                values.insert(facade_ctor, ctor_scheme)
+                value_origins.insert(facade_ctor, ctor_origin)
+                if !values.contains_key(variant.name) {
+                    values.insert(variant.name, ctor_scheme)
+                    value_origins.insert(variant.name, ctor_origin)
+                }
+            }
             match env.trait_reg.impl_methods.get(def.name) {
                 some(methods) => { impl_methods.insert(def.name, map_clone(methods)) }, none => {}
             }
@@ -392,8 +455,8 @@ fn extract_decl_export(
                                 for item in names {
                                     let local_name = match item.alias { some(a) => a, none => item.name }
                                     copy_inline_export(append_identity(source_prefix, item.name), "${facade}::${local_name}",
-                                        env, fn_mut_params_map, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
-                                        impl_methods, inherent_methods, struct_field_orders, mut_methods, fn_mut_params)
+                                        env, fn_mut_params_map, program, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                                        impl_methods, inherent_methods, struct_field_orders, extern_values, mut_methods, fn_mut_params)
                                 }
                             },
                             UseImport::Module => {
@@ -401,8 +464,8 @@ fn extract_decl_export(
                                 let item_name = path.get(path.len() - 1).unwrap_or("")
                                 let local_name = match use_decl.alias { some(a) => a, none => item_name }
                                 copy_inline_export(append_identity(source_prefix, item_name), "${facade}::${local_name}",
-                                    env, fn_mut_params_map, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
-                                    impl_methods, inherent_methods, struct_field_orders, mut_methods, fn_mut_params)
+                                    env, fn_mut_params_map, program, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                                    impl_methods, inherent_methods, struct_field_orders, extern_values, mut_methods, fn_mut_params)
                             }
                         },
                         none => {}

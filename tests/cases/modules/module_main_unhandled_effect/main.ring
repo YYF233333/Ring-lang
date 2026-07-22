@@ -1,5 +1,5 @@
-use effects::{trigger}
+use effects::{via_helper}
 
 fn main() {
-    trigger()
+    via_helper()
 }

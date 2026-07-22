@@ -144,3 +144,29 @@ stage-0 来源：
 3. 用原始 stage-0（SHA256 见上一个 checkpoint）编当前源码到全新目录；runtime 明确 `-O2` 链接。先验证新增 alias tests与四个 SCC negatives。
 4. 用该 compiler 再编同一源码；必须不再出现 `is_occurs_check` codegen panic，也不应新增 infer_ctx/infer_decl 的虚假 W0001。
 5. 再执行原 checkpoint 的双后端短 gate、必要 suites、最终 LLVM self-compile ×3。全部通过后才允许 merge和 step 8 bookkeeping；完成即停，仍禁止进入 step 9。
+
+---
+
+## B-163 step 8 — 2026-07-22 known-gaps follow-up（仍未 bootstrap/merge）
+
+### 本轮完成
+
+- `copy_inline_export` 对 file-module raw ABI `extern fn` 增加受 AST 约束的 leaf fallback：仅当源文件顶层确有同名 `ExternFn` 时，才从 `module$$_abi_name` 回退到 `abi_name`，并同步传播 facade value scheme、raw ABI `value_origins`、`extern_values` 与 mut-param metadata。这样不会把缺失 canonical binding 误解析到同名普通/import alias。
+- 将 `inline_pub_use_namespaces` 的 `origin` 改为 private inline module，所有公开能力只经 `facade` 暴露；正式执行面新增 `facade::parse_number("42")`（runtime extern fn）以及 `facade::Choice::Number(9)` 的构造和 match。
+- private origin 暴露了真实 enum ctor 缺口：旧实现只复制 `EnumDef`，没有 ctor scheme。现从 canonical `EnumDef` 重建与注册期一致的 constructor scheme，导出 `facade::Choice::Variant -> canonical Enum::Variant` 精确 origin；为兼容现有 named-enum import，只在 leaf 未占用时补 legacy variant binding，避免同名 variant 覆盖。
+- 正式补锁短 alias scheme：`module_scheme_alias_fail_catch` 覆盖同 file module `fail_now -> via_helper` 后 typed enum catch；`module_scheme_alias_return` 锁 unannotated `leaf() -> Int` 被 `Bool` caller 使用必须 E0301。既有 `module_main_unhandled_effect` 改为同模块 `fail_now -> via_helper`，继续要求 main 报 E0403。
+- 静态复核 `rebind_fn_scheme_with_alias`：canonical 与 display alias 的 `DefId` 同一性门能排除 shadow/import，file top-level 与 `outer::fn` inline display 计算和 `insert_file_module_aliases` 一致；未发现需另改的明显语义/语法问题。
+
+### 分钟级旧锚验证（不是当前源码 GREEN）
+
+- 原始 stage-0 对 `module_scheme_alias_fail_catch`：build/link/run PASS，输出匹配 `17`；对 `module_scheme_alias_return`：negative PASS（E0301）。这证明新用例本身语法/运行规约成立，但 stage-0 尚无 canonical alias 机制，不能作为 alias 修复 GREEN。
+- 原始 stage-0 对修改后的 `module_main_unhandled_effect`：negative PASS（E0403）。
+- 原始 stage-0 对 `inline_pub_use_namespaces`：按预期 RED，停在旧 parser 不支持 ModBlock `pub use` 的 E0101；因此 raw extern/enum facade 新路径仍必须由下一代 compiler 验证。
+- `git diff --check` clean。本轮按边界未启动 compiler bootstrap、全量 suite 或后台任务。
+
+### 下一步（边界不变）
+
+1. 用原始 stage-0 编译当前 compiler 源码并以显式 `-O2` runtime 链接第一代新 compiler。
+2. 先跑本节三个 alias gates、四个 SCC negatives 和扩充后的 `inline_pub_use_namespaces`；后者必须在 LLVM/C 双后端输出 `7,8,41,9,42`。
+3. 再由第一代新 compiler 编同一源码，确认无 `is_occurs_check` panic/虚假 W0001；随后执行原 checkpoint 的双后端 gate、必要 suites 与 LLVM self-compile ×3。
+4. 所有 Step 8 hard gates 通过后才 merge/bookkeeping；完成即停，禁止进入 Step 9。

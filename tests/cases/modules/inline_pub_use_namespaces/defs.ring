@@ -1,11 +1,12 @@
 pub extern type ForeignHandle
+pub extern fn parse_int(s: Str) -> Option<Int>
 
 pub struct TopItem { value: Int }
 pub type TopCount = Int
 pub fn top_value() -> Int { 41 }
 pub fn make_top(value: Int) -> TopItem { TopItem { value: value } }
 
-pub mod origin {
+mod origin {
     pub struct Item { value: Int }
 
     pub enum Choice {
@@ -32,11 +33,12 @@ pub mod origin {
 }
 
 pub mod facade {
-    pub use super::origin::{Item, Choice, Read, Signal, Signaling, Count}
+    pub use super::origin::{Item, Choice, Read, Signal, Signaling, Count, make_item}
     pub use super::ForeignHandle as Handle
     pub use super::TopItem as RootItem
     pub use super::TopCount as RootCount
     pub use super::top_value as value
+    pub use super::parse_int as parse_number
 
     pub fn read_item(value: Item) -> Count { value.read() }
     pub fn read_root(value: RootItem) -> RootCount { value.value }
