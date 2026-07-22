@@ -144,7 +144,7 @@ fn report_extern_forward_ambiguity(
     let mut names: List<Str> = []
     for candidate in candidates { names.push(nominal_display_name(candidate.identity)) }
     names.sort()
-    let sink = new_collecting_sink()
+    let mut sink = new_collecting_sink()
     sink.report(make_diag(
         E0708, Severity::SevError,
         "Ambiguous project extern forward '${forward.name}': matching public Ring definitions are ${names.join(", ")}",
