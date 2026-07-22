@@ -11,7 +11,7 @@
 
 use types::{Type, EffectRow}
 use ast::{Span}
-use hir::{HDictDef, TraitBound, HEffectOp}
+use hir::{HDictDef, TraitBound, HEffectOp, module_item_identity}
 
 // Per-function registration info (forward-declare pass).
 // total_params = ring params + trait-bound dict params + evidence params —
@@ -176,7 +176,10 @@ pub struct CCtx {
     pub imports_map: Map<Str, Str>,
     // Names declared by the CURRENT module (fns/structs/enums/consts/...) —
     // c_resolve_fn qualifies these with module_prefix.
-    pub local_names: Set<Str>
+    pub local_names: Set<Str>,
+    // Same exact raw-ExternFn -> canonical Ring implementation plan consumed
+    // by the LLVM project backend.  Absence deliberately preserves real FFI.
+    pub extern_forward_bridges: Map<Str, Str>
 }
 
 pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
@@ -231,7 +234,8 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         test_emit_idx: 0,
         module_prefix: none,
         imports_map: map_new(),
-        local_names: set_new()
+        local_names: set_new(),
+        extern_forward_bridges: map_new()
     }
 }
 
@@ -342,10 +346,16 @@ pub fn c_resolve_fn(ctx: CCtx, name: Str) -> Str {
         none => {
             match ctx.module_prefix {
                 some(prefix) => {
-                    if ctx.local_names.contains(name) {
-                        c_mangle_fn_with_prefix(prefix, name)
-                    } else {
-                        c_mangle_fn(name)
+                    let bridge_key = module_item_identity(prefix, name)
+                    match ctx.extern_forward_bridges.get(bridge_key) {
+                        some(target) => c_mangle_fn(target),
+                        none => {
+                            if ctx.local_names.contains(name) {
+                                c_mangle_fn_with_prefix(prefix, name)
+                            } else {
+                                c_mangle_fn(name)
+                            }
+                        },
                     }
                 },
                 none => c_mangle_fn(name),

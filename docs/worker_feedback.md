@@ -213,3 +213,21 @@ stage-0 来源：
 
 - 当前源码以 `compiler/checker.ring` 为局部 entry：LLVM target PASS，C target 生成并经 clang 编译 PASS；输出仅含既有 W0001 与“无 main”提示。
 - `git diff --check` clean。未运行 bootstrap、全量 suite、自编译或 Step 9；semantic GREEN 仍需下一代 compiler 跑 `inline_pub_use_namespaces` 与 `inline_super_extern_type_boundary`。
+
+---
+
+## B-163 step 8 — 2026-07-22 project extern-forward bridge follow-up
+
+### 根因与修复设计 [通知]
+
+- 第二代 compiler 已将 Ring function 定义 canonicalize，但 `codegen_llvm_stmt.ring` 为破除 `codegen_llvm_expr` 循环依赖而保留的 raw `ExternFn` forward declarations 仍落入 backend unknown-extern fallback，最终引用 `gen_llvm_expr`、`discard`、`is_boxed_def` 等 raw linker symbols。恢复 suffix/leaf 搜索会重新引入跨模块同名误绑定，因此没有采用。
+- `compile_phases` 在所有模块完成 checking 后构造 LLVM/C 共用的 exact bridge plan。候选必须同时满足：canonical public Ring `Fn`、leaf 相同、resolved signature（type params、参数 mutability/type、return、effects）相同，且 provider 模块直接依赖 forward declaration 模块；最后一条刻画“正常反向 use 会成环”的 intentional forward 结构，也隔离无关真实 FFI。
+- 唯一候选生成 `declaring_prefix$$_raw -> provider canonical identity`；零候选明确保留 raw FFI；多个相容候选报 E0708 并停止，不允许 first-wins。bounded generic forward 暂不桥接，因为当前结构还不能精确比较其 trait constraints。
+- LLVM/C resolver 均在显式 imports 之后、current-module prefix/bare fallback 之前消费同一 bridge map。known runtime/LLVM-C ABI 分支不变；不存在 bridge 时仍按真实外部符号链接。
+
+### 正式回归与分钟级证据
+
+- `extern_forward_project_bridge` 同时覆盖：有效反向 forward、同 leaf 但签名不相容 decoy、同签名但无反向依赖的 `parse_int` Ring decoy不得劫持真实 FFI。预期 LLVM/C 输出均为 `42`、`7`。
+- `error_extern_forward_ambiguous` 包含两个签名相容且都直接依赖 forward 模块的 provider，要求 E0708。
+- 旧 `ring_step8.exe` 对正例 LLVM/C 都生成 raw `bridge` 引用；两后端 object 链接均以 `undefined symbol: bridge` 失败，证明正例有效 RED。旧 compiler 对歧义负例错误接受（exit 0），同样为有效 RED。
+- 当前源码的 `codegen_llvm_ctx.ring`、`codegen_c_ctx.ring` LLVM partial compile PASS。`compiler_mod.ring` 旧锚 partial build 在 180 秒边界被终止，只出现既有 parser W0001，无遗留进程；未重跑长探针。完整语义 GREEN 需下一代 compiler build 后由主 agent验证。

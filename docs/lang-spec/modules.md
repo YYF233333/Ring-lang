@@ -321,6 +321,7 @@ ModuleExports {
 | E0704 | 循环依赖 |
 | E0705 | 重复导入 / 相对路径超出模块嵌套深度 |
 | E0706 | `use` 不在文件顶部 |
+| E0708 | 项目内 `extern fn` forward declaration 匹配到多个实现 |
 
 ## 限制
 

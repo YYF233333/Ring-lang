@@ -65,6 +65,7 @@ pub const E0704: Str = "E0704"
 pub const E0705: Str = "E0705"
 pub const E0706: Str = "E0706"
 pub const E0707: Str = "E0707"
+pub const E0708: Str = "E0708"
 
 // E08xx = Ownership errors
 pub const E0801: Str = "E0801"
@@ -129,6 +130,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0705" { return "Relative path out of scope" }
     if code == "E0706" { return "Use declaration must appear before other declarations" }
     if code == "E0707" { return "Ambiguous import" }
+    if code == "E0708" { return "Ambiguous project extern forward" }
     if code == "E0801" { return "Use of moved value" }
     if code == "E0802" { return "Drop-Clone conflict" }
     if code == "E0803" { return "Drop method must not fail" }

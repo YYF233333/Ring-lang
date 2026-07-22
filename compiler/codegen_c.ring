@@ -123,8 +123,13 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
 // names the module whose `main` the C main() wrapper calls.
 // ============================================================
 
-pub fn generate_c_project(modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str, c_path: Str, o_path: Str, emit_lines: Bool) {
+pub fn generate_c_project(
+    modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str,
+    c_path: Str, o_path: Str, emit_lines: Bool,
+    extern_forward_bridges: Map<Str, Str>
+) {
     let mut ctx = new_c_ctx(emit_lines)
+    ctx.extern_forward_bridges = extern_forward_bridges
 
     // Scan pass over ALL modules (generate_llvm_project parity, same union
     // rules).  #134: boxed_vars is deliberately NOT unioned here — def_ids
