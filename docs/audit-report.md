@@ -75,7 +75,7 @@
 
 ## LLVM Codegen
 
-### #255 `impl Drop for <enum>` 的用户 drop 从不被调用（两后端一致的既有 gap）[high] [judgment] [open]
+### #255 `impl Drop for <enum>` 的用户 drop 从不被调用（两后端一致的既有 gap）[critical] [judgment] [open]
 
 > 2026-07-12 B-163 step 7 worker 发现（C 侧按 oracle parity 照搬保持 diff=0，两侧都缺）。
 
@@ -85,7 +85,7 @@ checker 对 enum 的 `impl Drop` 照常收进 `drop_types`（E0801 move 语义�
 
 发现者：step 7 worker（feedback 分诊）
 
-### #256 Result 壳 RC 归零时 payload 不递归释放（两后端同构泄漏）[high] [judgment] [open]
+### #256 Result 壳 RC 归零时 payload 不递归释放（两后端同构泄漏）[critical] [judgment] [open]
 
 > 2026-07-12 B-163 step 7 worker 发现（skip 集逐一对齐时暴露）。既有行为，非 step 7 引入。
 
@@ -105,7 +105,7 @@ LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理
 
 发现者：step 7 worker（feedback 分诊）
 
-### #251 abort handler 的 arm body 从不执行——checker 放行非恒等 body 但 codegen 忽略 [high] [judgment] [open]
+### #251 abort handler 的 arm body 从不执行——checker 放行非恒等 body 但 codegen 忽略 [critical] [judgment] [open]
 
 > 2026-07-12 B-163 step 6 worker 实测确认（双后端一致，共享设计缺陷；C 侧 faithful port 保持 diff=0）。
 
