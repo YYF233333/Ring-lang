@@ -436,3 +436,26 @@ stage-0 来源：
 
 - inline sibling 注册只推导直接 `super::<sibling>` 依赖；不推导 `self::child`、多级 `super::super`、任意祖先路径或函数体依赖。循环 sibling facade 仍稳定回退并由 checker 报错。这是已记录的有界排序契约，不是 Step 9 工作。
 - Step 8 已完成并停止。B-163 状态转为 `queued: phase1-step9`，等待用户后续明确启动。
+
+---
+
+## B-163 step 9 — 2026-07-24 C-stage1 milestone [通知]
+
+### 可追溯构建与结果
+
+- 专用 worktree 基线为 `6486def`。tracked `compiler/dist-llvm/main.o` 大小 5,231,234 bytes，SHA256 为 `61C49BC9BE7185B3FE94064A5A59E038843E77401414DACFA83208EFE4FD8EF9`，与 Step 8 fixpoint 记录完全一致。
+- runtime 以 `clang++ -c ring_runtime.cpp -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS` 显式编译；`ring_runtime.o` 大小 246,196 bytes，SHA256 `904A9EAF0650948784E938137E3DE0AED05C91F432EF018C4229F44C85FD6D5A`。它与冻结对象、LLVM-C、512 MiB stack/manifest 链接成 LLVM anchor：`ring_anchor.exe` 大小 3,333,120 bytes，SHA256 `658B8BF1447841A8C65FDE83BB8539614A3D5A56735F72AEBFAD4B1F7EFB2575`。
+- anchor 执行 `build compiler/main.ring --target=c --out-dir=tests/.tmp_step9_c_stage1/c_codegen_anchor`，exit 0，耗时 330.102s。产出 `main.c` 18,575,084 bytes / SHA256 `07D4D3C55EB4EF11FE49283EE64B7AB2377AEF03356C6F317D0E2B9FC1AA14CD`，以及 clang 已接受的 `main.o` 5,119,019 bytes / SHA256 `56AA964B5B250A6B127746EAFA3E288B33A09CAE3D4348A160805E8BABA1C8A3`。
+- `main.o` 与同一 `-O2` runtime、LLVM-C 按 anchor 的链接参数生成 C-stage1：`ring_c_stage1.exe` 大小 2,853,376 bytes，SHA256 `420FE8FA20A842A85DE5B09E06641CDED2C6A3E6294C301ECF6B3E96C01A7D28`；链接 exit 0，耗时 0.267s。
+- C-stage1 对 `examples/hello.ring` 执行 C build，exit 0，耗时 0.410s；`hello.c` 大小 250,650 bytes，SHA256 `BF4E23C5B776FC36F62C6714FC0D265F19C3D196355091F2733D5817364070F6`。生成 object 经同一 runtime 链接后运行 exit 0，输出精确为 `Hello, Ring-lang!`。因此 C-stage1 已达到“能生成、能链接、能运行小程序”的第一里程碑。
+
+### B-155 初筛与结论边界
+
+- 单次 compiler-scale `main.c` 共 575,012 行，最大行长 609；二进制 NUL/非法控制字节、原始非 ASCII 字节、NUL 转义均为 0。10,007 个 `ring_cstr_*` 声明的最大长度为 389 bytes，长度大于 512 的声明为 0；全部 63 个八进制转义只组成源码已有的 UTF-8 破折号/圈号。文件尾完整结束于生成 `main` 的 `return 0; }`，clang 已成功编译全文件。未发现 B-155 已知的“正常字符串后附随机堆尾字节/异常膨胀长度”明显形态。
+- 以上只能证明这一份 C-stage1 文本没有明显垃圾，**不能证明确定性，也不能关闭 B-155**。本里程碑按边界没有启动 stage2/3；同一最终 compiler/source 的 `.c ×3` 逐字节一致性仍须在后续自举轮完成。
+
+### 日志核对与保留边界
+
+- 最终保留的 runtime 编译、anchor 链接、compiler-scale C build、C-stage1 链接、hello build/link/run 日志均无 `error`、`fatal`、`panic`、`verification failed` 或 `0xC0000005`；除 compiler-scale build 的既有 W0001 外没有诊断，所有最终退出码均为 0。
+- 首次 runtime 编译曾被沙箱拒绝执行本机 clang，获批后以完全相同的 `-O2` 命令重跑成功；首次 hello 链接脚本误按 project 产物名引用 `main.o`，发现实际单文件产物是 `hello.o` 后仅修正命令并成功重链。两者都不是编译器失败。
+- 本里程碑未进入 stage2/3、未执行 Map shim 清理、未进入 Phase 2，也未修改编译器源码。所有二进制和 `tests/.tmp_step9_c_stage1/` 产物保持 untracked，禁止提交。
