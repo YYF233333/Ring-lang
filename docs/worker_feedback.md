@@ -459,3 +459,20 @@ stage-0 来源：
 - 最终保留的 runtime 编译、anchor 链接、compiler-scale C build、C-stage1 链接、hello build/link/run 日志均无 `error`、`fatal`、`panic`、`verification failed` 或 `0xC0000005`；除 compiler-scale build 的既有 W0001 外没有诊断，所有最终退出码均为 0。
 - 首次 runtime 编译曾被沙箱拒绝执行本机 clang，获批后以完全相同的 `-O2` 命令重跑成功；首次 hello 链接脚本误按 project 产物名引用 `main.o`，发现实际单文件产物是 `hello.o` 后仅修正命令并成功重链。两者都不是编译器失败。
 - 本里程碑未进入 stage2/3、未执行 Map shim 清理、未进入 Phase 2，也未修改编译器源码。所有二进制和 `tests/.tmp_step9_c_stage1/` 产物保持 untracked，禁止提交。
+
+---
+
+## B-163 step 9 — 2026-07-24 C-stage2/3 determinism closure [通知]
+
+### 三代自举与文本硬门
+
+- 从上一里程碑的 C-stage1 继续：`ring_c_stage1.exe build compiler/main.ring --target=c` 生成 stage2，exit 0，耗时 425.784s；stage2 `main.c` 为 18,575,084 bytes，SHA256 `07D4D3C55EB4EF11FE49283EE64B7AB2377AEF03356C6F317D0E2B9FC1AA14CD`。其 `main.o` 与同一 `-O2` runtime、LLVM-C 链接为 `ring_c_stage2.exe`，大小 2,853,376 bytes，SHA256 `973AB5C35B880F3FD2F59B473FC6C2DEE2D16B1D540B5A69644F476608FCF59E`。
+- `ring_c_stage2.exe build compiler/main.ring --target=c` 生成 stage3，exit 0，耗时 581.120s；stage3 `main.c` 同为 18,575,084 bytes、同一 SHA256。其 object 链接成 `ring_c_stage3.exe`，大小 2,853,376 bytes，SHA256 `D347FD487FC3F11749A318D89D105609F83D851BE8A65778218BFA1958D45027`。
+- anchor→stage1、C-stage1→stage2、C-stage2→stage3 三份 `main.c` 的长度和 SHA256 完全相同，故三者逐字节一致；没有规范化、删尾或忽略差异。三份 `main.o` 原始 SHA256 分别为 `56AA964B…C8A3`、`D6FE8A66…7536`、`87CAAD21…6689`；`llvm-readobj` 显示其结构字段一致，仅 COFF `TimeDateStamp` 不同，将对象头 offset 4..7 归零后三份 SHA256 均为 `C5AC875BEDDB109264257E79CC34E4C912A07CC5DFAD59CAEF08AD4E4C5D9D39`。Phase 1 的正式确定性判据仍是可审计的 `.c` 文本，不以 native object hash 替代。
+
+### 三代可运行性与 B-155 归因边界
+
+- stage1/stage2/stage3 分别用 C 后端编译 `examples/hello.ring`，build 耗时 0.410s / 0.413s / 0.386s；三份 `hello.c` 均为 250,650 bytes，SHA256 均为 `BF4E23C5B776FC36F62C6714FC0D265F19C3D196355091F2733D5817364070F6`。三份 object 均与同一 `-O2` runtime 成功链接，运行 exit 0，输出精确为 `Hello, Ring-lang!`；stage2/stage3 运行耗时 0.026s / 0.025s。
+- 所有 stage2/3 codegen、链接与 smoke 日志均无 `error`、`fatal`、`panic`、`verification failed` 或 `0xC0000005`，仅 compiler-scale build 的既有 W0001；所有最终退出码均为 0。C object 由 `codegen_c.ring` 固定以 `clang -std=c11 -O2 -c` 生成，runtime 复用上一里程碑明确以 `clang++ -std=c++17 -O2` 构建的同一对象。
+- 在“同一源码、LLVM anchor 与两代 C 自举编译器、连续三次 compiler-scale C emission”这一证据范围内，B-155 已知的随机堆尾字节/字符串长度膨胀没有进入 C 文本；结果支持把该已知表现归因到 LLVM-C marshalling/LLVM 发射信道，而不是 C 源码发射信道。它不单独证明共享 RC 在所有路径都无缺陷，也不关闭此前完整 diff 中的间歇 `0xC0000005`；该全局结论仍需后续既定 gate。
+- 本轮没有清理任何前代产物，没有开始 Map shim 清理、全套测试或 Phase 2；编译器源码无修改，所有 native/tmp 产物继续保持 untracked。
