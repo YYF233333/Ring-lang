@@ -26,6 +26,13 @@ pub fn is_module_item_identity(name: Str) -> Bool {
     name.index_of("$$_").is_some()
 }
 
+// Compiler-synthesised definitions live below one reserved module prefix.
+// Resolver prefixes always begin with an identifier segment, whose first
+// character is [A-Za-z_]; therefore no source module path can begin with `$`.
+fn compiler_intrinsic_identity(namespace: Str, source_name: Str) -> Str {
+    module_item_identity("$compiler_intrinsic$${namespace}", source_name)
+}
+
 // Synthetic Map indexing must bypass every user-spellable binding while the
 // raw helper remains available as an ordinary prelude API.  Checker and infer
 // share both spellings here so neither phase can drift from the other.
@@ -34,7 +41,7 @@ pub fn map_index_helper_source_name() -> Str {
 }
 
 pub fn map_index_helper_identity() -> Str {
-    module_item_identity("prelude$map", map_index_helper_source_name())
+    compiler_intrinsic_identity("prelude$map", map_index_helper_source_name())
 }
 
 // The raw slot bridge spellings remain callable prelude APIs, so their
@@ -54,7 +61,7 @@ pub fn slot_write_source_name() -> Str {
 }
 
 fn slot_bridge_identity(source_name: Str) -> Str {
-    module_item_identity("prelude$slot", source_name)
+    compiler_intrinsic_identity("prelude$slot", source_name)
 }
 
 pub fn slot_read_identity() -> Str {
