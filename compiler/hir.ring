@@ -26,11 +26,13 @@ pub fn is_module_item_identity(name: Str) -> Bool {
     name.index_of("$$_").is_some()
 }
 
-// Compiler-synthesised definitions live below one reserved module prefix.
-// Resolver prefixes always begin with an identifier segment, whose first
-// character is [A-Za-z_]; therefore no source module path can begin with `$`.
+// Compiler-synthesised definitions live below an unspellable module prefix.
+// Resolver path segments come only from a filesystem basename after `/` and
+// `\` have been split away, or from a legal use/inline-module identifier.
+// Therefore no segment can contain `/`; module_prefix joins segments only with
+// `$`, so no source declaration identity can begin with this sentinel.
 fn compiler_intrinsic_identity(namespace: Str, source_name: Str) -> Str {
-    module_item_identity("$compiler_intrinsic$${namespace}", source_name)
+    module_item_identity("/$compiler_intrinsic$${namespace}", source_name)
 }
 
 // Synthetic Map indexing must bypass every user-spellable binding while the
