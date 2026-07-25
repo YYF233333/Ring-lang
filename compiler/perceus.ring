@@ -16,7 +16,8 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
     hexpr_type, hexpr_span, hexpr_effects,
     is_rc_excluded_type, type_contains_extern_handle,
-    is_borrow_returning_call, is_user_drop_type}
+    is_borrow_returning_call, is_user_drop_type,
+    slot_read_identity, slot_take_identity, slot_write_identity}
 use types::{Type}
 
 // ============================================================
@@ -458,7 +459,7 @@ pub fn is_owned_slot_result_callee(callee: HExpr) -> Bool {
     match callee {
         HExpr::Ident { name, resolved_name, .. } => {
             let actual = match resolved_name { some(rn) => rn, none => name }
-            actual == "ring_slot_read" || actual == "ring_slot_take"
+            actual == slot_read_identity() || actual == slot_take_identity()
         },
         _ => false,
     }
@@ -2523,7 +2524,7 @@ pub fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
             // List/Map implementations.  The buffer takes arg 2 by ownership;
             // method parameters outside this call remain borrows.
             let actual = match resolved_name { some(rn) => rn, none => name }
-            if actual == "ring_slot_write" && arg_count == 3 { [2] } else { [] }
+            if actual == slot_write_identity() && arg_count == 3 { [2] } else { [] }
         },
         HExpr::FieldAccess { receiver, field, .. } => {
             let recv_ty = hexpr_type(receiver)

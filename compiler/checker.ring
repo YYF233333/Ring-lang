@@ -3,7 +3,9 @@ use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
 use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler,
     compare_by_first, is_user_drop_type, hexpr_type,
-    map_index_helper_source_name, map_index_helper_identity}
+    map_index_helper_source_name, map_index_helper_identity,
+    slot_read_source_name, slot_take_source_name, slot_write_source_name,
+    slot_read_identity, slot_take_identity, slot_write_identity}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
@@ -99,6 +101,14 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                 },
                 none => {}
             }
+            // list.ring and map.ring both declare these extern bridges.  Phase
+            // 1 has now finished, so each lookup points at the final prelude
+            // binding/DefId (the map.ring declaration with today's STD_FILES
+            // order).  Attach the ABI ownership identity to that exact DefId;
+            // later user shadowing receives a different DefId and no origin.
+            record_value_origin(ctx, slot_read_source_name(), slot_read_identity())
+            record_value_origin(ctx, slot_take_source_name(), slot_take_identity())
+            record_value_origin(ctx, slot_write_source_name(), slot_write_identity())
             // Phase 2: compile struct/enum/trait declarations, non-extern impl methods, and top-level functions
             for decl in all_prelude_decls {
                 match decl {

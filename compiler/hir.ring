@@ -37,6 +37,47 @@ pub fn map_index_helper_identity() -> Str {
     module_item_identity("prelude$map", map_index_helper_source_name())
 }
 
+// The raw slot bridge spellings remain callable prelude APIs, so their
+// ownership contracts must not attach to those user-spellable names.  The
+// checker records these unspellable identities on the exact prelude DefIds;
+// RC and both native backends consume only the identities below.
+pub fn slot_read_source_name() -> Str {
+    "ring_slot_read"
+}
+
+pub fn slot_take_source_name() -> Str {
+    "ring_slot_take"
+}
+
+pub fn slot_write_source_name() -> Str {
+    "ring_slot_write"
+}
+
+fn slot_bridge_identity(source_name: Str) -> Str {
+    module_item_identity("prelude$slot", source_name)
+}
+
+pub fn slot_read_identity() -> Str {
+    slot_bridge_identity(slot_read_source_name())
+}
+
+pub fn slot_take_identity() -> Str {
+    slot_bridge_identity(slot_take_source_name())
+}
+
+pub fn slot_write_identity() -> Str {
+    slot_bridge_identity(slot_write_source_name())
+}
+
+// Convert only a proven prelude slot identity back to its C ABI symbol.
+// Ordinary Ring bindings with the same source spelling intentionally miss.
+pub fn slot_bridge_runtime_name(identity: Str) -> Str? {
+    if identity == slot_read_identity() { return some(slot_read_source_name()) }
+    if identity == slot_take_identity() { return some(slot_take_source_name()) }
+    if identity == slot_write_identity() { return some(slot_write_source_name()) }
+    none
+}
+
 pub struct HParam {
     pub name: Str,
     pub ty: Type,

@@ -30,7 +30,8 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
     HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
     TraitDispatch, DictDispatchInfo, effect_op_slot,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
-    trait_dict_name, trait_bound_param_name, evidence_param_name, is_extern_handle_type}
+    trait_dict_name, trait_bound_param_name, evidence_param_name, is_extern_handle_type,
+    slot_bridge_runtime_name}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_param, c_mangle_fn,
     c_resolve_fn,
@@ -2117,6 +2118,12 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
 
 // Ring extern fn name → C runtime name (verbatim port of extern_fn_to_runtime).
 fn extern_fn_to_runtime_c(name: Str) -> Str? {
+    // Slot bridge calls arrive here only under their unspellable prelude
+    // identity.  Map that proven identity back to the raw C ABI symbol.
+    match slot_bridge_runtime_name(name) {
+        some(runtime_name) => { return some(runtime_name) },
+        none => {},
+    }
     if name == "print" { return some("ring_print") }
     if name == "panic" { return some("ring_panic") }
     if name == "eprintln" { return some("ring_eprintln") }

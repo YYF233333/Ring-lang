@@ -9,7 +9,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     BUILTIN_RANGE,
     effect_op_slot,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value,
-    is_extern_handle_type}
+    is_extern_handle_type, slot_bridge_runtime_name}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall, HandleCleanup,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -2429,6 +2429,12 @@ fn is_void_runtime_fn(name: Str) -> Bool {
 
 // Map Ring extern fn names to C runtime names
 fn extern_fn_to_runtime(name: Str) -> Str? {
+    // Slot bridge calls arrive here only under their unspellable prelude
+    // identity.  Map that proven identity back to the raw C ABI symbol.
+    match slot_bridge_runtime_name(name) {
+        some(runtime_name) => { return some(runtime_name) },
+        none => {},
+    }
     if name == "print" { return some("ring_print") }
     if name == "panic" { return some("ring_panic") }
     if name == "eprintln" { return some("ring_eprintln") }
