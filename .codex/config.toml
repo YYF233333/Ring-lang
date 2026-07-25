@@ -1,0 +1,31 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+# GPT-5.6 Sol is required for this repository. ChatGPT-authenticated Codex
+# currently caps it at 272k even though the API model supports a 1.05M window.
+model = "gpt-5.6-sol"
+model_reasoning_effort = "max"
+model_context_window = 272000
+model_auto_compact_token_limit = 244800
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+default_subagent_model = "gpt-5.6-sol"
+default_subagent_reasoning_effort = "max"
+interrupt_message = true
+
+[agents.implementer]
+description = "Implement one scoped Ring-lang backlog or audit item in a root-assigned git worktree; keep the same identity through review and fixes."
+config_file = "agents/implementer.toml"
+
+[agents.reviewer]
+description = "Read-only review of a Ring-lang implementation diff against its spec, invariants, and test evidence."
+config_file = "agents/reviewer.toml"
+
+[agents.finder]
+description = "Read-only Ring-lang audit finder assigned one or more explicit lenses on a fixed main snapshot."
+config_file = "agents/finder.toml"
+
+[agents.skeptic]
+description = "Read-only adversarial verifier that independently reproduces or refutes a proposed Ring-lang audit finding."
+config_file = "agents/skeptic.toml"

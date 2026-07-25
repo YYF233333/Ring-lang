@@ -1,19 +1,24 @@
 {
+  "variables": {
+    "llvm_include_dir%": "<!(node resolve_llvm.js --include-dir)",
+    "llvm_lib_dir%": "<!(node resolve_llvm.js --lib-dir)",
+    "llvm_library%": "<!(node resolve_llvm.js --library)"
+  },
   "targets": [
     {
       "target_name": "llvm_addon",
       "sources": ["llvm_addon.cpp"],
       "include_dirs": [
-        "C:/software/Scoop/apps/llvm/current/include"
+        "<(llvm_include_dir)"
+      ],
+      "library_dirs": [
+        "<(llvm_lib_dir)"
+      ],
+      "libraries": [
+        "<(llvm_library)"
       ],
       "conditions": [
         ["OS=='win'", {
-          "library_dirs": [
-            "C:/software/Scoop/apps/llvm/current/lib"
-          ],
-          "libraries": [
-            "LLVM-C.lib"
-          ],
           "msvs_settings": {
             "VCCLCompilerTool": {
               "AdditionalOptions": ["/std:c++17"],

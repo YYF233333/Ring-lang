@@ -7,6 +7,7 @@ out/
 Thumbs.db
 
 .claude/worktrees/
+/.worktrees/
 .claude/settings.local.json
 .deepseek/
 
@@ -16,6 +17,7 @@ tests/cases/**/*.js
 compiler/llvm-addon/node_modules/
 compiler/llvm-addon/build/
 compiler/llvm-addon/*.node
+/compiler/llvm_addon.node
 
 # LLVM native backend build artifacts (rebuilt from source; main.o is committed)
 /ring_runtime.o
@@ -32,4 +34,6 @@ examples/*.o
 /ring*.exe
 /ring*.map
 /ring*.o
+/hello.exe
+/test_output*.txt
 /tmp*/
