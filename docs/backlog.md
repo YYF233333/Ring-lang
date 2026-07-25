@@ -914,6 +914,49 @@ source-map 支持 + 断点调试。
 
 ## 基础设施
 
+### B-166 Codex context lease 工作流适配 [infra] [P0] [M] [judgment] [queued]
+
+> 2026-07-25 立项（Discussion，用户确认先按 context lease 方案试运行）。当前 Codex 配置的 context window 为 272K、auto-compact 阈值为 244.8K，而既有编排按约 1M 预算形成：spawn 默认可能继承完整父历史，Worker 会滚动清队列，同一 implementer 跨多轮 review / follow-up 保持长寿命，Audit 还会复用 finder 做 skeptic。连续注意力任务一旦跨自动压缩边界，压缩摘要无法可靠保存实现 invariant、反例和中间排除链。
+
+**设计真值**：`docs/workflow.md`「上下文预算与连续注意力」及其 Worker / Audit 规则（2026-07-25）。本项只落地 Codex adapter 和自动校验，不重新讨论该策略，也不修改当前 `[doing]` 的 B-163 spec。
+
+**目标**：让每个 continuity-sensitive work package 在一个 fresh、未压缩的 context lease 内闭环；root 只消费 self-contained task packet 和短报告。自动压缩降级为事故恢复，不再充当正常 phase boundary。
+
+**涉及修改**：
+
+1. `.agents/skills/worker/SKILL.md`
+   - 一次调用只执行一个有界 integration batch，不再滚动到授权队列耗尽；
+   - L / XL item 必须先经 planner 切成按 invariant 划分的 work-package DAG；
+   - 所有 Codex spawn 显式使用 fresh context（当前 runtime 对应 `fork_turns="none"`），只注入 task packet；
+   - 同一 implementer 仅在一个 lease 内稳定，最多承接一轮窄修；第二轮实质性返修、scope 扩张或 compaction 后生成新 agent；
+   - agent 最终报告约束在 2K token 内，长日志落 worktree artifact。
+2. `.agents/skills/full-audit/SKILL.md`
+   - finder 单元改为「一个 lens × 一个有界代码分区」；
+   - candidate dossier 独立传递；skeptic 必须 fresh spawn，禁止复用原 finder 或继承整轮历史。
+3. `.agents/skills/discussion/SKILL.md`
+   - 默认读取看板 heading / compact index、目标 item 和未解决 feedback，不把两个完整看板作为每轮固定 context tax；
+   - current checkpoint 替换旧 checkpoint，完成即清理。
+4. `.codex/config.toml`、`.codex/agents/*.toml`
+   - 增加只读 planner role，并在角色 prompt 中写入 lease、scope、handoff 和报告上限；
+   - 复核 auto-compact / rollout 相关配置，只能按试运行数据保守调整；不得把 rollout budget 当作可用 context；
+   - 第一阶段不直接安装 hard `PreCompact` hook；先用一个真实 wave 验证 lease 边界。若仍频繁触碰 compaction，再由 Discussion 决定是否另立 hook 项。
+5. `.agents/scripts/validate_workflow.py` 及必要的小型 helper
+   - 校验 planner role / config 路径、L / XL planner gate、fresh spawn、单批次停止、fresh skeptic 和报告上限；
+   - 检查 `worker_feedback.md` 不含已完成 item 的历史 checkpoint；如静态判断不可靠，至少提供显式 allowlist / current-item 标记，禁止 silent skip；
+   - 可生成或校验最小 task-packet / current-state-handoff schema，但不得引入新的第三块事实看板。
+6. 清理 Codex adapter 与 `docs/workflow.md` 的其他漂移；Claude adapter 可保留 provider-specific 机制，但核心状态机不得与 context lease 冲突。
+
+**验收标准（Phase A，首次试运行）**：
+
+- 在 Worker / Audit / Discussion 三个 Codex skill 中，所有 subagent 创建路径均可证明为 fresh context；不存在依赖默认 full-history fork 的路径。
+- planner role 可用，L / XL raw dispatch 会 fail closed；task packet 明确 base、交付物、invariant、读写边界、验收门和停止条件。
+- Worker 一次调用在一个有界 batch 后停止；implementer 仅允许一轮窄修，超界会产生带更新 packet 的 fresh agent。
+- Audit 不再把 finder 复用为 skeptic；finder 和 skeptic 都收到有界 dossier。
+- agent 报告有 2K token 上限，长日志落盘；`worker_feedback.md` 只保留未解决 durable state 和每项唯一 current checkpoint。
+- `python .agents/scripts/validate_workflow.py` 通过；对临时测试副本故意移除 fresh-spawn 或 planner-gate 条款时，validator 必须失败，证明不是只检查文件存在。
+- 在下一次真实 Worker wave 记录一次简短 pilot：每个 lease 的读集、是否触发 compaction、是否发生 handoff、packet 是否足够恢复、最终报告大小。pilot 完成即停止，由 Discussion 决定数值护栏是否调整以及是否需要 Phase B `PreCompact` / `SubagentStop` hook。
+- 本项只改工作流基础设施，不触碰编译器语义；无需运行编译器全量门，但 TOML parse、workflow validator 及其负向自测必须通过。
+
 ## 测试基础设施
 
 ### B-153 verify_rc mutation testing harness [infra] [P3] [M] [judgment] [queued]
