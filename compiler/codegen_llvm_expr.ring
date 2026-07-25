@@ -1489,6 +1489,8 @@ pub fn emit_memoised_const_body(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled:
 
 // B-104 D4: synthesise (once) the memoised getter `ring_dict_init_<name>` for a
 // static dict with no impl-generated init function:
+//   * a forward-declared impl dict builder (registered before body emission):
+//     call the builder, independent of declaration order;
 //   * a dict_lower wrapped INSTANCE (static_dict_defs entry with inner != []):
 //     built via build_wrapped_dict with the DICT_STATIC typeid;
 //   * a builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq fallback):
@@ -1532,21 +1534,33 @@ fn get_or_create_static_dict_getter(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef
     discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
 
     LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
-    let inst_def = match ctx.static_dict_defs.get(name) {
-        some(def) => if def.inner.len() > 0 { some(def) } else { none },
-        none => none,
-    }
-    let value = match inst_def {
-        some(def) => {
-            let mut inner_refs: List<DictRef> = []
-            for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
-            build_wrapped_dict_typed(ctx, def.base_dict, def.trait_name, inner_refs, RING_TYPEID_DICT_STATIC)
+    let build_fn_name = "ring_dict_build_${name}"
+    let value = match ctx.functions.get(build_fn_name) {
+        some(build_fn) => {
+            let build_fn_ty = match ctx.fn_types.get(build_fn_name) {
+                some(t) => t,
+                none => LLVMFunctionType(ctx.ptr_type, [], 0),
+            }
+            LLVMBuildCall2(ctx.builder, build_fn_ty, build_fn, [], fresh_name(ctx, "db"))
         },
         none => {
-            let name_str = gen_str_lit(ctx, name)
-            let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
-            let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
-            LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
+            let inst_def = match ctx.static_dict_defs.get(name) {
+                some(def) => if def.inner.len() > 0 { some(def) } else { none },
+                none => none,
+            }
+            match inst_def {
+                some(def) => {
+                    let mut inner_refs: List<DictRef> = []
+                    for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
+                    build_wrapped_dict_typed(ctx, def.base_dict, def.trait_name, inner_refs, RING_TYPEID_DICT_STATIC)
+                },
+                none => {
+                    let name_str = gen_str_lit(ctx, name)
+                    let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
+                    let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
+                    LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
+                },
+            }
         },
     }
     discard(LLVMBuildStore(ctx.builder, value, g))

@@ -332,7 +332,7 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
             HDecl::Fn { name, params, effects, trait_bounds, body, .. } => {
                 forward_declare_fn(ctx, name, params, effects, trait_bounds, prefix, some(body))
             },
-            HDecl::Impl { target_type, methods, .. } => {
+            HDecl::Impl { target_type, trait_name, methods, .. } => {
                 for method in methods {
                     match method {
                         HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, body: mb, .. } => {
@@ -343,6 +343,27 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                         },
                         _ => {},
                     }
+                }
+                // Pre-declare the impl trait dict's build function so a lazy
+                // getter emitted by an earlier use site can call the real
+                // builder regardless of declaration order.  The C backend
+                // enforces the same invariant through CCtx.dict_build_fns.
+                match trait_name {
+                    some(tn) => {
+                        let dict_name = trait_dict_name(target_type, tn)
+                        let has_methods = match ctx.trait_method_order.get(tn) {
+                            some(order) => order.len() > 0,
+                            none => methods.len() > 0,
+                        }
+                        let build_fn_name = "ring_dict_build_${dict_name}"
+                        if has_methods && ctx.functions.get(build_fn_name).is_none() {
+                            let build_fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+                            let build_fn = LLVMAddFunction(ctx.module, build_fn_name, build_fn_ty)
+                            ctx.functions.insert(build_fn_name, build_fn)
+                            ctx.fn_types.insert(build_fn_name, build_fn_ty)
+                        }
+                    },
+                    none => {},
                 }
             },
             HDecl::Struct { name, fields, .. } => {
