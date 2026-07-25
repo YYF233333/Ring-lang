@@ -6,7 +6,8 @@
 // RC semantics (same bridge pattern as List<T>):
 //   - ring_slot_read = peek + dup (map keeps ref, caller gets ref)
 //   - ring_slot_take = move out (slot set to null, caller owns)
-//   - ring_slot_write = store (caller's ref transferred to slot)
+//   - ring_slot_write = direct store (arg 2 transfers ownership to the slot)
+//   - ring_slot_replace = borrowed input (dup before store, then drop old)
 //   - ring_slot_drop = take + ring_drop (release element)
 
 pub struct Map<K, V> {
@@ -23,6 +24,7 @@ extern fn ring_slot_dealloc<T>(buf: Ptr<T>, count: Int) -> Unit
 extern fn ring_slot_read<T>(buf: Ptr<T>, idx: Int) -> T
 extern fn ring_slot_take<T>(buf: Ptr<T>, idx: Int) -> T
 extern fn ring_slot_write<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
+extern fn ring_slot_replace<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
 extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit
 extern fn ring_buf_alloc(cap: Int) -> Ptr<Int>
 extern fn ring_buf_dealloc(p: Ptr<Int>) -> Unit
@@ -295,9 +297,10 @@ impl<K: Hash + Eq, V> Map {
         // Probe and insert
         let idx = map_probe_index(self, key)
         if ring_buf_get_byte(self.meta, idx) == 1 {
-            // Key exists: replace value, drop old
-            ring_slot_drop(self.values, idx)
-            ring_slot_write(self.values, idx, value)
+            // Key exists: preserve the first inserted key.  The value input is
+            // borrowed, so replace duplicates it before dropping the old slot
+            // (including the self-assignment case).
+            ring_slot_replace(self.values, idx, value)
         } else {
             // New entry
             ring_buf_set_byte(self.meta, idx, 1)

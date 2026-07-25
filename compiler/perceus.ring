@@ -286,6 +286,13 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     if type_contains_extern_handle(ty, externs) {
         return false
     }
+    // The slot bridge contract is stronger than an unresolved generic result:
+    // read duplicates and take moves out, so both always produce an owned
+    // reference.  Impl-level K/V variables are not always name-labelled by
+    // zonk, therefore this exact leaf must override the unnamed-TypeVar guard.
+    if is_owned_slot_result_call(expr) {
+        return true
+    }
     // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #149): an expression
     // whose HIR type is an unresolved TypeVar must never be materialised.  The
     // type-level Unit exclusion (rule ②) cannot see through it: an UNANNOTATED
@@ -350,10 +357,11 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
         // the blanket IndexExpr borrow classification: never materialised (leak
         // in every operand position — the lexer's per-char `src[i]` flood, a
         // dominant tid=3 STR share) and Clone-wrapped on escape (the dup
-        // escaped, the original 1-char string leaked).  List/Map indexing
-        // (ring_list_get / ring_map_get / ring_map_int_get) returns the element
-        // pointer WITHOUT a dup — a true borrow — and keeps the conservative
-        // path (generic/TypeVar receivers too).
+        // escaped, the original 1-char string leaked).  List indexing
+        // (ring_list_get) returns the element pointer WITHOUT a dup — a true
+        // borrow — and keeps the conservative path (generic/TypeVar receivers
+        // too).  Map indexing is lowered during inference to the owned
+        // map_get_panic Ring call, whose ring_slot_read duplicates the value.
         HExpr::IndexExpr { receiver, .. } => is_str_index(receiver),
         // B-104 D7: a value-position IfExpr whose EVERY non-diverging branch
         // tail is itself materialisable (fresh-owned) — materialise the whole
@@ -416,19 +424,42 @@ pub fn is_str_index(receiver: HExpr) -> Bool {
     }
 }
 
-// B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP type (audit #149): an unresolved TypeVar
+// B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP type (audit #149): an UNNAMED TypeVar
 // (or an ErrorType from checker recovery) gives no ownership information — the
 // value could be the Unit ABI accident (a live receiver pointer moved verbatim
-// because Unit is rc-excluded), which a drop would double-free.  Such values are
-// excluded from materialisation and droppability (leak direction); Clone on
-// escape stays allowed (a dup only pins).  Monomorphic call sites are zonked to
-// concrete types and unaffected; the leak cost is confined to generic-context
-// temporaries and the #149 over-generalised unannotated-fn calls.
+// because Unit is rc-excluded), which a drop would double-free.  A NAMED TypeVar
+// is different: zonk labels declared generic parameters (T/K/V/U), whose value
+// ownership follows the normal Ring call/read contract.  Keeping those values
+// droppable is required for generic slot reads/takes and callback results to
+// balance their owned references.  Only unnamed inference holes stay in the
+// conservative leak direction; Clone on escape remains allowed.
 // (pub: shared with verify_rc.ring's unknown-ownership guard.)
 pub fn is_unresolved_var_type(ty: Type) -> Bool {
     match ty {
-        Type::TypeVar { .. } => true,
+        Type::TypeVar { name, .. } => name.is_none(),
         Type::ErrorType => true,
+        _ => false,
+    }
+}
+
+// Exact low-level slot leaves whose result is FRESH-OWNED by ABI contract.
+// Keep this narrow: all other unresolved call results retain audit #149's
+// conservative posture.  Shared with verify_rc so production and accounting
+// use the same leaf table.
+pub fn is_owned_slot_result_call(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Call { callee, args, .. } =>
+            args.len() == 2 && is_owned_slot_result_callee(callee),
+        _ => false,
+    }
+}
+
+pub fn is_owned_slot_result_callee(callee: HExpr) -> Bool {
+    match callee {
+        HExpr::Ident { name, resolved_name, .. } => {
+            let actual = match resolved_name { some(rn) => rn, none => name }
+            actual == "ring_slot_read" || actual == "ring_slot_take"
+        },
         _ => false,
     }
 }
@@ -1232,7 +1263,6 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //                             (HIR: IndexExpr / tuple FieldAccess — covered by
 //                              is_owner_bearing's IndexExpr/FieldAccess arms, NOT
 //                              by a field name here).
-//   ring_map_get / ring_map_int_get   m[k]     → value ptr, no dup (HIR: IndexExpr).
 //   RECEIVER-RETURNING MUTATORS (B-103 Wave A → B-104 D1 rule ② re-mechanised):
 //   each returns its RECEIVER (arg 0) verbatim — `return list;` / `return map;`
 //   / `return set;` / `return sb;` — no dup.  Ring-level type is Unit, but at
@@ -1260,13 +1290,13 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   Unit-typed values instead of the receiver-return ABI accident.
 //     .push    ring_list_push                  → `return list;`
 //     .set     ring_list_set                   → `return list;`
-//     .insert  ring_map_set / ring_map_int_set → `return map;`
+//     .insert  Map.insert → Unit (the pure Ring method mutates the receiver)
 //              (Set.insert → ring_set_add / ring_set_int_add → `return set;`)
-//     .remove  ring_map_delete / ring_map_int_delete / ring_set_delete /
-//              ring_set_int_delete             → `return map/set;`
+//     .remove  Map.remove → Unit; ring_set_delete / ring_set_int_delete
+//              return the set receiver
 //     .add     ring_set_add / ring_set_int_add / ring_sb_add → `return set/sb;`
-//     .clear   ring_list_clear / ring_map_clear / ring_map_int_clear /
-//              ring_set_clear / ring_set_int_clear → `return receiver;`
+//     .clear   ring_list_clear / Map.clear / ring_set_clear /
+//              ring_set_int_clear → Unit or receiver per the type-level rule
 //     .extend  ring_list_extend                → `return list;` (the OTHER list's
 //              elements are dup'd inside the runtime — B-102 layer 5)
 //     .line / .add_int  ring_sb_line / ring_sb_add_int → `return sb;`
@@ -1287,23 +1317,22 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //     ring_json_stringify / ring_cwd / ring_read_file / ring_path_join / resolve
 //     / dirname / basename / extname.
 //   Option builders (fresh 2-slot block; payload dup'd or ownership-transferred):
-//     ring_list_get_opt / ring_map_get_opt / ring_map_int_get_opt (dup payload),
+//     ring_list_get_opt and pure Ring Map.get (dup payload),
 //     ring_list_first / last / find (dup payload — B-103), ring_list_find_index /
 //     ring_str_char_at / char_code_at / index_of / last_index_of / ring_parse_int
 //     / parse_float (fresh boxed payload), ring_list_pop / shift (payload
 //     OWNERSHIP TRANSFERRED out of the vector — vec erases its ref, no dup
 //     needed), ring_Option_map (wraps the closure's owned result).
-//   Container builders: ring_list_new / map_new / map_int_new / set_new /
-//     set_int_new / sb_new / ring_args / ring_map_keys (fresh strs) /
-//     map_int_keys (fresh boxes) / ring_map_values / entries / map_int_values /
-//     entries (dup values — B-098/B-103) / ring_set_to_list / set_int_to_list
+//   Container builders: ring_list_new / pure Ring map_new / set_new /
+//     set_int_new / sb_new / ring_args / pure Ring Map keys/values/entries
+//     (ring_slot_read duplicates elements) / ring_set_to_list / set_int_to_list
 //     (fresh strs/boxes) / ring_set_from_list / set_int_from_list (inline-value
 //     copies) / ring_set_union / intersect / difference (+ _int variants; inline
 //     values, no RC sharing) / ring_set_clone / set_int_clone (inline values) /
-//     ring_list_clone / map_clone / map_int_clone (dup elements/values — B-103 /
+//     ring_list_clone / pure Ring map_clone (dup elements/values — B-103 /
 //     #135) / ring_list_map (owns closure results) / ring_list_filter / concat /
-//     slice / reverse / sort / sort_default / flat_map / ring_map_from /
-//     map_int_from (dup shared elements/values — B-103 Wave A: these copied
+//     slice / reverse / sort / sort_default / flat_map / pure Ring map_from
+//     (dup shared elements/values — B-103 Wave A: these copied
 //     source-owned pointers into the fresh container WITHOUT a dup, so dropping
 //     both source and result deep-dropped the same elements → latent double-free,
 //     masked only while the leak régime never dropped the source) / ring_sb_to_str.
@@ -1326,13 +1355,12 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   an "unbox call" — unboxing is emitted inside arith/compare/cond lowering),
 //   ring_str_len / eq / lt / contains / starts_with / ends_with / is_empty,
 //   ring_list_len / contains / index_of / is_empty / any / all,
-//   ring_map_has / len, ring_map_int_has / len, ring_set_has / len,
-//   ring_set_int_has / len, ring_sb_len, ring_Option_is_some / is_none.
+//   ring_set_has / len, ring_set_int_has / len, ring_sb_len,
+//   ring_Option_is_some / is_none.  Map scalar results are pure Ring calls.
 //
 // ── NULL / NEVER returners (RC-inert: ring_drop(null) is a no-op) ─────────────
 //   null:  ring_print / eprintln / write_file / delete_file / assert /
-//          ring_list_for_each / map_for_each / map_int_for_each / set_for_each /
-//          set_int_for_each.
+//          ring_list_for_each / set_for_each / set_int_for_each.
 //   never: ring_panic / exit / match_fail / ring_raise / __ring_raise_fail
 //          (longjmp/exit).
 //   void:  ring_dup / drop / register_drop / register_never_drop / runtime_init /
@@ -1741,6 +1769,12 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     if type_contains_extern_handle(ty, externs) {
         return false
     }
+    // Same exact owned-slot override as anf_should_materialize.  In pure
+    // List/Map impl bodies the K/V result may still be an unnamed TypeVar, but
+    // the bridge has already dup'd/moved an independent reference.
+    if is_owned_slot_result_call(init) {
+        return true
+    }
     // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #149, mirrors
     // anf_should_materialize): a binding whose type is an unresolved TypeVar is
     // never scope-end-dropped.  The #149 checker hole over-generalises an
@@ -1755,10 +1789,10 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     match init {
         // Owner-bearing reads → rc_escape wraps in a fresh Clone.
         //
-        // B-101 element-read-projection UAF audit: a `let x = list[i]` / `let x =
-        // m[k]` / `let x = obj.field` binds an element/field READ.  The runtime read
-        // (ring_list_get / ring_map_get / struct-GEP) returns a BORROW (no dup —
-        // B-098).  Naively scope-end-dropping x would free the container's element
+        // B-101 element-read-projection UAF audit: a `let x = list[i]` /
+        // `let x = obj.field` binds an element/field READ.  The runtime read
+        // (ring_list_get / struct-GEP) returns a BORROW (no dup — B-098).
+        // Naively scope-end-dropping x would free the container's element
         // → UAF.  But these are owner-bearing, so rc_stmt's rc_escape wraps the init
         // in HExpr::Clone (gen_clone → ring_dup): the binding then owns an
         // INDEPENDENT dup'd reference, NOT the container's element.  The scope-end
@@ -1801,7 +1835,8 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         //       what finally RECLAIMS the apply_subst transients (G-a memory gate).
         // PRE-CONDITION: the borrow-leaf classification in is_borrow_returning_call
         // (+ the owned-container-constructor dups in ring_runtime.cpp: list_first/
-        // last, map_int_values/entries — B-103) must be COMPLETE, else a missed
+        // last — B-103, and pure Ring Map ring_slot_read paths) must be COMPLETE,
+        // else a missed
         // borrow leaf would be scope-end-dropped → UAF.  ASan (real_program ×3 +
         // self-compile) is the completeness safety net: an over-free pinpoints the
         // missed leaf, which is then added to is_borrow_returning_call.
@@ -2475,41 +2510,31 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
 // Container-sink argument detection
 // ============================================================
 //
-// A method call whose VALUE argument escapes into the receiver container (the
-// container takes co-ownership): list.push / .insert / .add / .set / map.set /
-// .insert / set.add / .insert, string-builder .append etc.  Returns the arg
-// indices (0-based, receiver excluded — args here are the non-self arguments)
-// that are sink (owned) positions.  Anything not listed is a borrow.
+// Returns the arg indices (0-based) whose call boundary takes ownership.
+// Pure Ring List/Map methods borrow their parameters; Set/StringBuilder copy
+// their inputs.  The remaining sinks are exact raw-storage boundaries:
+// ring_slot_write, Cell.set, and Ptr.write.  Anything else is a borrow.
 // (pub: shared with verify_rc.ring — the verifier must agree on which call args
 // are ownership sinks, or it would mis-report escapes/leaks.)
 pub fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
     match callee {
+        HExpr::Ident { name, resolved_name, .. } => {
+            // Slot storage is the single ownership boundary for the pure Ring
+            // List/Map implementations.  The buffer takes arg 2 by ownership;
+            // method parameters outside this call remain borrows.
+            let actual = match resolved_name { some(rn) => rn, none => name }
+            if actual == "ring_slot_write" && arg_count == 3 { [2] } else { [] }
+        },
         HExpr::FieldAccess { receiver, field, .. } => {
-            // #175: Set.insert/add and StringBuilder.add/append copy content
-            // rather than storing the RC pointer — their args are NOT ownership
-            // sinks.  Marking them as sinks causes the Clone-elevated RC to
-            // never be balanced → unbounded RC leak.
             let recv_ty = hexpr_type(receiver)
-            let is_copy_receiver = match recv_ty {
-                Type::StructType { name, .. } =>
-                    name == "Set" || name == "StringBuilder",
-                _ => false,
-            }
-            if is_copy_receiver {
-                []
-            } else if field == "push" || field == "add" || field == "append" || field == "push_back" {
-                // single value argument at index 0
-                if arg_count >= 1 { [0] } else { [] }
-            } else if field == "insert" {
-                // List.insert(idx, val) → value at 1; Map has set/insert(key,val)
-                // → value at 1.  Conservatively mark the LAST argument (the value)
-                // as the sink.
-                if arg_count >= 1 { [arg_count - 1] } else { [] }
-            } else if field == "set" {
-                // List.set(idx, val) / Map.set(key, val) → value is last arg.
-                if arg_count >= 1 { [arg_count - 1] } else { [] }
-            } else {
-                []
+            match recv_ty {
+                Type::StructType { name, .. } => {
+                    if name == "Cell" && field == "set" && arg_count == 1 { [0] } else { [] }
+                },
+                Type::PtrType { .. } => {
+                    if field == "write" && arg_count == 1 { [0] } else { [] }
+                },
+                _ => [],
             }
         },
         _ => [],

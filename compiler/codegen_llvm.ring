@@ -191,44 +191,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_find", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_flat_map", [ptr, ptr], ptr)
 
-    // Map
-    get_or_declare_runtime_fn(ctx, "ring_map_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_get", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_set", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_has", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_delete", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_keys", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_values", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_entries", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_len", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_is_empty", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_for_each", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_fold", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_filter", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_any", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_map_values", [ptr, ptr], ptr)
-
-    // Map<Int>
-    get_or_declare_runtime_fn(ctx, "ring_map_int_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_get", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_get_opt", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_set", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_has", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_delete", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_keys", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_values", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_entries", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_len", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_is_empty", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_for_each", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_clone", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_from", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_clear", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_fold", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_filter", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_any", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_map_values", [ptr, ptr], ptr)
-
     // Set
     get_or_declare_runtime_fn(ctx, "ring_set_new", [], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_add", [ptr, ptr], ptr)
@@ -287,10 +249,8 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_path_basename", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_path_extname", [ptr], ptr)
 
-    // Collection clone/from (B-152 P2: ring_list_clone removed — now a Ring function)
-    get_or_declare_runtime_fn(ctx, "ring_map_clone", [ptr], ptr)
+    // Collection clone/from (B-152 P2/P3: List/Map are Ring functions)
     get_or_declare_runtime_fn(ctx, "ring_set_clone", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_from", [ptr], ptr)
 
     // Parse
     get_or_declare_runtime_fn(ctx, "ring_parse_int", [ptr], ptr)
@@ -326,9 +286,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_shift", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_clear", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_extend", [ptr, ptr], ptr)
-
-    // Map (additional)
-    get_or_declare_runtime_fn(ctx, "ring_map_clear", [ptr], ptr)
 
     // Misc
     get_or_declare_runtime_fn(ctx, "ring_assert", [i64, ptr], ptr)

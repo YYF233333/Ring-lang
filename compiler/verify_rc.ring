@@ -109,7 +109,7 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     is_borrow_returning_call, is_fresh_owned_bool_value}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
     sink_arg_indices, is_variant_constructor_call, expr_diverges, stmt_diverges,
-    is_scalar_type}
+    is_scalar_type, is_owned_slot_result_call, is_owned_slot_result_callee}
 
 // Value classes (what an expression's value IS, ownership-wise)
 const CLS_OWNED: Int = 0     // fresh / dup'd — somebody must consume it exactly once
@@ -423,6 +423,17 @@ fn v_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     if type_contains_extern_handle(ty, externs) {
         return false
     }
+    // Exact slot ABI leaf: read/take results are owned even when an impl-level
+    // K/V remains an unnamed TypeVar after zonk.
+    if is_owned_slot_result_call(init) {
+        return true
+    }
+    // A post-RC Clone is an explicit ring_dup and therefore owns its result;
+    // do not let the audit #149 TypeVar guard erase that ownership proof.
+    match init {
+        HExpr::Clone { .. } => return true,
+        _ => {}
+    }
     if is_unresolved_var_type(ty) {
         return false
     }
@@ -594,6 +605,7 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             }
             let ctor = is_variant_constructor_call(callee, ty)
             let sinks = sink_arg_indices(callee, args.len())
+            let owned_slot_result = args.len() == 2 && is_owned_slot_result_callee(callee)
             let mut i = 0
             for a in args {
                 if ctor || v_list_has_int(sinks, i) {
@@ -603,7 +615,9 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 }
                 i = i + 1
             }
-            if is_borrow_returning_call(callee) {
+            if owned_slot_result {
+                CLS_OWNED
+            } else if is_borrow_returning_call(callee) {
                 CLS_BORROW
             } else {
                 v_cls_of_fresh(ty, ctx.externs)
@@ -690,7 +704,14 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
 
         HExpr::Clone { inner, ty, .. } => {
             v_expr(inner, M_BORROWED, ctx)
-            v_cls_of_fresh(ty, ctx.externs)
+            // Clone is an explicit ring_dup.  Unit/extern exclusions still
+            // apply, but an unnamed TypeVar result remains provably owned.
+            if is_rc_excluded_type(ty, ctx.externs)
+                || type_contains_extern_handle(ty, ctx.externs) {
+                CLS_EXCLUDED
+            } else {
+                CLS_OWNED
+            }
         },
 
         HExpr::Block { .. } => {
@@ -853,10 +874,15 @@ fn v_cls_of_fresh(ty: Type, externs: Set<Str>) -> Int {
 
 // Identifier read/move.
 fn v_ident(name: Str, ty: Type, span: Span, mode: Int, mut ctx: VCtx) -> Int {
-    if v_type_excluded(ty, ctx.externs) {
-        return CLS_EXCLUDED
-    }
     let idx = v_lookup(ctx, name)
+    // An exact owned producer (slot read/take or Clone<TypeVar>) can bind an
+    // unnamed TypeVar.  Binding provenance is stronger than the generic
+    // type-level exclusion, so account K_OWNED before applying that guard.
+    if idx < 0 || ctx.kinds[idx] != K_OWNED {
+        if v_type_excluded(ty, ctx.externs) {
+            return CLS_EXCLUDED
+        }
+    }
     if idx < 0 {
         // Module-level fn / const / enum-variant reference: reads borrow; the
         // pass Clone-wraps owner-bearing escapes, so a bare consumed global is

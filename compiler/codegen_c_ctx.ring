@@ -678,11 +678,10 @@ pub fn rt_use_raw(mut ctx: CCtx, name: Str, proto: Str) {
     ctx.rt_protos.insert(name, proto)
 }
 
-// True when `name` is a known ring_runtime.cpp symbol.  A Ring function whose
-// mangled name collides with one (std map_new → ring_map_new vs the C++
-// bootstrap shim) must be renamed — the LLVM backend gets this for free from
-// LLVM's module-level symbol renaming; in C a duplicate definition is a hard
-// link error.
+// True when `name` is a known ring_runtime.cpp symbol.  A colliding Ring
+// function must be renamed — the LLVM backend gets this for free from LLVM's
+// module-level symbol renaming; in C a duplicate definition is a hard link
+// error.
 pub fn is_runtime_symbol(name: Str) -> Bool {
     match rt_sig(name) {
         some(_) => true,
@@ -819,46 +818,8 @@ fn rt_sig(name: Str) -> Str? {
     if name == "ring_list_shift" { return some("p>p") }
     if name == "ring_list_clear" { return some("p>p") }
     if name == "ring_list_extend" { return some("pp>p") }
-    // Map
-    if name == "ring_map_new" { return some(">p") }
-    if name == "ring_map_get" { return some("pp>p") }
-    if name == "ring_map_get_opt" { return some("pp>p") }
-    if name == "ring_map_set" { return some("ppp>p") }
-    if name == "ring_map_has" { return some("pp>i") }
-    if name == "ring_map_delete" { return some("pp>p") }
-    if name == "ring_map_keys" { return some("p>p") }
-    if name == "ring_map_values" { return some("p>p") }
-    if name == "ring_map_entries" { return some("p>p") }
-    if name == "ring_map_len" { return some("p>i") }
-    if name == "ring_map_is_empty" { return some("p>i") }
-    if name == "ring_map_for_each" { return some("pp>p") }
-    if name == "ring_map_fold" { return some("ppp>p") }
-    if name == "ring_map_filter" { return some("pp>p") }
-    if name == "ring_map_any" { return some("pp>i") }
-    if name == "ring_map_map_values" { return some("pp>p") }
-    if name == "ring_map_clone" { return some("p>p") }
-    if name == "ring_map_from" { return some("p>p") }
-    if name == "ring_map_clear" { return some("p>p") }
-    // Map<Int>
-    if name == "ring_map_int_new" { return some(">p") }
-    if name == "ring_map_int_get" { return some("pp>p") }
-    if name == "ring_map_int_get_opt" { return some("pp>p") }
-    if name == "ring_map_int_set" { return some("ppp>p") }
-    if name == "ring_map_int_has" { return some("pp>i") }
-    if name == "ring_map_int_delete" { return some("pp>p") }
-    if name == "ring_map_int_keys" { return some("p>p") }
-    if name == "ring_map_int_values" { return some("p>p") }
-    if name == "ring_map_int_entries" { return some("p>p") }
-    if name == "ring_map_int_len" { return some("p>i") }
-    if name == "ring_map_int_is_empty" { return some("p>i") }
-    if name == "ring_map_int_for_each" { return some("pp>p") }
-    if name == "ring_map_int_clone" { return some("p>p") }
-    if name == "ring_map_int_from" { return some("p>p") }
-    if name == "ring_map_int_clear" { return some("p>p") }
-    if name == "ring_map_int_fold" { return some("ppp>p") }
-    if name == "ring_map_int_filter" { return some("pp>p") }
-    if name == "ring_map_int_any" { return some("pp>i") }
-    if name == "ring_map_int_map_values" { return some("pp>p") }
+    // B-152 P3 closure: Map operations are Ring functions/methods.  Only the
+    // low-level slot/buffer/hash bridges remain runtime symbols.
     // Set
     if name == "ring_set_new" { return some(">p") }
     if name == "ring_set_add" { return some("pp>p") }

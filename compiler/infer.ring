@@ -13,7 +13,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     HForInDestructure, HLetDestructureBinding,
     trait_bound_param_name,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
-    hexpr_type, hexpr_effects, hexpr_span}
+    hexpr_type, hexpr_effects, hexpr_span, map_index_helper_identity}
 use diagnostics::{DiagnosticContext, DiagnosticNote, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0206, E0301, E0303, E0304, E0305, E0306,
     E0307, E0308, E0309, E0402, E0411, E0601, E0705, W0001}
@@ -855,6 +855,7 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
     let idx_type = apply_subst(s, hexpr_type(idx_r.hexpr))
 
     let mut result_ty: Type = Type::ErrorType
+    let mut map_key_type: Type? = none
 
     match recv_type {
         Type::StructType { name, type_params, .. } => {
@@ -865,7 +866,9 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
             } else if name == BUILTIN_MAP {
                 // map[key]: index must be key type K, result is value type V
                 if type_params.len() >= 2 {
-                    s = unify_at(ctx.sink, ctx.env, idx_type, type_params.get(0).unwrap(), s, span)
+                    let key_type = type_params.get(0).unwrap()
+                    s = unify_at(ctx.sink, ctx.env, idx_type, key_type, s, span)
+                    map_key_type = some(apply_subst(s, key_type))
                     result_ty = type_params.get(1).unwrap()
                 } else {
                     result_ty = Type::ErrorType
@@ -893,12 +896,67 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
         }
     }
 
-    InferResult {
-        hexpr: HExpr::IndexExpr {
-            receiver: recv_r.hexpr, index: idx_r.hexpr,
-            ty: result_ty, effects: combined_effects, span: span
+    match map_key_type {
+        some(key_type) => {
+            // B-152 P3 closure: Map subscript is the bounded pure-Ring
+            // map_get_panic call, not a backend/runtime projection.  Lowering
+            // here preserves the Hash+Eq dictionaries.  The binding comes from
+            // load_prelude's canonical TypeScheme/DefId, never from a lexical
+            // name lookup that a local/parameter could shadow.
+            let callee_name = map_index_helper_identity()
+            let callee_scheme = match ctx.env.lookup(callee_name) {
+                some(scheme) => scheme,
+                none => panic("unreachable: canonical prelude map_get_panic is missing")
+            }
+            let callee_ty = ctx.env.instantiate(callee_scheme)
+            let callee = HExpr::Ident {
+                name: callee_name, resolved_name: none,
+                def_id: callee_scheme.def_id, dict_closure_dicts: none,
+                ty: callee_ty, effects: EMPTY_ROW, span: span
+            }
+            let effect_tail = ctx.env.fresh_var_id()
+            let expected_fn = Type::FnType {
+                params: [apply_subst(s, recv_type), key_type],
+                return_type: apply_subst(s, result_ty),
+                effects: EffectRow { effects: [], tail: some(effect_tail) }
+            }
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(callee), expected_fn, s, span)
+
+            match apply_subst(s, hexpr_type(callee)) {
+                Type::FnType { effects: fn_effects, .. } => {
+                    let me2 = merge_effects(ctx.env, combined_effects, fn_effects, s)
+                    combined_effects = me2.0
+                    s = me2.1
+                },
+                _ => {}
+            }
+
+            let resolved_dicts = resolve_dicts_from_scheme(
+                ctx.sink, ctx.env, ctx.current_fn_bounds,
+                callee_scheme, hexpr_type(callee), s, span)
+
+            let final_result_ty = apply_subst(s, result_ty)
+            InferResult {
+                hexpr: HExpr::Call {
+                    callee: callee,
+                    args: [recv_r.hexpr, idx_r.hexpr],
+                    type_args: [],
+                    resolved_dicts: resolved_dicts,
+                    dict_dispatch: none,
+                    ty: final_result_ty,
+                    effects: combined_effects,
+                    span: span
+                },
+                subst: s, effects: combined_effects
+            }
         },
-        subst: s, effects: combined_effects
+        none => InferResult {
+            hexpr: HExpr::IndexExpr {
+                receiver: recv_r.hexpr, index: idx_r.hexpr,
+                ty: result_ty, effects: combined_effects, span: span
+            },
+            subst: s, effects: combined_effects
+        }
     }
 }
 

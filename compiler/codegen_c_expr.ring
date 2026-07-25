@@ -2122,7 +2122,6 @@ fn extern_fn_to_runtime_c(name: Str) -> Str? {
     if name == "eprintln" { return some("ring_eprintln") }
     if name == "exit" || name == "exit_process" { return some("ring_exit") }
     if name == "argv" { return some("ring_args") }
-    if name == "map_new" { return some("ring_map_new") }
     if name == "set_new" { return some("ring_set_new") }
     if name == "read_file" { return some("ring_read_file") }
     if name == "write_file" { return some("ring_write_file") }
@@ -2137,7 +2136,6 @@ fn extern_fn_to_runtime_c(name: Str) -> Str? {
     if name == "parse_int" { return some("ring_parse_int") }
     if name == "parse_float" { return some("ring_parse_float") }
     if name == "set_from" { return some("ring_set_from_list") }
-    if name == "map_from" { return some("ring_map_from") }
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
     if name == "set_int_new" { return some("ring_set_int_new") }
     if name == "set_int_from" { return some("ring_set_int_from_list") }
@@ -2271,17 +2269,13 @@ fn rt_method_returns_i64_c(name: Str) -> Bool {
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_map_has" { return true }
-    if name == "ring_map_len" { return true }
     if name == "ring_set_has" { return true }
     if name == "ring_set_len" { return true }
     if name == "ring_sb_len" { return true }
-    if name == "ring_map_is_empty" { return true }
     if name == "ring_set_int_has" { return true }
     if name == "ring_set_int_len" { return true }
     if name == "ring_set_is_empty" { return true }
     if name == "ring_set_int_is_empty" { return true }
-    if name == "ring_map_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2296,18 +2290,15 @@ fn rt_method_returns_bool_c(name: Str) -> Bool {
     if name == "ring_str_eq" { return true }
     if name == "ring_str_lt" { return true }
     if name == "ring_list_is_empty" { return true }
-    if name == "ring_map_has" { return true }
     if name == "ring_set_has" { return true }
     if name == "ring_list_any" { return true }
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
     if name == "ring_set_int_has" { return true }
-    if name == "ring_map_is_empty" { return true }
     if name == "ring_set_is_empty" { return true }
     if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
-    if name == "ring_map_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2372,22 +2363,7 @@ fn method_to_runtime_c(type_name: Str, method: Str) -> Str? {
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
     // B-152 P2: List methods are pure Ring — no entries (fall through to
     // the Ring-compiled impl methods).
-    // B-152 P3: Map method calls still route through C++ bootstrap shims.
-    if type_name == "Map" && method == "get" { return some("ring_map_get_opt") }
-    if type_name == "Map" && method == "insert" { return some("ring_map_set") }
-    if type_name == "Map" && method == "contains_key" { return some("ring_map_has") }
-    if type_name == "Map" && method == "keys" { return some("ring_map_keys") }
-    if type_name == "Map" && method == "values" { return some("ring_map_values") }
-    if type_name == "Map" && method == "entries" { return some("ring_map_entries") }
-    if type_name == "Map" && method == "len" { return some("ring_map_len") }
-    if type_name == "Map" && method == "remove" { return some("ring_map_delete") }
-    if type_name == "Map" && method == "is_empty" { return some("ring_map_is_empty") }
-    if type_name == "Map" && method == "for_each" { return some("ring_map_for_each") }
-    if type_name == "Map" && method == "clear" { return some("ring_map_clear") }
-    if type_name == "Map" && method == "fold" { return some("ring_map_fold") }
-    if type_name == "Map" && method == "filter" { return some("ring_map_filter") }
-    if type_name == "Map" && method == "any" { return some("ring_map_any") }
-    if type_name == "Map" && method == "map_values" { return some("ring_map_map_values") }
+    // B-152 P3 closure: Map methods are pure Ring impl methods.
     // Set methods
     if type_name == "Set" && method == "add" { return some("ring_set_add") }
     if type_name == "Set" && method == "insert" { return some("ring_set_add") }
@@ -3670,8 +3646,7 @@ fn gen_c_index_expr(mut ctx: CCtx, receiver: HExpr, index: HExpr) -> Str {
         rt_use(ctx, "ring_str_get", 2)
         c_emit(ctx, "${t} = ring_str_get(${recv_val}, RING_UNTAG(${idx_val}));")
     } else if type_name == "Map" && is_builtin_collection(recv_type) {
-        rt_use(ctx, "ring_map_get", 2)
-        c_emit(ctx, "${t} = ring_map_get(${recv_val}, ${idx_val});")
+        panic("C codegen: Map IndexExpr must be lowered to map_get_panic")
     } else {
         rt_use(ctx, "ring_list_get", 2)
         c_emit(ctx, "${t} = ring_list_get(${recv_val}, RING_UNTAG(${idx_val}));")
@@ -4118,16 +4093,11 @@ fn emit_c_for_list(mut ctx: CCtx, binding: Str, destructure: List<HForInDestruct
                 c_emit(ctx, "${t} = ${conv_name}(${raw});")
                 t
             } else if name == "Map" && type_params.len() == 2 {
-                let is_int_key = match type_params[0] {
-                    Type::IntType => true,
-                    _ => false,
-                }
-                let conv_name = if is_int_key { "ring_map_int_entries" } else { "ring_map_entries" }
-                rt_use(ctx, conv_name, 1)
                 collection_converted = true
-                let t = fresh_tmp(ctx)
-                c_emit(ctx, "${t} = ${conv_name}(${raw});")
-                t
+                gen_c_method_call(
+                    ctx, raw,
+                    Type::StructType { name: name, type_params: type_params },
+                    "entries", [], [])
             } else {
                 raw
             }

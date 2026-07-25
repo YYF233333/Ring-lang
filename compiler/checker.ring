@@ -2,7 +2,8 @@ use types::{Type, UNIT}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
 use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler,
-    compare_by_first, is_user_drop_type, hexpr_type}
+    compare_by_first, is_user_drop_type, hexpr_type,
+    map_index_helper_source_name, map_index_helper_identity}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
@@ -29,6 +30,33 @@ pub struct CheckResult {
 const STD_FILES: List<Str> =
     ["io.ring", "iterator.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"]
 
+fn canonicalize_prelude_decl(decl: Decl) -> Decl {
+    match decl {
+        Decl::Fn { name, type_params, params, return_type, declared_effects,
+                   body, is_pub, is_abstract, span } => {
+            if name == map_index_helper_source_name() {
+                // Compiler-synthesised Map indexing must target an identity no
+                // Ring source identifier can spell.  Keep the raw API as an
+                // environment alias below; the emitted definition is private
+                // so project-link candidate collection ignores it.
+                Decl::Fn {
+                    name: map_index_helper_identity(),
+                    type_params: type_params, params: params,
+                    return_type: return_type, declared_effects: declared_effects,
+                    body: body, is_pub: false, is_abstract: is_abstract, span: span
+                }
+            } else {
+                Decl::Fn {
+                    name: name, type_params: type_params, params: params,
+                    return_type: return_type, declared_effects: declared_effects,
+                    body: body, is_pub: is_pub, is_abstract: is_abstract, span: span
+                }
+            }
+        },
+        _ => decl
+    }
+}
+
 fn find_std_dir() -> Str? {
     let candidates = [
         path_resolve(path_join(path_dirname(path_resolve(".")), "std")),
@@ -53,10 +81,23 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                     let prelude_sink = new_collecting_sink()
                     let ast = parse(source, file_path, prelude_sink)
                     for decl in ast.decls {
-                        register_decl_public(ctx, decl)
-                        all_prelude_decls.push(decl)
+                        let canonical_decl = canonicalize_prelude_decl(decl)
+                        register_decl_public(ctx, canonical_decl)
+                        all_prelude_decls.push(canonical_decl)
                     }
                 }
+            }
+            // Install the source-level API spelling as an alias of the exact
+            // canonical scheme/DefId. record_value_origin makes ordinary
+            // explicit calls use the same backend-safe canonical identity too.
+            let map_get_name = map_index_helper_source_name()
+            let map_get_identity = map_index_helper_identity()
+            match ctx.env.lookup(map_get_identity) {
+                some(scheme) => {
+                    ctx.env.bind(map_get_name, scheme)
+                    record_value_origin(ctx, map_get_name, map_get_identity)
+                },
+                none => {}
             }
             // Phase 2: compile struct/enum/trait declarations, non-extern impl methods, and top-level functions
             for decl in all_prelude_decls {

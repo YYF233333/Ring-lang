@@ -26,6 +26,17 @@ pub fn is_module_item_identity(name: Str) -> Bool {
     name.index_of("$$_").is_some()
 }
 
+// Synthetic Map indexing must bypass every user-spellable binding while the
+// raw helper remains available as an ordinary prelude API.  Checker and infer
+// share both spellings here so neither phase can drift from the other.
+pub fn map_index_helper_source_name() -> Str {
+    "map_get_panic"
+}
+
+pub fn map_index_helper_identity() -> Str {
+    module_item_identity("prelude$map", map_index_helper_source_name())
+}
+
 pub struct HParam {
     pub name: Str,
     pub ty: Type,

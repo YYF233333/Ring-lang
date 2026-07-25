@@ -1,18 +1,19 @@
-// B-104 D1 rule ④ regression: runtime OVERWRITE drops the old slot value.
+// B-104 D1 rule ④ regression: pure Ring List/Map overwrite replaces the old
+// slot value through the borrowed ring_slot_replace bridge.
 //
-// THE CHANGE THIS PINS: ring_list_set / ring_map_set / ring_map_int_set now drop
-// the value previously stored in the slot.  Insert side (verified, perceus
-// sink_arg_indices): the value arg of .set/.insert is a sink — borrows are
-// escape-Cloned (dup), fresh temps transfer ownership — so the container owns +1
-// per slot (drop_list/drop_map deep-drop it at end-of-life).  Overwriting without
-// a drop leaked that +1, unbounded for hot slots (the rule-④ leak class).
+// THE CHANGE THIS PINS: only direct bare ring_slot_write arg 2 is an ownership
+// sink. Public .set/.insert parameters are borrows; overwrite uses
+// ring_slot_replace, which duplicates its borrowed input before storing it and
+// then drops the previous slot. New-slot ring_slot_write transfers the clone
+// made at that exact boundary. The container therefore owns +1 per slot
+// (drop_list/drop_map deep-drop it at end-of-life).
 //
 // THE UAF RISK THIS PINS (rc>1 sharing): the old value may be co-owned —
 //   * `let saved = xs[i]` / `let saved = m[k]` escape-Clones the element (rc 2):
 //     the overwrite drop must DECREMENT, not free — the golden .expected pins saved's
 //     surviving content;
-//   * self-assign `xs.set(0, xs[0])`: the sink arg arrives with its own call-site
-//     dup (rc 2), so store-then-drop nets rc back to 1 with the slot still valid.
+//   * self-assign duplicates inside ring_slot_replace before dropping the old
+//     slot, so it nets rc back to 1 with the slot still valid.
 // A wrong impl (dropping an account the container never held, or drop-before-
 // store) frees live values → native UAF; ASan + the golden diff catch it.
 
@@ -31,7 +32,7 @@ fn list_set_shared() -> Str {
 
 fn list_set_self() -> Str {
     let mut xs = ["x", "y"]
-    xs.set(0, xs[0])            // sink arg dup'd at call site (rc 2) → store + drop old → rc 1
+    xs.set(0, xs[0])            // replace dup-before-drop → slot remains rc 1
     "${xs[0]}${xs[1]}"
 }
 
@@ -51,7 +52,7 @@ fn map_set_shared() -> Str {
 
 fn map_int_set_shared() -> Str {
     let mut m = map_from([(1, "one"), (2, "two")])
-    let saved = m[1]            // int-keyed map (ring_map_int_set path)
+    let saved = m[1]            // unified pure Ring Map path
     m.insert(1, "uno")
     "${m[1]} ${saved} ${m[2]} len=${m.len()}"
 }
