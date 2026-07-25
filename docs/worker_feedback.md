@@ -1,12 +1,14 @@
 # Agent Feedback
 
-> Agent → 用户的 durable 异步通道，只保存当前仍未解决、且必须跨 turn / session 传递的信息。
+> Agent → 用户的异步消息通道。Worker / Auditor / 其他 agent 均可写入。
 >
-> - `[决策]`：需要用户判断的设计问题；对应 item 转为 `waiting-feedback`。
-> - `[通知]`：影响后续执行、但当前不阻塞的关键事实。
-> - `[观察]`：不算 bug、但值得后续关注的现象。
+> 三种类型：
+> - `[决策]`：需要用户判断的设计问题，阻塞对应 backlog item（转 `waiting-feedback`）
+> - `[通知]`：值得用户了解的信息，不阻塞工作（实现取舍、跳过步骤的原因、潜在改进点等）
+> - `[观察]`：不算 bug 但值得注意的现象（代码异味、设计不一致、潜在改进方向等）
 >
-> 常规进度、实现取舍、review 意见和命令日志走实时消息或 worktree artifact。每个活跃 item 最多保留一个 current-state checkpoint，新版本替换旧版本；任务完成后立即删除。历史通过 branch、commit 和测试日志追溯。
+> Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
+> Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
 ---
 

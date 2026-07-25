@@ -916,45 +916,48 @@ source-map 支持 + 断点调试。
 
 ### B-166 Codex context lease 工作流适配 [infra] [P0] [M] [judgment] [queued]
 
-> 2026-07-25 立项（Discussion，用户确认先按 context lease 方案试运行）。当前 Codex 配置的 context window 为 272K、auto-compact 阈值为 244.8K，而既有编排按约 1M 预算形成：spawn 默认可能继承完整父历史，Worker 会滚动清队列，同一 implementer 跨多轮 review / follow-up 保持长寿命，Audit 还会复用 finder 做 skeptic。连续注意力任务一旦跨自动压缩边界，压缩摘要无法可靠保存实现 invariant、反例和中间排除链。
+> 2026-07-25 立项并修订（Discussion，用户确认 Codex 单独试运行）。当前 Codex 配置的 context window 为 272K、auto-compact 阈值为 244.8K；agent 启动后的基础上下文实测已约 150K，因此此前拟定的两档低阈值不成立。既有编排按约 1M 预算形成，连续注意力任务若跨自动压缩边界，压缩摘要可能丢失实现 invariant、反例和中间排除链。
 
-**设计真值**：`docs/workflow.md`「上下文预算与连续注意力」及其 Worker / Audit 规则（2026-07-25）。本项只落地 Codex adapter 和自动校验，不重新讨论该策略，也不修改当前 `[doing]` 的 B-163 spec。
+**适用边界（用户拍板）**：本项是 **Codex-only adapter policy**，只允许修改 `.agents/` 与 `.codex/` 的 Codex 编排及其校验，不得把 context lease、fresh-context、token 阈值或 bounded-batch 规则写入 provider-neutral 的 `docs/workflow.md`，也不得改变 `.claude/` adapter。Claude Code 继续采用原模式：尽量把完整任务放入一个长寿命 agent，跨实现 / review / follow-up 复用其上下文，少开 subagent 以降低成本和重复读取。
 
-**目标**：让每个 continuity-sensitive work package 在一个 fresh、未压缩的 context lease 内闭环；root 只消费 self-contained task packet 和短报告。自动压缩降级为事故恢复，不再充当正常 phase boundary。
+**Codex 试运行规则**：
+
+- `200K` 是首次**提醒收尾**的观测线，不是 hard stop，也不是 work-package 最大预算。低于 200K 不因 token 数机械拆分任务。
+- 到达 200K 或 runtime 首次 context warning 后，只发出一次收尾提醒：agent 重新评估剩余工作，尽量不再主动扩展新的独立 scope，并判断当前连续任务能否在 auto-compact 前闭环。能则继续完成、测试和提交；不能则停在安全点并输出 handoff。
+- 只有即将跨 compaction、已经发生 compaction，或新工作属于独立 continuity unit 时才换 fresh-context agent；同一 agent 可在一个连续任务内复用上下文并接受多轮窄修，不设“一轮返修”硬上限。
+- 自动压缩后的摘要不作为继续 continuity-sensitive 实现或验证的可靠依据；需要依赖压缩前细节时由 fresh-context agent 按 self-contained task packet 接手。
+- task packet 按 invariant / 执行路径 / 验收门切分，不按固定 token 数或平均文件数切分。
 
 **涉及修改**：
 
 1. `.agents/skills/worker/SKILL.md`
-   - 一次调用只执行一个有界 integration batch，不再滚动到授权队列耗尽；
-   - L / XL item 必须先经 planner 切成按 invariant 划分的 work-package DAG；
-   - 所有 Codex spawn 显式使用 fresh context（当前 runtime 对应 `fork_turns="none"`），只注入 task packet；
-   - 同一 implementer 仅在一个 lease 内稳定，最多承接一轮窄修；第二轮实质性返修、scope 扩张或 compaction 后生成新 agent；
-   - agent 最终报告约束在 2K token 内，长日志落 worktree artifact。
+   - L / XL item 先切成按 invariant 划分、可独立交接的 work-package DAG；不使用固定 token 上限决定切分；
+   - 新 continuity unit 的 Codex spawn 显式使用 fresh context（当前 runtime 对应 `fork_turns="none"`），只注入 self-contained task packet；
+   - 同一连续任务优先复用 implementer；达到 200K 后提醒收尾，只有无法在 compaction 前闭环、已经 compaction 或 scope 独立时才 handoff；
+   - 报告采用紧凑结构，长日志落 worktree artifact，但不设置另一个硬 token gate。
 2. `.agents/skills/full-audit/SKILL.md`
-   - finder 单元改为「一个 lens × 一个有界代码分区」；
-   - candidate dossier 独立传递；skeptic 必须 fresh spawn，禁止复用原 finder 或继承整轮历史。
+   - finder 按连续代码范围分配 lens，避免单 agent 在 compaction 前横跨无关审计域；
+   - candidate dossier 独立传递；出于独立验证要求，skeptic 使用 fresh spawn，禁止由原 finder 自证。
 3. `.agents/skills/discussion/SKILL.md`
-   - 默认读取看板 heading / compact index、目标 item 和未解决 feedback，不把两个完整看板作为每轮固定 context tax；
-   - current checkpoint 替换旧 checkpoint，完成即清理。
+   - Codex 侧优先读取看板 heading / compact index、目标 item 和未解决 feedback，避免把两个完整看板作为每轮固定 context tax；
+   - 该优化不得回写为 Claude Code 的读取限制。
 4. `.codex/config.toml`、`.codex/agents/*.toml`
-   - 增加只读 planner role，并在角色 prompt 中写入 lease、scope、handoff 和报告上限；
-   - 复核 auto-compact / rollout 相关配置，只能按试运行数据保守调整；不得把 rollout budget 当作可用 context；
+   - 增加只读 planner role，并在角色 prompt 中写入 scope、200K reminder、compaction handoff 和 task-packet 契约；
+   - 复核 auto-compact / rollout 相关配置；不得把 rollout budget 当作可用 context，也不得把 200K 配成强制中断；
    - 第一阶段不直接安装 hard `PreCompact` hook；先用一个真实 wave 验证 lease 边界。若仍频繁触碰 compaction，再由 Discussion 决定是否另立 hook 项。
 5. `.agents/scripts/validate_workflow.py` 及必要的小型 helper
-   - 校验 planner role / config 路径、L / XL planner gate、fresh spawn、单批次停止、fresh skeptic 和报告上限；
-   - 检查 `worker_feedback.md` 不含已完成 item 的历史 checkpoint；如静态判断不可靠，至少提供显式 allowlist / current-item 标记，禁止 silent skip；
-   - 可生成或校验最小 task-packet / current-state-handoff schema，但不得引入新的第三块事实看板。
-6. 清理 Codex adapter 与 `docs/workflow.md` 的其他漂移；Claude adapter 可保留 provider-specific 机制，但核心状态机不得与 context lease 冲突。
+   - 校验 planner role / config 路径、新 continuity unit 的 fresh spawn、200K reminder、compaction 后 handoff 和 fresh skeptic；
+   - 校验 Codex-only 条款没有写入 `.claude/`，并防止后续 validator 把 Codex token policy 强加给公共工作流。
+6. 清理 Codex adapter 与 provider-neutral 工作流的漂移；不得修改 `.claude/skills/`。
 
 **验收标准（Phase A，首次试运行）**：
 
-- 在 Worker / Audit / Discussion 三个 Codex skill 中，所有 subagent 创建路径均可证明为 fresh context；不存在依赖默认 full-history fork 的路径。
-- planner role 可用，L / XL raw dispatch 会 fail closed；task packet 明确 base、交付物、invariant、读写边界、验收门和停止条件。
-- Worker 一次调用在一个有界 batch 后停止；implementer 仅允许一轮窄修，超界会产生带更新 packet 的 fresh agent。
-- Audit 不再把 finder 复用为 skeptic；finder 和 skeptic 都收到有界 dossier。
-- agent 报告有 2K token 上限，长日志落盘；`worker_feedback.md` 只保留未解决 durable state 和每项唯一 current checkpoint。
-- `python .agents/scripts/validate_workflow.py` 通过；对临时测试副本故意移除 fresh-spawn 或 planner-gate 条款时，validator 必须失败，证明不是只检查文件存在。
-- 在下一次真实 Worker wave 记录一次简短 pilot：每个 lease 的读集、是否触发 compaction、是否发生 handoff、packet 是否足够恢复、最终报告大小。pilot 完成即停止，由 Discussion 决定数值护栏是否调整以及是否需要 Phase B `PreCompact` / `SubagentStop` hook。
+- planner role 可用，L / XL 能生成按 continuity boundary 切分的 task packets；packet 明确 base、交付物、invariant、读写边界、验收门和停止条件。
+- 新 continuity unit 不继承 root 完整 transcript；同一连续任务在 200K 前可复用原 implementer，达到 200K 只触发一次收尾提醒而不强制中断。
+- 若 agent 判断无法在 compaction 前闭环，能产出可由 fresh agent 恢复的 checkpoint；若能闭环，则允许继续完成当前任务。
+- Audit 不把 finder 复用为 skeptic；finder 和 skeptic 收到有界 dossier。
+- `python .agents/scripts/validate_workflow.py` 通过；负向自测能分别抓到缺失 fresh-spawn、200K reminder、compaction-handoff 或误改 `.claude/` 的情况。
+- 在下一次真实 Codex Worker wave 记录一次简短 pilot：agent 初始 context、达到 200K 的时点、提醒后的选择、是否触发 compaction、是否 handoff，以及 packet 是否足够恢复。由 Discussion 根据 pilot 决定是否调整提醒线或另立 Phase B `PreCompact` / `SubagentStop` hook。
 - 本项只改工作流基础设施，不触碰编译器语义；无需运行编译器全量门，但 TOML parse、workflow validator 及其负向自测必须通过。
 
 ## 测试基础设施
