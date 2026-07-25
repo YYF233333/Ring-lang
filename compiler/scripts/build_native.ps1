@@ -5,20 +5,50 @@ param([switch]$Stats)
 
 $ErrorActionPreference = "Stop"
 
-# Step 1: Compile to LLVM .o
-Write-Host "Step 1/3: Compiling to LLVM .o ..."
-node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$anchorPath = Join-Path $repoRoot "compiler\dist-llvm\main.o"
+$runtimeSource = Join-Path $repoRoot "ring_runtime.cpp"
+$runtimeObject = Join-Path $repoRoot "ring_runtime.o"
+$outputPath = Join-Path $repoRoot "ring.exe"
 
-# Step 2: Compile runtime
-Write-Host "Step 2/3: Compiling runtime ..."
-$runtimeFlags = @("-c", "ring_runtime.cpp", "-o", "ring_runtime.o", "-O2", "-std=c++17")
+if (-not (Test-Path -LiteralPath $anchorPath -PathType Leaf)) {
+    throw "Tracked compiler anchor not found: $anchorPath"
+}
+
+$clang = Get-Command clang -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($null -eq $clang) {
+    throw "clang was not found on PATH"
+}
+
+$clangxx = Get-Command clang++ -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($null -eq $clangxx) {
+    throw "clang++ was not found on PATH"
+}
+
+Write-Host "Step 1/2: Compiling native runtime with clang++ ..."
+$runtimeFlags = @(
+    "-c",
+    $runtimeSource,
+    "-o",
+    $runtimeObject,
+    "-O2",
+    "-std=c++17",
+    "-D_CRT_SECURE_NO_WARNINGS"
+)
 if ($Stats) { $runtimeFlags += "-DRING_ALLOC_STATS" }
-clang $runtimeFlags
+& $clangxx.Source @runtimeFlags
+if ($LASTEXITCODE -ne 0) {
+    throw "clang++ runtime compilation failed with exit code $LASTEXITCODE"
+}
 
-# Step 3: Link
-Write-Host "Step 3/3: Linking ..."
-$llvmRoot = Split-Path (Split-Path (Get-Command clang).Source)
+Write-Host "Step 2/2: Linking compiler from tracked anchor ..."
+$llvmRoot = Split-Path (Split-Path $clang.Source)
 $llvmLibDir = Join-Path $llvmRoot "lib"
-clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-L$llvmLibDir" -lLLVM-C
+& $clang.Source $anchorPath $runtimeObject -o $outputPath -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-L$llvmLibDir" -lLLVM-C
+if ($LASTEXITCODE -ne 0) {
+    throw "clang link failed with exit code $LASTEXITCODE"
+}
 
-Write-Host "Built: ring.exe"
+Write-Host "Built: $outputPath"
