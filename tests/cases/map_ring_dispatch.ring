@@ -1,6 +1,6 @@
 // B-152 P3 closure: every Map family operation must dispatch to std/map.ring.
-// The generic wrapper forces Hash + Eq dictionaries to be forwarded through
-// both a bounded method call and the subscript -> map_get_panic lowering.
+// The generic wrappers force Hash + Eq dictionaries to be forwarded through
+// bounded methods, subscript lowering, and the source-level map_get_panic API.
 
 struct Key { id: Int }
 
@@ -46,6 +46,12 @@ fn insert_and_index<K: Hash + Eq>(
 ) -> Int {
     m.insert(write_key, 40)
     m[read_key] + 2
+}
+
+fn source_api_get<K: Hash + Eq>(m: Map<K, Int>, key: K) -> Int {
+    // The raw prelude alias must retain the canonical scheme/DefId so both
+    // custom key dictionaries are forwarded through this ordinary source call.
+    map_get_panic(m, key)
 }
 
 fn make_keyed_map() -> Map<Key, Int> {
@@ -186,6 +192,7 @@ fn main() {
     m.insert(Key { id: 1 }, 10)
     let mut copied = map_clone(m)
     print(copied.get(Key { id: 1 }).unwrap_or(-1))
+    print(source_api_get(copied, Key { id: 1 }))
 
     let mut total = 0
     for (k, v) in copied {

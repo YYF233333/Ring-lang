@@ -1,18 +1,15 @@
 // B-104 D1 rule ④ regression: map_from with REPEATED keys drops the overwritten dup.
 //
-// THE CHANGE THIS PINS: ring_map_from / ring_map_int_from dup each value into
-// the fresh map (B-103 owned-container-constructor rule); on a repeated key the
-// later entry wins and the previously stored dup is the MAP'S OWN +1 — it must
-// be ring_drop'd, else it leaks (pre-fix: `(*result)[key] = val` silently
-// overwrote the pointer).
+// THE CHANGE THIS PINS: pure-Ring map_from feeds borrowed entry values through
+// Map.insert. A new slot acquires ownership at ring_slot_write; a repeated key
+// uses borrowed ring_slot_replace, which duplicates the new value before
+// dropping the MAP'S previous +1. The later entry wins without leaking.
 //
 // THE UAF RISK THIS PINS: the overwritten value is still owned by the ENTRIES
-// pair-list (rc 2 = pair's ref + map's dup → the drop steps back to 1, never
-// to 0).  A wrong impl (dropping the pair's account, or dropping without having
-// dup'd) frees a value the entries list still holds → native UAF when the
-// entries binding is read after map_from or scope-end-dropped.  Expected output
-// (later entry wins, entries list untouched) pins both the
-// winner and the entries' surviving contents.
+// pair-list (rc 2 = pair's ref + map slot's ref → replacement steps back to 1,
+// never to 0). A wrong bridge contract frees a value the entries list still
+// holds → native UAF when the entries binding is read after map_from or dropped.
+// Expected output pins both the winner and the entries' surviving contents.
 
 fn dup_key_str() -> Str {
     let m = map_from([("k", "a"), ("k", "b"), ("x", "y")])
@@ -26,7 +23,7 @@ fn dup_key_int() -> Str {
 
 fn dup_key_shared_entries() -> Str {
     // entries stays bound: its pairs keep their own value accounts; the map's
-    // overwritten-dup drop must not touch them (rc 2→1) — read them afterwards.
+    // replaced-slot drop must not touch them (rc 2→1) — read them afterwards.
     let entries = [("k", "a"), ("k", "b"), ("z", "c")]
     let m = map_from(entries)
     let mut acc = ""

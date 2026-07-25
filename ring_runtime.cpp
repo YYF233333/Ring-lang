@@ -37,8 +37,8 @@
 // Type aliases (documentation only — all cross-boundary types are void*)
 //   Str          = RingStr*         (data ptr into ring_alloc'd block)
 //   List         = RingList*        (Ring struct: {buf, len_tagged, cap_tagged})
-//   Map          = std::unordered_map<std::string, void*>*
-//   MapInt       = std::unordered_map<int64_t, void*>*
+//   Map          = RingMapStruct*    (pure-Ring: {meta, keys, values, len, cap})
+//   MapInt       = no distinct ABI type (Map<Int, V> uses the same RingMapStruct)
 //   Set          = std::unordered_set<std::string>*
 //   SetInt       = std::unordered_set<int64_t>*
 //   StringBuilder = std::string*

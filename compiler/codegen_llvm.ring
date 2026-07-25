@@ -634,8 +634,8 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
     ctx.fn_original_param_types.insert(mangled, orig_types)
 
     // Dedup: skip if already declared (multi-module imports can re-declare).
-    // Map.insert drops old value, but LLVMValueRef is extern — ring_drop would
-    // free a non-Ring pointer → heap corruption.
+    // ctx.functions is a pure-Ring Map whose values are raw LLVMValueRef extern
+    // handles; its borrowed ring_slot_replace path must never dup/drop them.
     if ctx.functions.get(mangled).is_some() {
         return
     }
