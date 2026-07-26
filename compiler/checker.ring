@@ -2,14 +2,18 @@ use types::{Type, UNIT}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
 use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler,
-    compare_by_first, is_user_drop_type, hexpr_type}
+    compare_by_first, is_user_drop_type, hexpr_type,
+    map_index_helper_source_name, map_index_helper_identity,
+    slot_read_source_name, slot_take_source_name, slot_write_source_name,
+    slot_read_identity, slot_take_identity, slot_write_identity,
+    is_nullary_variant_ctor_ident}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_module_identity, check_prelude_decl}
 use dict_lower::{lower_dicts}
 use andor_lower::{lower_andor}
-use infer_ctx::{InferCtx, type_error, record_value_origin}
+use infer_ctx::{InferCtx, type_error, record_value_origin, record_variant_ctor_origin}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
 use codes::{E0702, E0703, E0705, E0707, E0801}
@@ -28,6 +32,33 @@ pub struct CheckResult {
 
 const STD_FILES: List<Str> =
     ["io.ring", "iterator.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"]
+
+fn canonicalize_prelude_decl(decl: Decl) -> Decl {
+    match decl {
+        Decl::Fn { name, type_params, params, return_type, declared_effects,
+                   body, is_pub, is_abstract, span } => {
+            if name == map_index_helper_source_name() {
+                // Compiler-synthesised Map indexing must target an identity no
+                // Ring source identifier can spell.  Keep the raw API as an
+                // environment alias below; the emitted definition is private
+                // so project-link candidate collection ignores it.
+                Decl::Fn {
+                    name: map_index_helper_identity(),
+                    type_params: type_params, params: params,
+                    return_type: return_type, declared_effects: declared_effects,
+                    body: body, is_pub: false, is_abstract: is_abstract, span: span
+                }
+            } else {
+                Decl::Fn {
+                    name: name, type_params: type_params, params: params,
+                    return_type: return_type, declared_effects: declared_effects,
+                    body: body, is_pub: is_pub, is_abstract: is_abstract, span: span
+                }
+            }
+        },
+        _ => decl
+    }
+}
 
 fn find_std_dir() -> Str? {
     let candidates = [
@@ -53,11 +84,32 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                     let prelude_sink = new_collecting_sink()
                     let ast = parse(source, file_path, prelude_sink)
                     for decl in ast.decls {
-                        register_decl_public(ctx, decl)
-                        all_prelude_decls.push(decl)
+                        let canonical_decl = canonicalize_prelude_decl(decl)
+                        register_decl_public(ctx, canonical_decl)
+                        all_prelude_decls.push(canonical_decl)
                     }
                 }
             }
+            // Install the source-level API spelling as an alias of the exact
+            // canonical scheme/DefId. record_value_origin makes ordinary
+            // explicit calls use the same backend-safe canonical identity too.
+            let map_get_name = map_index_helper_source_name()
+            let map_get_identity = map_index_helper_identity()
+            match ctx.env.lookup(map_get_identity) {
+                some(scheme) => {
+                    ctx.env.bind(map_get_name, scheme)
+                    record_value_origin(ctx, map_get_name, map_get_identity)
+                },
+                none => {}
+            }
+            // list.ring and map.ring both declare these extern bridges.  Phase
+            // 1 has now finished, so each lookup points at the final prelude
+            // binding/DefId (the map.ring declaration with today's STD_FILES
+            // order).  Attach the ABI ownership identity to that exact DefId;
+            // later user shadowing receives a different DefId and no origin.
+            record_value_origin(ctx, slot_read_source_name(), slot_read_identity())
+            record_value_origin(ctx, slot_take_source_name(), slot_take_identity())
+            record_value_origin(ctx, slot_write_source_name(), slot_write_identity())
             // Phase 2: compile struct/enum/trait declarations, non-extern impl methods, and top-level functions
             for decl in all_prelude_decls {
                 match decl {
@@ -359,6 +411,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                         some(origin) => { record_value_origin(ctx, local_name, origin) },
                                         none => {}
                                     }
+                                    match mod_.variant_ctor_origins.get(item.name) {
+                                        some(origin) => { record_variant_ctor_origin(ctx, local_name, origin) },
+                                        none => {}
+                                    }
                                     match mod_.fn_mut_params.get(item.name) {
                                         some(flags) => { ctx.fn_mut_params.insert(local_name, flags) },
                                         none => {}
@@ -381,6 +437,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                                         ctx.env.types.variant_to_enum.insert(v.name, edef.name)
                                                         match mod_.value_origins.get(v.name) {
                                                             some(origin) => { record_value_origin(ctx, v.name, origin) },
+                                                            none => {}
+                                                        }
+                                                        match mod_.variant_ctor_origins.get(v.name) {
+                                                            some(origin) => { record_variant_ctor_origin(ctx, v.name, origin) },
                                                             none => {}
                                                         }
                                                     },
@@ -453,6 +513,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                 some(origin) => { record_value_origin(ctx, name, origin) },
                                 none => {}
                             }
+                            match mod_.variant_ctor_origins.get(name) {
+                                some(origin) => { record_variant_ctor_origin(ctx, name, origin) },
+                                none => {}
+                            }
                             match mod_.fn_mut_params.get(name) {
                                 some(flags) => { ctx.fn_mut_params.insert(name, flags) },
                                 none => {}
@@ -473,6 +537,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                                 ctx.env.types.variant_to_enum.insert(v.name, edef.name)
                                                 match mod_.value_origins.get(v.name) {
                                                     some(origin) => { record_value_origin(ctx, v.name, origin) },
+                                                    none => {}
+                                                }
+                                                match mod_.variant_ctor_origins.get(v.name) {
+                                                    some(origin) => { record_variant_ctor_origin(ctx, v.name, origin) },
                                                     none => {}
                                                 }
                                             },
@@ -559,6 +627,9 @@ fn check_consumed(name: Str, ty: Type, span: Span, consumed: Map<Str, Span>, dro
 }
 
 fn try_consume_ident(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>) {
+    // A fieldless variant is Ident-shaped but evaluates a fresh constructor on
+    // every occurrence. It is not a binding that can become moved.
+    if is_nullary_variant_ctor_ident(expr) { return }
     match expr {
         HExpr::Ident { name, ty, span, .. } => {
             if is_user_drop_type(ty, drop_types) {
@@ -572,7 +643,11 @@ fn try_consume_ident(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<
 fn check_moves_expr(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
     match expr {
         HExpr::Ident { name, ty, span, .. } => {
-            check_consumed(name, ty, span, consumed, drop_types, sink)
+            // Mirror try_consume_ident: repeated evaluation of a nullary ctor is
+            // repeated fresh construction, never use-after-move.
+            if is_nullary_variant_ctor_ident(expr) == false {
+                check_consumed(name, ty, span, consumed, drop_types, sink)
+            }
         },
         HExpr::Block { stmts, tail, .. } => {
             for s in stmts {

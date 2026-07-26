@@ -155,6 +155,10 @@ pub struct TypeRegistry {
     pub enums: Map<Str, EnumDef>,
     pub effects: Map<Str, EffectDef>,
     pub variant_to_enum: Map<Str, Str>,
+    // Exact constructor provenance keyed by the lexical binding DefId. This is
+    // a codegen identity table for every variant constructor; ownership
+    // freshness is classified separately in shared HIR helpers.
+    pub variant_ctor_origins: Map<Int, Str>,
     pub type_aliases: Map<Str, TypeAliasDef>,
     pub sigs: Map<Str, SigDef>,
     pub effect_aliases: Map<Str, EffectAliasDef>
@@ -209,6 +213,7 @@ pub fn new_type_env() -> TypeEnv {
             enums: map_new(),
             effects: map_new(),
             variant_to_enum: map_new(),
+            variant_ctor_origins: map_new(),
             type_aliases: map_new(),
             sigs: map_new(),
             effect_aliases: map_new()

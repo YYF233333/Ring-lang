@@ -1,26 +1,23 @@
-// B-104 D1 rule ④ regression: runtime REMOVE / CLEAR drops the owned contents.
+// B-104 D1 rule ④ regression: REMOVE / CLEAR drop owned slot contents.
 //
-// THE CHANGE THIS PINS: ring_map_delete / ring_map_int_delete drop the removed
-// value; ring_list_clear / ring_map_clear / ring_map_int_clear drop every
-// element/value before clearing (the container owns +1 per stored value via the
-// .insert/.push sink dups — drop_map/drop_list settle that account at
-// end-of-life, but remove/clear previously just erased the pointers → leak).
-// ring_set_clear / ring_set_int_clear are audited NO-OPs RC-wise: set elements
-// are value-inlined (std::string / int64 copies, no RC pointer stored — the
-// #135 ring_set_clone conclusion).  Set.clear is NOT exercised here: the LLVM
-// method_to_runtime has no "Set"/"clear" mapping (pre-existing native
-// panic-stub, found by this case's first run — see audit-report);
-// behaviour is covered by tests/cases/collection_clear.ring.
+// THE CHANGE THIS PINS: pure-Ring Map.remove/clear and List.clear release each
+// occupied key/value or element via ring_slot_drop (owned ring_slot_take plus
+// ring_drop). Map<Int, V> uses the same generic Map path. New slots acquire
+// ownership at ring_slot_write, while overwrite uses borrowed
+// ring_slot_replace; drop_map/drop_list settle slots still live at end-of-life.
+// The low-level Set clear bridges remain RC-neutral because their elements are
+// value-inlined std::string/int64 copies.
 //
-// THE UAF RISK THIS PINS (rc>1 sharing): a `let saved = m[k]` / `xs[i]`
-// escape-Clone co-owns the value (rc 2); the remove/clear drop must DECREMENT,
-// not free — the expected output pins saved's surviving content, ASan the liveness.
+// THE UAF RISK THIS PINS (rc>1 sharing): `m[k]` gets an owned +1 from
+// ring_slot_read; `xs[i]` gets its +1 when the low-level borrow escapes into the
+// binding. The remove/clear slot drop must DECREMENT, not free; expected output
+// pins saved content and ASan pins liveness.
 // Containers must stay alive and reusable after clear (insert/push again).
 
 fn map_remove_shared() -> Str {
     let mut m = map_from([("a", "va"), ("b", "vb")])
-    let saved = m["a"]          // escape-Clone dup (rc 2)
-    m.remove("a")               // drop decrements rc 2→1 — saved survives
+    let saved = m["a"]          // owned ring_slot_read result (rc 2)
+    m.remove("a")               // ring_slot_drop decrements rc 2→1
     m.remove("ghost")           // miss: no-op, nothing to drop
     "${saved} len=${m.len()} hasA=${m.contains_key("a")} b=${m["b"]}"
 }
@@ -34,7 +31,7 @@ fn map_remove_unshared() -> Str {
 fn map_int_remove_shared() -> Str {
     let mut m = map_from([(1, "one"), (2, "two")])
     let saved = m[1]
-    m.remove(1)                 // int-keyed: ring_map_int_delete path
+    m.remove(1)                 // same generic pure-Ring Map.remove path
     "${saved} len=${m.len()} two=${m[2]}"
 }
 

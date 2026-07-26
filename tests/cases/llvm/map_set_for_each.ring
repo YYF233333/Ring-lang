@@ -1,9 +1,9 @@
 // B-129 Map/Set HOF llvm_diff coverage.
-// Map/Set HOF methods (fold, filter, any, all, map_values) iterate via
-// ring_map_for_each / ring_set_for_each.  B-089 G-b sorted iteration
-// determinism ensures deterministic order — this test pins that the
-// outputs match.  Callbacks include heap-allocated intermediates to
-// exercise the #152 HOF drop fix.
+// Pure-Ring Map HOF methods iterate occupied slots and obtain owned callback
+// arguments through ring_slot_read; Set HOFs use their low-level runtime
+// bridges. Fixed inputs have deterministic slot/traversal order, which this
+// golden pins. Callbacks include heap-allocated intermediates to exercise the
+// #152 HOF drop fix.
 
 fn main() {
     // ── Map<Str, Str> fold ──

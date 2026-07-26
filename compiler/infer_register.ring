@@ -6,9 +6,9 @@ use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, Enu
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
-use hir::{compare_by_first, module_item_identity}
+use hir::{compare_by_first, module_item_identity, variant_ctor_name}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type, resolve_effect_expr,
-    record_value_origin, resolve_mod_uses}
+    record_value_origin, record_variant_ctor_origin, resolve_mod_uses}
 use infer_helpers::{is_value_type}
 
 // ============================================================
@@ -977,6 +977,14 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                     } else {
                         ctx.env.bind_mono(variant.name, fn_type)
                     }
+                }
+                // Bare fieldless variants and positional payload constructors
+                // both lower through Ident/Call codegen and need an exact
+                // canonical constructor symbol. Named-field variants lower via
+                // HExpr::NamedVariantConstruct instead.
+                if variant.field_names.is_none() {
+                    record_variant_ctor_origin(ctx, variant.name,
+                        variant_ctor_name(name, variant.name))
                 }
             }
 

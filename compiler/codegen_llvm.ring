@@ -191,44 +191,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_find", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_flat_map", [ptr, ptr], ptr)
 
-    // Map
-    get_or_declare_runtime_fn(ctx, "ring_map_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_get", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_set", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_has", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_delete", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_keys", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_values", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_entries", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_len", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_is_empty", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_for_each", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_fold", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_filter", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_any", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_map_values", [ptr, ptr], ptr)
-
-    // Map<Int>
-    get_or_declare_runtime_fn(ctx, "ring_map_int_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_get", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_get_opt", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_set", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_has", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_delete", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_keys", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_values", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_entries", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_len", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_is_empty", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_for_each", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_clone", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_from", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_clear", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_fold", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_filter", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_any", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_map_int_map_values", [ptr, ptr], ptr)
-
     // Set
     get_or_declare_runtime_fn(ctx, "ring_set_new", [], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_add", [ptr, ptr], ptr)
@@ -287,10 +249,8 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_path_basename", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_path_extname", [ptr], ptr)
 
-    // Collection clone/from (B-152 P2: ring_list_clone removed — now a Ring function)
-    get_or_declare_runtime_fn(ctx, "ring_map_clone", [ptr], ptr)
+    // Collection clone/from (B-152 P2/P3: List/Map are Ring functions)
     get_or_declare_runtime_fn(ctx, "ring_set_clone", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_map_from", [ptr], ptr)
 
     // Parse
     get_or_declare_runtime_fn(ctx, "ring_parse_int", [ptr], ptr)
@@ -326,9 +286,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_shift", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_clear", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_extend", [ptr, ptr], ptr)
-
-    // Map (additional)
-    get_or_declare_runtime_fn(ctx, "ring_map_clear", [ptr], ptr)
 
     // Misc
     get_or_declare_runtime_fn(ctx, "ring_assert", [i64, ptr], ptr)
@@ -375,7 +332,7 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
             HDecl::Fn { name, params, effects, trait_bounds, body, .. } => {
                 forward_declare_fn(ctx, name, params, effects, trait_bounds, prefix, some(body))
             },
-            HDecl::Impl { target_type, methods, .. } => {
+            HDecl::Impl { target_type, trait_name, methods, .. } => {
                 for method in methods {
                     match method {
                         HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, body: mb, .. } => {
@@ -386,6 +343,27 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                         },
                         _ => {},
                     }
+                }
+                // Pre-declare the impl trait dict's build function so a lazy
+                // getter emitted by an earlier use site can call the real
+                // builder regardless of declaration order.  The C backend
+                // enforces the same invariant through CCtx.dict_build_fns.
+                match trait_name {
+                    some(tn) => {
+                        let dict_name = trait_dict_name(target_type, tn)
+                        let has_methods = match ctx.trait_method_order.get(tn) {
+                            some(order) => order.len() > 0,
+                            none => methods.len() > 0,
+                        }
+                        let build_fn_name = "ring_dict_build_${dict_name}"
+                        if has_methods && ctx.functions.get(build_fn_name).is_none() {
+                            let build_fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+                            let build_fn = LLVMAddFunction(ctx.module, build_fn_name, build_fn_ty)
+                            ctx.functions.insert(build_fn_name, build_fn)
+                            ctx.fn_types.insert(build_fn_name, build_fn_ty)
+                        }
+                    },
+                    none => {},
                 }
             },
             HDecl::Struct { name, fields, .. } => {
@@ -677,8 +655,8 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
     ctx.fn_original_param_types.insert(mangled, orig_types)
 
     // Dedup: skip if already declared (multi-module imports can re-declare).
-    // Map.insert drops old value, but LLVMValueRef is extern — ring_drop would
-    // free a non-Ring pointer → heap corruption.
+    // ctx.functions is a pure-Ring Map whose values are raw LLVMValueRef extern
+    // handles; its borrowed ring_slot_replace path must never dup/drop them.
     if ctx.functions.get(mangled).is_some() {
         return
     }

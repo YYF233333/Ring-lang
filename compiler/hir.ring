@@ -26,6 +26,67 @@ pub fn is_module_item_identity(name: Str) -> Bool {
     name.index_of("$$_").is_some()
 }
 
+// Compiler-synthesised definitions live below an unspellable module prefix.
+// Resolver path segments come only from a filesystem basename after `/` and
+// `\` have been split away, or from a legal use/inline-module identifier.
+// Therefore no segment can contain `/`; module_prefix joins segments only with
+// `$`, so no source declaration identity can begin with this sentinel.
+fn compiler_intrinsic_identity(namespace: Str, source_name: Str) -> Str {
+    module_item_identity("/$compiler_intrinsic$${namespace}", source_name)
+}
+
+// Synthetic Map indexing must bypass every user-spellable binding while the
+// raw helper remains available as an ordinary prelude API.  Checker and infer
+// share both spellings here so neither phase can drift from the other.
+pub fn map_index_helper_source_name() -> Str {
+    "map_get_panic"
+}
+
+pub fn map_index_helper_identity() -> Str {
+    compiler_intrinsic_identity("prelude$map", map_index_helper_source_name())
+}
+
+// The raw slot bridge spellings remain callable prelude APIs, so their
+// ownership contracts must not attach to those user-spellable names.  The
+// checker records these unspellable identities on the exact prelude DefIds;
+// RC and both native backends consume only the identities below.
+pub fn slot_read_source_name() -> Str {
+    "ring_slot_read"
+}
+
+pub fn slot_take_source_name() -> Str {
+    "ring_slot_take"
+}
+
+pub fn slot_write_source_name() -> Str {
+    "ring_slot_write"
+}
+
+fn slot_bridge_identity(source_name: Str) -> Str {
+    compiler_intrinsic_identity("prelude$slot", source_name)
+}
+
+pub fn slot_read_identity() -> Str {
+    slot_bridge_identity(slot_read_source_name())
+}
+
+pub fn slot_take_identity() -> Str {
+    slot_bridge_identity(slot_take_source_name())
+}
+
+pub fn slot_write_identity() -> Str {
+    slot_bridge_identity(slot_write_source_name())
+}
+
+// Convert only a proven prelude slot identity back to its C ABI symbol.
+// Ordinary Ring bindings with the same source spelling intentionally miss.
+pub fn slot_bridge_runtime_name(identity: Str) -> Str? {
+    if identity == slot_read_identity() { return some(slot_read_source_name()) }
+    if identity == slot_take_identity() { return some(slot_take_source_name()) }
+    if identity == slot_write_identity() { return some(slot_write_source_name()) }
+    none
+}
+
 pub struct HParam {
     pub name: Str,
     pub ty: Type,
@@ -321,6 +382,30 @@ pub struct HProgram {
 // Codegen naming conventions
 pub fn variant_ctor_name(enum_name: Str, variant_name: Str) -> Str {
     "${enum_name}_${variant_name}"
+}
+
+// A fieldless user enum variant is represented by inference as an Ident whose
+// resolved_name comes from exact DefId-keyed constructor provenance. Unlike an
+// ordinary Ident read, evaluating that node CALLS the constructor and therefore
+// produces a fresh owned enum box. Keep this cross-stage ownership fact in one
+// place so Perceus and the post-RC verifier cannot disagree.
+pub fn is_nullary_variant_ctor_ident(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Ident { resolved_name, ty, .. } => match resolved_name {
+            some(rn) => match ty {
+                Type::EnumType { name, .. } =>
+                    // Option::none is the sole fieldless constructor whose
+                    // codegen result is a borrowed never-drop runtime singleton
+                    // rather than a fresh enum allocation. It still carries
+                    // resolved_name so codegen can select ring_Option_none.
+                    rn != variant_ctor_name(BUILTIN_OPTION, "none") &&
+                    rn.starts_with(variant_ctor_name(name, "")),
+                _ => false,
+            },
+            none => false,
+        },
+        _ => false,
+    }
 }
 
 pub fn trait_dict_name(type_name: Str, trait_name: Str) -> Str {

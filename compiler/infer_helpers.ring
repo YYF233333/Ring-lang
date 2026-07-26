@@ -4,7 +4,7 @@ use types::{Type, Effect, EffectRow,
     type_to_builtin_name}
 use ast::{Expr, Pattern, Span, NamedPatternField}
 use hir::{HExpr, HStmt, TraitDispatch, DictRef,
-    variant_ctor_name, trait_dict_name, trait_bound_param_name,
+    trait_dict_name, trait_bound_param_name,
     hexpr_type, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
 use codes::{E0201, E0205, E0208, E0303, E0307, E0308, E0504, E0705}
@@ -12,7 +12,8 @@ use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme,
     apply_subst, has_impl, lookup_variant}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry,
-    type_error, unify_at, build_scheme_var_map, resolve_relative_qualifier}
+    type_error, unify_at, build_scheme_var_map, resolve_relative_qualifier,
+    variant_ctor_origin}
 
 
 pub struct MethodLookupResult {
@@ -305,7 +306,7 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                     let t = ctx.env.instantiate(ms)
                     let actual_name = exact_value_origin(ctx, qualified_name, ms)
                     return InferResult {
-                        hexpr: HExpr::Ident { name: actual_name, resolved_name: none, def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                        hexpr: HExpr::Ident { name: actual_name, resolved_name: variant_ctor_origin(ctx, ms), def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                         subst: subst, effects: EMPTY_ROW
                     }
                 },
@@ -321,7 +322,7 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                                 let t = ctx.env.instantiate(fs)
                                 let actual_name = exact_value_origin(ctx, full_qualified, fs)
                                 return InferResult {
-                                    hexpr: HExpr::Ident { name: actual_name, resolved_name: none, def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                                    hexpr: HExpr::Ident { name: actual_name, resolved_name: variant_ctor_origin(ctx, fs), def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                                     subst: subst, effects: EMPTY_ROW
                                 }
                             },
@@ -374,8 +375,6 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                 },
                 none => {}
             }
-            let mut resolved_name: Str? = none
-            let mut enum_name: Str? = none
             // Check if this name was imported via use alias (e.g. use super::value)
             // If so, use the qualified name in HIR for correct codegen
             let actual_name = exact_value_origin(ctx, name, s)
@@ -383,9 +382,7 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                 some(q) => {
                     match ctx.env.types.enums.get(q) {
                         some(enum_def) => {
-                            if enum_def.variant_index.contains_key(name) {
-                                enum_name = some(enum_def.name)
-                            } else {
+                            if !enum_def.variant_index.contains_key(name) {
                                 let qualifier_display = nominal_display_name(q)
                                 let _ = type_error(ctx.sink, E0201, "'${qualifier_display}' has no variant '${name}'", span,
                                     DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
@@ -398,14 +395,10 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                         }
                     }
                 },
-                none => { enum_name = ctx.env.types.variant_to_enum.get(name) }
-            }
-            match enum_name {
-                some(en) => { resolved_name = some(variant_ctor_name(en, name)) },
                 none => {}
             }
             InferResult {
-                hexpr: HExpr::Ident { name: actual_name, resolved_name: resolved_name, def_id: s.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                hexpr: HExpr::Ident { name: actual_name, resolved_name: variant_ctor_origin(ctx, s), def_id: s.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                 subst: subst, effects: EMPTY_ROW
             }
         }

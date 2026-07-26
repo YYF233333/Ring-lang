@@ -98,6 +98,10 @@ LLVM_ONLY_SKIP = {
 # migration waves as the C backend gains coverage.
 C_SKIP: set = set()
 
+# Root-level positives that import sibling files and therefore use the
+# compiler's project-mode --out-dir contract.
+PROJECT_MODE_CASES = {"$compiler_intrinsic$prelude$slot.ring"}
+
 # B-163 step 8: the C backend supports project/module mode (generate_c_project).
 C_BACKEND_SUPPORTS_MODULES = True
 
@@ -475,7 +479,9 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             expected = norm(expected_file.read_text(encoding="utf-8"))
 
             ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file),
-                                                  tmpdir, backend=backend)
+                                                  tmpdir,
+                                                  is_module=name in PROJECT_MODE_CASES,
+                                                  backend=backend)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, str(rel), detail))
                 continue
@@ -732,7 +738,8 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 collector.add(TestResult(TestResult.SKIP, suite, rel, "C_SKIP"))
                 continue
 
-            diff_one(rel, ring_file, tmpdir)
+            diff_one(rel, ring_file, tmpdir,
+                     is_module=name in PROJECT_MODE_CASES)
 
         # --- Module positive cases ---
         for main_file in discover_module_positive(MODULES_DIR):

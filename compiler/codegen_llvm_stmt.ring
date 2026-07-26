@@ -3,7 +3,7 @@ use ast::{Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type,
     is_fresh_owned_bool_value}
 use codegen_llvm_ctx::{LlvmCtx, HandleCleanup, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca,
-    LLVM_INT_EQ, LLVM_INT_SLT, LLVM_INT_SLE}
+    llvm_mangle_method, LLVM_INT_EQ, LLVM_INT_SLT, LLVM_INT_SLE}
 
 // Re-declare LLVM types and functions to avoid ESM import issues
 extern type LLVMTypeRef
@@ -540,17 +540,17 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
                 collection_converted = true
                 LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "s2l"))
             } else { if name == "Map" && type_params.len() == 2 {
-                // Map for-in: convert to List of (key, value) entry pairs via
-                // ring_map_entries / ring_map_int_entries (converts to entry-pair
-                // list for iteration).  The fresh entries list is dropped
-                // at loop exit (same pattern as Set conversion above).
-                let is_int_key = match type_params[0] {
-                    Type::IntType => true,
-                    _ => false,
+                // Map for-in uses the pure Ring Map.entries impl.  The fresh
+                // entry list is dropped at loop exit like Set conversion.
+                let mangled = llvm_mangle_method("Map", "entries")
+                let conv_fn = match ctx.functions.get(mangled) {
+                    some(f) => f,
+                    none => panic("LLVM codegen: Map.entries function not found"),
                 }
-                let conv_name = if is_int_key { "ring_map_int_entries" } else { "ring_map_entries" }
-                let conv_fn = get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type)
-                let conv_ty = get_rt_fn_type(ctx, conv_name)
+                let conv_ty = match ctx.fn_types.get(mangled) {
+                    some(t) => t,
+                    none => panic("LLVM codegen: Map.entries function type not found"),
+                }
                 collection_converted = true
                 LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "m2l"))
             } else {

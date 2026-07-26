@@ -765,10 +765,19 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     // wrapped below in the memoised singleton getter ring_dict_init_<dictname>
     // (one construction per process; use sites borrow the singleton).
     let build_fn_name = "ring_dict_build_${dict_name}"
-    let build_fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
-    let build_fn = LLVMAddFunction(ctx.module, build_fn_name, build_fn_ty)
-    ctx.functions.insert(build_fn_name, build_fn)
-    ctx.fn_types.insert(build_fn_name, build_fn_ty)
+    let build_fn_ty = match ctx.fn_types.get(build_fn_name) {
+        some(t) => t,
+        none => LLVMFunctionType(ctx.ptr_type, [], 0),
+    }
+    let build_fn = match ctx.functions.get(build_fn_name) {
+        some(f) => f,
+        none => {
+            let f = LLVMAddFunction(ctx.module, build_fn_name, build_fn_ty)
+            ctx.functions.insert(build_fn_name, f)
+            ctx.fn_types.insert(build_fn_name, build_fn_ty)
+            f
+        },
+    }
 
     let saved_fn = ctx.current_fn
     let saved_bb = LLVMGetInsertBlock(ctx.builder)

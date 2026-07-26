@@ -1,20 +1,16 @@
 // B-103 → B-104 D1 rule ② regression: RECEIVER-RETURNING MUTATORS must not be
 // dropped or cloned.
 //
-// At the LLVM ABI, ring_list_push / ring_list_set / ring_map_set / ring_map_delete
-// / ring_set_add / ring_set_delete / ring_list_clear / ring_map_clear /
-// ring_list_extend all `return <receiver>;` VERBATIM (no dup) — even though the
-// Ring-level method type is Unit.  Binding such a call (`let r = xs.push(4)`)
-// therefore binds the LIVE CONTAINER; scope-end-dropping r would deep-free the
-// caller's container → native UAF / heap corruption.
+// List/Set mutators still cross low-level runtime bridges that may return the
+// receiver ABI value, while pure-Ring Map mutators update slot buffers through
+// ring_slot_write/ring_slot_replace/ring_slot_drop. Their source-level result is
+// uniformly Unit. Binding such a call (`let r = xs.push(4)`) must therefore
+// create no RC ownership; otherwise a raw receiver could be scope-end-dropped
+// and deep-free the caller's container.
 //
-// Mechanism history: B-103 guarded this by listing the 9 mutator field names in
-// is_borrow_returning_call (the binding was Clone-wrapped, the dup balanced the
-// drop).  B-104 D1 rule ② replaced the name grain with the TYPE-level Unit
-// exclusion: a Unit-typed value is never Clone'd, never dropped, never owned,
-// never materialised (is_rc_excluded_type) — the binding holds the raw receiver
-// pointer and no drop is ever emitted for it.  Same UAF protection, no churn,
-// and user methods sharing the names are no longer misclassified.
+// B-104 D1 rule ② enforces this at the TYPE level: a Unit-typed value is never
+// cloned, dropped, owned, or materialised (is_rc_excluded_type). This covers
+// both pure-Ring methods and bridge calls without classifying method names.
 //
 // Every helper binds a mutator result, lets it go out of scope, and the caller
 // keeps using the container afterwards.  Output must match the .expected
@@ -65,8 +61,7 @@ fn bind_set_remove(mut s: Set<Str>) -> Int {
     s.len()
 }
 
-// Mutator call in fn-TAIL position (escape) — the result is Clone-wrapped
-// (owner-bearing) and the caller discards it; must not corrupt the receiver.
+// A mutator in fn-tail position also remains Unit and RC-excluded.
 fn tail_push(mut xs: List<Str>) {
     xs.push("t")
 }

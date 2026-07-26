@@ -721,7 +721,7 @@ fn c_declare_fn(mut ctx: CCtx, mangled: Str, effect_key: Str, params: List<HPara
     if ctx.functions.contains_key(mangled) { return }
 
     // Symbol-collision rename: a Ring fn whose mangled name IS a runtime
-    // symbol (std map_new → ring_map_new C++ shim) gets a __ring suffix.
+    // symbol gets a __ring suffix.
     // All call sites resolve through CFnInfo.c_name, so this is transparent;
     // direct calls to such names route through extern_fn_to_runtime first
     // (runtime shim), matching the LLVM backend's behaviour.

@@ -7,6 +7,7 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     make_option_type, make_map_type}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef, ImplEntry, mono, add_impl}
+use hir::{variant_ctor_name}
 
 // ============================================================
 // Struct for open_row return value
@@ -249,6 +250,19 @@ fn register_option(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    // `some` is a normal payload constructor. Preserve exact constructor
+    // identity through its DefId so call lowering and sink classification do
+    // not depend on a same-spelled local/global.
+    match env.lookup("some") {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => {
+                env.types.variant_ctor_origins.insert(def_id,
+                    variant_ctor_name(BUILTIN_OPTION, "some"))
+            },
+            none => {}
+        },
+        none => {}
+    }
 
     // none: Option<T> (not a function, just a polymorphic value)
     let none_t_id = env.fresh_var_id()
@@ -259,6 +273,20 @@ fn register_option(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    // `none` still needs its exact canonical identity so both backends select
+    // the runtime singleton symbol. Ownership freshness is classified
+    // separately: is_nullary_variant_ctor_ident excludes this one borrowed
+    // built-in constructor result.
+    match env.lookup("none") {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => {
+                env.types.variant_ctor_origins.insert(def_id,
+                    variant_ctor_name(BUILTIN_OPTION, "none"))
+            },
+            none => {}
+        },
+        none => {}
+    }
 
     // Option methods: is_some, is_none, unwrap_or
     let mut methods = get_or_create_methods(env, BUILTIN_OPTION)

@@ -17,8 +17,8 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 ## 技术栈
 
 - **编译器**：Ring 自举。ring.exe 自编译（dist-llvm/ .o 冻结产出 + ring_runtime.cpp → clang 链接）；dist/（冻结 JS 产出）= stage 0 信任锚，但语言快照停在 `0bd7822`（2026-06-27）——只能编该代源码，回退到 HEAD 需链式重放（B-163 Phase 0 实测，2026-07-10）
-- **Runtime**：ring_runtime.cpp（~3600 行 C++ STL wrapper）→ RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 design.md §7.12
-- **双后端 codegen**：LLVM 后端（codegen_llvm*.ring，LLVM-C 22 API）仍是 native 默认与差分 oracle；C 后端（codegen_c*.ring）已完成 B-163 Phase 1 step 8，支持单文件及 project/module 模式，发射 C11 后调用 clang
+- **Runtime**：ring_runtime.cpp（~3200 行 C++ STL wrapper）→ RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 design.md §7.12
+- **双后端 codegen**：B-163 Phase 1 steps 1–9 已完成。LLVM 后端（codegen_llvm*.ring，LLVM-C 22 API）在 Phase 2 前仍是 native 默认与差分 oracle；C 后端（codegen_c*.ring）已支持单文件、project/module 与 self-host，发射 C11 后调用 clang
 - **测试**：Python test runner（`tests/run_tests.py`），零外部依赖
 - **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
 - **历史**：TS 原始实现归档于 git tag `ts-compiler-final`；JS codegen 后端归档于 `5df6c99`（B-100 Phase 2）
@@ -29,9 +29,9 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 Ring-lang/
 ├── compiler/          编译器源码（*.ring）+ dist/（冻结的 JS 产出，stage 0 回退）+ dist-llvm/（.o 产出）
 │   ├── codegen_llvm*.ring LLVM native 后端（5 个模块，当前默认/oracle）
-│   ├── codegen_c*.ring    C11 源码后端（B-163 Phase 1，已支持 project/module）
+│   ├── codegen_c*.ring    C11 源码后端（B-163 Phase 1 ✅，支持 project/module/self-host）
 │   └── llvm_ffi.ring      LLVM-C API 声明（91 extern fn + 13 extern type）
-├── ring_runtime.cpp   LLVM native backend 的 C ABI runtime（~2200 行 C++ STL wrapper）
+├── ring_runtime.cpp   双后端共享的 C ABI runtime（~3200 行 C++ STL wrapper）
 ├── std/               标准库（io/fs/path/process/str/num/list/map/set/result/iterator）
 ├── tests/             E2E 测试用例 + 测试运行器
 ├── examples/          示例程序
@@ -42,9 +42,11 @@ Ring-lang/
 ## 编译器管线
 
 ```
-源码 (.ring) → Lexer → Parser → AST → Checker (HM + effects) → HIR → Codegen LLVM → .o → native binary
-                                  ↓ (errors)
-                           DiagnosticSink → format_human / format_llm
+源码 (.ring) → Lexer → Parser → AST → Checker (HM + effects) → HIR → Perceus RC
+                                  ↓ (errors)                        ├→ Codegen C → .c → clang → .o → native binary
+                           DiagnosticSink                           └→ Codegen LLVM → .o → native binary
+                                  ↓
+                         format_human / format_llm
 ```
 
 - **AST**：忠实反映源码结构，所有节点带 Span
@@ -77,9 +79,10 @@ Ring-lang/
 
 | 类型 | 身份 | 迁移难度 | 已完成 |
 |------|------|---------|--------|
-| StringBuilder | `pub extern type`（structs map） | 简单（P0 已验证） | ✅ P0 |
-| List | `pub extern type`（structs map） | 中等 | ✅ P2 |
-| Map / Set | `pub extern type`（structs map） | 中等（同 List 模式） | 待做 |
+| StringBuilder | `pub struct`（原 `pub extern type`） | 简单（P0 已验证） | ✅ P0 |
+| List | `pub struct`（原 `pub extern type`） | 中等 | ✅ P2 |
+| Map | `pub struct`（原 `pub extern type`） | 中等（同 List 模式） | ✅ P3 |
+| Set | `pub extern type`（structs map） | 中等（复用 Map） | 待做 P4 |
 | Str | `Type::StrType`（Type 枚举变体） | 困难（需改类型系统 26 处） | P1 Step 1 ✅，Step 2 排最后 |
 
 - **extern type**（List/Map/Set/StringBuilder）：走 structs map 的 `Type::StructType`，改为 `pub struct` 后 checker/codegen 自然走通
@@ -94,6 +97,7 @@ C++ 端实现 slot 级操作，Ring 端声明为 `extern fn`，codegen 自动声
 extern fn ring_slot_read<T>(buf: Ptr<T>, idx: Int) -> T   // peek + dup
 extern fn ring_slot_take<T>(buf: Ptr<T>, idx: Int) -> T   // move out
 extern fn ring_slot_write<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
+extern fn ring_slot_replace<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
 extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 ```
 
@@ -108,8 +112,9 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 |------|------|------|
 | `ring_slot_read` | peek + `ring_dup` | get/first/last/concat/clone（共享所有权） |
 | `ring_slot_take` | move out，slot 置 null | pop/shift/clear/drop（转移所有权） |
-| `ring_slot_write` | 直接写入 | push/set/构造（接管所有权） |
-| `ring_slot_drop` | take + `ring_drop` | set 替换旧值 / clear / Drop impl |
+| `ring_slot_write` | 直接写入 | 新 slot、push、构造（接管所有权；不得用于替换已有值） |
+| `ring_slot_replace` | dup 新值 → store → drop 旧值 | List.set / Map equal-key overwrite；借用式替换且 self-assignment 安全 |
+| `ring_slot_drop` | take + `ring_drop` | clear / remove / Drop impl（不得用作 replace 的前半步） |
 
 ### 已知陷阱
 
@@ -117,9 +122,10 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 2. **`let mut` effect 泄漏**：impl 方法中 `let mut i = 0; while i < n { ... i = i + 1 }` 会导致 `mut` effect 泄漏到方法签名。解法：用 `for i in 0..n` 代替 while 循环（range iterator 不泄漏 mut）
 3. **Effect 暴露**：C runtime 函数没有 effect 签名，Ring 方法有。迁移后调用者可能因新暴露的 effect 而编译失败。需检查 HOF 方法（map/filter/fold 等）的 effect 传播
 4. **Typeid 一致性**：用户定义的 struct 会被分配 user typeid（≥64），但 C runtime 的 drop/dup 使用固定 typeid（如 RING_TYPEID_LIST=4）。需在 codegen 中强制分配匹配的 typeid（`get_or_assign_typeid` 特殊化）
-5. **C++ 函数保留为 shim**：旧编译器的 method_to_runtime 仍会引用 ring_list_* 等 C++ 函数，链接时需要符号存在。RIIR 后保留 C++ 函数不删除，作为 bootstrap shim
+5. **C++ bootstrap shim 生命周期**：只有当前跟踪的 bootstrap anchor 仍引用旧 runtime 符号时才保留 compatibility shim；新源码完成 fixed point、跟踪 anchor 不再引用后必须删除。B-152 P3 的 `ring_map_*` shim 已在 B-163 step 9 按此规则全部删除
 6. **sort_by 委托 C runtime**：原地排序用 Ring 实现效率低（无 break/continue），可委托 C 端的 `ring_list_sort_bridge` 桥接
 7. **Str 是内建类型**：`resolve_named_type("Str")` 在 `infer_ctx.ring:L1134` 短路返回 `Type::StrType`，绕过 structs map。P1 Step 2 需要删除此短路 + 改 26 处 StrType 引用
+8. **无字段 enum ctor 的所有权**：HIR 中它仍表示为 `Ident`，但 codegen 会分配新的 enum box，Perceus / move checker / RC verifier 必须按精确 ctor `DefId` 把它视为 fresh；不能按叶子拼写猜测（普通变量、const、函数和跨模块同名 shadow 都合法）。唯一例外是借用式内建 singleton `Option_none`
 
 ## 测试策略
 
@@ -149,7 +155,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 - 不支持 `dyn Trait` 动态分发、GATs
 - `pub` 可见性在单文件模式不强制（向后兼容）
 - 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证
-- `Map` key 类型限于 Str（native 后端 std::map<std::string>）；泛型 key 需 Hash trait（追踪于 B-107；List 方法已全部通过 trait dict dispatch）
+- `Map<K,V>` 已要求 `K: Hash + Eq`，支持 Str/Int/Bool 及手写 `Hash + Eq` impl 的用户类型（已有 struct 回归）；`derive Hash` 仍追踪于 B-107
 
 ### 语法
 
@@ -159,7 +165,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 ### 基础设施
 
-- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows（check + test 两阶段；bootstrap 因 B-155 IR 非确定性暂禁用）。Linux CI 待后续
+- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows（check + test 两阶段）。C self-host 文本固定点已干净且确定，但 Phase 2 前 LLVM 仍是主 anchor，并残留间歇执行信号，因此 bootstrap 保持禁用；Phase 2 切换 dist-c 后再恢复。Linux CI 待后续
 - 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
 - Checker 多错误恢复是 declaration 级（同一函数内停于首错）
 - LSP 暂不可用（TS 实现未移植）
@@ -167,9 +173,9 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 ## 路线图
 
-**当前**：**B-100 JS 退役完成 ✅**——Phase 1 ✅（P1.1 覆盖矩阵 → P1.2 gap 修复 → P1.3 对抗 review → P1.4 全部通过）+ **Phase 2 ✅**（golden .expected 快照建立 210+ 文件 + JS codegen 删除 `5df6c99` + 文档更新）。里程碑：B-099 ✅ B-089 ✅ B-104 ✅ B-080 ✅ B-122 ✅ B-138 ✅。测试状态以 `npm test` / `npm run test:llvm` 实跑为准，不在此记录具体计数。
+**当前**：**B-163 C 后端迁移 Phase 1 ✅**——steps 1–9 完成，C 单文件/project/self-host、C 文本固定点与 LLVM anchor 固定点均已闭合；**Phase 2 已排队但尚未开始**，在 parity 认证后才退役 LLVM、切换 dist-c 并恢复 CI bootstrap。测试状态以 Python runner 实跑为准，不在此记录具体计数。
 
-**后续**：B-151 CI ✅ → B-125 unsafe/Ptr<T> ✅ → B-002p1 精简 Drop ✅ → **B-152 RIIR std** → B-002p2 unwind 补全；后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
+**后续**：先完成 B-163 Phase 2；B-152 RIIR std 的剩余 P4 Set / P1 Step 2 Str / P5 在整个 B-163 完成前保持暂停，之后恢复 → B-002p2 unwind 补全；再后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
 
 **基础设施**：B-151 CI 重设计 ✅（Python runner + GitHub Actions Windows CI，零 Node 依赖）
 

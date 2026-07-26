@@ -5,7 +5,8 @@
 // RC semantics:
 //   - ring_slot_read = peek + dup (list keeps ref, caller gets ref)
 //   - ring_slot_take = move out (slot set to null, caller owns)
-//   - ring_slot_write = store (caller's ref transferred to slot)
+//   - ring_slot_write = direct store (arg 2 transfers ownership to the slot)
+//   - ring_slot_replace = borrowed input (dup before store, then drop old)
 //   - ring_slot_drop = take + ring_drop (release element)
 
 pub struct List<T> {
@@ -20,6 +21,7 @@ extern fn ring_slot_dealloc<T>(buf: Ptr<T>, count: Int) -> Unit
 extern fn ring_slot_read<T>(buf: Ptr<T>, idx: Int) -> T
 extern fn ring_slot_take<T>(buf: Ptr<T>, idx: Int) -> T
 extern fn ring_slot_write<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
+extern fn ring_slot_replace<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
 extern fn ring_slot_swap<T>(buf: Ptr<T>, i: Int, j: Int) -> Unit
 extern fn ring_slot_move<T>(src: Ptr<T>, src_off: Int, dst: Ptr<T>, dst_off: Int, count: Int) -> Unit
 extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit
@@ -198,9 +200,9 @@ impl<T> List {
         if index < 0 || index >= self.len {
             panic("list index out of bounds")
         }
-        // Drop old value, store new
-        ring_slot_drop(self.buf, index)
-        ring_slot_write(self.buf, index, value)
+        // Borrowed input: duplicate before releasing the old slot so
+        // self-assignment (`xs.set(i, xs[i])`) remains valid.
+        ring_slot_replace(self.buf, index, value)
     }
 
     // Higher-order methods

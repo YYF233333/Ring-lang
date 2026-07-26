@@ -9,7 +9,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     BUILTIN_RANGE,
     effect_op_slot,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value,
-    is_extern_handle_type}
+    is_extern_handle_type, slot_bridge_runtime_name}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall, HandleCleanup,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -1489,6 +1489,8 @@ pub fn emit_memoised_const_body(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled:
 
 // B-104 D4: synthesise (once) the memoised getter `ring_dict_init_<name>` for a
 // static dict with no impl-generated init function:
+//   * a forward-declared impl dict builder (registered before body emission):
+//     call the builder, independent of declaration order;
 //   * a dict_lower wrapped INSTANCE (static_dict_defs entry with inner != []):
 //     built via build_wrapped_dict with the DICT_STATIC typeid;
 //   * a builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq fallback):
@@ -1532,21 +1534,33 @@ fn get_or_create_static_dict_getter(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef
     discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
 
     LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
-    let inst_def = match ctx.static_dict_defs.get(name) {
-        some(def) => if def.inner.len() > 0 { some(def) } else { none },
-        none => none,
-    }
-    let value = match inst_def {
-        some(def) => {
-            let mut inner_refs: List<DictRef> = []
-            for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
-            build_wrapped_dict_typed(ctx, def.base_dict, def.trait_name, inner_refs, RING_TYPEID_DICT_STATIC)
+    let build_fn_name = "ring_dict_build_${name}"
+    let value = match ctx.functions.get(build_fn_name) {
+        some(build_fn) => {
+            let build_fn_ty = match ctx.fn_types.get(build_fn_name) {
+                some(t) => t,
+                none => LLVMFunctionType(ctx.ptr_type, [], 0),
+            }
+            LLVMBuildCall2(ctx.builder, build_fn_ty, build_fn, [], fresh_name(ctx, "db"))
         },
         none => {
-            let name_str = gen_str_lit(ctx, name)
-            let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
-            let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
-            LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
+            let inst_def = match ctx.static_dict_defs.get(name) {
+                some(def) => if def.inner.len() > 0 { some(def) } else { none },
+                none => none,
+            }
+            match inst_def {
+                some(def) => {
+                    let mut inner_refs: List<DictRef> = []
+                    for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
+                    build_wrapped_dict_typed(ctx, def.base_dict, def.trait_name, inner_refs, RING_TYPEID_DICT_STATIC)
+                },
+                none => {
+                    let name_str = gen_str_lit(ctx, name)
+                    let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
+                    let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
+                    LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
+                },
+            }
         },
     }
     discard(LLVMBuildStore(ctx.builder, value, g))
@@ -2429,12 +2443,17 @@ fn is_void_runtime_fn(name: Str) -> Bool {
 
 // Map Ring extern fn names to C runtime names
 fn extern_fn_to_runtime(name: Str) -> Str? {
+    // Slot bridge calls arrive here only under their unspellable prelude
+    // identity.  Map that proven identity back to the raw C ABI symbol.
+    match slot_bridge_runtime_name(name) {
+        some(runtime_name) => { return some(runtime_name) },
+        none => {},
+    }
     if name == "print" { return some("ring_print") }
     if name == "panic" { return some("ring_panic") }
     if name == "eprintln" { return some("ring_eprintln") }
     if name == "exit" || name == "exit_process" { return some("ring_exit") }
     if name == "argv" { return some("ring_args") }
-    if name == "map_new" { return some("ring_map_new") }
     if name == "set_new" { return some("ring_set_new") }
     if name == "read_file" { return some("ring_read_file") }
     if name == "write_file" { return some("ring_write_file") }
@@ -2451,7 +2470,6 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "set_from" { return some("ring_set_from_list") }
     // B-152 P2: list_new removed — list() is now a Ring function.
     // gen_list_lit still calls ring_list_new directly via get_or_declare_runtime_fn.
-    if name == "map_from" { return some("ring_map_from") }
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
     if name == "set_int_new" { return some("ring_set_int_new") }
     if name == "set_int_from" { return some("ring_set_int_from_list") }
@@ -2492,17 +2510,13 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_map_has" { return true }
-    if name == "ring_map_len" { return true }
     if name == "ring_set_has" { return true }
     if name == "ring_set_len" { return true }
     if name == "ring_sb_len" { return true }
-    if name == "ring_map_is_empty" { return true }
     if name == "ring_set_int_has" { return true }
     if name == "ring_set_int_len" { return true }
     if name == "ring_set_is_empty" { return true }
     if name == "ring_set_int_is_empty" { return true }
-    if name == "ring_map_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2518,18 +2532,15 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     if name == "ring_str_eq" { return true }
     if name == "ring_str_lt" { return true }
     if name == "ring_list_is_empty" { return true }
-    if name == "ring_map_has" { return true }
     if name == "ring_set_has" { return true }
     if name == "ring_list_any" { return true }
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
     if name == "ring_set_int_has" { return true }
-    if name == "ring_map_is_empty" { return true }
     if name == "ring_set_is_empty" { return true }
     if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
-    if name == "ring_map_any" { return true }
     if name == "ring_set_any" { return true }
     if name == "ring_set_all" { return true }
     if name == "ring_set_int_any" { return true }
@@ -2836,26 +2847,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
     // B-152 P2: List methods are now pure Ring — no method_to_runtime entries.
     // All List method calls fall through to the Ring-compiled impl methods.
-    // NOTE: Map.clone / List.clone / Set.clone are compiler-internal (HExpr::Clone
-    // from Perceus RC), not user-callable methods — they are NOT in this table.
-    // B-152 P3: Map is now a Ring struct, but method calls still route through
-    // C++ bootstrap shims to avoid codegen dict-passing issues with trait-bounded
-    // impl blocks. The shims understand the new RingMapStruct layout.
-    if type_name == "Map" && method == "get" { return some("ring_map_get_opt") }
-    if type_name == "Map" && method == "insert" { return some("ring_map_set") }
-    if type_name == "Map" && method == "contains_key" { return some("ring_map_has") }
-    if type_name == "Map" && method == "keys" { return some("ring_map_keys") }
-    if type_name == "Map" && method == "values" { return some("ring_map_values") }
-    if type_name == "Map" && method == "entries" { return some("ring_map_entries") }
-    if type_name == "Map" && method == "len" { return some("ring_map_len") }
-    if type_name == "Map" && method == "remove" { return some("ring_map_delete") }
-    if type_name == "Map" && method == "is_empty" { return some("ring_map_is_empty") }
-    if type_name == "Map" && method == "for_each" { return some("ring_map_for_each") }
-    if type_name == "Map" && method == "clear" { return some("ring_map_clear") }
-    if type_name == "Map" && method == "fold" { return some("ring_map_fold") }
-    if type_name == "Map" && method == "filter" { return some("ring_map_filter") }
-    if type_name == "Map" && method == "any" { return some("ring_map_any") }
-    if type_name == "Map" && method == "map_values" { return some("ring_map_map_values") }
+    // B-152 P3 closure: Map methods are pure Ring impl methods.
     // Set methods
     if type_name == "Set" && method == "add" { return some("ring_set_add") }
     if type_name == "Set" && method == "insert" { return some("ring_set_add") }
@@ -4570,10 +4562,7 @@ fn gen_index_expr(mut ctx: LlvmCtx, receiver: HExpr, index: HExpr, ty: Type) -> 
             LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], fresh_name(ctx, "sg"))
         } else {
             if type_name == "Map" && is_builtin_collection(recv_type) {
-                // B-152 P3: Map subscript — unified, always calls ring_map_get
-                let get_fn = get_or_declare_runtime_fn(ctx, "ring_map_get", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
-                let get_ty = get_rt_fn_type(ctx, "ring_map_get")
-                LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "mg"))
+                panic("LLVM codegen: Map IndexExpr must be lowered to map_get_panic")
             } else {
                 // Fallback: try list_get
                 let raw_idx = unbox_int(ctx, idx_val)
