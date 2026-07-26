@@ -384,6 +384,30 @@ pub fn variant_ctor_name(enum_name: Str, variant_name: Str) -> Str {
     "${enum_name}_${variant_name}"
 }
 
+// A fieldless user enum variant is represented by inference as an Ident whose
+// resolved_name comes from exact DefId-keyed constructor provenance. Unlike an
+// ordinary Ident read, evaluating that node CALLS the constructor and therefore
+// produces a fresh owned enum box. Keep this cross-stage ownership fact in one
+// place so Perceus and the post-RC verifier cannot disagree.
+pub fn is_nullary_variant_ctor_ident(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Ident { resolved_name, ty, .. } => match resolved_name {
+            some(rn) => match ty {
+                Type::EnumType { name, .. } =>
+                    // Option::none is the sole fieldless constructor whose
+                    // codegen result is a borrowed never-drop runtime singleton
+                    // rather than a fresh enum allocation. It still carries
+                    // resolved_name so codegen can select ring_Option_none.
+                    rn != variant_ctor_name(BUILTIN_OPTION, "none") &&
+                    rn.starts_with(variant_ctor_name(name, "")),
+                _ => false,
+            },
+            none => false,
+        },
+        _ => false,
+    }
+}
+
 pub fn trait_dict_name(type_name: Str, trait_name: Str) -> Str {
     let safe_type = if type_name.contains("::") { type_name.replace("::", "$") } else { type_name }
     let safe_trait = if trait_name.contains("::") { trait_name.replace("::", "$") } else { trait_name }

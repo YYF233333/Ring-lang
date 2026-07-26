@@ -5,14 +5,15 @@ use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
     compare_by_first, is_user_drop_type, hexpr_type,
     map_index_helper_source_name, map_index_helper_identity,
     slot_read_source_name, slot_take_source_name, slot_write_source_name,
-    slot_read_identity, slot_take_identity, slot_write_identity}
+    slot_read_identity, slot_take_identity, slot_write_identity,
+    is_nullary_variant_ctor_ident}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_module_identity, check_prelude_decl}
 use dict_lower::{lower_dicts}
 use andor_lower::{lower_andor}
-use infer_ctx::{InferCtx, type_error, record_value_origin}
+use infer_ctx::{InferCtx, type_error, record_value_origin, record_variant_ctor_origin}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
 use codes::{E0702, E0703, E0705, E0707, E0801}
@@ -410,6 +411,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                         some(origin) => { record_value_origin(ctx, local_name, origin) },
                                         none => {}
                                     }
+                                    match mod_.variant_ctor_origins.get(item.name) {
+                                        some(origin) => { record_variant_ctor_origin(ctx, local_name, origin) },
+                                        none => {}
+                                    }
                                     match mod_.fn_mut_params.get(item.name) {
                                         some(flags) => { ctx.fn_mut_params.insert(local_name, flags) },
                                         none => {}
@@ -432,6 +437,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                                         ctx.env.types.variant_to_enum.insert(v.name, edef.name)
                                                         match mod_.value_origins.get(v.name) {
                                                             some(origin) => { record_value_origin(ctx, v.name, origin) },
+                                                            none => {}
+                                                        }
+                                                        match mod_.variant_ctor_origins.get(v.name) {
+                                                            some(origin) => { record_variant_ctor_origin(ctx, v.name, origin) },
                                                             none => {}
                                                         }
                                                     },
@@ -504,6 +513,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                 some(origin) => { record_value_origin(ctx, name, origin) },
                                 none => {}
                             }
+                            match mod_.variant_ctor_origins.get(name) {
+                                some(origin) => { record_variant_ctor_origin(ctx, name, origin) },
+                                none => {}
+                            }
                             match mod_.fn_mut_params.get(name) {
                                 some(flags) => { ctx.fn_mut_params.insert(name, flags) },
                                 none => {}
@@ -524,6 +537,10 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                                 ctx.env.types.variant_to_enum.insert(v.name, edef.name)
                                                 match mod_.value_origins.get(v.name) {
                                                     some(origin) => { record_value_origin(ctx, v.name, origin) },
+                                                    none => {}
+                                                }
+                                                match mod_.variant_ctor_origins.get(v.name) {
+                                                    some(origin) => { record_variant_ctor_origin(ctx, v.name, origin) },
                                                     none => {}
                                                 }
                                             },
@@ -610,6 +627,9 @@ fn check_consumed(name: Str, ty: Type, span: Span, consumed: Map<Str, Span>, dro
 }
 
 fn try_consume_ident(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>) {
+    // A fieldless variant is Ident-shaped but evaluates a fresh constructor on
+    // every occurrence. It is not a binding that can become moved.
+    if is_nullary_variant_ctor_ident(expr) { return }
     match expr {
         HExpr::Ident { name, ty, span, .. } => {
             if is_user_drop_type(ty, drop_types) {
@@ -623,7 +643,11 @@ fn try_consume_ident(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<
 fn check_moves_expr(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
     match expr {
         HExpr::Ident { name, ty, span, .. } => {
-            check_consumed(name, ty, span, consumed, drop_types, sink)
+            // Mirror try_consume_ident: repeated evaluation of a nullary ctor is
+            // repeated fresh construction, never use-after-move.
+            if is_nullary_variant_ctor_ident(expr) == false {
+                check_consumed(name, ty, span, consumed, drop_types, sink)
+            }
         },
         HExpr::Block { stmts, tail, .. } => {
             for s in stmts {

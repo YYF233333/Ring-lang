@@ -1,4 +1,4 @@
-use types::{Type, EMPTY_ROW}
+use types::{Type, EnumVariant, EMPTY_ROW}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use hir::{HProgram, HDecl, compare_by_first, variant_ctor_name}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, TypeAliasDef, EffectAliasDef}
@@ -13,6 +13,10 @@ pub struct ModuleExports {
     pub module_prefix: Str,
     pub values: Map<Str, TypeScheme>,
     pub value_origins: Map<Str, Str>,
+    // Export lookup spelling -> canonical variant constructor symbol. This is
+    // separate from value_origins because only genuine constructor bindings
+    // may influence codegen/ownership classification.
+    pub variant_ctor_origins: Map<Str, Str>,
     pub types: Map<Str, TypeDef>,
     pub type_aliases: Map<Str, TypeAliasDef>,
     pub effects: Map<Str, EffectDef>,
@@ -69,6 +73,29 @@ fn export_nominal_identity(env: TypeEnv, type_name: Str) -> Str {
     }
 }
 
+// Reconstruct an enum constructor from its canonical definition. Looking up the
+// variant leaf in the value environment is unsound: a later module-local value
+// with the same spelling may shadow that leaf while the public enum must still
+// export its own constructor. Consumers allocate a fresh local DefId, so export
+// schemes deliberately carry none here.
+fn variant_ctor_scheme(def: EnumDef, variant: EnumVariant) -> TypeScheme {
+    let enum_params = def.type_param_vars.map(fn(id) {
+        Type::TypeVar { id: id, name: none }
+    })
+    let enum_type = Type::EnumType { name: def.name, type_params: enum_params }
+    let ctor_type = if variant.field_names.is_some() || variant.fields.len() == 0 {
+        enum_type
+    } else {
+        Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW }
+    }
+    TypeScheme {
+        ty: ctor_type,
+        type_vars: def.type_param_vars,
+        bounds: [],
+        def_id: none
+    }
+}
+
 // Resolve a relative pub-use inside an inline module to the same canonical
 // identity scheme used by registration (file-prefix$$_inline::item).
 fn inline_use_source_prefix(mod_identity: Str, use_decl: UseDecl) -> Str? {
@@ -107,6 +134,7 @@ fn inline_use_source_prefix(mod_identity: Str, use_decl: UseDecl) -> Str? {
 fn copy_inline_export(
     source: Str, local: Str, env: TypeEnv, fn_mut_params_map: Map<Str, List<Bool>>, program: Program,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
+    mut variant_ctor_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>, mut type_aliases: Map<Str, TypeAliasDef>, mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>, mut traits: Map<Str, TraitDef>,
     mut impl_methods: Map<Str, Map<Str, TypeScheme>>,
@@ -118,6 +146,13 @@ fn copy_inline_export(
         some(scheme) => {
             values.insert(local, scheme)
             value_origins.insert(local, source)
+            match scheme.def_id {
+                some(def_id) => match env.types.variant_ctor_origins.get(def_id) {
+                    some(origin) => { variant_ctor_origins.insert(local, origin) },
+                    none => {}
+                },
+                none => {}
+            }
             match fn_mut_params_map.get(source) {
                 some(flags) => { fn_mut_params.insert(local, flags) }, none => {}
             }
@@ -202,29 +237,21 @@ fn copy_inline_export(
             // variant from another enum. The fully-qualified facade binding
             // gives inference an exact lookup; the legacy leaf binding keeps
             // named enum imports compatible when it is not already occupied.
-            let enum_params = def.type_param_vars.map(fn(id) {
-                Type::TypeVar { id: id, name: none }
-            })
-            let enum_type = Type::EnumType { name: def.name, type_params: enum_params }
             for variant in def.variants {
-                let ctor_type = if variant.field_names.is_some() || variant.fields.len() == 0 {
-                    enum_type
-                } else {
-                    Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW }
-                }
-                let ctor_scheme = TypeScheme {
-                    ty: ctor_type,
-                    type_vars: def.type_param_vars,
-                    bounds: [],
-                    def_id: none
-                }
+                let ctor_scheme = variant_ctor_scheme(def, variant)
                 let ctor_origin = variant_ctor_name(def.name, variant.name)
                 let facade_ctor = "${local}::${variant.name}"
                 values.insert(facade_ctor, ctor_scheme)
                 value_origins.insert(facade_ctor, ctor_origin)
+                if variant.field_names.is_none() {
+                    variant_ctor_origins.insert(facade_ctor, ctor_origin)
+                }
                 if !values.contains_key(variant.name) {
                     values.insert(variant.name, ctor_scheme)
                     value_origins.insert(variant.name, ctor_origin)
+                    if variant.field_names.is_none() {
+                        variant_ctor_origins.insert(variant.name, ctor_origin)
+                    }
                 }
             }
             match env.trait_reg.impl_methods.get(def.name) {
@@ -257,6 +284,7 @@ fn extract_decl_export(
     program: Program,
     mut values: Map<Str, TypeScheme>,
     mut value_origins: Map<Str, Str>,
+    mut variant_ctor_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>,
     mut type_aliases: Map<Str, TypeAliasDef>,
     mut effects: Map<Str, EffectDef>,
@@ -307,13 +335,19 @@ fn extract_decl_export(
                 match env.types.enums.get(name) {
                     some(edef) => {
                         types.insert(display, TypeDef::EnumDef_(edef))
+                        // The module's final leaf scope may contain an unrelated
+                        // same-spelled private fn/const. Export the enum's exact
+                        // constructor scheme and identity from EnumDef instead.
                         for v in edef.variants {
-                            match env.lookup(v.name) {
-                                some(vscheme) => {
-                                    values.insert(v.name, vscheme)
-                                    value_origins.insert(v.name, variant_ctor_name(edef.name, v.name))
-                                },
-                                none => {},
+                            let ctor_scheme = variant_ctor_scheme(edef, v)
+                            let ctor_origin = variant_ctor_name(edef.name, v.name)
+                            values.insert(v.name, ctor_scheme)
+                            value_origins.insert(v.name, ctor_origin)
+                            // Fieldless and positional constructors lower via
+                            // Ident/Call and therefore need provenance. Named
+                            // construction uses its dedicated HIR node.
+                            if v.field_names.is_none() {
+                                variant_ctor_origins.insert(v.name, ctor_origin)
                             }
                         }
                     },
@@ -455,7 +489,8 @@ fn extract_decl_export(
                 for subdecl in mod_decls {
                     let prefixed = prefix_decl_name(mod_name, subdecl)
                     extract_decl_export(prefixed, env, fn_mut_params_map, program,
-                        values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                        values, value_origins, variant_ctor_origins,
+                        types, type_aliases, effects, effect_aliases, traits,
                         impl_methods, inherent_methods, struct_field_orders,
                         extern_values, mut_methods, fn_mut_params, false)
                 }
@@ -468,7 +503,8 @@ fn extract_decl_export(
                                 for item in names {
                                     let local_name = match item.alias { some(a) => a, none => item.name }
                                     copy_inline_export(append_identity(source_prefix, item.name), "${facade}::${local_name}",
-                                        env, fn_mut_params_map, program, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                                        env, fn_mut_params_map, program, values, value_origins, variant_ctor_origins,
+                                        types, type_aliases, effects, effect_aliases, traits,
                                         impl_methods, inherent_methods, struct_field_orders, extern_values, mut_methods, fn_mut_params)
                                 }
                             },
@@ -477,7 +513,8 @@ fn extract_decl_export(
                                 let item_name = path.get(path.len() - 1).unwrap_or("")
                                 let local_name = match use_decl.alias { some(a) => a, none => item_name }
                                 copy_inline_export(append_identity(source_prefix, item_name), "${facade}::${local_name}",
-                                    env, fn_mut_params_map, program, values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                                    env, fn_mut_params_map, program, values, value_origins, variant_ctor_origins,
+                                    types, type_aliases, effects, effect_aliases, traits,
                                     impl_methods, inherent_methods, struct_field_orders, extern_values, mut_methods, fn_mut_params)
                             }
                         },
@@ -497,6 +534,7 @@ fn extract_decl_export(
 fn copy_exported_name(
     source: ModuleExports, source_name: Str, local_name: Str,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
+    mut variant_ctor_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>, mut type_aliases: Map<Str, TypeAliasDef>, mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>, mut traits: Map<Str, TraitDef>,
     mut struct_field_orders: Map<Str, List<Str>>, mut extern_values: Set<Str>,
@@ -509,6 +547,10 @@ fn copy_exported_name(
             values.insert(local_name, scheme)
             match source.value_origins.get(source_name) {
                 some(origin) => { value_origins.insert(local_name, origin) },
+                none => {}
+            }
+            match source.variant_ctor_origins.get(source_name) {
+                some(origin) => { variant_ctor_origins.insert(local_name, origin) },
                 none => {}
             }
         },
@@ -565,6 +607,7 @@ pub fn extract_exports(
 ) -> ModuleExports {
     let mut values: Map<Str, TypeScheme> = map_new()
     let mut value_origins: Map<Str, Str> = map_new()
+    let mut variant_ctor_origins: Map<Str, Str> = map_new()
     let mut types: Map<Str, TypeDef> = map_new()
     let mut type_aliases: Map<Str, TypeAliasDef> = map_new()
     let mut effects: Map<Str, EffectDef> = map_new()
@@ -579,7 +622,8 @@ pub fn extract_exports(
     for decl in program.decls {
         let canonical_decl = module_prefix_decl_name(module_prefix, decl)
         extract_decl_export(canonical_decl, env, fn_mut_params_map, program,
-            values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+            values, value_origins, variant_ctor_origins,
+            types, type_aliases, effects, effect_aliases, traits,
             impl_methods, inherent_methods, struct_field_orders,
             extern_values, mut_methods, fn_mut_params, true)
     }
@@ -598,7 +642,8 @@ pub fn extract_exports(
                         for item in names {
                             let local_name = match item.alias { some(a) => a, none => item.name }
                             copy_exported_name(source, item.name, local_name,
-                                values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                                values, value_origins, variant_ctor_origins,
+                                types, type_aliases, effects, effect_aliases, traits,
                                 struct_field_orders, extern_values, fn_mut_params,
                                 impl_methods, inherent_methods, mut_methods)
                             // Importing an enum also imports its constructors.
@@ -606,7 +651,8 @@ pub fn extract_exports(
                                 some(TypeDef::EnumDef_(edef)) => {
                                     for v in edef.variants {
                                         copy_exported_name(source, v.name, v.name,
-                                            values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                                            values, value_origins, variant_ctor_origins,
+                                            types, type_aliases, effects, effect_aliases, traits,
                                             struct_field_orders, extern_values, fn_mut_params,
                                             impl_methods, inherent_methods, mut_methods)
                                     }
@@ -627,7 +673,8 @@ pub fn extract_exports(
                         sorted_names.sort()
                         for name in sorted_names {
                             copy_exported_name(source, name, name,
-                                values, value_origins, types, type_aliases, effects, effect_aliases, traits,
+                                values, value_origins, variant_ctor_origins,
+                                types, type_aliases, effects, effect_aliases, traits,
                                 struct_field_orders, extern_values, fn_mut_params,
                                 impl_methods, inherent_methods, mut_methods)
                         }
@@ -672,6 +719,7 @@ pub fn extract_exports(
         module_prefix: module_prefix,
         values: values,
         value_origins: value_origins,
+        variant_ctor_origins: variant_ctor_origins,
         types: types,
         type_aliases: type_aliases,
         effects: effects,

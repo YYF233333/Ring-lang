@@ -106,7 +106,8 @@ use types::{Type}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
     is_rc_excluded_type, type_contains_extern_handle,
-    is_borrow_returning_call, is_fresh_owned_bool_value}
+    is_borrow_returning_call, is_fresh_owned_bool_value,
+    is_nullary_variant_ctor_ident}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
     sink_arg_indices, is_variant_constructor_call, expr_diverges, stmt_diverges,
     is_scalar_type, is_owned_slot_result_call, is_owned_slot_result_callee}
@@ -570,13 +571,23 @@ fn v_cond(expr: HExpr, mut ctx: VCtx) {
 // ============================================================
 
 fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
+    let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
     match expr {
         HExpr::IntLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
         HExpr::FloatLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
         HExpr::StrLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
         HExpr::BoolLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
 
-        HExpr::Ident { name, ty, span, .. } => v_ident(name, ty, span, mode, ctx),
+        HExpr::Ident { name, ty, span, .. } => {
+            // Inference represents a fieldless enum construction as an Ident,
+            // but both native backends call its zero-argument constructor.  It
+            // is therefore a fresh owned production, not a binding/global read.
+            if nullary_variant_ctor {
+                v_cls_of_fresh(ty, ctx.externs)
+            } else {
+                v_ident(name, ty, span, mode, ctx)
+            }
+        },
 
         HExpr::BinOp { left, right, ty, .. } => {
             // Eager arith/compare: operands are consuming-borrows (the op

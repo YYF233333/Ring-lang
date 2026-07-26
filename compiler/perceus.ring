@@ -17,6 +17,7 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     hexpr_type, hexpr_span, hexpr_effects,
     is_rc_excluded_type, type_contains_extern_handle,
     is_borrow_returning_call, is_user_drop_type,
+    is_nullary_variant_ctor_ident,
     slot_read_identity, slot_take_identity, slot_write_identity}
 use types::{Type}
 
@@ -310,6 +311,7 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     if is_unresolved_var_type(ty) {
         return false
     }
+    let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
     match expr {
         // Arithmetic / comparison BinOps box a FRESH result (gen_int_binop /
         // gen_*_binop → box_int/box_bool/box_float) — materialise.  `&&`/`||`
@@ -351,6 +353,11 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
         HExpr::FloatLit { .. } => true,
         HExpr::StrLit { .. } => true,
         HExpr::BoolLit { .. } => true,
+        // A fieldless variant has Ident syntax in HIR, but codegen invokes its
+        // zero-argument constructor and returns a FRESH enum box.  In operand
+        // position it therefore needs the same ANF binding + scope-end Drop as
+        // every other fresh constructor.
+        HExpr::Ident { .. } => nullary_variant_ctor,
         // B-104 D1 rule ③: IndexExpr refined by RECEIVER type.  `s[i]` on a Str
         // lowers to ring_str_get, which allocates a NEW 1-char string
         // (ring_runtime.cpp: ring_alloc + placement-new — verified) — a FRESH
@@ -1215,8 +1222,12 @@ fn transform_fn_body(params: List<HParam>, body: HExpr, boxed: Set<Int>, externs
 // closure, string-interp, .values()/.entries() which build owned containers):
 // it has no other owner, so the sink moves it in (no clone — cloning would leak).
 fn is_owner_bearing(expr: HExpr) -> Bool {
+    let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
     match expr {
-        HExpr::Ident { .. } => true,
+        // Ordinary identifiers read an existing owner.  A fieldless variant is
+        // the one Ident-shaped exception: codegen calls a constructor, so the
+        // result is fresh and must move without an escape Clone.
+        HExpr::Ident { .. } => nullary_variant_ctor == false,
         HExpr::FieldAccess { .. } => true,
         // B-104 D1 rule ③: `s[i]` on a Str is NOT owner-bearing — ring_str_get
         // returns a FRESH 1-char string (new ring_alloc, verified), so an escape

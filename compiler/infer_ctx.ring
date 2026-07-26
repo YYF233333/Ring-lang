@@ -697,6 +697,27 @@ pub fn record_value_origin(mut ctx: InferCtx, local_name: Str, origin: Str) {
     }
 }
 
+// Constructor identity must follow the binding, not its spelling: enum
+// variants may be imported or aliased, while a local with the same name must
+// remain an ordinary value. The map covers fieldless and positional-payload
+// constructors; named-field construction has its own HIR node.
+pub fn record_variant_ctor_origin(mut ctx: InferCtx, local_name: Str, origin: Str) {
+    match ctx.env.lookup(local_name) {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => { ctx.env.types.variant_ctor_origins.insert(def_id, origin) },
+            none => {}
+        },
+        none => {}
+    }
+}
+
+pub fn variant_ctor_origin(ctx: InferCtx, scheme: TypeScheme) -> Str? {
+    match scheme.def_id {
+        some(def_id) => ctx.env.types.variant_ctor_origins.get(def_id),
+        none => none
+    }
+}
+
 // Scheme variables may occur exclusively in effect payloads.  They still
 // need an instantiation mapping so SchemeBound resolution can select the
 // correct trait dictionary (and reject an unsatisfied bound) at the call site.
@@ -1766,8 +1787,13 @@ fn bind_relative_import(mut ctx: InferCtx, local_name: Str, qualified_name: Str)
     let mut found = false
     match ctx.env.lookup(qualified_name) {
         some(scheme) => {
+            let ctor_origin = variant_ctor_origin(ctx, scheme)
             ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
             if local_name != qualified_name { record_value_origin(ctx, local_name, qualified_name) }
+            match ctor_origin {
+                some(origin) => { record_variant_ctor_origin(ctx, local_name, origin) },
+                none => {}
+            }
             found = true
         },
         none => {

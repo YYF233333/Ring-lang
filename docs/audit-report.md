@@ -145,16 +145,6 @@ LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理
 
 发现者：#245 worker（feedback 分诊）
 
-### #249 LLVM lazy dict getter 的 decl-order 缺陷：dispatch 位先于 impl 块时手写 dict 被忽略 [medium] [judgment] [open] [deferred: B-163p2-retire]
-
-> 2026-07-11 step 5 worker 发现（C 侧以 forward-pass 预注册有意偏离规避，LLVM 侧未动）。
-
-`resolve_static_dict_by_name` 是 lazy 的：某 trait dispatch 位在 decl 顺序上先于其 `impl` 块时，getter 先以 runtime builtin fallback 形态创建；随后 `emit_trait_dict` 的 memoised getter 注册发现同名已存在直接 return existing——**手写 dict 的 build fn 成为死代码、该 dispatch 走 tag-only fallback**（用户 impl 实质被忽略）。decl-order 敏感，实践少触发（impl 通常先于使用）。C 后端不受影响（`CCtx.dict_build_fns` forward pass 预注册，与 decl 顺序无关）。
-
-**修复方向**：LLVM 侧对齐 C 的预注册方案；或不修随 Phase 2 退役消亡。Phase 1 期间它是 oracle——若差分撞到 decl-order 形状会以 diff FAIL 暴露（C 对 LLVM 错）。
-
-发现者：step 5 worker（feedback 分诊）
-
 ### #248 LLVM derived clone 签名与 checker scheme 契约不一致（静默多传参）[low] [judgment] [open] [deferred: B-163p2-retire]
 
 > 2026-07-11 step 5 worker 发现（clang 在 C 侧把它变成硬错误而暴露；C 侧已修，LLVM 未动）。

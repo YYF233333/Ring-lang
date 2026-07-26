@@ -385,6 +385,7 @@ fn test_fetch() {
 > 2026-06-27 立项（Discussion，路线图重定）。消除 C++ STL 依赖，让 Ring 真正拥有自己的底层。容器（Str/List/Map/Set）全部用纯 Ring + `Ptr<T>` + Drop 重写。
 > **2026-07-10 暂停**：B-163 C 后端迁移插队 P0，剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。P3 Map 已 merge（`8871592`），但 trait-bounded impl 方法 dict 转发 bug 迫使 Map 方法仍走 `method_to_runtime` + C++ bootstrap shim——P3 验收「~30 个 ring_map_* 删除」未闭环，调查并入 B-163 计划（plan-c-backend.md §2.5 #1），修好后回本条目关 P3。
 > **2026-07-11 调查结论（B-163 step 5 worker）**：dict 转发 bug **HEAD 无法复现**——bounded impl 五场景 probe（调用位 dict 解析/方法内 bound dispatch/impl 互调转发/HOF closure 捕获 dict/双 bounds）+ Map 真实形状 Ring 路径 probe，LLVM/C 双后端全绿。共享层（resolve_dicts_from_scheme/dict_lower）无缺陷；P3 当时的 double bootstrap 崩溃疑似已被后续修复序列消除，或需自编译规模触发。**闭环实验留 B-163 step 9 后**：C 后端删 Map method_to_runtime 条目 + 全量 sweep + self-compile via C，全绿则删 C++ ring_map_* bootstrap shim，关 P3 遗留验收。
+> **2026-07-27 P3 闭环（B-163 step 9）**：Map 的 LLVM/C `method_to_runtime` 映射、下标特殊发射与全部 `ring_map_*` C++ bootstrap shim 已删除；`Map<K,V>` 只走纯 Ring `K: Hash + Eq` 实现，用户 struct 的手写 Hash/Eq dict 已有双后端回归。C/LLVM 三代固定点、全量双后端门禁、RC ×3 与 ASan capstone 通过，P3 遗留验收正式关闭。B-152 仍整体暂停，待 B-163 Phase 2 完成后从 P4 / P1s2 / P5 恢复。
 
 **前置**：B-125（unsafe/Ptr<T> 原语）+ B-002 Phase 1（精简版 Drop）
 
@@ -395,7 +396,7 @@ fn test_fetch() {
 | P0 | StringBuilder — 管线验证 pilot（extern type → Ring struct + impl Drop + codegen 适配） | M |
 | P1 | Str — Step 1 ✅（C++ 去 STL）；Step 2 排最后（需删 Type::StrType 枚举，最难） | L |
 | P2 | List\<T\> — `Ptr<T>` + len + cap，替换 std::vector\<void*\> | L |
-| P3 | Map\<K,V\> — 开放寻址哈希表，替换 std::unordered_map（吸收 B-107 Hash trait） | XL |
+| P3 ✅ | Map\<K,V\> — 开放寻址哈希表，替换 std::unordered_map（Hash trait + 泛型 key 已兑现） | XL |
 | P4 | Set\<K\> — 复用 Map 实现 | M |
 | P5 | 清理：删除全部 C++ 残留，`.cpp` → `.c`，`clang++` → `clang`（最终 ~400 行纯 C：RC 核心 + boxing + IO/OS + fail effect + Ptr 原语 + init，详见 design.md §7.12） | M |
 
@@ -603,7 +604,7 @@ pub struct Map<K, V> {
 
 **方法实现**（全部 `impl<K: Hash + Eq, V> Map`，纯 Ring + unsafe 块）：
 - `map_new<K, V>() -> Map<K, V>`：初始 cap=0，三个 buffer 为空 alloc
-- `insert(mut self, key: K, value: V)`：probe → hit 则 drop 旧 value + 替换；miss 则写入空/tombstone slot
+- `insert(mut self, key: K, value: V)`：probe → hit 则以 `ring_slot_replace` 借用式替换旧 value（保留首个相等 key）；miss 则写入空/tombstone slot
 - `get(self, key: K) -> Option<V>`：probe → hit 则 `ring_slot_read` value（dup）；miss 则 none
 - `contains_key(self, key: K) -> Bool`：probe → hit/miss
 - `remove(mut self, key: K)`：probe → hit 则 `ring_slot_drop` key+value，meta 置 tombstone
@@ -694,9 +695,10 @@ pub struct Map<K, V> {
 - `for (i, x) in xs.enumerate()` 可用且行为正确
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-107 泛型 Map key（Hash trait + derive）[feature] [P2] [L] [judgment] [absorbed: B-152p3]
+### B-107 `derive Hash`（泛型 Map key 剩余项）[feature] [P2] [L] [judgment] [queued] [after: B-163]
 
 > **2026-07-10 注记**：P3 已落地 Hash trait + 泛型 Map struct，但 dict 转发 bug 致方法调用仍走 C++ bootstrap shim（shim 内联 hash 仅支持 tagged Int/Bool + Str；`K: Hash` bound 把 key 限在这三类内，行为安全但泛型 key 承诺未兑现）。本条目保留至 shim 删除（B-163 plan §2.5 #1）+ derive Hash 落地后再关单。
+> **2026-07-27 更新（B-163 step 9）**：shim 与后端特殊映射已全部删除，泛型 Map 和用户自定义 key 已通过手写 `impl Hash + Eq`（struct 回归）在双后端兑现；本条现只剩 `derive Hash` 语法/派生实现及对应回归，B-163 全部完成后再排期。
 
 > 2026-06-07 立项（Discussion）。**类型系统说谎的缺口**：`std/map.ring` 的 `Map<K,V>` 类型层全泛型（`get(key:K)`/`insert(key:K,..)` 用类型变量 K），类型检查器放行 `Map<Int,T>`/`Map<MyEnum,T>`，但 runtime（LLVM `unordered_map<std::string,void*>`、JS 同样 Str-key）只兑现 Str key。非 Str key 静默错误，**两后端皆有，LLVM 上具体化**。bootstrap 阶段编译器自身的 Map 几乎全是 `Map<Str,...>` 故未暴露（migration diary 记录的简化）。
 
@@ -1127,7 +1129,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [doing: phase1-step9]
+### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [queued] [phase2]
 
 > 2026-07-10 立项（Discussion，B-155 泥潭止损 + 后端信道结构性分析）。**完整执行计划见 `docs/plan-c-backend.md`**，执行前必读。
 
@@ -1135,7 +1137,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 **Phase 0 ✅（2026-07-10）**：链式重放 21 代完成（方案 A，JS 锚点 0bd7822 → HEAD）。「执行层污染」假设**推翻**——B-155 为现行源码活 RC bug（已回填 B-155 条目，改写为方向 C 审计）。干净 dist-llvm@HEAD = `1e2bc9d`。**注意**：Phase 1 验收「.c 文本字节一致」被 B-155 gate，方向 C 审计需在 Phase 1 收尾前完成（并行不冲突）。
 
-**Phase 1**：C 后端实现（叶到根九步，见 plan §2.2）。移植期间 LLVM 后端保留为差分 oracle——双后端同用例输出 diff = 0。
+**Phase 1 ✅**：C 后端实现（叶到根九步，见 plan §2.2）。移植期间 LLVM 后端保留为差分 oracle——双后端同用例输出 diff = 0。
 > **进度（2026-07-10）**：steps 1–3 ✅（`4edc7a1`+`ba76b67`，golden 子集 14/14 三重判据全绿：C==.expected、双后端 diff=0、.c ×2 字节一致）+ 双后端差分 harness ✅（`4314e1a`，run_tests.py `--backend=c`/`--suite diff`/`C_SKIP`/`--filter`，diff opt-in）。exec_sync runtime 已补实现（此前 std 声明但 native 从未实现）。
 > **进度（2026-07-11）**：step 4 ✅（`2b85e9f`，struct/enum 构造 + 字段访问/赋值 + match/if-let + record row 访问；golden 28 + e2e 47 子集三重判据全绿，diff 82/0；全量 C sweep：llvm 84/213、e2e 256/380，余项全为 step 5/6 stub + drop_basic step 7 窗口）。sweep 逼出两个 C 侧修复（调用位局部作用域优先、同名 impl first-wins）并分诊出 audit **#243**（LLVM 同序潜伏 miscompile）/ **#244**（mangling 歧义根因）/ **#245**（**critical 共享 wrong-code**：ctor 嵌套 literal 不比值，双后端一致，oracle 污染面）。**#245 插队修复 ✅（`95f79c3`，2026-07-11）**：ctor 字段位 literal 值比较 + tuple 元素位 ctor 递归 + or-pattern invalid IR/wrong-code 一并修复（双后端同改 diff=0）；穷尽性层排查正确无需修（E0601 负面回归锁定）；golden 零污染（旧错误行为未烤入任何 .expected）。范围外分诊出 #246（catch arm 无嵌套检查，step 6 注意项已入 §2.5）/ #247（预存在 verification failed）。**step 5 ✅（`f80f202`，2026-07-11）**：closure/trait dict/evidence 七类 stub 清零 + B-141 default trait methods 全链 + derived impls；trait 方法序单一来源落 `hir.ring`（§2.5 #2 达成，LLVM 私有副本未切换、Phase 2 随退役删）；#243 顺带修复；**§2.5 #1 调查结论：dict 转发 bug HEAD 无法复现**（双后端五场景 probe + Map Ring 路径 probe 全绿，共享层无缺陷；闭环实验 = C 后端删 Map method_to_runtime + 删 ring_map_* shim，留 step 9 自编译后做，成则关 B-152 P3 遗留验收）。C sweep：step 5 面清零，剩余 44+46 fail 全为 step 6 面 + drop_basic（step 7）。分诊入 audit：#248/#249（LLVM 侧已知缺陷，deferred 退役）/#250（CLI out-dir 不对称）。**step 6 ✅（`9140506`，2026-07-12）**：effect handler（setjmp/longjmp abort + evidence struct tail-resumptive）+ catch（复用 emit_c_match_arm 统一链）+ default evidence 收口；**#246 同波修复**（四形态 wrong-code + verifier error 实锤，catch_pattern_needs_chain 路由 + 嵌套检查接入，回归 expected 手写）。C sweep：**llvm 218/0**，e2e 380 pass / 1 fail（仅 drop_basic = step 7 面）；diff 五 filter 全绿；LLVM 回归 ×2 全绿。LLVM_SKIP 重评估：4 用例 C 下 PASS（含 2 个 LLVM AV crash 用例——差分信道兑现）、6 用例双后端同构失败 = 共享层缺陷（证据已回填 #219/#220/#221）。分诊入 audit：#251（high：abort arm body 从不执行，静默 wrong-code）/#252（catch 顶层 tuple/or LLVM 空分支）/#253（gen_lambda cleanup stack 泄漏，deferred 退役）。**[决策] 待用户拍板**：跨 longjmp 的 `let mut` 写入丢失（见 worker_feedback.md，文档化 vs 立案修复）。**遗留处置**：4 个 C-PASS 用例挪出 LLVM_SKIP 的 runner 分化机制留后续波。**step 7 ✅（`03abbcc`，2026-07-12）**：emit_c_drop_functions（用户 Drop struct + enum payload 递归 + 注册序列内联 main）+ RC 消费完整性核对（19 处 dup/drop 发射位点无遗漏零修补）+ E0801/E0802/E0803 边界验证。**里程碑：C sweep ×3 零失败（e2e 381/0、llvm 219/0 三轮全同）= 单文件模式全覆盖**；diff 全量 504/0/36。一处对 oracle 的正确性偏离（用户 drop 补齐 evidence 实参 = audit #254）。分诊入 audit：#255（high：impl Drop for enum 用户 drop 不调用，两后端同 gap）/#256（high：Result payload 不递归释放同构泄漏）/#244 撞名补充。CLAUDE.md RIIR 陷阱 #1 已修正（容器 drop 实际走 runtime 固定 tid，非 codegen 生成）。**下一步 = step 8**（extern fn/FFI 声明、emit_c_main 收口、模块初始化 + project mode → `C_BACKEND_SUPPORTS_MODULES` 翻 True；顺带补 E0803 负面用例）→ step 9（自编译冲刺 + B-155 判别实验 + B-152 P3 闭环实验）。未移植面 grep `c_stub_` 可列全（现仅防御性 guard）。
 
@@ -1145,14 +1147,17 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 > **恢复（2026-07-19）**：额度已恢复，按上述保存点与顺序继续 step 8。已复核 WIP HEAD、worktree clean 与原始 stage-0 SHA256；当前先重跑最新源码 bootstrap，再执行定向双后端回归和 LLVM self-compile ×3 gate，仍不进入 step 9。
 > **再次停止点（2026-07-21，未 merge）**：新 WIP checkpoint `fa22ac2` 已提交到原隔离 worktree。已修 method export canonical identity、type alias/export namespaces、C `ring_` prefix symbol collision、module main E0403、exact self/super/qualified SCC 与 inline 依赖闭包；bootstrap 进一步定位到 canonical fn scheme rebind 未同步同 DefId 源码短名，当前补丁已落盘但未重编验证。inline raw ABI extern-fn re-export/enum ctor 用例、二代自举、双后端 gates、LLVM self-compile ×3仍未完成。完整 provenance 与恢复首序见该 worktree `docs/worker_feedback.md`；step 9 未开始。
 > **step 8 ✅（2026-07-23，本 merge commit）**：C project/module codegen、extern/FFI bridge、module-qualified nominal/effect/trait identity、resolved re-export origin、alias 后 mut/ABI metadata 与诊断显示全部收口，`C_BACKEND_SUPPORTS_MODULES = true`。最终门：e2e LLVM 435/0、e2e C 439/0、LLVM golden 219/0、RC 536/0、diff 重跑 543/0；LLVM self-compile 三轮对象 3/3 字节一致。`dist-llvm/main.o` 连编两次二进制零差异，SHA256 `61C49BC9BE7185B3FE94064A5A59E038843E77401414DACFA83208EFE4FD8EF9`。一次 diff 首跑出现两个与 B-155 已知形态相同的间歇 `0xC0000005`；两个用例各独立 ×3 与完整重跑均通过，证据保留在 worker feedback，未静默忽略。**下一步 step 9 仅排队，尚未开始。**
+> **step 9 ✅（2026-07-27，本 merge commit）**：C self-host、B-155 C 信道判别与 B-152 P3 闭环完成。Map 的后端特殊映射/C++ shim 全部删除，compiler intrinsic identity 改为用户不可拼写；LLVM lazy dict getter 改为 forward registration，关闭 audit #249。终验发现并彻底修复另一处 compiler-scale RC blocker：用户无字段 enum ctor 在 HIR 中是 `Ident`，但 codegen 实际分配 fresh box，旧 Perceus 因把它当 borrowed 而每次 escape 多 clone 且不 materialize operand；修复以精确 ctor `DefId` provenance 贯穿 builtins、direct/inline/named/wildcard/transitive import/re-export、HIR/Perceus/move checker/RC verifier，显式保留 `Option_none` borrowed singleton 例外，并用同名 local/const/fn/跨模块 shadow 负面对抗锁定。分配探针从每轮 **3N live** 降为常数 1；compiler-scale 计数从 `4,475,020,322 alloc / 4,292,365,880 free / 182,654,442 live` 降至同 alloc 下 `4,468,103,421 free / 6,916,901 live`（live 减少约 96.2%）。
+>
+> 固定点：C self-host 三代 `main.c` 均为 17,837,093 bytes、SHA256 `7F65EB315DE702FB2C1B75EC5542DA30471ECE8495FE3DFA95801025027983C3`；9741 个 `ring_cstr` 的 raw-byte/escape hard scan 无 NUL/control、长度错配、坏 escape、异常 padding、`[109]`/`[1410]` 或 ≥1000-byte 膨胀。LLVM anchor 三代 `main.o` 均为 4,744,208 bytes、SHA256 `F481CC52F6CDF89CDC42B36C3365231A71A5247567811677D6DC51828FFB6DA3`，已写回 `dist-llvm/main.o`。最终门：C e2e `449/0/17`、C golden `220/0/1`、diff `552/0/20`、RC 三轮各 `542/0/2`；最终聚合 runner `1211/0`（LLVM e2e `445/0/21`、golden `220/0/1`、RC `542/0/2`、self-compile `4/0`）。ASan gating 15/15，full-strength capstone（`quarantine_size_mb=256:malloc_context_size=12`）4:07:21 完成、零 sanitizer error，产出的 `main.c` 与三代 C 固定点同哈希。聚合绿轮前两次独立 LLVM e2e 曾分别出现 3 个和 1 个无诊断 `0xC0000005`（`442/3/21`、`444/1/21`），四个信号均独立 ×3 全绿且未跨轮重复，按 B-155 既有 LLVM 信道残留如实保留；最终完整绿轮不抹除间歇证据，也不阻塞已由 C/diff/固定点/ASan 闭合的 Phase 1。**停止于 Phase 1；Phase 2 尚未开始。**
 
-**Phase 2**：B-100 (Z) 策略 parity 认证 → LLVM-C 后端 tag `llvm-c-backend-final` 归档删除 → dist-c/（.c 文本）成为 stage 0 信任锚 → CI bootstrap 重启（文本 diff）→ 文档 bookkeeping（清单见 plan §3）。
+**Phase 2（已排队，尚未开始）**：B-100 (Z) 策略 parity 认证 → LLVM-C 后端 tag `llvm-c-backend-final` 归档删除 → dist-c/（.c 文本）成为 stage 0 信任锚 → CI bootstrap 重启（文本 diff）→ 文档 bookkeeping（清单见 plan §3）。
 
 **验收标准**：
-- 全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）
-- self-compile via C 后端 ×3 **.c 文本字节一致**（B-155 验收升级版）
-- ASan capstone 全量通过；CI bootstrap 重新启用
-- 退役 + bookkeeping 清单全部完成
+- Phase 1：全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）
+- Phase 1：self-compile via C 后端 ×3 **.c 文本字节一致**（B-155 验收升级版）
+- Phase 1：ASan capstone 全量通过
+- Phase 2：LLVM 退役、dist-c anchor、CI bootstrap 重启与 bookkeeping 清单全部完成
 
 **排序影响**：B-152 RIIR 剩余（P4 Set / P1s2 Str / P5）建议暂停，本条完成后在 C 后端上继续（纯 Ring 代码天然跨后端）。远期 LLVM target 重启 gates 见 plan §4（届时走修宪程序）。
 
@@ -1195,7 +1200,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 旧 ring_sb_* C++ 函数可删除
 - 全部 E2E 通过；**自编译通过**（project mode 验证）
 
-### B-155 自编译 IR 非确定性：字符串常量含堆垃圾（活 RC bug，方向 C 审计）[bugfix] [P0] [L] [judgment] [queued] [deferred: B-163p1-step2]
+### B-155 自编译 IR 非确定性：字符串常量含堆垃圾（LLVM 信道残留）[bugfix] [P0] [L] [judgment] [queued] [deferred: B-163p2-retire]
 
 > 2026-06-27 立项（Discussion，CI bootstrap 失败调查）。2026-06-30 深度调查（见下）。
 > **2026-07-10 Phase 0 定性（B-163 链式重放 21 代 + 完美对照实验，commit `1e2bc9d`/`361c490`）**：「执行层污染 / 尸体遗传」假设**推翻**——**活 bug 在现行源码**，经 native RC（Perceus dup/drop 生效）暴露；JS 后端 GC 下 RC 是 no-op 故全程不可见。判据（0bd7822 完美对照对，同源码同 LLVM，唯一变量 = 执行信道）：JS 执行 0 垃圾 + 三次重编与提交版逐字节一致；native 执行（干净 JS 锚点 .o 链接的 ring.exe）64×`[109 x i8]` + ×2 重编不一致；干净链条复现间歇性 0xC0000005（~1/3 命中，同一 RC bug 的致命形态）。本条目改写为**方向 C 审计**。
@@ -1203,6 +1208,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 > **基线**：干净 dist-llvm@HEAD = `1e2bc9d`（provenance 全程可追溯 JS 锚点 0bd7822）。取证数据持久化于 `C:\Users\Yufeng Ying\Desktop\Ring-lang-artifacts\b155-replay-2026-07-10\`（逐代比对 CSV + 全部构建日志 + 0bd7822 JS/native 完美对照 .ll 对；各代 .ll/exe 体积大未存，可按 CSV 重放复建）。
 > **2026-07-10 审计中断快照（方向 C 半程，用户拍板绕过转 B-163 Phase 1）**：① 膨胀 = 读取时 `s->len` 已脏而 buf 完好——数组类型（Ring 层 `value.len()+1`）与 initializer 长度（marshalling 层 `ring_str_len_u32`）两条独立路径一致读到 108，LLVM 越界抄 108 字节把相邻堆烤进常量；② Length 恒 108/1408 非随机 → 覆写者是系统性固定模式，108 为偶数排除 tagged Int 覆写，受害块 = RingStr header（24B raw，size class 32）；③ 受害 Str 全部是**插值构造的临时**（`"${type_name} { "` 类）；④ `gen_str_lit_simple`/`build_global_cstring_decl` 两层 IR 的 RC 时序正确（drop 全在 scope-end）→ 嫌疑上移至 `gen_string_interp` 插值构造层（B-158 revert `a5fb9a4` 可能是同 bug 另一形态）或 Perceus 跨函数传参 borrow 推断；⑤ **07-01「strlen==len 零 mismatch」结论不可靠**（当时诊断跑在脏 stage 上），重启时需在干净 stage 重验。**重启序（性价比排序）**：ASan 单用例循环（复现候选：`string_builder.ring` / `handle_try_return_cleanup.ring` 编译进程曾间歇 AV）→ free 毒化二分 → 插值路径审计 → Perceus extern 约定审计。
 > **推迟决策（2026-07-10 用户拍板）**：B-163 Phase 1 step 2（字符串字面量发射）= 本 bug 判别实验——.c 文本带垃圾 → 拿文本证据重启审计（好查一个量级）；.c 干净 → bug 为 marshalling 层特有，随 LLVM 后端退役消亡。Phase 1 收尾验收「.c 字节一致」仍被本 bug gate。
+> **2026-07-27 Phase 1 终验**：C self-host 三代 `main.c` 逐字节一致（17,837,093 bytes，SHA256 `7F65EB315DE702FB2C1B75EC5542DA30471ECE8495FE3DFA95801025027983C3`），9741 个 `ring_cstr` 的 hard scan 未发现 NUL/control、声明长度错配、padding、坏 escape、`[109]`/`[1410]` 或任何 ≥1000 字节膨胀常量；full-strength ASan compiler self-compile 4:07:21 完成且生成同哈希文本。C 信道上的历史堆垃圾与非确定性已排除。LLVM anchor 本身三代对象一致，但测试执行仍可间歇出现无诊断 `0xC0000005`，且既有 +1 NUL marshalling 异常形态仍在，因此不能把 B-155 普遍关单；剩余 LLVM 信道问题随 B-163 Phase 2 退役收口，Phase 1 不再另开方向 C 修复。
 
 **现象**：`ring.exe build compiler/main.ring --target=llvm` 两次编译产出的 LLVM IR 不一致。64 个 `[109 x i8]` + 210 个 `[1410 x i8]` 常量包含编译进程的堆数据，每次运行不同。代码段（.text 反汇编）两次编译完全一致，差异仅在 `.rdata`。
 
