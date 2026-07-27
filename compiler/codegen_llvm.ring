@@ -2,7 +2,8 @@ use types::{Type, Effect, EffectRow, effect_kind_name, is_option_type}
 use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp, DerivedImpl, HStringInterpPart,
-    evidence_param_name, trait_dict_name, trait_bound_param_name,
+    evidence_param_name, effect_name_from_evidence_param,
+    trait_dict_name, trait_bound_param_name,
     compare_by_first, hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
@@ -1556,8 +1557,7 @@ fn emit_c_main_common(mut ctx: LlvmCtx, ring_main_name: Str, warn_no_main: Bool)
                     // B-097: pass default evidence for effects that have it,
                     // null for io/fail/unknown effects (runtime handles those)
                     for ep in ev_params {
-                        // ep is like "__ring_ev_Logger" — extract effect name
-                        let effect_name = ep.slice(10, ep.len())
+                        let effect_name = effect_name_from_evidence_param(ep)
                         match ctx.default_evidence.get(effect_name) {
                             some(def_ev) => call_args.push(def_ev),
                             none => call_args.push(LLVMConstPointerNull(ptr)),

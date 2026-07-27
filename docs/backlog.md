@@ -1158,6 +1158,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 > 合并前真实全集：C e2e `458/0/12` + golden `222/0`；LLVM e2e `457/0/13` + golden `222/0`。全量 diff 两轮分别 `563/2/12`、`562/3/12`，5 个失败全为 LLVM 编译进程无诊断 `0xC0000005`，且五个用例互不重复、各自独立 ×3 全绿；原始整轮失败如实保留，未伪造全绿。audit #220 的 `exhaustive_generic_payload` 已在 C/LLVM/diff 恢复并删单。当前硬门仍有 **1 LLVM-only + 11 shared-positive + 1 check-only** gap，以及 **3 个 manual-evidence**（死的 `HStmt::Dup`、C `#line`、extern-handle RC 结构断言）。**下一步 = P2.2 gap 修复与 manual gate 自动化；LLVM tag/删除、dist-c 切换均未开始。**
 >
 > **P2.2 进度（2026-07-27）**：audit #222 ✅——tuple 越界字段访问记录 E0304 后不再继续索引/panic，以 `ErrorType` 安全恢复；含补丁的 C-self-host compiler 实测负向诊断 E0304、合法 tuple field access 通过，matrix 变为 **66 covered / 12 known-gap / 3 manual-evidence**。`CHECK_ONLY_GAPS` 已清零；剩余语义门为 1 LLVM-only + 11 shared-positive。
+>
+> module-qualified effect evidence ✅——统一反解 `__ring_ev_` 参数，结构性保留 file-module `$$_` canonical boundary，仅还原 inline `::`；C/LLVM 的 main、lookup 与 user-drop 五个消费点已收口。新增 unqualified/inline 与真实多文件 `pkg$effects$$_child::InlineDefault` 双后端回归，独立对抗 review PASS；matrix 现为 **68 covered / 11 known-gap / 3 manual-evidence**，剩余 1 LLVM-only + 10 shared-positive。LLVM bootstrap 的 verifier warning 在 clean `97bbd64` 与 patched 同命令下逐字一致且都产出对象，排除本补丁回归。
 
 **验收标准**：
 - Phase 1：全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）

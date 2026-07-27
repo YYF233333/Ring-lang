@@ -74,10 +74,6 @@ SHARED_POSITIVE_GAPS = {
         "both backends hit the same deep-handler heap failure "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "tests/cases/mod_effect_evidence.ring": (
-        "both backends access-violate in shared effect-evidence handling "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
     "tests/cases/api_clone.ring": (
         "both backends access-violate in the shared clone/runtime path "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
