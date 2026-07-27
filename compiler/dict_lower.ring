@@ -39,7 +39,7 @@
 use ast::{Span}
 use types::{Type, EffectRow, EMPTY_ROW}
 use hir::{HProgram, HDecl, HStmt, HExpr, HMatchArm, HStructFieldInit,
-    HStringInterpPart, HEffectHandler, HTraitMethod, DictRef, TraitDispatch,
+    HStringInterpPart, HEffectHandler, HEffectOp, HTraitMethod, DictRef, TraitDispatch,
     HDictDef, dict_instance_name, hexpr_type, hexpr_effects, hexpr_span}
 
 pub fn lower_dicts(program: HProgram) -> HProgram {
@@ -103,8 +103,20 @@ fn dl_decl(d: HDecl, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
             HDecl::Struct { name: name, type_params: type_params, fields: fields, is_pub: is_pub, span: span },
         HDecl::Enum { name, type_params, variants, is_pub, span } =>
             HDecl::Enum { name: name, type_params: type_params, variants: variants, is_pub: is_pub, span: span },
-        HDecl::Effect { name, type_params, ops, is_pub, span } =>
-            HDecl::Effect { name: name, type_params: type_params, ops: ops, is_pub: is_pub, span: span },
+        HDecl::Effect { name, type_params, ops, is_pub, span } => {
+            let mut new_ops: List<HEffectOp> = []
+            for op in ops {
+                let new_default_body = match op.default_body {
+                    some(body) => some(dl_expr(body, defs, seen, counter)),
+                    none => none,
+                }
+                new_ops.push(HEffectOp {
+                    name: op.name, params: op.params, return_type: op.return_type,
+                    has_default: op.has_default, default_body: new_default_body
+                })
+            }
+            HDecl::Effect { name: name, type_params: type_params, ops: new_ops, is_pub: is_pub, span: span }
+        },
         HDecl::ExternFn { name, def_id, type_params, params, return_type, effects, is_pub, span } =>
             HDecl::ExternFn { name: name, def_id: def_id, type_params: type_params, params: params, return_type: return_type, effects: effects, is_pub: is_pub, span: span },
         HDecl::ExternType { name, type_params, is_pub, span } =>

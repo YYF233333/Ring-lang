@@ -242,7 +242,17 @@ fn verify_decls(decls: List<HDecl>, boxed: Set<Int>, externs: Set<Str>, mut find
             },
             HDecl::Struct { .. } => {},
             HDecl::Enum { .. } => {},
-            HDecl::Effect { .. } => {},
+            HDecl::Effect { name, ops, .. } => {
+                for op in ops {
+                    match op.default_body {
+                        some(body) => {
+                            v_fn_scope(op.params, body, "effect ${name}.${op.name} default",
+                                boxed, externs, findings)
+                        },
+                        none => {},
+                    }
+                }
+            },
             HDecl::Trait { .. } => {},
             HDecl::ExternFn { .. } => {},
             HDecl::ExternType { .. } => {},

@@ -70,10 +70,6 @@ LLVM_BACKEND_GAPS = {
 }
 
 SHARED_POSITIVE_GAPS = {
-    "tests/cases/default_effect_body_io.ring": (
-        "both backends hit the same deep-handler heap failure "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
     "tests/cases/mod_effect_evidence.ring": (
         "both backends access-violate in shared effect-evidence handling "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
