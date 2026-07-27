@@ -105,7 +105,7 @@ LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理
 
 发现者：step 7 worker（feedback 分诊）
 
-### #251 abort handler 的 arm body 从不执行——checker 放行非恒等 body 但 codegen 忽略 [critical] [judgment] [open]
+### #251 abort handler 的 arm body 从不执行——checker 放行非恒等 body 但 codegen 忽略 [critical] [judgment] [doing]
 
 > 2026-07-12 B-163 step 6 worker 实测确认（双后端一致，共享设计缺陷；C 侧 faithful port 保持 diff=0）。
 >
