@@ -30,7 +30,8 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
     HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
     TraitDispatch, DictDispatchInfo, effect_op_slot,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
-    trait_dict_name, trait_bound_param_name, evidence_param_name, is_extern_handle_type,
+    trait_dict_name, trait_bound_param_name, evidence_param_name,
+    effect_name_from_evidence_param, is_extern_handle_type,
     slot_bridge_runtime_name}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_param, c_mangle_fn,
@@ -1631,9 +1632,7 @@ fn c_lookup_evidence(mut ctx: CCtx, ep_name: Str) -> Str {
     match ctx.named_values.get(ep_name) {
         some(cv) => cv,
         none => {
-            // ep_name is "__ring_ev_<eff>" — prefix is 10 chars (same
-            // extraction as the LLVM backend's lookup_evidence).
-            let effect_name = ep_name.slice(10, ep_name.len())
+            let effect_name = effect_name_from_evidence_param(ep_name)
             match ctx.default_evidence.get(effect_name) {
                 some(g) => g,
                 none => "RING_UNIT",

@@ -15,7 +15,8 @@ use types::{Type, Effect, EffectRow, effect_kind_name}
 use ast::{Span, UseDecl, UseImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, HEffectOp, TraitBound, evidence_param_name, trait_bound_param_name,
-    default_evidence_name, variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
+    effect_name_from_evidence_param, default_evidence_name,
+    variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
     default_method_self_name, scan_trait_method_order, collect_all_supertraits,
     type_contains_extern_handle,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, TypeKind}
@@ -1099,9 +1100,8 @@ fn c_user_drop_args(ctx: CCtx, user_drop_name: Str, total_params: Int) -> Str {
     for _i in 1..(total_params - ev.len()) {
         args.push("RING_UNIT")
     }
-    // ep is "__ring_ev_<eff>" (prefix = 10 chars — lookup_evidence parity).
     for ep in ev {
-        let effect_name = ep.slice(10, ep.len())
+        let effect_name = effect_name_from_evidence_param(ep)
         match ctx.default_evidence.get(effect_name) {
             some(g) => args.push(g),
             none => args.push("RING_UNIT"),
@@ -1145,10 +1145,9 @@ fn emit_c_main_wrapper_common(mut ctx: CCtx, ring_main_key: Str, warn_no_main: B
                 some(evs) => {
                     // B-097: pass the default evidence global for effects that
                     // have one; NULL for io/fail/unknown effects (the runtime
-                    // handles those without evidence).  ep is "__ring_ev_<eff>"
-                    // (prefix = 10 chars — same extraction as lookup_evidence).
+                    // handles those without evidence).
                     for ep in evs {
-                        let effect_name = ep.slice(10, ep.len())
+                        let effect_name = effect_name_from_evidence_param(ep)
                         match ctx.default_evidence.get(effect_name) {
                             some(g) => args.push(g),
                             none => args.push("RING_UNIT"),

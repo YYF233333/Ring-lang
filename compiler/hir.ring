@@ -419,6 +419,27 @@ pub fn evidence_param_name(effect_name: Str) -> Str {
     "__ring_ev_${safe}"
 }
 
+// Reverse evidence_param_name back to the canonical effect identity used by
+// checker/codegen registries.  File-module identities have the shape
+// `path$segments$$_Decl::inline`; the `$` before the `$$_` boundary belongs to
+// the resolver module prefix and must stay encoded.  Only `$` after that
+// boundary represents inline `::`.  Without a file-module boundary, every `$`
+// represents an inline module separator because `$` is illegal in source
+// identifiers.
+pub fn effect_name_from_evidence_param(param_name: Str) -> Str {
+    let prefix = "__ring_ev_"
+    let encoded = param_name.slice(prefix.len(), param_name.len())
+    match encoded.index_of("$$_") {
+        some(boundary_start) => {
+            let suffix_start = boundary_start + "$$_".len()
+            let file_identity = encoded.slice(0, suffix_start)
+            let inline_suffix = encoded.slice(suffix_start, encoded.len()).replace("$", "::")
+            "${file_identity}${inline_suffix}"
+        },
+        none => encoded.replace("$", "::"),
+    }
+}
+
 pub fn default_evidence_name(effect_name: Str) -> Str {
     let safe = if effect_name.contains("::") { effect_name.replace("::", "$") } else { effect_name }
     "__ring_default_ev_${safe}"

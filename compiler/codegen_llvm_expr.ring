@@ -3,7 +3,8 @@ use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler, HEffectOp, DictRef, DictDispatchInfo, TraitDispatch,
     TraitBound,
-    evidence_param_name, trait_dict_name, trait_bound_param_name, compare_by_first,
+    evidence_param_name, effect_name_from_evidence_param,
+    trait_dict_name, trait_bound_param_name, compare_by_first,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     BUILTIN_RANGE,
@@ -2401,8 +2402,7 @@ fn lookup_evidence(mut ctx: LlvmCtx, ev_param_name: Str) -> LLVMValueRef {
         some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "ev")),
         none => {
             // B-097: not in scope — try default evidence before falling back to null.
-            // Extract effect name from "__ring_ev_<name>" (prefix is 10 chars).
-            let effect_name = ev_param_name.slice(10, ev_param_name.len())
+            let effect_name = effect_name_from_evidence_param(ev_param_name)
             match ctx.default_evidence.get(effect_name) {
                 some(def_ev) => def_ev,
                 none => {
