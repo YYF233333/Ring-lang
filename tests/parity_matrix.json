@@ -631,25 +631,29 @@
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
       "status": "known-gap",
       "gap_scope": "shared-positive",
-      "reason": "both backends fail the same 'fail on bad port' assertion (audit #219)"
+      "reason": "both backends skip the abort-handler arm body and fail the same 'fail on bad port' assertion (audit #251)"
     },
     {
-      "feature_id": "gap.shared.effect_custom_multi_effect",
-      "evidence": ["tests/cases/effect_custom_multi_effect.ring"],
-      "oracle": "shared-failure-no-parity",
+      "feature_id": "backend.effect_handler_mut_capture",
+      "evidence": [
+        "tests/cases/effect_custom_multi_effect.ring",
+        "tests/cases/effect_handler_mut_capture.ring"
+      ],
+      "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends fail the same 'log called twice' assertion (audit #219)"
+      "status": "covered",
+      "reason": "Mutable handler captures, multiple arms, true arm-in-arm nesting, transitive captures, and lexical shadow isolation execute under both backends."
     },
     {
-      "feature_id": "gap.shared.struct_match_pattern",
-      "evidence": ["tests/cases/struct_match_pattern.ring"],
-      "oracle": "shared-failure-no-parity",
+      "feature_id": "backend.struct_named_pattern_fields",
+      "evidence": [
+        "tests/cases/struct_match_pattern.ring",
+        "tests/cases/struct_named_pattern_fields.ring"
+      ],
+      "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends fail the same 'y-axis' assertion (audit #221)"
+      "status": "covered",
+      "reason": "Struct named-pattern fields, literals, nesting, bindings, and lexical scope isolation execute under both backends."
     },
     {
       "feature_id": "gap.shared.tuple_eq",
