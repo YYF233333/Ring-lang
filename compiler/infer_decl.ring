@@ -1903,12 +1903,24 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 // Also map effects
                 let mapped_effects = apply_subst_row_map(var_mapping, effects)
 
-                // Generalize only genuinely new row variables.  Mirroring
-                // infer_ctx::generalize is important here: a monomorphic env
-                // variable (e.g. an unannotated `raise_arg(x)`) must remain
-                // shared, while a body-local/callee-instantiation variable gets
-                // a fresh instance at every call site.
+                // Preserve check-time refinements of higher-order parameter
+                // rows (for example, an abort handler proving that an open
+                // callback row contains fail<E>). The existing structural
+                // mapping restores registration-time variable identities.
+                let mut mapped_params: List<Type> = []
+                for p in params {
+                    mapped_params.push(apply_subst_map(var_mapping, p.ty))
+                }
+
+                // Generalize only genuinely new row/refined-parameter variables.
+                // Mirroring infer_ctx::generalize is important here: a
+                // monomorphic env variable (e.g. an unannotated `raise_arg(x)`)
+                // must remain shared, while a body-local/callee-instantiation
+                // variable gets a fresh instance at every call site.
                 let mut row_free: Set<Int> = set_new()
+                for mapped_param in mapped_params {
+                    collect_free_vars(mapped_param, row_free)
+                }
                 collect_free_vars(Type::EffectRowType {
                     effects: mapped_effects.effects, tail: mapped_effects.tail
                 }, row_free)
@@ -1950,7 +1962,7 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 }
 
                 let new_type = Type::FnType {
-                    params: reg_params, return_type: mapped_ret, effects: mapped_effects
+                    params: mapped_params, return_type: mapped_ret, effects: mapped_effects
                 }
                 rebind_fn_scheme_with_alias(ctx, name, TypeScheme {
                     ..scheme,

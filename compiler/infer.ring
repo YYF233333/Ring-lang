@@ -2359,10 +2359,11 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
             // fail.raise receives the error payload raised by the handled body.
             // Extract concrete fail label(s) exactly as infer_catch does and
-            // unify duplicates. An open row tail alone does not identify an
-            // error type, so do not invent one for it here.
+            // unify duplicates. Apply the current substitution first because
+            // an earlier HOF call may already have expanded the body's row tail.
             if is_abort_handler && !body_fail_types_extracted {
-                for eff in effects.effects {
+                let resolved_body_effects = apply_subst_row(s, effects)
+                for eff in resolved_body_effects.effects {
                     match eff {
                         Effect::FailEffect { error_type: et } => {
                             match body_fail_error_type {
@@ -2420,6 +2421,31 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                         }
                     },
                     none => {}
+                }
+
+                // An abort handler proves that an otherwise-open body row
+                // contains fail<payload>. Split that open tail into the handled
+                // fail label plus a fresh residual row instead of erasing or
+                // closing it. The residual remains effect-polymorphic and is
+                // propagated after fail is filtered from this handle.
+                if body_fail_error_type.is_none() {
+                    let resolved_body_effects = apply_subst_row(s, effects)
+                    match (abort_payload_type, resolved_body_effects.tail) {
+                        (some(payload_type), some(body_tail)) => {
+                            let residual_tail = ctx.env.fresh_var_id()
+                            let required_tail = Type::EffectRowType {
+                                effects: [Effect::FailEffect { error_type: payload_type }],
+                                tail: some(residual_tail)
+                            }
+                            s = unify_at(
+                                ctx.sink, ctx.env,
+                                Type::TypeVar { id: body_tail, name: none },
+                                required_tail, s, handler.span
+                            )
+                            body_fail_error_type = some(payload_type)
+                        },
+                        _ => {}
+                    }
                 }
             }
 
