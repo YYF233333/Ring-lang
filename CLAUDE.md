@@ -59,7 +59,7 @@ Ring-lang/
 
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_ctor_name`），不允许跨阶段硬编码字符串契约
-- **dist-llvm/ 重编**：修改编译器后用 ring.exe 重编：`ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。ring.exe 构建方式见「常用命令」。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。dist/ 作 stage 0 信任锚（需 llvm_addon；语言快照停在 `0bd7822`，编不了 HEAD 源码——回退需链式重放，见 B-163 Phase 0）。
+- **dist-llvm/ 重编**：修改编译器后用 ring.exe 重编：`.\ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。ring.exe 构建方式见「常用命令」。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。dist/ 作 stage 0 信任锚（需 llvm_addon；语言快照停在 `0bd7822`，编不了 HEAD 源码——回退需链式重放，见 B-163 Phase 0）。
 - 注释语法 `//`，无 pipe 运算符，`.method()` 是唯一链式调用方式（`::` 模块路径和 `.method()` 方法调用是两个不互通的范畴，无 UFCS）
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
 - 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）
@@ -183,19 +183,19 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 ## 常用命令
 
-```bash
+```powershell
 # 构建 ring.exe（需 clang + LLVM）
 clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
 clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-L<LLVM_LIB_DIR>" -lLLVM-C
 
 # 编译单文件为 native .o
-ring.exe build examples/hello.ring
+.\ring.exe build examples/hello.ring
 
 # 类型检查
-ring.exe check examples/effects.ring
+.\ring.exe check examples/effects.ring
 
 # LLM 格式错误输出
-ring.exe check --error-format=llm examples/effects.ring
+.\ring.exe check --error-format=llm examples/effects.ring
 
 # E2E 测试（Python runner）
 python tests/run_tests.py --suite e2e
@@ -216,7 +216,7 @@ python tests/run_tests.py
 python tests/run_tests.py --update-golden
 
 # 重新编译编译器自身（dist-llvm/）
-ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
+.\ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
 ```
 
 ## ASan 跑法（两档，2026-06-11 定）
