@@ -2326,6 +2326,11 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     // unconstrained body TypeVar to Never (the #180 bottom-poisoning class).
     let mut result_type = hexpr_type(body_r.hexpr)
 
+    // #251: populated lazily only for an abort handler so ordinary
+    // tail-resumptive handles retain their existing (#258) checker behavior.
+    let mut body_fail_error_type: Type? = none
+    let mut body_fail_types_extracted = false
+
     let mut hhandlers: List<HEffectHandler> = []
     let mut handled_effects: Set<Str> = set_new()
     // Abort arms run after the current handler has been deactivated. Their
@@ -2350,6 +2355,30 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                 some(ed) => ed.name,
                 none => handler.effect_name
             }
+            let is_abort_handler = canonical_effect_name == "fail" && handler.op_name == "raise"
+
+            // fail.raise receives the error payload raised by the handled body.
+            // Extract concrete fail label(s) exactly as infer_catch does and
+            // unify duplicates. An open row tail alone does not identify an
+            // error type, so do not invent one for it here.
+            if is_abort_handler && !body_fail_types_extracted {
+                for eff in effects.effects {
+                    match eff {
+                        Effect::FailEffect { error_type: et } => {
+                            match body_fail_error_type {
+                                some(existing) => {
+                                    s = unify_at(ctx.sink, ctx.env, existing, et, s, span)
+                                },
+                                none => {
+                                    body_fail_error_type = some(et)
+                                }
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+                body_fail_types_extracted = true
+            }
 
             // Instantiate effect type params with fresh variables for handler
             let mut handler_inst_map: Map<Int, Type> = map_new()
@@ -2369,10 +2398,35 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                 none => {}
             }
 
+            // The instantiated fail.raise parameter is the single payload
+            // contract shared by the handled body's concrete fail<E> row, the
+            // source annotation (if any), and the arm-local binding.
+            let mut abort_payload_type: Type? = none
+            if is_abort_handler {
+                match op_def {
+                    some(od) => {
+                        match od.params.first() {
+                            some(odt) => {
+                                let payload_type = apply_subst_map(handler_inst_map, odt)
+                                match body_fail_error_type {
+                                    some(body_error_type) => {
+                                        s = unify_at(ctx.sink, ctx.env, payload_type, body_error_type, s, handler.span)
+                                    },
+                                    none => {}
+                                }
+                                abort_payload_type = some(payload_type)
+                            },
+                            none => {}
+                        }
+                    },
+                    none => {}
+                }
+            }
+
             let mut hparams: List<HParam> = []
             let mut hi = 0
             for p in handler.params {
-                let pt = match p.type_annotation {
+                let mut pt = match p.type_annotation {
                     some(ta) => resolve_type_expr(ctx, ta),
                     none => match op_def {
                         some(od) => match od.params.get(hi) {
@@ -2380,6 +2434,34 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                             none => ctx.env.fresh_var()
                         },
                         none => ctx.env.fresh_var()
+                    }
+                }
+                if is_abort_handler && hi == 0 {
+                    match abort_payload_type {
+                        some(payload_type) => {
+                            let mut payload_notes: List<DiagnosticNote> = [
+                                DiagnosticNote {
+                                    message: "abort handler payload type must match handled fail error type",
+                                    span: some(handler.span)
+                                },
+                                DiagnosticNote {
+                                    message: "handler payload parameter has type '${type_to_string(apply_subst(s, pt))}'",
+                                    span: some(p.span)
+                                }
+                            ]
+                            match body_fail_error_type {
+                                some(body_error_type) => {
+                                    payload_notes.push(DiagnosticNote {
+                                        message: "handled body raises '${type_to_string(apply_subst(s, body_error_type))}'",
+                                        span: some(hexpr_span(body_r.hexpr))
+                                    })
+                                },
+                                none => {}
+                            }
+                            s = unify_at_noted(ctx.sink, ctx.env, pt, payload_type, s, p.span, payload_notes)
+                            pt = apply_subst(s, payload_type)
+                        },
+                        none => {}
                     }
                 }
                 ctx.env.bind_mono(p.name, pt)
@@ -2401,7 +2483,6 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
             let hbr = infer_expr(ctx, handler.body, s)
             s = hbr.subst
-            let is_abort_handler = canonical_effect_name == "fail" && handler.op_name == "raise"
             if is_abort_handler {
                 abort_arm_effect_rows.push(hbr.effects)
 

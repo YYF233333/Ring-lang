@@ -641,19 +641,20 @@
       "oracle": "handwritten-golden+dual-backend",
       "lane": ["llvm-golden", "c-golden", "llvm-diff"],
       "status": "covered",
-      "reason": "Abort arms execute once with outer evidence, nested re-raise, captures, bottom typing, and catch-path cleanup."
+      "reason": "Abort arms execute once with typed payloads, owned results, outer evidence, nested re-raise, captures, bottom typing, and catch-path cleanup."
     },
     {
       "feature_id": "backend.frontend_abort_handler_contract",
       "evidence": [
         "tests/cases/error_abort_handler_arm_io_effect.ring",
         "tests/cases/error_abort_handler_arm_reraise_effect.ring",
+        "tests/cases/error_abort_handler_payload_type.ring",
         "tests/cases/error_abort_handler_result_type.ring"
       ],
       "oracle": "diagnostic-substring",
       "lane": ["check"],
       "status": "covered",
-      "reason": "Checker rejects abort-arm result mismatch and exposes arm io/re-raised fail effects to enclosing signatures."
+      "reason": "Checker rejects abort payload/result mismatches and exposes arm io/re-raised fail effects to enclosing signatures."
     },
     {
       "feature_id": "backend.effect_handler_mut_capture",

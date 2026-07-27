@@ -1,5 +1,6 @@
 mapped-arm:boom:7:2
 mapped=13 hits=1 normal=41 shadow=outer-shadow
+owned=owned:heap
 bottom=10
 nested=25 nested_hits=1
 outer-rethrow:again:first

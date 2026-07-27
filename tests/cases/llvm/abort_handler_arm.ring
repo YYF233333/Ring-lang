@@ -18,6 +18,10 @@ fn raise_number(value: Int) -> Int with {fail<Int>} {
     fail.raise(value)
 }
 
+fn raise_owned_text(message: Str) -> Str with {fail<Str>} {
+    fail.raise(message)
+}
+
 // The normal result remains the polymorphic T even though the abort arm is
 // Never. This pins the #180 bottom-poisoning guard for abort-result joining.
 fn generic_passthrough<T>(value: T, should_fail: Bool) -> T with {fail<Str>} {
@@ -58,6 +62,18 @@ fn main() {
     assert(arm_hits == 1, "abort arm executes exactly once and not on normal path")
     assert(shadow == "outer-shadow", "abort parameter does not leak past handle")
     print("mapped=${mapped} hits=${arm_hits} normal=${normal} shadow=${shadow}")
+
+    // The abort arm may produce a fresh owned heap value rather than returning
+    // the tagged payload. It must escape the catch arm and survive the backend
+    // merge/Perceus ownership path.
+    let owned = handle {
+        raise_owned_text("heap")
+    } with {
+        fail.raise(message: Str) => "owned:${message}",
+    }
+    assert(owned == "owned:heap", "fresh owned abort-arm result escapes")
+    assert(owned.len() == 10, "fresh owned abort-arm result remains live")
+    print("owned=${owned}")
 
     // A directly raised body has type Never; the recovering abort arm determines
     // the handle's Int result instead of leaving HExpr.ty stuck at Never.
@@ -166,7 +182,8 @@ fn main() {
             raise_number(i)
         } with {
             Transform.apply(n) => n + 1000,
-            fail.raise(n: Int) => n + 1,
+            // No annotation: the concrete body fail<Int> row constrains n.
+            fail.raise(n) => n + 1,
         }
         checksum = checksum + value
     }
