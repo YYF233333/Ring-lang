@@ -987,7 +987,7 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     let mut captures: List<Str> = []
     collect_c_captures(ctx, body, params, captures)
     let mut extern_typed: Set<Str> = set_new()
-    collect_c_extern_typed_names(body, ctx.extern_types, extern_typed)
+    collect_c_extern_typed_names(body, captures, params, ctx.extern_types, extern_typed)
 
     let ln = ctx.lambda_counter
     ctx.lambda_counter = ln + 1
@@ -1053,11 +1053,7 @@ fn consider_c_capture_name(ctx: CCtx, name: Str, resolved_name: Str?, params: Li
         some(rn) => rn,
         none => name,
     }
-    let mut is_param = false
-    for p in params {
-        if p.name == lookup_name || p.name == name { is_param = true }
-    }
-    if is_param { return }
+    if c_capture_name_is_bound(name, lookup_name, params) { return }
     // Step 8: module-aware fn check (consider_capture_name parity —
     // resolved lookup_name → bare name → resolved name).
     let is_fn = if ctx.functions.contains_key(c_resolve_fn(ctx, lookup_name)) {
@@ -1081,6 +1077,36 @@ fn consider_c_capture_name(ctx: CCtx, name: Str, resolved_name: Str?, params: Li
             captures.push(lookup_name)
         }
     }
+}
+
+fn c_capture_name_is_bound(name: Str, lookup_name: Str, params: List<HParam>) -> Bool {
+    for p in params {
+        if p.name == lookup_name || p.name == name { return true }
+    }
+    false
+}
+
+// A nested handler arm is a closure nested inside the closure currently being
+// scanned. Its own operation parameters (and future explicit resume binding)
+// are lexical locals, while the enclosing closure's parameters must remain in
+// the exclusion set. Copy rather than mutate so sibling arms stay isolated.
+fn extend_c_handler_capture_params(
+    params: List<HParam>,
+    handler_params: List<HParam>,
+    resume_name: Str?
+) -> List<HParam> {
+    let mut extended: List<HParam> = []
+    for p in params { extended.push(p) }
+    for p in handler_params { extended.push(p) }
+    match resume_name {
+        some(rn) => {
+            extended.push(HParam {
+                name: rn, ty: Type::ErrorType, def_id: none, is_mutable: false
+            })
+        },
+        none => {},
+    }
+    extended
 }
 
 // #B-087 gap 3: capture the dict param a trait dispatch routes through.
@@ -1217,8 +1243,12 @@ fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures
                 collect_c_captures(ctx, arm.body, params, captures)
             }
         },
-        HExpr::HandleExpr { body: he_body, .. } => {
+        HExpr::HandleExpr { body: he_body, handlers: he_handlers, .. } => {
             collect_c_captures(ctx, he_body, params, captures)
+            for h in he_handlers {
+                let arm_params = extend_c_handler_capture_params(params, h.params, h.resume_name)
+                collect_c_captures(ctx, h.body, arm_params, captures)
+            }
         },
         HExpr::EffectOp { effect_name: eo_eff, args: eo_args, .. } => {
             for a in eo_args { collect_c_captures(ctx, a, params, captures) }
@@ -1289,137 +1319,183 @@ fn collect_c_captures_stmt(ctx: CCtx, stmt: HStmt, params: List<HParam>, mut cap
 // B-144: names whose Ident use in the body has an extern-handle type — the
 // lambda construction skips ring_dup for these captures.  (Set intersection
 // with the capture list happens at the use site: extern_typed ∩ captures.)
-fn collect_c_extern_typed_names(expr: HExpr, externs: Set<Str>, mut out: Set<Str>) {
+fn collect_c_extern_typed_names(
+    expr: HExpr,
+    captures: List<Str>,
+    params: List<HParam>,
+    externs: Set<Str>,
+    mut out: Set<Str>
+) {
     match expr {
         HExpr::Ident { name, resolved_name, ty, .. } => {
-            if is_extern_handle_type(ty, externs) {
-                let lookup = match resolved_name { some(rn) => rn, none => name }
+            let lookup = match resolved_name { some(rn) => rn, none => name }
+            let mut found = false
+            for c in captures {
+                if c == lookup || c == name { found = true }
+            }
+            if found
+                && c_capture_name_is_bound(name, lookup, params) == false
+                && is_extern_handle_type(ty, externs) {
                 out.insert(lookup)
             }
         },
         HExpr::BinOp { left, right, .. } => {
-            collect_c_extern_typed_names(left, externs, out)
-            collect_c_extern_typed_names(right, externs, out)
+            collect_c_extern_typed_names(left, captures, params, externs, out)
+            collect_c_extern_typed_names(right, captures, params, externs, out)
         },
-        HExpr::UnaryOp { operand, .. } => collect_c_extern_typed_names(operand, externs, out),
+        HExpr::UnaryOp { operand, .. } =>
+            collect_c_extern_typed_names(operand, captures, params, externs, out),
         HExpr::Call { callee, args, .. } => {
-            collect_c_extern_typed_names(callee, externs, out)
-            for a in args { collect_c_extern_typed_names(a, externs, out) }
+            collect_c_extern_typed_names(callee, captures, params, externs, out)
+            for a in args { collect_c_extern_typed_names(a, captures, params, externs, out) }
         },
-        HExpr::FieldAccess { receiver, .. } => collect_c_extern_typed_names(receiver, externs, out),
+        HExpr::FieldAccess { receiver, .. } =>
+            collect_c_extern_typed_names(receiver, captures, params, externs, out),
         HExpr::Block { stmts, tail, .. } => {
-            for s in stmts { collect_c_extern_typed_names_stmt(s, externs, out) }
+            for s in stmts {
+                collect_c_extern_typed_names_stmt(s, captures, params, externs, out)
+            }
             match tail {
-                some(t) => collect_c_extern_typed_names(t, externs, out),
+                some(t) => collect_c_extern_typed_names(t, captures, params, externs, out),
                 none => {},
             }
         },
         HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
-            collect_c_extern_typed_names(condition, externs, out)
-            collect_c_extern_typed_names(then_branch, externs, out)
+            collect_c_extern_typed_names(condition, captures, params, externs, out)
+            collect_c_extern_typed_names(then_branch, captures, params, externs, out)
             match else_branch {
-                some(eb) => collect_c_extern_typed_names(eb, externs, out),
+                some(eb) => collect_c_extern_typed_names(eb, captures, params, externs, out),
                 none => {},
             }
         },
         HExpr::MatchExpr { scrutinee, arms, .. } => {
-            collect_c_extern_typed_names(scrutinee, externs, out)
+            collect_c_extern_typed_names(scrutinee, captures, params, externs, out)
             for arm in arms {
                 match arm.guard {
-                    some(g) => collect_c_extern_typed_names(g, externs, out),
+                    some(g) => collect_c_extern_typed_names(g, captures, params, externs, out),
                     none => {},
                 }
-                collect_c_extern_typed_names(arm.body, externs, out)
+                collect_c_extern_typed_names(arm.body, captures, params, externs, out)
             }
         },
         HExpr::StringInterp { parts, .. } => {
             for part in parts {
                 match part {
-                    HStringInterpPart::Expression(e) => collect_c_extern_typed_names(e, externs, out),
+                    HStringInterpPart::Expression(e) =>
+                        collect_c_extern_typed_names(e, captures, params, externs, out),
                     _ => {},
                 }
             }
         },
         HExpr::StructLit { fields, spread, .. } => {
-            for f in fields { collect_c_extern_typed_names(f.value, externs, out) }
+            for f in fields {
+                collect_c_extern_typed_names(f.value, captures, params, externs, out)
+            }
             match spread {
-                some(sp) => collect_c_extern_typed_names(sp, externs, out),
+                some(sp) => collect_c_extern_typed_names(sp, captures, params, externs, out),
                 none => {},
             }
         },
         HExpr::ListLit { elements, .. } => {
-            for e in elements { collect_c_extern_typed_names(e, externs, out) }
+            for e in elements {
+                collect_c_extern_typed_names(e, captures, params, externs, out)
+            }
         },
         HExpr::TupleLit { elements, .. } => {
-            for e in elements { collect_c_extern_typed_names(e, externs, out) }
+            for e in elements {
+                collect_c_extern_typed_names(e, captures, params, externs, out)
+            }
         },
         HExpr::IndexExpr { receiver, index, .. } => {
-            collect_c_extern_typed_names(receiver, externs, out)
-            collect_c_extern_typed_names(index, externs, out)
+            collect_c_extern_typed_names(receiver, captures, params, externs, out)
+            collect_c_extern_typed_names(index, captures, params, externs, out)
         },
-        HExpr::Lambda { body: lb, .. } => collect_c_extern_typed_names(lb, externs, out),
+        HExpr::Lambda { body: lb, .. } =>
+            collect_c_extern_typed_names(lb, captures, params, externs, out),
         HExpr::NamedVariantConstruct { fields: nvc_fields, spread: nvc_spread, .. } => {
-            for f in nvc_fields { collect_c_extern_typed_names(f.value, externs, out) }
+            for f in nvc_fields {
+                collect_c_extern_typed_names(f.value, captures, params, externs, out)
+            }
             match nvc_spread {
-                some(sp) => collect_c_extern_typed_names(sp, externs, out),
+                some(sp) => collect_c_extern_typed_names(sp, captures, params, externs, out),
                 none => {},
             }
         },
         HExpr::TryCatch { body: tc_body, arms: tc_arms, .. } => {
-            collect_c_extern_typed_names(tc_body, externs, out)
+            collect_c_extern_typed_names(tc_body, captures, params, externs, out)
             for arm in tc_arms {
                 match arm.guard {
-                    some(g) => collect_c_extern_typed_names(g, externs, out),
+                    some(g) => collect_c_extern_typed_names(g, captures, params, externs, out),
                     none => {},
                 }
-                collect_c_extern_typed_names(arm.body, externs, out)
+                collect_c_extern_typed_names(arm.body, captures, params, externs, out)
             }
         },
-        HExpr::HandleExpr { body: he_body, .. } => collect_c_extern_typed_names(he_body, externs, out),
+        HExpr::HandleExpr { body: he_body, handlers: he_handlers, .. } => {
+            collect_c_extern_typed_names(he_body, captures, params, externs, out)
+            for h in he_handlers {
+                let arm_params = extend_c_handler_capture_params(params, h.params, h.resume_name)
+                collect_c_extern_typed_names(h.body, captures, arm_params, externs, out)
+            }
+        },
         HExpr::EffectOp { args: eo_args, .. } => {
-            for a in eo_args { collect_c_extern_typed_names(a, externs, out) }
+            for a in eo_args {
+                collect_c_extern_typed_names(a, captures, params, externs, out)
+            }
         },
         HExpr::RangeExpr { start: rs, end: re, .. } => {
-            collect_c_extern_typed_names(rs, externs, out)
-            collect_c_extern_typed_names(re, externs, out)
+            collect_c_extern_typed_names(rs, captures, params, externs, out)
+            collect_c_extern_typed_names(re, captures, params, externs, out)
         },
-        HExpr::Clone { inner, .. } => collect_c_extern_typed_names(inner, externs, out),
+        HExpr::Clone { inner, .. } =>
+            collect_c_extern_typed_names(inner, captures, params, externs, out),
         HExpr::ReturnExpr { value, .. } => match value {
-            some(v) => collect_c_extern_typed_names(v, externs, out),
+            some(v) => collect_c_extern_typed_names(v, captures, params, externs, out),
             none => {},
         },
-        HExpr::UnsafeBlock { body, .. } => collect_c_extern_typed_names(body, externs, out),
+        HExpr::UnsafeBlock { body, .. } =>
+            collect_c_extern_typed_names(body, captures, params, externs, out),
         _ => {},
     }
 }
 
-fn collect_c_extern_typed_names_stmt(stmt: HStmt, externs: Set<Str>, mut out: Set<Str>) {
+fn collect_c_extern_typed_names_stmt(
+    stmt: HStmt,
+    captures: List<Str>,
+    params: List<HParam>,
+    externs: Set<Str>,
+    mut out: Set<Str>
+) {
     match stmt {
-        HStmt::Let { init, .. } => collect_c_extern_typed_names(init, externs, out),
-        HStmt::Var { init, .. } => collect_c_extern_typed_names(init, externs, out),
+        HStmt::Let { init, .. } =>
+            collect_c_extern_typed_names(init, captures, params, externs, out),
+        HStmt::Var { init, .. } =>
+            collect_c_extern_typed_names(init, captures, params, externs, out),
         HStmt::Assign { target, value, .. } => {
-            collect_c_extern_typed_names(target, externs, out)
-            collect_c_extern_typed_names(value, externs, out)
+            collect_c_extern_typed_names(target, captures, params, externs, out)
+            collect_c_extern_typed_names(value, captures, params, externs, out)
         },
-        HStmt::ExprStmt { expr, .. } => collect_c_extern_typed_names(expr, externs, out),
+        HStmt::ExprStmt { expr, .. } =>
+            collect_c_extern_typed_names(expr, captures, params, externs, out),
         HStmt::Return { value, .. } => match value {
-            some(v) => collect_c_extern_typed_names(v, externs, out),
+            some(v) => collect_c_extern_typed_names(v, captures, params, externs, out),
             none => {},
         },
         HStmt::While { condition, body, .. } => {
-            collect_c_extern_typed_names(condition, externs, out)
-            collect_c_extern_typed_names(body, externs, out)
+            collect_c_extern_typed_names(condition, captures, params, externs, out)
+            collect_c_extern_typed_names(body, captures, params, externs, out)
         },
         HStmt::ForIn { iterable, body, .. } => {
-            collect_c_extern_typed_names(iterable, externs, out)
-            collect_c_extern_typed_names(body, externs, out)
+            collect_c_extern_typed_names(iterable, captures, params, externs, out)
+            collect_c_extern_typed_names(body, captures, params, externs, out)
         },
-        HStmt::LetDestructure { init, .. } => collect_c_extern_typed_names(init, externs, out),
+        HStmt::LetDestructure { init, .. } =>
+            collect_c_extern_typed_names(init, captures, params, externs, out),
         HStmt::IfLet { expr, then_block, else_block, .. } => {
-            collect_c_extern_typed_names(expr, externs, out)
-            collect_c_extern_typed_names(then_block, externs, out)
+            collect_c_extern_typed_names(expr, captures, params, externs, out)
+            collect_c_extern_typed_names(then_block, captures, params, externs, out)
             match else_block {
-                some(eb) => collect_c_extern_typed_names(eb, externs, out),
+                some(eb) => collect_c_extern_typed_names(eb, captures, params, externs, out),
                 none => {},
             }
         },
