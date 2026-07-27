@@ -214,7 +214,7 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 发现者：Opus+DS
 
 
-### #219 effect handler 交互：custom effect + fail 组合 runtime crash [medium] [judgment] [open]
+### #219 effect handler 交互：custom effect + fail 组合 runtime crash [medium] [judgment] [doing]
 
 `effect_custom_and_fail.ring`（"fail on bad port"）和 `effect_custom_multi_effect.ring`（"log called twice"）runtime assertion 失败。custom effect handler 与 fail effect 交互时 evidence 传递或 handler 栈有误。
 
@@ -224,7 +224,7 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 发现者：B-151 CI
 
-### #221 struct match pattern + tuple eq dispatch runtime crash [medium] [judgment] [open]
+### #221 struct match pattern + tuple eq dispatch runtime crash [medium] [judgment] [doing]
 
 三个用例 runtime assertion 失败：`struct_match_pattern.ring`（"y-axis"）、`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。struct 的 match pattern 和 tuple 的 eq 比较在共享层有误。
 
