@@ -2320,17 +2320,28 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     let body_r = infer_expr(ctx, body, subst)
     let mut s = body_r.subst
     let mut effects = body_r.effects
+    // #251: an abort arm is an alternate exit from the handled body, so its
+    // value participates in the handle result. Keep the concrete body type as
+    // the initial join candidate so a Never abort arm cannot bind an otherwise
+    // unconstrained body TypeVar to Never (the #180 bottom-poisoning class).
+    let mut result_type = hexpr_type(body_r.hexpr)
 
     let mut hhandlers: List<HEffectHandler> = []
     let mut handled_effects: Set<Str> = set_new()
+    // Abort arms run after the current handler has been deactivated. Their
+    // effects therefore escape unchanged and must be merged only AFTER the
+    // handled body row has had this handle's effects removed. Tail-resumptive
+    // arm effects intentionally remain out of scope here (audit #258).
+    let mut abort_arm_effect_rows: List<EffectRow> = []
 
     for handler in handlers {
         ctx.env.push_scope()
-        // Handler arms are lowered to closures by both backends. Infer the
-        // entire arm at one deeper lambda depth so mutable outer captures use
-        // the same shared cell as ordinary closures. Save/restore the exact
-        // enclosing depth, and keep all fallible arm setup inside the bracket,
-        // so nested handlers and failed inference cannot leak scope state.
+        // Tail-resumptive arms are lowered to closures; #251 abort arms execute
+        // inline after the current handler is inactive. Infer both at one deeper
+        // lambda depth so mutable outer captures use the same shared cell in
+        // either lowering. Save/restore the exact enclosing depth, and keep all
+        // fallible arm setup inside the bracket, so nested handlers and failed
+        // inference cannot leak scope state.
         let enclosing_lambda_depth = ctx.lambda_depth
         ctx.lambda_depth = enclosing_lambda_depth + 1
         let handler_result = some({
@@ -2390,6 +2401,31 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
             let hbr = infer_expr(ctx, handler.body, s)
             s = hbr.subst
+            let is_abort_handler = canonical_effect_name == "fail" && handler.op_name == "raise"
+            if is_abort_handler {
+                abort_arm_effect_rows.push(hbr.effects)
+
+                // #251/#180: Never is bottom, but unify binds TypeVars before
+                // applying the Never shortcut. Join explicitly so an abort arm
+                // that re-raises does not poison a polymorphic normal result,
+                // while a Never body can still recover to the arm's value type.
+                let resolved_result = apply_subst(s, result_type)
+                let resolved_arm = apply_subst(s, hexpr_type(hbr.hexpr))
+                let result_is_never = match resolved_result { Type::NeverType => true, _ => false }
+                let arm_is_never = match resolved_arm { Type::NeverType => true, _ => false }
+                if result_is_never && !arm_is_never {
+                    result_type = hexpr_type(hbr.hexpr)
+                } else {
+                    if !result_is_never && !arm_is_never {
+                        let handle_notes: List<DiagnosticNote> = [
+                            DiagnosticNote { message: "abort handler arm and handled body must produce the same type", span: some(handler.span) },
+                            DiagnosticNote { message: "handled body has type '${type_to_string(resolved_result)}'", span: some(hexpr_span(body_r.hexpr)) },
+                            DiagnosticNote { message: "abort arm has type '${type_to_string(resolved_arm)}'", span: some(hexpr_span(hbr.hexpr)) }
+                        ]
+                        s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(hbr.hexpr), result_type, s, handler.span, handle_notes)
+                    }
+                }
+            }
             hhandlers.push(HEffectHandler {
                 effect_name: canonical_effect_name, op_name: handler.op_name,
                 params: hparams, resume_name: handler.resume_name, body: hbr.hexpr
@@ -2421,10 +2457,20 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     }
     effects = EffectRow { effects: filtered_effects, tail: resolved_effects.tail }
 
+    // #251: the abort arm executes outside the current handler. Merge its row
+    // verbatim after filtering the body row so io/custom effects and a re-raised
+    // fail escape to the enclosing signature/handler instead of being swallowed.
+    for arm_effects in abort_arm_effect_rows {
+        let me = merge_effects(ctx.env, effects, arm_effects, s)
+        effects = me.0
+        s = me.1
+    }
+    effects = apply_subst_row(s, effects)
+
     InferResult {
         hexpr: HExpr::HandleExpr {
             body: body_r.hexpr, handlers: hhandlers,
-            ty: hexpr_type(body_r.hexpr), effects: effects, span: span
+            ty: apply_subst(s, result_type), effects: effects, span: span
         },
         subst: s, effects: effects
     }

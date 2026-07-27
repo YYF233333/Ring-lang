@@ -86,10 +86,6 @@ SHARED_POSITIVE_GAPS = {
         "both backends access-violate in deep Set operations "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "tests/cases/effect_custom_and_fail.ring": (
-        "both backends skip the abort-handler arm body and fail the same "
-        "'fail on bad port' assertion (audit #251)"
-    ),
     "tests/cases/tuple_eq.ring": (
         "both backends fail the same tuple equality assertion (audit #221)"
     ),

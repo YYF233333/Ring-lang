@@ -1826,13 +1826,20 @@ fn gen_c_try_catch(mut ctx: CCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
     res
 }
 
-// Handle expression — port of gen_handle_expr.  Builds one evidence struct
-// per handled effect; a fail.raise handler is the abort form (setjmp, the
-// raised value IS the handle result).
+// Handle expression — port of gen_handle_expr. Builds one evidence struct per
+// handled effect; a fail.raise handler is the abort form (setjmp, then execute
+// the arm with the raised payload after restoring outer evidence).
 fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>) -> Str {
     // Group handlers by effect name.
     let mut by_effect: Map<Str, List<HEffectHandler>> = map_new()
+    let mut abort_handler: HEffectHandler? = none
     for h in handlers {
+        if h.effect_name == "fail" && h.op_name == "raise" {
+            match abort_handler {
+                some(_) => {},
+                none => { abort_handler = some(h) },
+            }
+        }
         match by_effect.get(h.effect_name) {
             some(existing) => existing.push(h),
             none => {
@@ -1849,6 +1856,9 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
     // B-100 Fix 7: save outer evidence bindings so post-handle code sees the
     // outer evidence again (not this handle's dropped struct).
     let mut saved_ev_entries: List<(Str, Str)> = []
+    // #251: absence is part of the lexical snapshot. If no outer binding
+    // existed, the abort arm must not see this handle's stale/dropped evidence.
+    let mut absent_ev_names: List<Str> = []
 
     let mut sorted_by_effect = by_effect.entries()
     sorted_by_effect.sort_by(compare_by_first)
@@ -1866,7 +1876,7 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
 
         match ctx.named_values.get(ev_name) {
             some(outer_cv) => saved_ev_entries.push((ev_name, outer_cv)),
-            none => {},
+            none => absent_ev_names.push(ev_name),
         }
 
         if is_fail_abort {
@@ -1886,8 +1896,9 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
     }
 
     if has_fail_abort {
-        // Abort (fail.raise) handler: inline setjmp like gen_c_try_catch; the
-        // catch path's error value (= the raised value) IS the result.
+        // Abort (fail.raise) handler: inline setjmp like gen_c_try_catch. On
+        // the catch path the current frame/evidence is deactivated first, then
+        // the payload is bound and the abort arm executes exactly once.
         rt_use_catch_fns(ctx)
         let frame = fresh_tmp(ctx)
         let buf = fresh_tmp(ctx)
@@ -1908,18 +1919,50 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
         emit_c_evidence_drops(ctx, ev_drop_vars)
         c_emit(ctx, "goto ${merge_lbl};")
 
-        // --- catch path: error value IS the result ---
+        // --- catch path: deactivate current handle, then execute abort arm ---
         c_raw(ctx, "${catch_lbl}:;")
-        c_emit(ctx, "${res} = ring_catch_get_error(${frame});")
+        let error_val = fresh_tmp(ctx)
+        c_emit(ctx, "${error_val} = ring_catch_get_error(${frame});")
         c_emit(ctx, "ring_catch_pop();")
         emit_c_evidence_drops(ctx, ev_drop_vars)
 
-        c_raw(ctx, "${merge_lbl}:;")
-        // B-100 Fix 7: restore outer evidence bindings.
+        // #251: abort arms run outside the current handler. Restore the full
+        // outer evidence snapshot before generating the arm so ordinary effects
+        // dispatch outward; explicitly remove names that were previously absent.
         for saved in saved_ev_entries {
             let (sname, scv) = saved
             ctx.named_values.insert(sname, scv)
         }
+        for absent_name in absent_ev_names {
+            ctx.named_values.remove(absent_name)
+        }
+
+        // The operation parameter is a lexical binder. Isolate it from the
+        // enclosing map so a same-named outer local is restored at the merge.
+        let saved_arm_named = ctx.named_values
+        ctx.named_values = map_clone(saved_arm_named)
+        let arm_val = match abort_handler {
+            some(h) => {
+                let mut param_index = 0
+                for p in h.params {
+                    let pv = c_local(ctx, p.name)
+                    if param_index == 0 {
+                        c_emit(ctx, "${pv} = ${error_val};")
+                    } else {
+                        c_emit(ctx, "${pv} = RING_UNIT;")
+                    }
+                    param_index = param_index + 1
+                }
+                gen_c_expr(ctx, h.body)
+            },
+            // Defensive fallback for malformed HIR; checked source always has
+            // the fail.raise handler that set has_fail_abort.
+            none => error_val,
+        }
+        c_emit(ctx, "${res} = ${arm_val};")
+        ctx.named_values = saved_arm_named
+
+        c_raw(ctx, "${merge_lbl}:;")
         res
     } else {
         // Non-abort handlers: execute the body with evidence bound.
@@ -1934,6 +1977,9 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
         for saved in saved_ev_entries {
             let (sname, scv) = saved
             ctx.named_values.insert(sname, scv)
+        }
+        for absent_name in absent_ev_names {
+            ctx.named_values.remove(absent_name)
         }
         res
     }

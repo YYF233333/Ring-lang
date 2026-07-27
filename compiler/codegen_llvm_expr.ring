@@ -5915,7 +5915,14 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     // For each handler, create an evidence struct { fn_ptr }
     // Group handlers by effect name
     let mut by_effect: Map<Str, List<HEffectHandler>> = map_new()
+    let mut abort_handler: HEffectHandler? = none
     for h in handlers {
+        if h.effect_name == "fail" && h.op_name == "raise" {
+            match abort_handler {
+                some(_) => {},
+                none => { abort_handler = some(h) },
+            }
+        }
         match by_effect.get(h.effect_name) {
             some(existing) => existing.push(h),
             none => {
@@ -5936,6 +5943,10 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     // via default evidence) finds a stale alloca whose stored pointer was freed
     // by emit_evidence_drops (UAF crash — B-100 Fix 7).
     let mut saved_ev_entries: List<(Str, LLVMValueRef)> = []
+    // #251: record names with no outer mapping too. Restoring only present
+    // entries would leave the current handle's stale/dropped evidence visible
+    // while generating the abort arm.
+    let mut absent_ev_names: List<Str> = []
 
     // For each effect, create an evidence object
     let mut sorted_by_effect = by_effect.entries()
@@ -5957,7 +5968,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         // restore it after the handle scope — prevents UAF on default evidence.
         match ctx.named_values.get(ev_name) {
             some(outer_alloca) => saved_ev_entries.push((ev_name, outer_alloca)),
-            none => {},
+            none => absent_ev_names.push(ev_name),
         }
 
         if is_fail_abort {
@@ -5982,8 +5993,8 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 
     if has_fail_abort {
         // Abort (fail.raise) handler: inline setjmp like gen_try_catch (B-089 G-b).
-        // The catch path simply returns the error value (= the value passed to
-        // fail.raise), no catch arms needed.
+        // The catch path deactivates this handle, binds the raised payload, and
+        // executes the abort arm exactly once.
         let current_fn = match ctx.current_fn {
             some(f) => f,
             none => panic("LLVM codegen: handle expr outside function"),
@@ -6027,7 +6038,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
         discard(LLVMBuildBr(ctx.builder, merge_bb))
 
-        // --- catch path: error value IS the result ---
+        // --- catch path: deactivate current handle, then execute abort arm ---
         LLVMPositionBuilderAtEnd(ctx.builder, catch_bb)
         let get_err_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ctx.ptr_type], ctx.ptr_type)
         let get_err_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
@@ -6035,19 +6046,50 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
         // B-096: drop non-abort evidence structs on the catch path too.
         emit_evidence_drops(ctx, ev_drop_allocas)
+
+        // #251: the abort arm is outside the current handler. Restore the full
+        // outer evidence snapshot before generating it so ordinary effects
+        // dispatch outward; absence must remove the inner placeholder as well.
+        for saved in saved_ev_entries {
+            let (sname, salloca) = saved
+            ctx.named_values.insert(sname, salloca)
+        }
+        for absent_name in absent_ev_names {
+            ctx.named_values.remove(absent_name)
+        }
+
+        // Bind the payload in an isolated lexical map. This preserves a
+        // same-named outer local after the arm/merge.
+        let saved_arm_named = ctx.named_values
+        ctx.named_values = map_clone(saved_arm_named)
+        let arm_val = match abort_handler {
+            some(h) => {
+                let mut param_index = 0
+                for p in h.params {
+                    let param_val = if param_index == 0 {
+                        error_val
+                    } else {
+                        LLVMConstPointerNull(ctx.ptr_type)
+                    }
+                    let alloca = build_entry_alloca(ctx, ctx.ptr_type, p.name)
+                    discard(LLVMBuildStore(ctx.builder, param_val, alloca))
+                    ctx.named_values.insert(p.name, alloca)
+                    param_index = param_index + 1
+                }
+                gen_llvm_expr(ctx, h.body)
+            },
+            // Defensive fallback for malformed HIR; checked source always has
+            // the fail.raise handler that set has_fail_abort.
+            none => error_val,
+        }
+        ctx.named_values = saved_arm_named
         let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
         discard(LLVMBuildBr(ctx.builder, merge_bb))
 
         // --- merge ---
         LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
         let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "hdlv"))
-        LLVMAddIncoming(phi, [body_val, error_val], [normal_end_bb, catch_end_bb])
-        // B-100 Fix 7: restore outer evidence allocas so post-handle code that
-        // uses the same effect (e.g. via default evidence) doesn't hit a freed ptr.
-        for saved in saved_ev_entries {
-            let (sname, salloca) = saved
-            ctx.named_values.insert(sname, salloca)
-        }
+        LLVMAddIncoming(phi, [body_val, arm_val], [normal_end_bb, catch_end_bb])
         phi
     } else {
         // Non-abort handlers: just execute body with evidence set up
@@ -6062,6 +6104,9 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         for saved in saved_ev_entries {
             let (sname, salloca) = saved
             ctx.named_values.insert(sname, salloca)
+        }
+        for absent_name in absent_ev_names {
+            ctx.named_values.remove(absent_name)
         }
         result
     }
