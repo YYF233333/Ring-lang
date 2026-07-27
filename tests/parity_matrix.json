@@ -203,11 +203,11 @@
     },
     {
       "feature_id": "HExpr.ReturnExpr",
-      "evidence": ["tests/cases/llvm/if_elseif_return.ring"],
+      "evidence": ["tests/cases/llvm/match_return_expr.ring"],
       "oracle": "golden+dual-backend",
       "lane": ["llvm-golden", "c-golden", "llvm-diff"],
       "status": "covered",
-      "reason": "Early returns from expression branches execute."
+      "reason": "Return expressions embedded in match arms execute under both backends."
     },
     {
       "feature_id": "HExpr.UnsafeBlock",
@@ -316,11 +316,11 @@
     },
     {
       "feature_id": "HStmt.Dup",
-      "evidence": ["tests/cases/llvm/rc_alias_read_projection.ring"],
-      "oracle": "golden+dual-backend",
-      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
-      "status": "covered",
-      "reason": "Perceus-inserted duplication is exercised by escaping projections."
+      "evidence": ["compiler/hir.ring"],
+      "oracle": "manual-source-inspection",
+      "lane": ["manual-source"],
+      "status": "manual-evidence",
+      "reason": "HStmt.Dup has consumers and walker reconstruction but no producer; it is currently dead/unreachable and awaits cleanup."
     },
 
     {

@@ -63,57 +63,57 @@ TIMEOUT_SELFCOMPILE = 900  # seconds, for self-compile / rc self-verify (600 was
 # backend, and check-only failures are independent of codegen entirely.
 # Every retained gap carries an actionable reason instead of a bare skip name.
 LLVM_BACKEND_GAPS = {
-    "default_effect_topo.ring": (
+    "tests/cases/default_effect_topo.ring": (
         "LLVM backend access violation; C backend passes "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
 }
 
 SHARED_POSITIVE_GAPS = {
-    "default_effect_body_io.ring": (
+    "tests/cases/default_effect_body_io.ring": (
         "both backends hit the same deep-handler heap failure "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "mod_effect_evidence.ring": (
+    "tests/cases/mod_effect_evidence.ring": (
         "both backends access-violate in shared effect-evidence handling "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "api_clone.ring": (
+    "tests/cases/api_clone.ring": (
         "both backends access-violate in the shared clone/runtime path "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "iterator.ring": (
+    "tests/cases/iterator.ring": (
         "both backends access-violate in the shared iterator/runtime path "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "set_struct_eq.ring": (
+    "tests/cases/set_struct_eq.ring": (
         "both backends access-violate in structural Set equality "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "set_ops_deep_eq.ring": (
+    "tests/cases/set_ops_deep_eq.ring": (
         "both backends access-violate in deep Set operations "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "effect_custom_and_fail.ring": (
+    "tests/cases/effect_custom_and_fail.ring": (
         "both backends fail the same 'fail on bad port' assertion (audit #219)"
     ),
-    "effect_custom_multi_effect.ring": (
+    "tests/cases/effect_custom_multi_effect.ring": (
         "both backends fail the same 'log called twice' assertion (audit #219)"
     ),
-    "struct_match_pattern.ring": (
+    "tests/cases/struct_match_pattern.ring": (
         "both backends fail the same 'y-axis' assertion (audit #221)"
     ),
-    "tuple_eq.ring": (
+    "tests/cases/tuple_eq.ring": (
         "both backends fail the same tuple equality assertion (audit #221)"
     ),
-    "tuple_eq_struct.ring": (
+    "tests/cases/tuple_eq_struct.ring": (
         "both backends fail the same structural tuple equality assertion "
         "(audit #221)"
     ),
 }
 
 CHECK_ONLY_GAPS = {
-    "error_tuple_oob.ring": (
+    "tests/cases/error_tuple_oob.ring": (
         "ring check panics before reporting expected E0304 (audit #222)"
     ),
 }
@@ -295,21 +295,32 @@ def matches_filter(name: str, name_filter: Optional[str]) -> bool:
     return name_filter.replace("\\", "/").lower() in name.replace("\\", "/").lower()
 
 
-def positive_gap_reason(name: str, backend: str) -> Optional[str]:
+def normalized_repo_path(path) -> str:
+    """Normalize an absolute or repo-relative path to forward-slash form."""
+    text = str(path).replace("\\", "/")
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        candidate = REPO / candidate
+    return candidate.resolve().relative_to(REPO.resolve()).as_posix()
+
+
+def positive_gap_reason(case_path, backend: str) -> Optional[str]:
     """Return an execution-gap reason for a positive case/backend, if any."""
-    if name in SHARED_POSITIVE_GAPS:
-        return f"known shared positive gap: {SHARED_POSITIVE_GAPS[name]}"
-    if backend == "llvm" and name in LLVM_BACKEND_GAPS:
-        return f"LLVM backend gap: {LLVM_BACKEND_GAPS[name]}"
+    key = normalized_repo_path(case_path)
+    if key in SHARED_POSITIVE_GAPS:
+        return f"known shared positive gap: {SHARED_POSITIVE_GAPS[key]}"
+    if backend == "llvm" and key in LLVM_BACKEND_GAPS:
+        return f"LLVM backend gap: {LLVM_BACKEND_GAPS[key]}"
     return None
 
 
-def diff_gap_reason(name: str) -> Optional[str]:
+def diff_gap_reason(case_path) -> Optional[str]:
     """Return why a case cannot currently provide a dual-backend oracle."""
-    if name in SHARED_POSITIVE_GAPS:
-        return f"known shared positive gap: {SHARED_POSITIVE_GAPS[name]}"
-    if name in LLVM_BACKEND_GAPS:
-        return f"LLVM oracle unavailable: {LLVM_BACKEND_GAPS[name]}"
+    key = normalized_repo_path(case_path)
+    if key in SHARED_POSITIVE_GAPS:
+        return f"known shared positive gap: {SHARED_POSITIVE_GAPS[key]}"
+    if key in LLVM_BACKEND_GAPS:
+        return f"LLVM oracle unavailable: {LLVM_BACKEND_GAPS[key]}"
     return None
 
 
@@ -529,7 +540,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             if not matches_filter(str(rel), name_filter):
                 continue
 
-            gap_reason = positive_gap_reason(name, backend)
+            gap_reason = positive_gap_reason(ring_file, backend)
             if gap_reason:
                 collector.add(TestResult(
                     TestResult.SKIP, suite, str(rel), gap_reason))
@@ -579,10 +590,11 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
         if not matches_filter(str(rel), name_filter):
             continue
 
-        if name in CHECK_ONLY_GAPS:
+        check_key = normalized_repo_path(ring_file)
+        if check_key in CHECK_ONLY_GAPS:
             collector.add(TestResult(
                 TestResult.SKIP, suite, f"neg:{rel}",
-                f"known check-only gap: {CHECK_ONLY_GAPS[name]}"))
+                f"known check-only gap: {CHECK_ONLY_GAPS[check_key]}"))
             continue
 
         error_file = ring_file.with_suffix(".error")
@@ -698,7 +710,7 @@ def run_llvm(ring_exe: str, clang_path: str, collector: ResultCollector,
             if not matches_filter(name, name_filter):
                 continue
 
-            gap_reason = positive_gap_reason(name, backend)
+            gap_reason = positive_gap_reason(ring_file, backend)
             if gap_reason:
                 collector.add(TestResult(
                     TestResult.SKIP, suite, name, gap_reason))
@@ -799,7 +811,7 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
 
             if not matches_filter(rel, name_filter):
                 continue
-            gap_reason = diff_gap_reason(name)
+            gap_reason = diff_gap_reason(ring_file)
             if gap_reason:
                 collector.add(TestResult(
                     TestResult.SKIP, suite, rel, gap_reason))
@@ -849,7 +861,7 @@ PARITY_GAP_TABLES = {
 
 def repo_relative(path: Path) -> str:
     """Return a normalized repo-relative path."""
-    return path.resolve().relative_to(REPO.resolve()).as_posix()
+    return normalized_repo_path(path)
 
 
 def parity_lane_members() -> dict[str, set[str]]:
@@ -889,18 +901,109 @@ def parity_lane_members() -> dict[str, set[str]]:
     }
 
 
+def display_path(path: Path) -> str:
+    """Use repo-relative paths when possible, absolute paths for temp probes."""
+    try:
+        return repo_relative(path)
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def companion_integrity_errors(
+    cases_dir: Path = CASES_DIR,
+    native_dir: Path = NATIVE_ONLY_DIR,
+) -> List[str]:
+    """Reject orphan companions and EXPECT_PANIC outside native_only."""
+    errors: List[str] = []
+    for companion in cases_dir.rglob("*"):
+        if not companion.is_file() or companion.suffix not in {".expected", ".error"}:
+            continue
+        ring_file = companion.with_suffix(".ring")
+        if not ring_file.is_file():
+            errors.append(
+                f"orphan companion without same-stem .ring: "
+                f"{display_path(companion)}"
+            )
+        if companion.suffix != ".expected":
+            continue
+        try:
+            expected_raw = companion.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"cannot read {display_path(companion)}: {exc}")
+            continue
+        if (
+            is_expect_panic(expected_raw)
+            and companion.resolve().parent != native_dir.resolve()
+        ):
+            errors.append(
+                f"EXPECT_PANIC outside native_only: {display_path(companion)}"
+            )
+    return errors
+
+
+def mask_ring_strings_and_comments(source: str) -> str:
+    """Blank strings and // comments while preserving offsets and newlines."""
+    masked: List[str] = []
+    state = "code"
+    index = 0
+    while index < len(source):
+        char = source[index]
+        next_char = source[index + 1] if index + 1 < len(source) else ""
+
+        if state == "code":
+            if char == "/" and next_char == "/":
+                masked.extend([" ", " "])
+                index += 2
+                state = "comment"
+                continue
+            if char == '"':
+                masked.append(" ")
+                index += 1
+                state = "string"
+                continue
+            masked.append(char)
+            index += 1
+            continue
+
+        if state == "comment":
+            if char == "\n":
+                masked.append("\n")
+                state = "code"
+            else:
+                masked.append(" ")
+            index += 1
+            continue
+
+        # String state.  Escaped quotes and escaped backslashes remain inside
+        # the string; newlines are preserved so diagnostics keep line numbers.
+        if char == "\\" and next_char:
+            masked.append(" ")
+            masked.append("\n" if next_char == "\n" else " ")
+            index += 2
+        elif char == '"':
+            masked.append(" ")
+            index += 1
+            state = "code"
+        else:
+            masked.append("\n" if char == "\n" else " ")
+            index += 1
+
+    return "".join(masked)
+
+
 def extract_enum_variants(source_path: Path, enum_name: str) -> set[str]:
     """Extract top-level variants from a Ring enum declaration.
 
     The parser is deliberately small but brace-aware: commas inside struct
     fields, tuples, lists, or generic arguments do not split variants.
     """
-    source = source_path.read_text(encoding="utf-8")
-    source = re.sub(r"//[^\n]*", "", source)
+    source = mask_ring_strings_and_comments(
+        source_path.read_text(encoding="utf-8"))
     match = re.search(
         rf"\bpub\s+enum\s+{re.escape(enum_name)}\s*\{{", source)
     if not match:
-        raise ValueError(f"enum {enum_name} not found in {repo_relative(source_path)}")
+        raise ValueError(
+            f"enum {enum_name} not found in {display_path(source_path)}")
 
     open_index = match.end() - 1
     outer_depth = 0
@@ -943,19 +1046,20 @@ def extract_enum_variants(source_path: Path, enum_name: str) -> set[str]:
     return variants
 
 
-def gap_reason_for_lane(case_name: str, lane: str) -> Optional[str]:
+def gap_reason_for_lane(evidence_path, lane: str) -> Optional[str]:
     """Return a classified gap if this case is skipped in the given lane."""
+    key = normalized_repo_path(evidence_path)
     if lane == "check":
-        return CHECK_ONLY_GAPS.get(case_name)
+        return CHECK_ONLY_GAPS.get(key)
     if lane not in POSITIVE_PARITY_LANES:
         return None
-    if case_name in SHARED_POSITIVE_GAPS:
-        return SHARED_POSITIVE_GAPS[case_name]
+    if key in SHARED_POSITIVE_GAPS:
+        return SHARED_POSITIVE_GAPS[key]
     if (
-        case_name in LLVM_BACKEND_GAPS
+        key in LLVM_BACKEND_GAPS
         and lane in {"e2e-llvm", "e2e-diff", "llvm-golden", "llvm-diff"}
     ):
-        return LLVM_BACKEND_GAPS[case_name]
+        return LLVM_BACKEND_GAPS[key]
     return None
 
 
@@ -977,13 +1081,41 @@ def expected_gap_lanes(scope: str, evidence: str,
     return None
 
 
-def validate_parity_matrix() -> Tuple[List[dict], List[str]]:
+def expected_covered_lanes(
+    evidence: str,
+    members: dict[str, set[str]],
+) -> Optional[set[str]]:
+    """Return the complete executable bundle required for covered evidence."""
+    bundles = [
+        ("llvm-golden", {"llvm-golden", "c-golden", "llvm-diff"}),
+        ("e2e-llvm", {"e2e-llvm", "e2e-c", "e2e-diff"}),
+        ("native-llvm", {"native-llvm", "native-c", "native-diff"}),
+        ("module-llvm", {"module-llvm", "module-c", "module-diff"}),
+        ("check", {"check"}),
+        ("self-compile-c", {"self-compile-c"}),
+    ]
+    for membership_lane, bundle in bundles:
+        if evidence in members[membership_lane]:
+            return bundle
+    return None
+
+
+def validate_parity_matrix(
+    matrix_data: Optional[dict] = None,
+    gap_tables: Optional[dict[str, dict[str, str]]] = None,
+) -> Tuple[List[dict], List[str]]:
     """Validate matrix schema, enum closure, lanes, evidence, and gap closure."""
     errors: List[str] = []
-    try:
-        raw = json.loads(PARITY_MATRIX.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        return [], [f"cannot read parity matrix: {exc}"]
+    if matrix_data is None:
+        try:
+            raw = json.loads(PARITY_MATRIX.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            return [], [f"cannot read parity matrix: {exc}"]
+    else:
+        raw = matrix_data
+    active_gap_tables = (
+        PARITY_GAP_TABLES if gap_tables is None else gap_tables
+    )
 
     if not isinstance(raw, dict):
         return [], ["matrix root must be an object"]
@@ -998,11 +1130,58 @@ def validate_parity_matrix() -> Tuple[List[dict], List[str]]:
         errors.append(
             "C project/module lanes are disabled but matrix evidence requires them"
         )
+    expected_scopes = set(PARITY_GAP_TABLES)
+    if set(active_gap_tables) != expected_scopes:
+        errors.append(
+            f"gap table scopes {sorted(active_gap_tables)} != "
+            f"{sorted(expected_scopes)}"
+        )
+    for scope, table in active_gap_tables.items():
+        if not isinstance(table, dict):
+            errors.append(f"{scope}: gap table must be an object")
+            continue
+        for path_text, gap_reason in table.items():
+            if (
+                not isinstance(path_text, str)
+                or "\\" in path_text
+                or Path(path_text).is_absolute()
+            ):
+                errors.append(f"{scope}: invalid normalized gap path {path_text!r}")
+                continue
+            try:
+                normalized = normalized_repo_path(path_text)
+            except ValueError:
+                errors.append(f"{scope}: gap path escapes repository: {path_text}")
+                continue
+            if normalized != path_text:
+                errors.append(
+                    f"{scope}: gap path is not normalized: {path_text}"
+                )
+            if not isinstance(gap_reason, str) or not gap_reason:
+                errors.append(f"{scope}: empty gap reason for {path_text}")
+
+    valid_gap_tables = {
+        scope: table for scope, table in active_gap_tables.items()
+        if isinstance(table, dict)
+    }
+    scopes = sorted(valid_gap_tables)
+    for index, left_scope in enumerate(scopes):
+        for right_scope in scopes[index + 1:]:
+            overlap = sorted(
+                set(valid_gap_tables[left_scope])
+                & set(valid_gap_tables[right_scope])
+            )
+            if overlap:
+                errors.append(
+                    f"gap tables {left_scope}/{right_scope} overlap: "
+                    f"{', '.join(overlap)}"
+                )
+
     required = {"feature_id", "evidence", "oracle", "lane", "status", "reason"}
     seen_ids: set[str] = set()
     valid_rows: List[dict] = []
     gap_cases: dict[str, dict[str, str]] = {
-        scope: {} for scope in PARITY_GAP_TABLES
+        scope: {} for scope in valid_gap_tables
     }
 
     for index, row in enumerate(features):
@@ -1081,6 +1260,46 @@ def validate_parity_matrix() -> Tuple[List[dict], List[str]]:
                 errors.append(f"{label}: evidence file missing: {evidence_text}")
                 continue
 
+            if status == "covered":
+                gap_scopes = sorted(
+                    scope for scope, table in valid_gap_tables.items()
+                    if evidence_text in table
+                )
+                if gap_scopes:
+                    errors.append(
+                        f"{label}: covered evidence is present in gap table(s) "
+                        f"{', '.join(gap_scopes)}: {evidence_text}"
+                    )
+                required_bundle = expected_covered_lanes(
+                    evidence_text, members)
+                if required_bundle is None:
+                    errors.append(
+                        f"{label}: covered evidence has no supported runner bundle: "
+                        f"{evidence_text}"
+                    )
+                elif set(lanes) != required_bundle:
+                    errors.append(
+                        f"{label}: covered lanes {sorted(lanes)} != complete "
+                        f"bundle {sorted(required_bundle)} for {evidence_text}"
+                    )
+                if (
+                    feature_id.startswith(
+                        ("HExpr.", "HStmt.", "HDecl.", "Pattern."))
+                    and required_bundle in ({"check"}, {"self-compile-c"})
+                ):
+                    errors.append(
+                        f"{label}: HIR/Pattern covered evidence requires a "
+                        "dual-backend executable bundle"
+                    )
+                if (
+                    required_bundle in ({"check"}, {"self-compile-c"})
+                    and not feature_id.startswith("backend.")
+                ):
+                    errors.append(
+                        f"{label}: single-lane covered evidence is reserved "
+                        "for backend.* surfaces"
+                    )
+
             for lane in lanes:
                 if lane == "manual-source":
                     continue
@@ -1102,7 +1321,7 @@ def validate_parity_matrix() -> Tuple[List[dict], List[str]]:
                     )
 
                 if status == "covered":
-                    gap_reason = gap_reason_for_lane(evidence_path.name, lane)
+                    gap_reason = gap_reason_for_lane(evidence_text, lane)
                     if gap_reason:
                         errors.append(
                             f"{label}: covered evidence is classified as a gap "
@@ -1111,13 +1330,13 @@ def validate_parity_matrix() -> Tuple[List[dict], List[str]]:
 
         if status == "known-gap":
             scope = row.get("gap_scope")
-            if not isinstance(scope, str) or scope not in PARITY_GAP_TABLES:
+            if not isinstance(scope, str) or scope not in valid_gap_tables:
                 errors.append(f"{label}: invalid or missing gap_scope")
             elif len(evidence) != 1:
                 errors.append(f"{label}: known-gap requires exactly one evidence path")
             else:
-                case_name = Path(evidence[0]).name
-                table = PARITY_GAP_TABLES[scope]
+                case_name = evidence[0]
+                table = valid_gap_tables[scope]
                 if case_name not in table:
                     errors.append(
                         f"{label}: {case_name} is not classified in {scope}"
@@ -1149,7 +1368,7 @@ def validate_parity_matrix() -> Tuple[List[dict], List[str]]:
         valid_rows.append(row)
 
     # Every runner gap is present exactly once, and the matrix has no orphan gap.
-    for scope, table in PARITY_GAP_TABLES.items():
+    for scope, table in valid_gap_tables.items():
         matrix_cases = set(gap_cases[scope])
         table_cases = set(table)
         missing = sorted(table_cases - matrix_cases)
@@ -1190,22 +1409,7 @@ def validate_parity_matrix() -> Tuple[List[dict], List[str]]:
                 f"{enum_name}: orphan variant mappings: {', '.join(extra)}"
             )
 
-    # EXPECT_PANIC is a native-only handwritten oracle.  A misplaced marker
-    # must fail loudly instead of changing ordinary golden semantics.
-    for expected_path in CASES_DIR.rglob("*.expected"):
-        try:
-            expected_raw = expected_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            errors.append(f"cannot read {repo_relative(expected_path)}: {exc}")
-            continue
-        if (
-            is_expect_panic(expected_raw)
-            and expected_path.resolve().parent != NATIVE_ONLY_DIR.resolve()
-        ):
-            errors.append(
-                "EXPECT_PANIC outside native_only: "
-                f"{repo_relative(expected_path)}"
-            )
+    errors.extend(companion_integrity_errors())
 
     return valid_rows, errors
 
