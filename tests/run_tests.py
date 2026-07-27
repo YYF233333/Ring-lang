@@ -38,6 +38,7 @@ from typing import List, Optional, Tuple
 REPO = Path(__file__).resolve().parent.parent
 CASES_DIR = REPO / "tests" / "cases"
 LLVM_CASES_DIR = CASES_DIR / "llvm"
+NATIVE_ONLY_DIR = CASES_DIR / "native_only"
 MODULES_DIR = CASES_DIR / "modules"
 RC_NEG_DIR = CASES_DIR / "verify_rc"
 RUNTIME_CPP = REPO / "ring_runtime.cpp"
@@ -53,50 +54,65 @@ TIMEOUT_RUN = 30       # seconds, per test program execution
 TIMEOUT_SELFCOMPILE = 900  # seconds, for self-compile / rc self-verify (600 was
                            # grazed at +2.4k compiler lines after B-163 step 5)
 
-# Cases not yet supported by the LLVM backend; skipped but reported.
-LLVM_SKIP = {
-    # Non-tail-resumptive / deep handler patterns
-    "default_effect_body_io.ring",
-    "mod_effect_evidence.ring",
-    # Runtime gaps (clone/iterator/set)
-    "api_clone.ring",
-    "map_clone.ring",
-    "iterator.ring",
-    "map_iteration.ring",
-    "set_struct_eq.ring",
-    "set_ops_deep_eq.ring",
-    # Frozen dist-llvm lacks checker fixes (#214/#215)
-    "trait_alias.ring",
-    "scc_mutual_recursion.ring",
-    # Runtime assertion failures (pre-existing LLVM backend bugs)
-    "effect_custom_and_fail.ring",
-    "effect_custom_multi_effect.ring",
-    "struct_match_pattern.ring",
-    "tuple_eq.ring",
-    "tuple_eq_struct.ring",
-    # Negative cases: ring.exe behavior differs from in-process checker
-    "error_occurs_check.ring",
-    "error_tuple_oob.ring",
+# B-163 Phase 2 parity classification.  These maps intentionally describe
+# different scopes: a backend-specific failure must never hide the other
+# backend, and check-only failures are independent of codegen entirely.
+# Every retained gap carries an actionable reason instead of a bare skip name.
+LLVM_BACKEND_GAPS = {
+    "default_effect_topo.ring": (
+        "LLVM backend access violation; C backend passes "
+        "(B-163 Phase2 P2.1 probe 2026-07-27)"
+    ),
 }
 
-# Cases broken on the LLVM backend ONLY (pre-existing LLVM backend bugs,
-# audit #219/#220/#221 family) that the C backend runs and PASSes (B-163
-# step 6 re-evaluation). Skipped whenever the LLVM backend is involved:
-# --backend=llvm runs of e2e/llvm suites, and --suite diff (no oracle).
-LLVM_ONLY_SKIP = {
-    # Non-tail-resumptive / deep handler pattern (LLVM)
-    "default_effect_topo.ring",
-    # Runtime assertion failure (LLVM)
-    "exhaustive_generic_payload.ring",
-    # Map runtime crashes (LLVM, access violation)
-    "map_hof.ring",
-    "map_ufcs_bug.ring",
+SHARED_POSITIVE_GAPS = {
+    "default_effect_body_io.ring": (
+        "both backends hit the same deep-handler heap failure "
+        "(B-163 Phase2 P2.1 probe 2026-07-27)"
+    ),
+    "mod_effect_evidence.ring": (
+        "both backends access-violate in shared effect-evidence handling "
+        "(B-163 Phase2 P2.1 probe 2026-07-27)"
+    ),
+    "api_clone.ring": (
+        "both backends access-violate in the shared clone/runtime path "
+        "(B-163 Phase2 P2.1 probe 2026-07-27)"
+    ),
+    "iterator.ring": (
+        "both backends access-violate in the shared iterator/runtime path "
+        "(B-163 Phase2 P2.1 probe 2026-07-27)"
+    ),
+    "set_struct_eq.ring": (
+        "both backends access-violate in structural Set equality "
+        "(B-163 Phase2 P2.1 probe 2026-07-27)"
+    ),
+    "set_ops_deep_eq.ring": (
+        "both backends access-violate in deep Set operations "
+        "(B-163 Phase2 P2.1 probe 2026-07-27)"
+    ),
+    "effect_custom_and_fail.ring": (
+        "both backends fail the same 'fail on bad port' assertion (audit #219)"
+    ),
+    "effect_custom_multi_effect.ring": (
+        "both backends fail the same 'log called twice' assertion (audit #219)"
+    ),
+    "struct_match_pattern.ring": (
+        "both backends fail the same 'y-axis' assertion (audit #221)"
+    ),
+    "tuple_eq.ring": (
+        "both backends fail the same tuple equality assertion (audit #221)"
+    ),
+    "tuple_eq_struct.ring": (
+        "both backends fail the same structural tuple equality assertion "
+        "(audit #221)"
+    ),
 }
 
-# Cases not yet supported by the C backend (B-163 migration set, independent
-# of LLVM_SKIP). Applies under --backend=c and --suite diff. Grown/shrunk by
-# migration waves as the C backend gains coverage.
-C_SKIP: set = set()
+CHECK_ONLY_GAPS = {
+    "error_tuple_oob.ring": (
+        "ring check panics before reporting expected E0304 (audit #222)"
+    ),
+}
 
 # Root-level positives that import sibling files and therefore use the
 # compiler's project-mode --out-dir contract.
@@ -275,6 +291,31 @@ def matches_filter(name: str, name_filter: Optional[str]) -> bool:
     return name_filter.replace("\\", "/").lower() in name.replace("\\", "/").lower()
 
 
+def positive_gap_reason(name: str, backend: str) -> Optional[str]:
+    """Return an execution-gap reason for a positive case/backend, if any."""
+    if name in SHARED_POSITIVE_GAPS:
+        return f"known shared positive gap: {SHARED_POSITIVE_GAPS[name]}"
+    if backend == "llvm" and name in LLVM_BACKEND_GAPS:
+        return f"LLVM backend gap: {LLVM_BACKEND_GAPS[name]}"
+    return None
+
+
+def diff_gap_reason(name: str) -> Optional[str]:
+    """Return why a case cannot currently provide a dual-backend oracle."""
+    if name in SHARED_POSITIVE_GAPS:
+        return f"known shared positive gap: {SHARED_POSITIVE_GAPS[name]}"
+    if name in LLVM_BACKEND_GAPS:
+        return f"LLVM oracle unavailable: {LLVM_BACKEND_GAPS[name]}"
+    return None
+
+
+def is_expect_panic(expected_raw: str) -> bool:
+    """Whether the first non-blank expected line requests a non-zero exit."""
+    first = next((line.strip() for line in expected_raw.splitlines()
+                  if line.strip()), "")
+    return first == "// EXPECT_PANIC"
+
+
 # ---------------------------------------------------------------------------
 # Compile + link + run helpers
 # ---------------------------------------------------------------------------
@@ -323,7 +364,8 @@ def run_exe(exe_path: str, timeout: int = TIMEOUT_RUN) -> subprocess.CompletedPr
 
 def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
                      tmpdir: str, *, is_module: bool = False,
-                     backend: str = "llvm") -> Tuple[bool, str, str]:
+                     backend: str = "llvm",
+                     expect_panic: bool = False) -> Tuple[bool, str, str]:
     """Compile a .ring file, link, run, return (ok, stdout, error_detail).
 
     On success, ok=True and stdout contains the program output.
@@ -383,6 +425,14 @@ def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
         r = run_exe(exe_file)
     except subprocess.TimeoutExpired:
         return False, "", "execution timed out (30s)"
+
+    if expect_panic:
+        if r.returncode == 0:
+            return False, r.stdout, (
+                "expected panic (non-zero exit), but program exited 0: "
+                f"{(r.stdout or '')[:300]}"
+            )
+        return True, r.stdout, ""
 
     if r.returncode != 0:
         return False, "", f"runtime crash (exit {r.returncode}): {(r.stderr or '')[:300]}"
@@ -456,6 +506,8 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
     for subdir_name in EXTRA_NEG_DIRS:
         subdir = CASES_DIR / subdir_name
         positive.extend(discover_positive_cases(subdir))
+    # Hand-written native semantic oracles, including EXPECT_PANIC cases.
+    positive.extend(discover_positive_cases(NATIVE_ONLY_DIR))
 
     with tempfile.TemporaryDirectory(prefix="ring_e2e_") as tmpdir:
         for ring_file in positive:
@@ -465,25 +517,29 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             if not matches_filter(str(rel), name_filter):
                 continue
 
-            if name in LLVM_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, str(rel), "LLVM_SKIP"))
-                continue
-            if backend == "llvm" and name in LLVM_ONLY_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, str(rel), "LLVM_ONLY_SKIP"))
-                continue
-            if backend == "c" and name in C_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, str(rel), "C_SKIP"))
+            gap_reason = positive_gap_reason(name, backend)
+            if gap_reason:
+                collector.add(TestResult(
+                    TestResult.SKIP, suite, str(rel), gap_reason))
                 continue
 
             expected_file = ring_file.with_suffix(".expected")
-            expected = norm(expected_file.read_text(encoding="utf-8"))
+            expected_raw = expected_file.read_text(encoding="utf-8")
+            expect_panic = is_expect_panic(expected_raw)
+            expected = norm(expected_raw)
 
             ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file),
                                                   tmpdir,
                                                   is_module=name in PROJECT_MODE_CASES,
-                                                  backend=backend)
+                                                  backend=backend,
+                                                  expect_panic=expect_panic)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, str(rel), detail))
+                continue
+
+            if expect_panic:
+                collector.add(TestResult(
+                    TestResult.PASS, suite, str(rel), "expected panic observed"))
                 continue
 
             actual = norm(stdout)
@@ -507,13 +563,14 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
         rel = ring_file.relative_to(CASES_DIR)
         name = ring_file.name
 
-        # Negative cases go through `ring check` only -- backend-independent,
-        # so neither --backend nor C_SKIP applies here.
+        # Negative cases go through `ring check` only -- backend-independent.
         if not matches_filter(str(rel), name_filter):
             continue
 
-        if name in LLVM_SKIP:
-            collector.add(TestResult(TestResult.SKIP, suite, f"neg:{rel}", "LLVM_SKIP"))
+        if name in CHECK_ONLY_GAPS:
+            collector.add(TestResult(
+                TestResult.SKIP, suite, f"neg:{rel}",
+                f"known check-only gap: {CHECK_ONLY_GAPS[name]}"))
             continue
 
         error_file = ring_file.with_suffix(".error")
@@ -553,10 +610,6 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 collector.add(TestResult(TestResult.SKIP, suite, f"mod:{mod_name}",
                                          "C backend: project mode not yet supported"))
                 continue
-            if backend == "c" and mod_name in C_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, f"mod:{mod_name}", "C_SKIP"))
-                continue
-
             expected_file = main_file.parent / "main.expected"
             expected = norm(expected_file.read_text(encoding="utf-8"))
 
@@ -633,14 +686,10 @@ def run_llvm(ring_exe: str, clang_path: str, collector: ResultCollector,
             if not matches_filter(name, name_filter):
                 continue
 
-            if name in LLVM_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, name, "LLVM_SKIP"))
-                continue
-            if backend == "llvm" and name in LLVM_ONLY_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, name, "LLVM_ONLY_SKIP"))
-                continue
-            if backend == "c" and name in C_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, name, "C_SKIP"))
+            gap_reason = positive_gap_reason(name, backend)
+            if gap_reason:
+                collector.add(TestResult(
+                    TestResult.SKIP, suite, name, gap_reason))
                 continue
 
             ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file),
@@ -681,17 +730,20 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
 
     Every positive case -- golden (tests/cases/llvm/), e2e single-file, and
     modules -- is compiled, linked and run under both DIFF_BACKENDS; the
-    normalized stdout must match byte-for-byte. Expected files are NOT
+    normalized stdout must match byte-for-byte. Normal golden contents are not
     consulted: the LLVM backend is the oracle, agreement is the assertion.
+    The native-only EXPECT_PANIC marker remains a shared handwritten oracle.
 
-    LLVM_SKIP and C_SKIP both apply (no oracle / no candidate -> no diff).
+    Backend-specific and shared gaps are reported with their exact scope.
+    Native-only EXPECT_PANIC cases pass when both backends exit non-zero.
     Module cases are SKIPped while the C backend lacks project mode.
     """
     suite = "diff"
     case_seq = [0]  # mutable counter for unique per-case work dirs
 
     def diff_one(label: str, ring_file: Path, tmpdir: str, *,
-                 is_module: bool = False) -> None:
+                 is_module: bool = False,
+                 expect_panic: bool = False) -> None:
         case_seq[0] += 1
         outputs: List[str] = []
         for side, backend in enumerate(DIFF_BACKENDS):
@@ -699,12 +751,19 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             os.makedirs(side_dir)
             ok, stdout, detail = compile_link_run(
                 ring_exe, clang_path, str(ring_file), side_dir,
-                is_module=is_module, backend=backend)
+                is_module=is_module, backend=backend,
+                expect_panic=expect_panic)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, label,
                                          f"[{backend}] {detail}"))
                 return
             outputs.append(norm(stdout))
+
+        if expect_panic:
+            collector.add(TestResult(
+                TestResult.PASS, suite, label,
+                "both backends observed expected panic"))
+            return
 
         if outputs[0] == outputs[1]:
             collector.add(TestResult(TestResult.PASS, suite, label))
@@ -718,6 +777,7 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
     single = discover_positive_cases(CASES_DIR)
     for subdir_name in EXTRA_NEG_DIRS:
         single.extend(discover_positive_cases(CASES_DIR / subdir_name))
+    single.extend(discover_positive_cases(NATIVE_ONLY_DIR))
     single.extend(discover_positive_cases(LLVM_CASES_DIR))
 
     with tempfile.TemporaryDirectory(prefix="ring_diff_") as tmpdir:
@@ -727,19 +787,17 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
 
             if not matches_filter(rel, name_filter):
                 continue
-            if name in LLVM_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, rel, "LLVM_SKIP"))
-                continue
-            if name in LLVM_ONLY_SKIP:
-                # C backend runs these, but there is no LLVM oracle to diff against.
-                collector.add(TestResult(TestResult.SKIP, suite, rel, "LLVM_ONLY_SKIP"))
-                continue
-            if name in C_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, rel, "C_SKIP"))
+            gap_reason = diff_gap_reason(name)
+            if gap_reason:
+                collector.add(TestResult(
+                    TestResult.SKIP, suite, rel, gap_reason))
                 continue
 
+            expected_raw = ring_file.with_suffix(".expected").read_text(
+                encoding="utf-8")
             diff_one(rel, ring_file, tmpdir,
-                     is_module=name in PROJECT_MODE_CASES)
+                     is_module=name in PROJECT_MODE_CASES,
+                     expect_panic=is_expect_panic(expected_raw))
 
         # --- Module positive cases ---
         for main_file in discover_module_positive(MODULES_DIR):
@@ -752,10 +810,6 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 collector.add(TestResult(TestResult.SKIP, suite, label,
                                          "C backend: project mode not yet supported"))
                 continue
-            if mod_name in C_SKIP:
-                collector.add(TestResult(TestResult.SKIP, suite, label, "C_SKIP"))
-                continue
-
             diff_one(label, main_file, tmpdir, is_module=True)
 
 
@@ -843,8 +897,9 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
 # ---------------------------------------------------------------------------
 
 def run_self_compile(ring_exe: str, collector: ResultCollector, *,
+                     backend: str = "llvm",
                      name_filter: Optional[str] = None) -> None:
-    """Run the self-compile suite: build compiler 3x, outputs must be identical."""
+    """Build the compiler 3x and compare the backend's primary artifact."""
     suite = "self-compile"
     # Coarse-grained: the whole suite is one unit; filter matches the suite name.
     if not matches_filter(suite, name_filter):
@@ -854,7 +909,8 @@ def run_self_compile(ring_exe: str, collector: ResultCollector, *,
         collector.add(TestResult(TestResult.SKIP, suite, "all", "compiler/main.ring not found"))
         return
 
-    outputs: List[str] = []  # paths to main.o from each run
+    artifact_name = "main.c" if backend == "c" else "main.o"
+    outputs: List[str] = []
 
     with tempfile.TemporaryDirectory(prefix="ring_selfcompile_") as tmpdir:
         for i in range(1, 4):
@@ -863,10 +919,12 @@ def run_self_compile(ring_exe: str, collector: ResultCollector, *,
 
             try:
                 r = ring_build(ring_exe, str(compiler_main),
-                               out_dir=run_dir, timeout=TIMEOUT_SELFCOMPILE)
+                               out_dir=run_dir, target=backend,
+                               timeout=TIMEOUT_SELFCOMPILE)
             except subprocess.TimeoutExpired:
                 collector.add(TestResult(
-                    TestResult.FAIL, suite, f"run {i}/3", "timed out (600s)"))
+                    TestResult.FAIL, suite, f"run {i}/3",
+                    f"timed out ({TIMEOUT_SELFCOMPILE}s)"))
                 return
 
             if r.returncode != 0:
@@ -876,14 +934,17 @@ def run_self_compile(ring_exe: str, collector: ResultCollector, *,
                     f"exit {r.returncode}: {combined[:500]}"))
                 return
 
-            o_file = os.path.join(run_dir, "main.o")
-            if not os.path.isfile(o_file):
+            artifact = os.path.join(run_dir, artifact_name)
+            if not os.path.isfile(artifact):
                 collector.add(TestResult(
-                    TestResult.FAIL, suite, f"run {i}/3", "main.o not produced"))
+                    TestResult.FAIL, suite, f"run {i}/3",
+                    f"{artifact_name} not produced for --target={backend}"))
                 return
 
-            outputs.append(o_file)
-            collector.add(TestResult(TestResult.PASS, suite, f"run {i}/3"))
+            outputs.append(artifact)
+            collector.add(TestResult(
+                TestResult.PASS, suite, f"run {i}/3",
+                f"{artifact_name} produced via --target={backend}"))
 
         # Compare outputs: runs 2 and 3 must match run 1 byte-for-byte
         consistent = True
@@ -895,7 +956,9 @@ def run_self_compile(ring_exe: str, collector: ResultCollector, *,
                 consistent = False
 
         if consistent:
-            collector.add(TestResult(TestResult.PASS, suite, "consistency (3/3 identical)"))
+            collector.add(TestResult(
+                TestResult.PASS, suite,
+                f"consistency ({artifact_name} 3/3 identical)"))
 
 
 # ---------------------------------------------------------------------------
@@ -938,8 +1001,8 @@ def main() -> int:
         help="Test suite(s) to run. Omit for all (diff is opt-in only).")
     parser.add_argument(
         "--backend", choices=["llvm", "c"], default="llvm",
-        help="Codegen backend for e2e/llvm positive cases (default: llvm). "
-             "Negative (check) cases are backend-independent.")
+        help="Codegen backend for e2e/llvm positive cases and self-compile "
+             "(default: llvm). Negative (check) cases are backend-independent.")
     parser.add_argument(
         "--filter", dest="name_filter", metavar="SUBSTR", default=None,
         help="Only run cases whose name contains SUBSTR (case-insensitive, "
@@ -961,7 +1024,10 @@ def main() -> int:
     clang_path = find_clang()
     ring_exe = find_ring_exe()
 
-    needs_clang = any(s in suites for s in ["e2e", "llvm", "diff"])
+    needs_clang = (
+        any(s in suites for s in ["e2e", "llvm", "diff"])
+        or ("self-compile" in suites and args.backend == "c")
+    )
 
     if ring_exe is None:
         print("ERROR: ring.exe not found.", file=sys.stderr)
@@ -970,7 +1036,8 @@ def main() -> int:
         return 1
 
     if needs_clang and clang_path is None:
-        print("ERROR: clang not found (required for e2e / llvm suites).", file=sys.stderr)
+        print("ERROR: clang not found (required for executable/codegen suites).",
+              file=sys.stderr)
         return 1
 
     # Ensure runtime .o is built
@@ -1008,7 +1075,8 @@ def main() -> int:
         run_rc(ring_exe, collector, name_filter=args.name_filter)
 
     if "self-compile" in suites:
-        run_self_compile(ring_exe, collector, name_filter=args.name_filter)
+        run_self_compile(ring_exe, collector, backend=args.backend,
+                         name_filter=args.name_filter)
 
     print_summary(collector)
     return 1 if collector.failures > 0 else 0
