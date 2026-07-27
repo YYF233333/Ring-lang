@@ -13,7 +13,7 @@
 
 use ast::{Span, Position, Pattern, BinOp}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
-    HStructFieldInit, HStringInterpPart, HEffectHandler,
+    HStructFieldInit, HStringInterpPart, HEffectHandler, HEffectOp,
     hexpr_type, hexpr_span, hexpr_effects,
     is_rc_excluded_type, type_contains_extern_handle,
     is_borrow_returning_call, is_user_drop_type,
@@ -233,7 +233,20 @@ fn anf_decl(decl: HDecl, externs: Set<Str>, mut counter: List<Int>) -> HDecl {
         },
         HDecl::Struct { .. } => decl,
         HDecl::Enum { .. } => decl,
-        HDecl::Effect { .. } => decl,
+        HDecl::Effect { name, type_params, ops, is_pub, span } => {
+            let mut new_ops: List<HEffectOp> = []
+            for op in ops {
+                let new_default_body = match op.default_body {
+                    some(body) => some(anf_fn_body(body, externs, counter)),
+                    none => none,
+                }
+                new_ops.push(HEffectOp {
+                    name: op.name, params: op.params, return_type: op.return_type,
+                    has_default: op.has_default, default_body: new_default_body
+                })
+            }
+            HDecl::Effect { name: name, type_params: type_params, ops: new_ops, is_pub: is_pub, span: span }
+        },
         HDecl::Trait { .. } => decl,
         HDecl::ExternFn { .. } => decl,
         HDecl::ExternType { .. } => decl,
@@ -1142,7 +1155,20 @@ fn transform_decl(decl: HDecl, boxed: Set<Int>, externs: Set<Str>, drop_types: S
         // Non-function declarations pass through unchanged
         HDecl::Struct { .. } => decl,
         HDecl::Enum { .. } => decl,
-        HDecl::Effect { .. } => decl,
+        HDecl::Effect { name, type_params, ops, is_pub, span } => {
+            let mut new_ops: List<HEffectOp> = []
+            for op in ops {
+                let new_default_body = match op.default_body {
+                    some(body) => some(transform_fn_body(op.params, body, boxed, externs, drop_types)),
+                    none => none,
+                }
+                new_ops.push(HEffectOp {
+                    name: op.name, params: op.params, return_type: op.return_type,
+                    has_default: op.has_default, default_body: new_default_body
+                })
+            }
+            HDecl::Effect { name: name, type_params: type_params, ops: new_ops, is_pub: is_pub, span: span }
+        },
         HDecl::Trait { .. } => decl,
         HDecl::ExternFn { .. } => decl,
         HDecl::ExternType { .. } => decl,

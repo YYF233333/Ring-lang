@@ -1160,6 +1160,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 > **P2.2 进度（2026-07-27）**：audit #222 ✅——tuple 越界字段访问记录 E0304 后不再继续索引/panic，以 `ErrorType` 安全恢复；含补丁的 C-self-host compiler 实测负向诊断 E0304、合法 tuple field access 通过，matrix 变为 **66 covered / 12 known-gap / 3 manual-evidence**。`CHECK_ONLY_GAPS` 已清零；剩余语义门为 1 LLVM-only + 11 shared-positive。
 >
 > module-qualified effect evidence ✅——统一反解 `__ring_ev_` 参数，结构性保留 file-module `$$_` canonical boundary，仅还原 inline `::`；C/LLVM 的 main、lookup 与 user-drop 五个消费点已收口。新增 unqualified/inline 与真实多文件 `pkg$effects$$_child::InlineDefault` 双后端回归，独立对抗 review PASS；matrix 现为 **68 covered / 11 known-gap / 3 manual-evidence**，剩余 1 LLVM-only + 10 shared-positive。LLVM bootstrap 的 verifier warning 在 clean `97bbd64` 与 patched 同命令下逐字一致且都产出对象，排除本补丁回归。
+>
+> default effect body pipeline ✅——default body 现完整穿过 `andor_lower`、`dict_lower`、ANF、Perceus 与 HIR verifier，参数作用域、borrow/escape 与五字段 `HEffectOp` 重建均纳入正式回归；定向 C/LLVM/diff 各 ×3、RC 与 self-verify 通过。LLVM anchor 三代 fixed-point 对象逐字节一致（4,749,677 bytes，SHA256 `A1604D96EDD13A449905A85B81415B6207D805BF24F19D44F113F68ADF6794D8`）并写回 `dist-llvm/main.o`；matrix 现为 **69 covered / 10 known-gap / 3 manual-evidence**，剩余 1 LLVM-only + 9 shared-positive。完整 C 聚合门 `1296/0`（e2e 462、llvm 222、RC 543、parity 69；24 项按 matrix/既有契约 skip）。LLVM 聚合首轮为 e2e `461/0/10`、llvm `220/2`、parity `69/0/13`；`adversarial_effect_closure` 与 `recursive_fn` 均无诊断退出 `0xC0000005`，各自独立 ×3 全绿，按 B-155 既有 LLVM 信道间歇证据如实保留，不伪记全绿。
 
 **验收标准**：
 - Phase 1：全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）

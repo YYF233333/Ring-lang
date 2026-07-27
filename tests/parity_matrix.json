@@ -565,13 +565,12 @@
       "reason": "LLVM backend access violation; C backend passes (B-163 Phase2 P2.1 probe 2026-07-27)"
     },
     {
-      "feature_id": "gap.shared.default_effect_body_io",
+      "feature_id": "backend.default_effect_body_pipeline",
       "evidence": ["tests/cases/default_effect_body_io.ring"],
-      "oracle": "shared-failure-no-parity",
+      "oracle": "golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends hit the same deep-handler heap failure (B-163 Phase2 P2.1 probe 2026-07-27)"
+      "status": "covered",
+      "reason": "Default effect bodies run through and/or, dictionary, ANF, Perceus, and RC verification before both backends."
     },
     {
       "feature_id": "backend.module_effect_evidence",
