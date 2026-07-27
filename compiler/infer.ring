@@ -2423,29 +2423,32 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                     none => {}
                 }
 
-                // An abort handler proves that an otherwise-open body row
-                // contains fail<payload>. Split that open tail into the handled
-                // fail label plus a fresh residual row instead of erasing or
-                // closing it. The residual remains effect-polymorphic and is
+                // An abort handler proves that every open contribution to the
+                // body row contains the same fail<payload> contract. Split any
+                // open tail into that handled fail label plus a fresh residual,
+                // even when the body also has an explicit fail label: otherwise
+                // a callback tail could later instantiate to fail<Other>.
+                //
+                // Effect rows currently have no lacks/optional-label constraint,
+                // so this is intentionally an exact (and conservative) callback
+                // effect requirement. The residual remains polymorphic and is
                 // propagated after fail is filtered from this handle.
-                if body_fail_error_type.is_none() {
-                    let resolved_body_effects = apply_subst_row(s, effects)
-                    match (abort_payload_type, resolved_body_effects.tail) {
-                        (some(payload_type), some(body_tail)) => {
-                            let residual_tail = ctx.env.fresh_var_id()
-                            let required_tail = Type::EffectRowType {
-                                effects: [Effect::FailEffect { error_type: payload_type }],
-                                tail: some(residual_tail)
-                            }
-                            s = unify_at(
-                                ctx.sink, ctx.env,
-                                Type::TypeVar { id: body_tail, name: none },
-                                required_tail, s, handler.span
-                            )
-                            body_fail_error_type = some(payload_type)
-                        },
-                        _ => {}
-                    }
+                let resolved_body_effects = apply_subst_row(s, effects)
+                match (abort_payload_type, resolved_body_effects.tail) {
+                    (some(payload_type), some(body_tail)) => {
+                        let residual_tail = ctx.env.fresh_var_id()
+                        let required_tail = Type::EffectRowType {
+                            effects: [Effect::FailEffect { error_type: payload_type }],
+                            tail: some(residual_tail)
+                        }
+                        s = unify_at(
+                            ctx.sink, ctx.env,
+                            Type::TypeVar { id: body_tail, name: none },
+                            required_tail, s, handler.span
+                        )
+                        body_fail_error_type = some(payload_type)
+                    },
+                    _ => {}
                 }
             }
 

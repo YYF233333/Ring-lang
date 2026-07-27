@@ -32,6 +32,17 @@ pub struct FnBoundsEntry {
     pub type_param_name: Str
 }
 
+// Checker-only bridge between a function body's fresh associated-type
+// variables and the registration-time associated types owned by its scheme.
+// This never becomes part of HIR or the public function ABI.
+pub struct AssocRebindEntry {
+    pub check_type: Type,
+    pub registration_type: Type?,
+    pub owner_name: Str,
+    pub trait_name: Str,
+    pub assoc_name: Str
+}
+
 // ============================================================
 // CompileError (raised via fail effect, caught at declaration level)
 // ============================================================
@@ -69,6 +80,9 @@ pub struct InferCtx {
     // Qualified associated type scope: "T::Item" -> Type
     // Used to disambiguate when multiple type params have same-named associated types
     pub qualified_assoc_scope: Map<Str, Type>,
+    // Function identity -> owner-qualified associated-type provenance captured
+    // before check_fn_decl restores its transient scopes.
+    pub rebind_assoc_provenance: Map<Str, List<AssocRebindEntry>>,
     // B-069: Default parameter support
     // fn_defaults: function name -> list of default-value HExprs (one per default param, in order)
     pub fn_defaults: Map<Str, List<HExpr>>,
@@ -100,6 +114,7 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         file_extern_types: set_new(),
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
+        rebind_assoc_provenance: map_new(),
         fn_defaults: map_new(),
         fn_min_arity: map_new(),
         mod_unsafe_allowed: false,

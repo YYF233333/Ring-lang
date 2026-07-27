@@ -645,25 +645,60 @@
     },
     {
       "feature_id": "backend.effect_abort_handler_open_row",
-      "evidence": ["tests/cases/abort_handler_open_row.ring"],
+      "evidence": [
+        "tests/cases/abort_handler_open_row.ring",
+        "tests/cases/abort_handler_assoc_open_row.ring"
+      ],
       "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
       "status": "covered",
-      "reason": "An abort handler refines an open HOF callback row to fail<Str> plus a residual row while ordinary effect-polymorphic HOF calls and pure handled bodies remain valid."
+      "reason": "Abort handlers refine explicit, unannotated, nested, mixed, and owner-qualified associated-type HOF rows to an exact fail payload contract, preserve residual io, and leave ordinary effect-polymorphic HOF calls and closed handled bodies valid."
+    },
+    {
+      "feature_id": "backend.module_abort_handler_assoc_constraint",
+      "evidence": [
+        "tests/cases/modules/abort_handler_assoc_constraint/main.ring"
+      ],
+      "oracle": "module-golden+dual-backend",
+      "lane": ["module-llvm", "module-c", "module-diff"],
+      "status": "covered",
+      "reason": "A cross-module abort handler preserves an explicit Source<Item = Int> constraint while refining and handling the callback fail row."
     },
     {
       "feature_id": "backend.frontend_abort_handler_contract",
       "evidence": [
         "tests/cases/error_abort_handler_arm_io_effect.ring",
         "tests/cases/error_abort_handler_arm_reraise_effect.ring",
+        "tests/cases/error_abort_handler_mixed_open_row_payload_type.ring",
         "tests/cases/error_abort_handler_open_row_payload_type.ring",
         "tests/cases/error_abort_handler_payload_type.ring",
-        "tests/cases/error_abort_handler_result_type.ring"
+        "tests/cases/error_abort_handler_result_type.ring",
+        "tests/cases/errors/abort_handler_unannotated_callback_payload.ring",
+        "tests/cases/errors/abort_handler_unannotated_payload_monomorphic.ring",
+        "tests/cases/errors/abort_handler_nested_open_row_payload.ring",
+        "tests/cases/errors/abort_handler_assoc_payload_owner.ring",
+        "tests/cases/errors/abort_handler_assoc_payload_multi_owner.ring",
+        "tests/cases/errors/abort_handler_assoc_payload_unified_owners.ring",
+        "tests/cases/errors/abort_handler_assoc_payload_open_record_owner.ring",
+        "tests/cases/errors/abort_handler_assoc_payload_structured.ring",
+        "tests/cases/errors/abort_handler_assoc_payload_typevar_equality.ring"
       ],
       "oracle": "diagnostic-substring",
       "lane": ["check"],
       "status": "covered",
-      "reason": "Checker rejects concrete and open-row abort payload/result mismatches and exposes arm io/re-raised fail effects to enclosing signatures."
+      "reason": "Checker rejects concrete/open/nested/unannotated payload mismatches, preserves owner-qualified associated-type identity, fails closed for unrepresentable associated equalities, and exposes arm io/re-raised fail effects."
+    },
+    {
+      "feature_id": "backend.frontend_rebind_monomorphic_param",
+      "evidence": [
+        "tests/cases/errors/rebind_monomorphic_param_expansion.ring",
+        "tests/cases/errors/abort_handler_unannotated_callback_payload.ring",
+        "tests/cases/errors/abort_handler_unannotated_payload_monomorphic.ring"
+      ],
+      "oracle": "diagnostic-substring",
+      "lane": ["check"],
+      "status": "covered",
+      "reason": "Rebinding a registration-owned monomorphic parameter may expose a nested element or callback effect variable, but must not quantify it across call sites."
     },
     {
       "feature_id": "backend.effect_handler_mut_capture",
