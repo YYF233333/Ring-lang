@@ -99,16 +99,14 @@ fn main() {
     print("nested: ${r2}")                     // 3,200,3
 
     // --- abort form: handle with fail.raise ---
-    // NOTE: both backends implement the abort form as "the raised value IS
-    // the handle result" — the arm body is not executed (see worker_feedback
-    // step 6: LLVM semantics, ported faithfully).  The arm body is the
-    // identity so the printed value is well-defined either way.
+    // Audit #251: the catch path binds the payload and executes this nonidentity
+    // arm after the current frame/evidence is inactive.
     let r3 = handle {
         raise_int(4)
     } with {
-        fail.raise(e) => e,
+        fail.raise(e) => e + 5,
     }
-    print("abort: ${r3}")                      // 12
+    print("abort: ${r3}")                      // 17
 
     // --- catch: multi-arm ctor dispatch + nested literal + guard (#246) ---
     let c1 = raise_code(5) catch {

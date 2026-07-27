@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, type_to_string, effect_to_string, nominal_display_name, effects_match_kind, effect_kind_name}
+use types::{Type, Effect, EffectRow, RecordField, UNIT, EMPTY_ROW, type_to_string, effect_to_string, nominal_display_name, effects_match_kind, effect_kind_name, types_equal}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
@@ -7,10 +7,11 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     hexpr_type, hexpr_effects, hexpr_span,
     collect_extern_type_names, compare_by_first}
 use env::{TypeScheme, SchemeBound, apply_subst, apply_subst_map, apply_subst_row_map, find_impl, has_impl}
+use union_find::{UnionFind}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0802, E0803}
-use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
+use codes::{E0201, E0204, E0301, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0503, E0507, E0802, E0803}
+use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, AssocRebindEntry, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type,
@@ -1212,7 +1213,17 @@ struct FnBodyResult {
     body: HExpr
 }
 
-fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<HParam>, expected_ret: Type, body: Expr, saved_tp_scope: Map<Str, Type>, span: Span) -> FnBodyResult {
+fn check_fn_body(
+    mut ctx: InferCtx,
+    fn_name: Str,
+    registration_scheme: TypeScheme?,
+    type_params: List<TypeParam>,
+    hparams: List<HParam>,
+    expected_ret: Type,
+    body: Expr,
+    saved_tp_scope: Map<Str, Type>,
+    span: Span
+) -> FnBodyResult {
     let body_result = infer_block(ctx, body, some(ctx.subst))
     ctx.subst = body_result.subst
     // Skip body-vs-return unification when the body type is Never (bottom).
@@ -1288,10 +1299,149 @@ fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     let final_ret = zonk_type(zctx, expected_ret)
     let eff = zonk_row(zctx, body_result.effects)
     let final_body = zonk_block(zctx, body_result.hexpr)
+    match registration_scheme {
+        some(scheme) => capture_assoc_rebind_provenance(
+            ctx, fn_name, scheme, final_params, final_ret, eff, ctx.subst
+        ),
+        none => {}
+    }
     FnBodyResult { params: final_params, ret: final_ret, eff: eff, body: final_body }
 }
 
+// Capture the owner-qualified identity of check-time associated-type variables
+// while the function's transient scopes are still live. rebind_fn_type runs
+// after check_fn_decl returns, when qualified_assoc_scope/current_fn_bounds have
+// already been restored, so it cannot reconstruct this safely from a bare
+// TypeVar id.
+fn capture_assoc_rebind_provenance(
+    mut ctx: InferCtx,
+    fn_name: Str,
+    registration_scheme: TypeScheme,
+    checked_params: List<HParam>,
+    checked_return: Type,
+    checked_effects: EffectRow,
+    final_subst: UnionFind
+) {
+    let mut captured: List<AssocRebindEntry> = []
+    match registration_scheme.ty {
+        Type::FnType {
+            params: registration_params,
+            return_type: registration_return,
+            effects: registration_effects
+        } => {
+            // First map each check-time owner (T/U/...) back to the corresponding
+            // registration-time owner using the ordinary function shape.
+            let mut owner_mapping: Map<Int, Type> = map_new()
+            let mut owner_conflicts: Set<Int> = set_new()
+            let mut param_index = 0
+            for checked_param in checked_params {
+                match registration_params.get(param_index) {
+                    some(registration_param) =>
+                        build_var_mapping(
+                            checked_param.ty, registration_param,
+                            owner_mapping, owner_conflicts
+                        ),
+                    none => {}
+                }
+                param_index = param_index + 1
+            }
+            build_var_mapping(
+                checked_return, registration_return,
+                owner_mapping, owner_conflicts
+            )
+            build_effect_var_mapping(
+                checked_effects, registration_effects,
+                owner_mapping, owner_conflicts
+            )
+
+            for fn_bound in ctx.current_fn_bounds {
+                let checked_owner = apply_subst(
+                    final_subst,
+                    Type::TypeVar {
+                        id: fn_bound.type_param_var_id,
+                        name: some(fn_bound.type_param_name)
+                    }
+                )
+                let registration_owner_id = match checked_owner {
+                    Type::TypeVar { id: checked_owner_id, .. } => {
+                        if owner_conflicts.contains(checked_owner_id) {
+                            none
+                        } else {
+                            let registration_owner = apply_subst_map(
+                                owner_mapping, checked_owner
+                            )
+                            match registration_owner {
+                                Type::TypeVar { id, .. } => some(id),
+                                _ => none
+                            }
+                        }
+                    },
+                    _ => none
+                }
+
+                match ctx.env.trait_reg.traits.get(fn_bound.trait_name) {
+                    some(trait_def) => {
+                        for assoc_def in trait_def.assoc_types {
+                            let origin = "${fn_bound.type_param_name}::${assoc_def.name}"
+                            match ctx.qualified_assoc_scope.get(origin) {
+                                some(checked_assoc) => {
+                                    let zonked_assoc = apply_subst(
+                                        final_subst, checked_assoc
+                                    )
+                                    let mut found_target = false
+                                    match registration_owner_id {
+                                        some(owner_id) => {
+                                            for scheme_bound in registration_scheme.bounds {
+                                                if scheme_bound.type_var == owner_id &&
+                                                   scheme_bound.trait_name == fn_bound.trait_name {
+                                                    for constraint in scheme_bound.assoc_constraints {
+                                                        if constraint.name == assoc_def.name {
+                                                            found_target = true
+                                                            captured.push(AssocRebindEntry {
+                                                                check_type: zonked_assoc,
+                                                                registration_type: some(constraint.ty),
+                                                                owner_name: fn_bound.type_param_name,
+                                                                trait_name: fn_bound.trait_name,
+                                                                assoc_name: assoc_def.name
+                                                            })
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        none => {}
+                                    }
+                                    if !found_target {
+                                        captured.push(AssocRebindEntry {
+                                            check_type: zonked_assoc,
+                                            registration_type: none,
+                                            owner_name: fn_bound.type_param_name,
+                                            trait_name: fn_bound.trait_name,
+                                            assoc_name: assoc_def.name
+                                        })
+                                    }
+                                },
+                                none => {}
+                            }
+                        }
+                    },
+                    none => {}
+                }
+            }
+        },
+        _ => {}
+    }
+    ctx.rebind_assoc_provenance.insert(fn_name, captured)
+}
+
 fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
+    // Save the registration scheme before entering the parameter scope: a
+    // parameter is allowed to have the same spelling as its function.
+    let registration_scheme = ctx.env.lookup(name)
+    // A failed or repeated check must never reuse provenance from an earlier
+    // inline/SCC precheck of the same canonical function identity.
+    ctx.rebind_assoc_provenance.insert(name, [])
+
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -1423,7 +1573,10 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     ctx.current_fn_return_type = some(expected_ret)
 
     let try_result = some(
-        check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_scope, span)
+        check_fn_body(
+            ctx, name, registration_scheme, type_params, hparams,
+            expected_ret, body, saved_tp_scope, span
+        )
     ) catch { _ => none }
 
     // Save complete bounds (inherited + own) before pop
@@ -1643,22 +1796,22 @@ fn check_one_decl_with_rebind(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HD
 
     // Update fn effects and rebind resolved types
     match hd {
-        HDecl::Fn { name, params, return_type, effects, .. } => {
+        HDecl::Fn { name, params, return_type, effects, span, .. } => {
             if effects.effects.len() > 0 {
                 update_fn_effects(ctx.env, name, effects)
             }
             // B-122: Rebind with fully-resolved type from inference
-            rebind_fn_type(ctx, name, params, return_type, effects)
+            rebind_fn_type(ctx, name, params, return_type, effects, span)
         },
         HDecl::Impl { methods, .. } => {
             // Rebind each impl method's resolved type
             for method in methods {
                 match method {
-                    HDecl::Fn { name: mname, params: mparams, return_type: mret, effects: meff, .. } => {
+                    HDecl::Fn { name: mname, params: mparams, return_type: mret, effects: meff, span: mspan, .. } => {
                         if meff.effects.len() > 0 {
                             update_fn_effects(ctx.env, mname, meff)
                         }
-                        rebind_fn_type(ctx, mname, mparams, mret, meff)
+                        rebind_fn_type(ctx, mname, mparams, mret, meff, mspan)
                     },
                     _ => {}
                 }
@@ -1863,39 +2016,946 @@ fn rebind_fn_scheme_with_alias(mut ctx: InferCtx, name: Str, scheme: TypeScheme)
     }
 }
 
-fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_type: Type, effects: EffectRow) {
+fn type_contains_fn(ty: Type) -> Bool {
+    match ty {
+        Type::FnType { .. } => true,
+        Type::StructType { type_params, .. } => {
+            for tp in type_params {
+                if type_contains_fn(tp) { return true }
+            }
+            false
+        },
+        Type::EnumType { type_params, .. } => {
+            for tp in type_params {
+                if type_contains_fn(tp) { return true }
+            }
+            false
+        },
+        Type::GenericType { base, args } => {
+            if type_contains_fn(base) { return true }
+            for arg in args {
+                if type_contains_fn(arg) { return true }
+            }
+            false
+        },
+        Type::RecordType { fields, .. } => {
+            for field in fields {
+                if type_contains_fn(field.ty) { return true }
+            }
+            false
+        },
+        Type::EffectRowType { effects, .. } => {
+            for eff in effects {
+                match eff {
+                    Effect::FailEffect { error_type } => {
+                        if type_contains_fn(error_type) { return true }
+                    },
+                    Effect::MutEffect { state_type } => {
+                        if type_contains_fn(state_type) { return true }
+                    },
+                    Effect::CustomEffect { type_args, .. } => {
+                        for arg in type_args {
+                            if type_contains_fn(arg) { return true }
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            false
+        },
+        Type::TupleType { elements } => {
+            for element in elements {
+                if type_contains_fn(element) { return true }
+            }
+            false
+        },
+        Type::PtrType { pointee } => type_contains_fn(pointee),
+        _ => false
+    }
+}
+
+fn report_rebind_shape_mismatch(
+    mut ctx: InferCtx, fn_name: Str, reg_ty: Type, check_ty: Type, span: Span
+) {
+    let display = nominal_display_name(fn_name)
+    let expected = type_to_string(reg_ty)
+    let actual = type_to_string(check_ty)
+    let _ = type_error(ctx.sink, E0301,
+        "Cannot safely rebind higher-order parameter in '${display}': registered shape '${expected}' does not match inferred shape '${actual}'",
+        span,
+        DiagnosticContext::TypeMismatch {
+            expected: expected, actual: actual,
+            expression: some("higher-order parameter rebind")
+        })
+}
+
+// A check-time variable is safe to write into a scheme only when the existing
+// positional mapping takes it back to a variable already owned by that scheme
+// (or to a concrete type). Named variables and variables carrying var_bounds
+// may denote declared generics/associated types; generalizing them as a fresh
+// anonymous fail payload would discard their bound provenance.
+fn audit_fail_payload_var(
+    mut ctx: InferCtx,
+    fn_name: Str,
+    id: Int,
+    var_name: Str?,
+    mapping: Map<Int, Type>,
+    original_scheme_vars: Set<Int>,
+    mut unsafe_vars: Set<Int>,
+    mut diagnosed_vars: Set<Int>,
+    span: Span
+) {
+    // Conflicted or ownerless associated-type provenance is pre-seeded by
+    // rebind_fn_type. Reject it only if it is about to escape through a newly
+    // written fail payload; unrelated associated types remain untouched.
+    if unsafe_vars.contains(id) {
+        if !diagnosed_vars.contains(id) {
+            diagnosed_vars.insert(id)
+            let display = nominal_display_name(fn_name)
+            let detail = "owner-qualified associated type has no unique registration-time target"
+            let _ = type_error(ctx.sink, E0503,
+                "Cannot rebind fail payload in '${display}': ${detail}",
+                span,
+                DiagnosticContext::TraitError { detail: detail })
+        }
+        return
+    }
+
+    let mapped = apply_subst_map(mapping, Type::TypeVar { id: id, name: var_name })
+    let mut mapped_vars: Set<Int> = set_new()
+    collect_free_vars(mapped, mapped_vars)
+    let mut new_vars: List<Int> = []
+    for mapped_id in mapped_vars {
+        if !original_scheme_vars.contains(mapped_id) {
+            new_vars.push(mapped_id)
+        }
+    }
+    if new_vars.len() == 0 { return }
+
+    let check_name = match var_name {
+        some(n) => n,
+        none => ""
+    }
+    let mut trait_names: Set<Str> = set_new()
+    match ctx.env.scope.var_bounds.get(id) {
+        some(bounds) => {
+            for trait_name in bounds { trait_names.insert(trait_name) }
+        },
+        none => {}
+    }
+    for mapped_id in new_vars {
+        match ctx.env.scope.var_bounds.get(mapped_id) {
+            some(bounds) => {
+                for trait_name in bounds { trait_names.insert(trait_name) }
+            },
+            none => {}
+        }
+    }
+    if check_name == "" && trait_names.len() == 0 { return }
+
+    unsafe_vars.insert(id)
+    for mapped_id in new_vars { unsafe_vars.insert(mapped_id) }
+    if diagnosed_vars.contains(id) { return }
+    diagnosed_vars.insert(id)
+    for mapped_id in new_vars { diagnosed_vars.insert(mapped_id) }
+
+    let display = nominal_display_name(fn_name)
+    let mut sorted_traits = trait_names.to_list()
+    sorted_traits.sort()
+    let traits_display = sorted_traits.join(", ")
+    let detail = if check_name != "" && sorted_traits.len() > 0 {
+        "named check-time variable '${check_name}' has untracked obligations: ${traits_display}"
+    } else if check_name != "" {
+        "named check-time variable '${check_name}' has no registration-time provenance"
+    } else {
+        "check-time variable has untracked obligations: ${traits_display}"
+    }
+    let _ = type_error(ctx.sink, E0503,
+        "Cannot rebind fail payload in '${display}': ${detail}",
+        span,
+        DiagnosticContext::TraitError { detail: detail })
+}
+
+fn audit_fail_payload_type(
+    mut ctx: InferCtx,
+    fn_name: Str,
+    ty: Type,
+    mapping: Map<Int, Type>,
+    original_scheme_vars: Set<Int>,
+    mut unsafe_vars: Set<Int>,
+    mut diagnosed_vars: Set<Int>,
+    span: Span
+) {
+    match ty {
+        Type::TypeVar { id, name } =>
+            audit_fail_payload_var(
+                ctx, fn_name, id, name, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            ),
+        Type::FnType { params, return_type, effects } => {
+            for param in params {
+                audit_fail_payload_type(
+                    ctx, fn_name, param, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+            audit_fail_payload_type(
+                ctx, fn_name, return_type, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            for eff in effects.effects {
+                match eff {
+                    Effect::FailEffect { error_type } =>
+                        audit_fail_payload_type(
+                            ctx, fn_name, error_type, mapping, original_scheme_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        ),
+                    Effect::MutEffect { state_type } =>
+                        audit_fail_payload_type(
+                            ctx, fn_name, state_type, mapping, original_scheme_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        ),
+                    Effect::CustomEffect { type_args, .. } => {
+                        for arg in type_args {
+                            audit_fail_payload_type(
+                                ctx, fn_name, arg, mapping, original_scheme_vars,
+                                unsafe_vars, diagnosed_vars, span
+                            )
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        },
+        Type::StructType { type_params, .. } => {
+            for tp in type_params {
+                audit_fail_payload_type(
+                    ctx, fn_name, tp, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::EnumType { type_params, .. } => {
+            for tp in type_params {
+                audit_fail_payload_type(
+                    ctx, fn_name, tp, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::GenericType { base, args } => {
+            audit_fail_payload_type(
+                ctx, fn_name, base, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            for arg in args {
+                audit_fail_payload_type(
+                    ctx, fn_name, arg, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::RecordType { fields, .. } => {
+            for field in fields {
+                audit_fail_payload_type(
+                    ctx, fn_name, field.ty, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::EffectRowType { effects, .. } => {
+            for eff in effects {
+                match eff {
+                    Effect::FailEffect { error_type } =>
+                        audit_fail_payload_type(
+                            ctx, fn_name, error_type, mapping, original_scheme_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        ),
+                    Effect::MutEffect { state_type } =>
+                        audit_fail_payload_type(
+                            ctx, fn_name, state_type, mapping, original_scheme_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        ),
+                    Effect::CustomEffect { type_args, .. } => {
+                        for arg in type_args {
+                            audit_fail_payload_type(
+                                ctx, fn_name, arg, mapping, original_scheme_vars,
+                                unsafe_vars, diagnosed_vars, span
+                            )
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        },
+        Type::TupleType { elements } => {
+            for element in elements {
+                audit_fail_payload_type(
+                    ctx, fn_name, element, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::PtrType { pointee } =>
+            audit_fail_payload_type(
+                ctx, fn_name, pointee, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            ),
+        _ => {}
+    }
+}
+
+fn type_contains_exact(ty: Type, needle: Type) -> Bool {
+    if types_equal(ty, needle) { return true }
+    match ty {
+        Type::FnType { params, return_type, effects } => {
+            for param in params {
+                if type_contains_exact(param, needle) { return true }
+            }
+            if type_contains_exact(return_type, needle) { return true }
+            for eff in effects.effects {
+                match eff {
+                    Effect::FailEffect { error_type } => {
+                        if type_contains_exact(error_type, needle) { return true }
+                    },
+                    Effect::MutEffect { state_type } => {
+                        if type_contains_exact(state_type, needle) { return true }
+                    },
+                    Effect::CustomEffect { type_args, .. } => {
+                        for arg in type_args {
+                            if type_contains_exact(arg, needle) { return true }
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            false
+        },
+        Type::StructType { type_params, .. } => {
+            for param in type_params {
+                if type_contains_exact(param, needle) { return true }
+            }
+            false
+        },
+        Type::EnumType { type_params, .. } => {
+            for param in type_params {
+                if type_contains_exact(param, needle) { return true }
+            }
+            false
+        },
+        Type::GenericType { base, args } => {
+            if type_contains_exact(base, needle) { return true }
+            for arg in args {
+                if type_contains_exact(arg, needle) { return true }
+            }
+            false
+        },
+        Type::RecordType { fields, .. } => {
+            for field in fields {
+                if type_contains_exact(field.ty, needle) { return true }
+            }
+            false
+        },
+        Type::EffectRowType { effects, .. } => {
+            for eff in effects {
+                match eff {
+                    Effect::FailEffect { error_type } => {
+                        if type_contains_exact(error_type, needle) { return true }
+                    },
+                    Effect::MutEffect { state_type } => {
+                        if type_contains_exact(state_type, needle) { return true }
+                    },
+                    Effect::CustomEffect { type_args, .. } => {
+                        for arg in type_args {
+                            if type_contains_exact(arg, needle) { return true }
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            false
+        },
+        Type::TupleType { elements } => {
+            for element in elements {
+                if type_contains_exact(element, needle) { return true }
+            }
+            false
+        },
+        Type::PtrType { pointee } => type_contains_exact(pointee, needle),
+        _ => false
+    }
+}
+
+fn unsafe_structured_assoc_origin(
+    ctx: InferCtx, fn_name: Str, payload: Type
+) -> Str? {
+    match ctx.rebind_assoc_provenance.get(fn_name) {
+        some(entries) => {
+            for entry in entries {
+                match entry.check_type {
+                    Type::TypeVar { .. } => {},
+                    checked_shape => {
+                        let represented_by_scheme = match entry.registration_type {
+                            some(registration_shape) =>
+                                types_equal(checked_shape, registration_shape),
+                            none => false
+                        }
+                        if !represented_by_scheme &&
+                           type_contains_exact(payload, checked_shape) {
+                            let trait_display = nominal_display_name(entry.trait_name)
+                            return some(
+                                "${entry.owner_name}::${entry.assoc_name} (${trait_display})"
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        none => {}
+    }
+    none
+}
+
+fn audit_fail_row(
+    mut ctx: InferCtx,
+    fn_name: Str,
+    row: EffectRow,
+    mapping: Map<Int, Type>,
+    original_scheme_vars: Set<Int>,
+    mut unsafe_vars: Set<Int>,
+    mut diagnosed_vars: Set<Int>,
+    span: Span
+) {
+    for eff in row.effects {
+        match eff {
+            Effect::FailEffect { error_type } => {
+                match unsafe_structured_assoc_origin(ctx, fn_name, error_type) {
+                    some(origin) => {
+                        let display = nominal_display_name(fn_name)
+                        let detail = "associated type '${origin}' was constrained to a structure that the registration scheme cannot represent"
+                        let _ = type_error(ctx.sink, E0503,
+                            "Cannot rebind fail payload in '${display}': ${detail}",
+                            span,
+                            DiagnosticContext::TraitError { detail: detail })
+                    },
+                    none => {}
+                }
+                audit_fail_payload_type(
+                    ctx, fn_name, error_type, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            },
+            _ => {}
+        }
+    }
+}
+
+fn audit_fail_rows_in_type(
+    mut ctx: InferCtx,
+    fn_name: Str,
+    ty: Type,
+    mapping: Map<Int, Type>,
+    original_scheme_vars: Set<Int>,
+    mut unsafe_vars: Set<Int>,
+    mut diagnosed_vars: Set<Int>,
+    span: Span
+) {
+    match ty {
+        Type::FnType { params, return_type, effects } => {
+            audit_fail_row(
+                ctx, fn_name, effects, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            for param in params {
+                audit_fail_rows_in_type(
+                    ctx, fn_name, param, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+            audit_fail_rows_in_type(
+                ctx, fn_name, return_type, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+        },
+        Type::StructType { type_params, .. } => {
+            for tp in type_params {
+                audit_fail_rows_in_type(
+                    ctx, fn_name, tp, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::EnumType { type_params, .. } => {
+            for tp in type_params {
+                audit_fail_rows_in_type(
+                    ctx, fn_name, tp, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::GenericType { base, args } => {
+            audit_fail_rows_in_type(
+                ctx, fn_name, base, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            for arg in args {
+                audit_fail_rows_in_type(
+                    ctx, fn_name, arg, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::RecordType { fields, .. } => {
+            for field in fields {
+                audit_fail_rows_in_type(
+                    ctx, fn_name, field.ty, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::TupleType { elements } => {
+            for element in elements {
+                audit_fail_rows_in_type(
+                    ctx, fn_name, element, mapping, original_scheme_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            }
+        },
+        Type::PtrType { pointee } =>
+            audit_fail_rows_in_type(
+                ctx, fn_name, pointee, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            ),
+        _ => {}
+    }
+}
+
+// Preserve the registration-time parameter skeleton. Checked shapes are used
+// only to update effect rows of structurally corresponding function nodes.
+// The one expansion is an unquantified registration TypeVar refined directly
+// to a FnType; this is required for unannotated higher-order parameters.
+fn rebind_param_fn_rows(
+    mut ctx: InferCtx,
+    fn_name: Str,
+    reg_ty: Type,
+    check_ty: Type,
+    mapping: Map<Int, Type>,
+    original_type_vars: List<Int>,
+    original_scheme_vars: Set<Int>,
+    mut row_candidates: Set<Int>,
+    mut monomorphic_expansion_vars: Set<Int>,
+    mut unsafe_vars: Set<Int>,
+    mut diagnosed_vars: Set<Int>,
+    span: Span
+) -> Type {
+    match (reg_ty, check_ty) {
+        (Type::TypeVar { id, name },
+         Type::FnType { params: check_params, return_type: check_ret, effects: check_effects }) => {
+            let registered = Type::TypeVar { id: id, name: name }
+            let checked = Type::FnType {
+                params: check_params, return_type: check_ret, effects: check_effects
+            }
+            if original_type_vars.contains(id) {
+                report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+                return registered
+            }
+
+            audit_fail_rows_in_type(
+                ctx, fn_name, checked, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            let mapped = apply_subst_map(mapping, checked)
+            let mut mapped_free: Set<Int> = set_new()
+            collect_free_vars(mapped, mapped_free)
+            let mut sorted_free = mapped_free.to_list()
+            sorted_free.sort()
+            for free_id in sorted_free {
+                if !original_scheme_vars.contains(free_id) {
+                    monomorphic_expansion_vars.insert(free_id)
+                    match ctx.env.scope.var_bounds.get(free_id) {
+                        some(bounds) => {
+                            if bounds.len() > 0 && !diagnosed_vars.contains(free_id) {
+                                diagnosed_vars.insert(free_id)
+                                unsafe_vars.insert(free_id)
+                                let mut traits = bounds.to_list()
+                                traits.sort()
+                                let display = nominal_display_name(fn_name)
+                                let traits_display = traits.join(", ")
+                                let detail = "inferred higher-order parameter variable has untracked obligations: ${traits_display}"
+                                let _ = type_error(ctx.sink, E0503,
+                                    "Cannot rebind inferred higher-order parameter in '${display}': ${detail}",
+                                    span,
+                                    DiagnosticContext::TraitError { detail: detail })
+                            }
+                        },
+                        none => {}
+                    }
+                }
+            }
+            mapped
+        },
+        (Type::TypeVar { id, name }, checked) => {
+            let registered = Type::TypeVar { id: id, name: name }
+            if type_contains_fn(checked) {
+                report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+            }
+            registered
+        },
+        (Type::FnType { params: reg_params, return_type: reg_ret, effects: reg_effects },
+         Type::FnType { params: check_params, return_type: check_ret, effects: check_effects }) => {
+            let registered = Type::FnType {
+                params: reg_params, return_type: reg_ret, effects: reg_effects
+            }
+            let checked = Type::FnType {
+                params: check_params, return_type: check_ret, effects: check_effects
+            }
+            if reg_params.len() != check_params.len() {
+                report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+                return registered
+            }
+
+            audit_fail_row(
+                ctx, fn_name, check_effects, mapping, original_scheme_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            let mapped_effects = apply_subst_row_map(mapping, check_effects)
+            match reg_effects.tail {
+                some(owner_id) => {
+                    if original_type_vars.contains(owner_id) {
+                        collect_free_vars(Type::EffectRowType {
+                            effects: mapped_effects.effects, tail: mapped_effects.tail
+                        }, row_candidates)
+                    }
+                },
+                none => {}
+            }
+
+            let mut rebound_params: List<Type> = []
+            let mut i = 0
+            while i < reg_params.len() {
+                match (reg_params.get(i), check_params.get(i)) {
+                    (some(reg_param), some(check_param)) =>
+                        rebound_params.push(rebind_param_fn_rows(
+                            ctx, fn_name, reg_param, check_param, mapping,
+                            original_type_vars, original_scheme_vars,
+                            row_candidates, monomorphic_expansion_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        )),
+                    _ => {}
+                }
+                i = i + 1
+            }
+            let rebound_ret = rebind_param_fn_rows(
+                ctx, fn_name, reg_ret, check_ret, mapping,
+                original_type_vars, original_scheme_vars,
+                row_candidates, monomorphic_expansion_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            Type::FnType {
+                params: rebound_params,
+                return_type: rebound_ret,
+                effects: mapped_effects
+            }
+        },
+        (Type::StructType { name: reg_name, type_params: reg_args },
+         Type::StructType { name: check_name, type_params: check_args }) => {
+            let registered = Type::StructType { name: reg_name, type_params: reg_args }
+            let checked = Type::StructType { name: check_name, type_params: check_args }
+            if reg_name != check_name || reg_args.len() != check_args.len() {
+                if type_contains_fn(registered) || type_contains_fn(checked) {
+                    report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+                }
+                return registered
+            }
+            let mut rebound_args: List<Type> = []
+            let mut i = 0
+            while i < reg_args.len() {
+                match (reg_args.get(i), check_args.get(i)) {
+                    (some(reg_arg), some(check_arg)) =>
+                        rebound_args.push(rebind_param_fn_rows(
+                            ctx, fn_name, reg_arg, check_arg, mapping,
+                            original_type_vars, original_scheme_vars,
+                            row_candidates, monomorphic_expansion_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        )),
+                    _ => {}
+                }
+                i = i + 1
+            }
+            Type::StructType { name: reg_name, type_params: rebound_args }
+        },
+        (Type::EnumType { name: reg_name, type_params: reg_args },
+         Type::EnumType { name: check_name, type_params: check_args }) => {
+            let registered = Type::EnumType { name: reg_name, type_params: reg_args }
+            let checked = Type::EnumType { name: check_name, type_params: check_args }
+            if reg_name != check_name || reg_args.len() != check_args.len() {
+                if type_contains_fn(registered) || type_contains_fn(checked) {
+                    report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+                }
+                return registered
+            }
+            let mut rebound_args: List<Type> = []
+            let mut i = 0
+            while i < reg_args.len() {
+                match (reg_args.get(i), check_args.get(i)) {
+                    (some(reg_arg), some(check_arg)) =>
+                        rebound_args.push(rebind_param_fn_rows(
+                            ctx, fn_name, reg_arg, check_arg, mapping,
+                            original_type_vars, original_scheme_vars,
+                            row_candidates, monomorphic_expansion_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        )),
+                    _ => {}
+                }
+                i = i + 1
+            }
+            Type::EnumType { name: reg_name, type_params: rebound_args }
+        },
+        (Type::TupleType { elements: reg_elements },
+         Type::TupleType { elements: check_elements }) => {
+            let registered = Type::TupleType { elements: reg_elements }
+            let checked = Type::TupleType { elements: check_elements }
+            if reg_elements.len() != check_elements.len() {
+                if type_contains_fn(registered) || type_contains_fn(checked) {
+                    report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+                }
+                return registered
+            }
+            let mut rebound_elements: List<Type> = []
+            let mut i = 0
+            while i < reg_elements.len() {
+                match (reg_elements.get(i), check_elements.get(i)) {
+                    (some(reg_element), some(check_element)) =>
+                        rebound_elements.push(rebind_param_fn_rows(
+                            ctx, fn_name, reg_element, check_element, mapping,
+                            original_type_vars, original_scheme_vars,
+                            row_candidates, monomorphic_expansion_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        )),
+                    _ => {}
+                }
+                i = i + 1
+            }
+            Type::TupleType { elements: rebound_elements }
+        },
+        (Type::GenericType { base: reg_base, args: reg_args },
+         Type::GenericType { base: check_base, args: check_args }) => {
+            let registered = Type::GenericType { base: reg_base, args: reg_args }
+            let checked = Type::GenericType { base: check_base, args: check_args }
+            if reg_args.len() != check_args.len() {
+                if type_contains_fn(registered) || type_contains_fn(checked) {
+                    report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+                }
+                return registered
+            }
+            let rebound_base = rebind_param_fn_rows(
+                ctx, fn_name, reg_base, check_base, mapping,
+                original_type_vars, original_scheme_vars,
+                row_candidates, monomorphic_expansion_vars,
+                unsafe_vars, diagnosed_vars, span
+            )
+            let mut rebound_args: List<Type> = []
+            let mut i = 0
+            while i < reg_args.len() {
+                match (reg_args.get(i), check_args.get(i)) {
+                    (some(reg_arg), some(check_arg)) =>
+                        rebound_args.push(rebind_param_fn_rows(
+                            ctx, fn_name, reg_arg, check_arg, mapping,
+                            original_type_vars, original_scheme_vars,
+                            row_candidates, monomorphic_expansion_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        )),
+                    _ => {}
+                }
+                i = i + 1
+            }
+            Type::GenericType { base: rebound_base, args: rebound_args }
+        },
+        (Type::RecordType { fields: reg_fields, tail: reg_tail, tail_name: reg_tail_name },
+         Type::RecordType { fields: check_fields, tail: check_tail, tail_name: check_tail_name }) => {
+            let registered = Type::RecordType {
+                fields: reg_fields, tail: reg_tail, tail_name: reg_tail_name
+            }
+            let checked = Type::RecordType {
+                fields: check_fields, tail: check_tail, tail_name: check_tail_name
+            }
+            let mut reliable = reg_fields.len() == check_fields.len()
+            for reg_field in reg_fields {
+                let mut found = false
+                for check_field in check_fields {
+                    if reg_field.name == check_field.name { found = true }
+                }
+                if !found { reliable = false }
+            }
+            if !reliable {
+                if type_contains_fn(registered) || type_contains_fn(checked) {
+                    report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+                }
+                return registered
+            }
+
+            let mut rebound_fields: List<RecordField> = []
+            for reg_field in reg_fields {
+                let mut found = false
+                let mut check_field_type = UNIT
+                for check_field in check_fields {
+                    if reg_field.name == check_field.name {
+                        found = true
+                        check_field_type = check_field.ty
+                    }
+                }
+                if found {
+                    rebound_fields.push(RecordField {
+                        name: reg_field.name,
+                        ty: rebind_param_fn_rows(
+                            ctx, fn_name, reg_field.ty, check_field_type, mapping,
+                            original_type_vars, original_scheme_vars,
+                            row_candidates, monomorphic_expansion_vars,
+                            unsafe_vars, diagnosed_vars, span
+                        )
+                    })
+                }
+            }
+            Type::RecordType {
+                fields: rebound_fields, tail: reg_tail, tail_name: reg_tail_name
+            }
+        },
+        (Type::PtrType { pointee: reg_pointee },
+         Type::PtrType { pointee: check_pointee }) =>
+            Type::PtrType {
+                pointee: rebind_param_fn_rows(
+                    ctx, fn_name, reg_pointee, check_pointee, mapping,
+                    original_type_vars, original_scheme_vars,
+                    row_candidates, monomorphic_expansion_vars,
+                    unsafe_vars, diagnosed_vars, span
+                )
+            },
+        (registered, checked) => {
+            if type_contains_fn(registered) || type_contains_fn(checked) {
+                report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
+            }
+            registered
+        }
+    }
+}
+
+fn rebind_fn_type(
+    mut ctx: InferCtx, name: Str, params: List<HParam>, return_type: Type,
+    effects: EffectRow, span: Span
+) {
     match ctx.env.lookup(name) {
-        some(scheme) => match scheme.ty {
+        some(scheme) => {
+            let mut original_scheme_vars: Set<Int> = set_new()
+            collect_free_vars(scheme.ty, original_scheme_vars)
+            // Associated-type variables may be owned exclusively by a
+            // SchemeBound constraint and not occur in the registration-time
+            // function shape until an open callback row is refined.
+            for owned_var in scheme.type_vars {
+                original_scheme_vars.insert(owned_var)
+            }
+            for scheme_bound in scheme.bounds {
+                original_scheme_vars.insert(scheme_bound.type_var)
+                for constraint in scheme_bound.assoc_constraints {
+                    collect_free_vars(constraint.ty, original_scheme_vars)
+                }
+            }
+            match scheme.ty {
             Type::FnType { params: reg_params, return_type: reg_ret, effects: reg_effects } => {
                 // Build mapping: check-time var id → registration-time var id
                 // by comparing resolved params with registered params position-by-position.
                 let mut var_mapping: Map<Int, Type> = map_new()
+                let mut structural_conflicts: Set<Int> = set_new()
                 let mut pi = 0
                 for p in params {
                     match reg_params.get(pi) {
-                        some(reg_p) => {
-                            build_var_mapping(p.ty, reg_p, var_mapping)
-                        },
+                        some(reg_p) => build_var_mapping(
+                            p.ty, reg_p, var_mapping, structural_conflicts
+                        ),
                         none => {}
                     }
                     pi = pi + 1
                 }
+                // Return/effect positions can own variables that never appear
+                // in ordinary parameters.
+                build_var_mapping(
+                    return_type, reg_ret, var_mapping, structural_conflicts
+                )
+                build_effect_var_mapping(
+                    effects, reg_effects, var_mapping, structural_conflicts
+                )
 
-                // B-100 Fix 3: also map check-time associated type vars to their
-                // registration-time counterparts via the return type position.
-                // Without this, associated type vars (e.g. T::Item) that only
-                // appear in the return type remain un-mapped, causing the rebound
-                // scheme to carry check-time vars that the instantiation/var_map
-                // machinery cannot resolve at call sites.
-                build_var_mapping(return_type, reg_ret, var_mapping)
-
-                // Effect payloads participate in the same registration-time
-                // identity contract as params/returns.  In particular, a
-                // bounded T may occur only inside fail<T>/mut<T>/Custom<T>,
-                // including inside an HOF parameter.  Map those check-time
-                // variables back before writing the inferred row into the
-                // scheme so its existing SchemeBound stays attached to T.
-                build_effect_var_mapping(effects, reg_effects, var_mapping)
+                // Reconcile the structural candidates above with the
+                // owner-qualified associated-type targets captured before
+                // cleanup. A check variable unified with both T::Item and some
+                // other registered variable represents an equality that the
+                // current scheme cannot publish, so it must fail closed.
+                let mut assoc_targets: Map<Int, Type> = map_new()
+                let mut assoc_unsafe_vars: Set<Int> = set_new()
+                match ctx.rebind_assoc_provenance.get(name) {
+                    some(entries) => {
+                        for entry in entries {
+                            match entry.check_type {
+                                Type::TypeVar { id: check_var_id, .. } => {
+                                    if structural_conflicts.contains(check_var_id) {
+                                        // Only conflicts on the associated
+                                        // payload identity are relevant here.
+                                        // Ordinary generic/row conflicts may
+                                        // already be represented by the
+                                        // registration scheme and must not
+                                        // poison unrelated fail<T> payloads.
+                                        assoc_unsafe_vars.insert(check_var_id)
+                                    } else {
+                                        match entry.registration_type {
+                                            some(target) => {
+                                                match assoc_targets.get(check_var_id) {
+                                                    some(existing) => {
+                                                        if !types_equal(existing, target) {
+                                                            // A single check-time
+                                                            // variable was unified
+                                                            // from two different
+                                                            // associated-type owners.
+                                                            assoc_unsafe_vars.insert(check_var_id)
+                                                        }
+                                                    },
+                                                    none => assoc_targets.insert(check_var_id, target)
+                                                }
+                                            },
+                                            none => assoc_unsafe_vars.insert(check_var_id)
+                                        }
+                                    }
+                                },
+                                // Structured associated types are audited
+                                // directly at each new fail payload below. They
+                                // cannot be represented as a TypeVar substitution.
+                                _ => {}
+                            }
+                        }
+                    },
+                    none => {}
+                }
+                let mut sorted_assoc_ids = assoc_targets.keys()
+                sorted_assoc_ids.sort()
+                for check_id in sorted_assoc_ids {
+                    match assoc_targets.get(check_id) {
+                        some(target) => {
+                            if !assoc_unsafe_vars.contains(check_id) {
+                                match var_mapping.get(check_id) {
+                                    some(structural_target) => {
+                                        if !types_equal(structural_target, target) {
+                                            assoc_unsafe_vars.insert(check_id)
+                                        }
+                                    },
+                                    none => {
+                                        // Owner-qualified provenance supplies
+                                        // the otherwise missing identity.
+                                        var_mapping.insert(check_id, target)
+                                    }
+                                }
+                            }
+                        },
+                        none => {}
+                    }
+                }
 
                 // Map the resolved return type back to registration-time vars
                 let mapped_ret = apply_subst_map(var_mapping, return_type)
@@ -1903,12 +2963,42 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 // Also map effects
                 let mapped_effects = apply_subst_row_map(var_mapping, effects)
 
-                // Generalize only genuinely new row variables.  Mirroring
-                // infer_ctx::generalize is important here: a monomorphic env
-                // variable (e.g. an unannotated `raise_arg(x)`) must remain
-                // shared, while a body-local/callee-instantiation variable gets
-                // a fresh instance at every call site.
+                // Preserve only checked effect-row refinements inside the
+                // registration parameter skeleton. Arbitrary inferred shapes
+                // must not become a new public parameter ABI.
+                let mut mapped_params: List<Type> = []
+                let mut param_row_candidates: Set<Int> = set_new()
+                let mut monomorphic_expansion_vars: Set<Int> = set_new()
+                let mut unsafe_provenance_vars = assoc_unsafe_vars
+                let mut diagnosed_vars: Set<Int> = set_new()
+                audit_fail_row(
+                    ctx, name, effects, var_mapping, original_scheme_vars,
+                    unsafe_provenance_vars, diagnosed_vars, span
+                )
+                let mut mapped_pi = 0
+                for p in params {
+                    match reg_params.get(mapped_pi) {
+                        some(reg_param) =>
+                            mapped_params.push(rebind_param_fn_rows(
+                                ctx, name, reg_param, p.ty, var_mapping,
+                                scheme.type_vars, original_scheme_vars,
+                                param_row_candidates, monomorphic_expansion_vars,
+                                unsafe_provenance_vars, diagnosed_vars, span
+                            )),
+                        none => {}
+                    }
+                    mapped_pi = mapped_pi + 1
+                }
+
+                // Generalize only outer-row variables and parameter-row
+                // variables owned by an originally quantified registration
+                // tail. Mono→Fn expansion variables remain shared.
+                // Mirroring infer_ctx::generalize is important here: a
+                // monomorphic env variable (e.g. an unannotated `raise_arg(x)`)
+                // must remain shared, while a body-local/callee-instantiation
+                // variable gets a fresh instance at every call site.
                 let mut row_free: Set<Int> = set_new()
+                for candidate in param_row_candidates { row_free.insert(candidate) }
                 collect_free_vars(Type::EffectRowType {
                     effects: mapped_effects.effects, tail: mapped_effects.tail
                 }, row_free)
@@ -1918,7 +3008,10 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 let mut sorted_row_free = row_free.to_list()
                 sorted_row_free.sort()
                 for v in sorted_row_free {
-                    if new_type_vars.contains(v) == false && env_free.contains(v) == false {
+                    if new_type_vars.contains(v) == false &&
+                       env_free.contains(v) == false &&
+                       monomorphic_expansion_vars.contains(v) == false &&
+                       unsafe_provenance_vars.contains(v) == false {
                         new_type_vars.push(v)
 
                         // instantiate() records trait obligations for fresh
@@ -1950,7 +3043,7 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 }
 
                 let new_type = Type::FnType {
-                    params: reg_params, return_type: mapped_ret, effects: mapped_effects
+                    params: mapped_params, return_type: mapped_ret, effects: mapped_effects
                 }
                 rebind_fn_scheme_with_alias(ctx, name, TypeScheme {
                     ..scheme,
@@ -1960,6 +3053,7 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                 })
             },
             _ => {}
+            }
         },
         none => {}
     }
@@ -1967,66 +3061,167 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
 
 // Build a var-id mapping by structurally comparing two types.
 // If check_ty = TypeVar(?42) and reg_ty = TypeVar(?1), records ?42 → ?1.
-fn build_var_mapping(check_ty: Type, reg_ty: Type, mut mapping: Map<Int, Type>) {
+fn record_var_mapping(
+    check_id: Int,
+    registration_type: Type,
+    mut mapping: Map<Int, Type>,
+    mut conflicts: Set<Int>
+) {
+    // update_fn_effects runs immediately before rebind and may place a
+    // check-time variable into the scheme's outer effect row. Mapping that
+    // variable to itself carries no registration identity; treating it as a
+    // candidate would conflict with the real parameter/bound target.
+    match registration_type {
+        Type::TypeVar { id: registration_id, .. } => {
+            if registration_id == check_id { return }
+        },
+        _ => {}
+    }
+    match mapping.get(check_id) {
+        some(existing) => {
+            if !types_equal(existing, registration_type) {
+                conflicts.insert(check_id)
+            }
+        },
+        none => mapping.insert(check_id, registration_type)
+    }
+}
+
+fn build_var_mapping(
+    check_ty: Type,
+    reg_ty: Type,
+    mut mapping: Map<Int, Type>,
+    mut conflicts: Set<Int>
+) {
     match (check_ty, reg_ty) {
         (Type::TypeVar { id: check_id, .. }, _) => {
-            if !mapping.contains_key(check_id) {
-                mapping.insert(check_id, reg_ty)
-            }
+            record_var_mapping(check_id, reg_ty, mapping, conflicts)
         },
         (Type::FnType { params: cp, return_type: cr, effects: ce },
          Type::FnType { params: rp, return_type: rr, effects: re }) => {
             let mut i = 0
             for c in cp {
                 match rp.get(i) {
-                    some(r) => build_var_mapping(c, r, mapping),
+                    some(r) => build_var_mapping(c, r, mapping, conflicts),
                     none => {}
                 }
                 i = i + 1
             }
-            build_var_mapping(cr, rr, mapping)
-            build_effect_var_mapping(ce, re, mapping)
+            build_var_mapping(cr, rr, mapping, conflicts)
+            build_effect_var_mapping(ce, re, mapping, conflicts)
         },
-        (Type::StructType { type_params: ct, .. }, Type::StructType { type_params: rt, .. }) => {
-            let mut i = 0
-            for c in ct {
-                match rt.get(i) {
-                    some(r) => build_var_mapping(c, r, mapping),
-                    none => {}
+        (Type::StructType { name: cn, type_params: ct },
+         Type::StructType { name: rn, type_params: rt }) => {
+            if cn == rn && ct.len() == rt.len() {
+                let mut i = 0
+                for c in ct {
+                    match rt.get(i) {
+                        some(r) => build_var_mapping(c, r, mapping, conflicts),
+                        none => {}
+                    }
+                    i = i + 1
                 }
-                i = i + 1
             }
         },
-        (Type::EnumType { type_params: ct, .. }, Type::EnumType { type_params: rt, .. }) => {
-            let mut i = 0
-            for c in ct {
-                match rt.get(i) {
-                    some(r) => build_var_mapping(c, r, mapping),
-                    none => {}
+        (Type::EnumType { name: cn, type_params: ct },
+         Type::EnumType { name: rn, type_params: rt }) => {
+            if cn == rn && ct.len() == rt.len() {
+                let mut i = 0
+                for c in ct {
+                    match rt.get(i) {
+                        some(r) => build_var_mapping(c, r, mapping, conflicts),
+                        none => {}
+                    }
+                    i = i + 1
                 }
-                i = i + 1
             }
         },
         (Type::TupleType { elements: ce }, Type::TupleType { elements: re }) => {
-            let mut i = 0
-            for c in ce {
-                match re.get(i) {
-                    some(r) => build_var_mapping(c, r, mapping),
-                    none => {}
+            if ce.len() == re.len() {
+                let mut i = 0
+                for c in ce {
+                    match re.get(i) {
+                        some(r) => build_var_mapping(c, r, mapping, conflicts),
+                        none => {}
+                    }
+                    i = i + 1
                 }
-                i = i + 1
             }
         },
+        (Type::GenericType { base: cb, args: ca },
+         Type::GenericType { base: rb, args: ra }) => {
+            if ca.len() == ra.len() {
+                build_var_mapping(cb, rb, mapping, conflicts)
+                let mut i = 0
+                for c in ca {
+                    match ra.get(i) {
+                        some(r) => build_var_mapping(c, r, mapping, conflicts),
+                        none => {}
+                    }
+                    i = i + 1
+                }
+            }
+        },
+        (Type::RecordType { fields: cf, tail: ct, .. },
+         Type::RecordType { fields: rf, tail: rt, .. }) => {
+            // Common named fields remain reliable even when an open
+            // registration row has expanded with additional checked fields.
+            // Skipping them would hide owner conflicts nested in those fields.
+            for check_field in cf {
+                for reg_field in rf {
+                    if check_field.name == reg_field.name {
+                        build_var_mapping(
+                            check_field.ty, reg_field.ty, mapping, conflicts
+                        )
+                    }
+                }
+            }
+
+            // Tail identity is only reliable when both visible field sets are
+            // exactly the same. Extra/missing fields may have been absorbed by
+            // an open row and change what the tail denotes.
+            let mut same_fields = cf.len() == rf.len()
+            for reg_field in rf {
+                let mut found = false
+                for check_field in cf {
+                    if check_field.name == reg_field.name { found = true }
+                }
+                if !found { same_fields = false }
+            }
+            if same_fields {
+                match (ct, rt) {
+                    (some(check_tail), some(reg_tail)) => {
+                        record_var_mapping(
+                            check_tail,
+                            Type::TypeVar { id: reg_tail, name: none },
+                            mapping,
+                            conflicts
+                        )
+                    },
+                    _ => {}
+                }
+            }
+        },
+        (Type::PtrType { pointee: cp }, Type::PtrType { pointee: rp }) =>
+            build_var_mapping(cp, rp, mapping, conflicts),
         _ => {}
     }
 }
 
-fn build_effect_var_mapping(check_row: EffectRow, reg_row: EffectRow, mut mapping: Map<Int, Type>) {
+fn build_effect_var_mapping(
+    check_row: EffectRow,
+    reg_row: EffectRow,
+    mut mapping: Map<Int, Type>,
+    mut conflicts: Set<Int>
+) {
     match (check_row.tail, reg_row.tail) {
         (some(check_tail), some(reg_tail)) => {
-            if !mapping.contains_key(check_tail) {
-                mapping.insert(check_tail, Type::TypeVar { id: reg_tail, name: none })
-            }
+            record_var_mapping(
+                check_tail,
+                Type::TypeVar { id: reg_tail, name: none },
+                mapping,
+                conflicts
+            )
         },
         _ => {},
     }
@@ -2036,14 +3231,15 @@ fn build_effect_var_mapping(check_row: EffectRow, reg_row: EffectRow, mut mappin
             if effects_match_kind(check_eff, reg_eff) {
                 match (check_eff, reg_eff) {
                     (Effect::FailEffect { error_type: ct }, Effect::FailEffect { error_type: rt }) =>
-                        build_var_mapping(ct, rt, mapping),
+                        build_var_mapping(ct, rt, mapping, conflicts),
                     (Effect::MutEffect { state_type: ct }, Effect::MutEffect { state_type: rt }) =>
-                        build_var_mapping(ct, rt, mapping),
+                        build_var_mapping(ct, rt, mapping, conflicts),
                     (Effect::CustomEffect { type_args: ca, .. }, Effect::CustomEffect { type_args: ra, .. }) => {
                         let mut i = 0
                         while i < ca.len() && i < ra.len() {
                             match (ca.get(i), ra.get(i)) {
-                                (some(ct), some(rt)) => build_var_mapping(ct, rt, mapping),
+                                (some(ct), some(rt)) =>
+                                    build_var_mapping(ct, rt, mapping, conflicts),
                                 _ => {},
                             }
                             i = i + 1

@@ -2320,17 +2320,33 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     let body_r = infer_expr(ctx, body, subst)
     let mut s = body_r.subst
     let mut effects = body_r.effects
+    // #251: an abort arm is an alternate exit from the handled body, so its
+    // value participates in the handle result. Keep the concrete body type as
+    // the initial join candidate so a Never abort arm cannot bind an otherwise
+    // unconstrained body TypeVar to Never (the #180 bottom-poisoning class).
+    let mut result_type = hexpr_type(body_r.hexpr)
+
+    // #251: populated lazily only for an abort handler so ordinary
+    // tail-resumptive handles retain their existing (#258) checker behavior.
+    let mut body_fail_error_type: Type? = none
+    let mut body_fail_types_extracted = false
 
     let mut hhandlers: List<HEffectHandler> = []
     let mut handled_effects: Set<Str> = set_new()
+    // Abort arms run after the current handler has been deactivated. Their
+    // effects therefore escape unchanged and must be merged only AFTER the
+    // handled body row has had this handle's effects removed. Tail-resumptive
+    // arm effects intentionally remain out of scope here (audit #258).
+    let mut abort_arm_effect_rows: List<EffectRow> = []
 
     for handler in handlers {
         ctx.env.push_scope()
-        // Handler arms are lowered to closures by both backends. Infer the
-        // entire arm at one deeper lambda depth so mutable outer captures use
-        // the same shared cell as ordinary closures. Save/restore the exact
-        // enclosing depth, and keep all fallible arm setup inside the bracket,
-        // so nested handlers and failed inference cannot leak scope state.
+        // Tail-resumptive arms are lowered to closures; #251 abort arms execute
+        // inline after the current handler is inactive. Infer both at one deeper
+        // lambda depth so mutable outer captures use the same shared cell in
+        // either lowering. Save/restore the exact enclosing depth, and keep all
+        // fallible arm setup inside the bracket, so nested handlers and failed
+        // inference cannot leak scope state.
         let enclosing_lambda_depth = ctx.lambda_depth
         ctx.lambda_depth = enclosing_lambda_depth + 1
         let handler_result = some({
@@ -2338,6 +2354,31 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             let canonical_effect_name = match effect_def {
                 some(ed) => ed.name,
                 none => handler.effect_name
+            }
+            let is_abort_handler = canonical_effect_name == "fail" && handler.op_name == "raise"
+
+            // fail.raise receives the error payload raised by the handled body.
+            // Extract concrete fail label(s) exactly as infer_catch does and
+            // unify duplicates. Apply the current substitution first because
+            // an earlier HOF call may already have expanded the body's row tail.
+            if is_abort_handler && !body_fail_types_extracted {
+                let resolved_body_effects = apply_subst_row(s, effects)
+                for eff in resolved_body_effects.effects {
+                    match eff {
+                        Effect::FailEffect { error_type: et } => {
+                            match body_fail_error_type {
+                                some(existing) => {
+                                    s = unify_at(ctx.sink, ctx.env, existing, et, s, span)
+                                },
+                                none => {
+                                    body_fail_error_type = some(et)
+                                }
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+                body_fail_types_extracted = true
             }
 
             // Instantiate effect type params with fresh variables for handler
@@ -2358,10 +2399,63 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                 none => {}
             }
 
+            // The instantiated fail.raise parameter is the single payload
+            // contract shared by the handled body's concrete fail<E> row, the
+            // source annotation (if any), and the arm-local binding.
+            let mut abort_payload_type: Type? = none
+            if is_abort_handler {
+                match op_def {
+                    some(od) => {
+                        match od.params.first() {
+                            some(odt) => {
+                                let payload_type = apply_subst_map(handler_inst_map, odt)
+                                match body_fail_error_type {
+                                    some(body_error_type) => {
+                                        s = unify_at(ctx.sink, ctx.env, payload_type, body_error_type, s, handler.span)
+                                    },
+                                    none => {}
+                                }
+                                abort_payload_type = some(payload_type)
+                            },
+                            none => {}
+                        }
+                    },
+                    none => {}
+                }
+
+                // An abort handler proves that every open contribution to the
+                // body row contains the same fail<payload> contract. Split any
+                // open tail into that handled fail label plus a fresh residual,
+                // even when the body also has an explicit fail label: otherwise
+                // a callback tail could later instantiate to fail<Other>.
+                //
+                // Effect rows currently have no lacks/optional-label constraint,
+                // so this is intentionally an exact (and conservative) callback
+                // effect requirement. The residual remains polymorphic and is
+                // propagated after fail is filtered from this handle.
+                let resolved_body_effects = apply_subst_row(s, effects)
+                match (abort_payload_type, resolved_body_effects.tail) {
+                    (some(payload_type), some(body_tail)) => {
+                        let residual_tail = ctx.env.fresh_var_id()
+                        let required_tail = Type::EffectRowType {
+                            effects: [Effect::FailEffect { error_type: payload_type }],
+                            tail: some(residual_tail)
+                        }
+                        s = unify_at(
+                            ctx.sink, ctx.env,
+                            Type::TypeVar { id: body_tail, name: none },
+                            required_tail, s, handler.span
+                        )
+                        body_fail_error_type = some(payload_type)
+                    },
+                    _ => {}
+                }
+            }
+
             let mut hparams: List<HParam> = []
             let mut hi = 0
             for p in handler.params {
-                let pt = match p.type_annotation {
+                let mut pt = match p.type_annotation {
                     some(ta) => resolve_type_expr(ctx, ta),
                     none => match op_def {
                         some(od) => match od.params.get(hi) {
@@ -2369,6 +2463,34 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                             none => ctx.env.fresh_var()
                         },
                         none => ctx.env.fresh_var()
+                    }
+                }
+                if is_abort_handler && hi == 0 {
+                    match abort_payload_type {
+                        some(payload_type) => {
+                            let mut payload_notes: List<DiagnosticNote> = [
+                                DiagnosticNote {
+                                    message: "abort handler payload type must match handled fail error type",
+                                    span: some(handler.span)
+                                },
+                                DiagnosticNote {
+                                    message: "handler payload parameter has type '${type_to_string(apply_subst(s, pt))}'",
+                                    span: some(p.span)
+                                }
+                            ]
+                            match body_fail_error_type {
+                                some(body_error_type) => {
+                                    payload_notes.push(DiagnosticNote {
+                                        message: "handled body raises '${type_to_string(apply_subst(s, body_error_type))}'",
+                                        span: some(hexpr_span(body_r.hexpr))
+                                    })
+                                },
+                                none => {}
+                            }
+                            s = unify_at_noted(ctx.sink, ctx.env, pt, payload_type, s, p.span, payload_notes)
+                            pt = apply_subst(s, payload_type)
+                        },
+                        none => {}
                     }
                 }
                 ctx.env.bind_mono(p.name, pt)
@@ -2390,6 +2512,30 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
             let hbr = infer_expr(ctx, handler.body, s)
             s = hbr.subst
+            if is_abort_handler {
+                abort_arm_effect_rows.push(hbr.effects)
+
+                // #251/#180: Never is bottom, but unify binds TypeVars before
+                // applying the Never shortcut. Join explicitly so an abort arm
+                // that re-raises does not poison a polymorphic normal result,
+                // while a Never body can still recover to the arm's value type.
+                let resolved_result = apply_subst(s, result_type)
+                let resolved_arm = apply_subst(s, hexpr_type(hbr.hexpr))
+                let result_is_never = match resolved_result { Type::NeverType => true, _ => false }
+                let arm_is_never = match resolved_arm { Type::NeverType => true, _ => false }
+                if result_is_never && !arm_is_never {
+                    result_type = hexpr_type(hbr.hexpr)
+                } else {
+                    if !result_is_never && !arm_is_never {
+                        let handle_notes: List<DiagnosticNote> = [
+                            DiagnosticNote { message: "abort handler arm and handled body must produce the same type", span: some(handler.span) },
+                            DiagnosticNote { message: "handled body has type '${type_to_string(resolved_result)}'", span: some(hexpr_span(body_r.hexpr)) },
+                            DiagnosticNote { message: "abort arm has type '${type_to_string(resolved_arm)}'", span: some(hexpr_span(hbr.hexpr)) }
+                        ]
+                        s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(hbr.hexpr), result_type, s, handler.span, handle_notes)
+                    }
+                }
+            }
             hhandlers.push(HEffectHandler {
                 effect_name: canonical_effect_name, op_name: handler.op_name,
                 params: hparams, resume_name: handler.resume_name, body: hbr.hexpr
@@ -2421,10 +2567,20 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     }
     effects = EffectRow { effects: filtered_effects, tail: resolved_effects.tail }
 
+    // #251: the abort arm executes outside the current handler. Merge its row
+    // verbatim after filtering the body row so io/custom effects and a re-raised
+    // fail escape to the enclosing signature/handler instead of being swallowed.
+    for arm_effects in abort_arm_effect_rows {
+        let me = merge_effects(ctx.env, effects, arm_effects, s)
+        effects = me.0
+        s = me.1
+    }
+    effects = apply_subst_row(s, effects)
+
     InferResult {
         hexpr: HExpr::HandleExpr {
             body: body_r.hexpr, handlers: hhandlers,
-            ty: hexpr_type(body_r.hexpr), effects: effects, span: span
+            ty: apply_subst(s, result_type), effects: effects, span: span
         },
         subst: s, effects: effects
     }
