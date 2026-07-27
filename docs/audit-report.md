@@ -234,7 +234,7 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 发现者：B-151 CI
 
-### #222 ring.exe check 对 tuple 越界 panic 而非报 E0304 [low] [judgment] [open]
+### #222 ring.exe check 对 tuple 越界 panic 而非报 E0304 [low] [judgment] [doing: B-163p2]
 
 `error_tuple_oob.ring`：`ring.exe check` panic（"unreachable: tuple index bounds already checked"）而非报 E0304。
 
