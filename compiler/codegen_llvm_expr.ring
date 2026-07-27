@@ -3476,6 +3476,8 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
 }
 
 fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef, enum_name: Str, enum_info: EnumTypeInfo, switch_val: LLVMValueRef, merge_bb: LLVMBasicBlockRef, default_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
+    let saved_named = ctx.named_values
+    ctx.named_values = map_clone(saved_named)
     match arm.pattern {
         Pattern::Constructor { name, qualifier, fields, .. } => {
             match enum_info.variants.get(name) {
@@ -3506,7 +3508,7 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
 
                     LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                     // Phase 1: check nested constructor tags before binding
-                    check_named_fields_nested_tags(ctx, scrut_val, enum_info, vi.field_names, named_fields, default_bb, current_fn)
+                    check_named_fields_nested_tags(ctx, scrut_val, enum_info.llvm_type, vi.field_names, named_fields, 1, default_bb, current_fn)
                     // Phase 2: bind pattern variables (reuse if-else path helper)
                     bind_named_constructor_fields(ctx, scrut_val, name, qualifier, named_fields)
 
@@ -3558,10 +3560,13 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
             // since wildcards/bindings are handled by gen_match_arm_wildcard
         },
     }
+    ctx.named_values = saved_named
 }
 
 // Handle wildcard/binding arm in enum match — emits body into default_bb
 fn gen_match_arm_wildcard(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef, default_bb: LLVMBasicBlockRef, merge_bb: LLVMBasicBlockRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
+    let saved_named = ctx.named_values
+    ctx.named_values = map_clone(saved_named)
     LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
 
     // If it's a binding pattern, bind the scrutinee value
@@ -3579,6 +3584,7 @@ fn gen_match_arm_wildcard(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValue
     discard(LLVMBuildBr(ctx.builder, merge_bb))
     phi_vals.push(body_val)
     phi_bbs.push(arm_end_bb)
+    ctx.named_values = saved_named
 }
 
 // Helper to bind nested patterns recursively
@@ -3755,7 +3761,12 @@ fn check_nested_ctor_tags(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern, fai
                     },
                     none => {},
                 },
-                none => {},
+                none => match resolve_struct_type(ctx, cname) {
+                    some(struct_info) => {
+                        check_named_fields_nested_tags(ctx, val, struct_info.llvm_type, struct_info.field_names, nfields, 0, fail_bb, current_fn)
+                    },
+                    none => {},
+                },
             }
         },
         Pattern::Literal { value, .. } => {
@@ -3859,6 +3870,11 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
     for i in 0..total {
         match arms.get(i) {
             some(arm) => {
+                // infer_match gives each arm its own scope.  Keep pattern
+                // bindings, guard locals, and body locals out of sibling arms
+                // and out of the merge continuation.
+                let saved_named = ctx.named_values
+                ctx.named_values = map_clone(saved_named)
                 let is_last = i == total - 1
                 // A guarded arm is never an unconditional match even when its
                 // pattern is irrefutable (wildcard/binding): a false guard must
@@ -3956,11 +3972,16 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         match ei_check {
                             some(enum_info_c) => match enum_info_c.variants.get(cname) {
                                 some(vi_c) => {
-                                    check_named_fields_nested_tags(ctx, scrut_val, enum_info_c, vi_c.field_names, nfields, next_bb, current_fn)
+                                    check_named_fields_nested_tags(ctx, scrut_val, enum_info_c.llvm_type, vi_c.field_names, nfields, 1, next_bb, current_fn)
                                 },
                                 none => {},
                             },
-                            none => {},
+                            none => match resolve_struct_type(ctx, cname) {
+                                some(struct_info_c) => {
+                                    check_named_fields_nested_tags(ctx, scrut_val, struct_info_c.llvm_type, struct_info_c.field_names, nfields, 0, next_bb, current_fn)
+                                },
+                                none => {},
+                            },
                         }
                         // Phase 2: all nested tags verified — bind fields
                         bind_named_constructor_fields(ctx, scrut_val, cname, qualifier, nfields)
@@ -4094,6 +4115,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         panic("LLVM codegen: unsupported pattern type in match if-else chain")
                     },
                 }
+                ctx.named_values = saved_named
             },
             none => {},
         }
@@ -4174,10 +4196,10 @@ fn check_positional_fields_nested_tags(mut ctx: LlvmCtx, scrut_val: LLVMValueRef
     }
 }
 
-// Helper: Phase-1 nested-tag checking for named constructor fields.
-// Like check_positional_fields_nested_tags but resolves each named field's
-// position in the variant's declared field list before GEP.
-fn check_named_fields_nested_tags(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, enum_info: EnumTypeInfo, field_names: List<Str>, named_fields: List<NamedPatternField>, fail_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) {
+// Helper: Phase-1 recursive checking for named constructor fields. Resolves
+// each named field's declared slot before GEP. field_offset is 1 for enum
+// payloads (slot 0 is the tag) and 0 for structs.
+pub fn check_named_fields_nested_tags(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, aggregate_type: LLVMTypeRef, field_names: List<Str>, named_fields: List<NamedPatternField>, field_offset: Int, fail_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) {
     for j in 0..named_fields.len() {
         match named_fields.get(j) {
             some(nf) => {
@@ -4191,7 +4213,7 @@ fn check_named_fields_nested_tags(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, enu
                                 fidx = fi
                             }
                         }
-                        let fptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, fidx + 1, fresh_name(ctx, "ncf"))
+                        let fptr = LLVMBuildStructGEP2(ctx.builder, aggregate_type, scrut_val, fidx + field_offset, fresh_name(ctx, "ncf"))
                         let fval = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fptr, fresh_name(ctx, "ncv"))
                         check_nested_ctor_tags(ctx, fval, nf.pattern, fail_bb, current_fn)
                     },
@@ -4271,7 +4293,7 @@ fn bind_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str
 // tag was verified). Mirrors gen_match_arm_enum's named-constructor path.
 // Also handles struct patterns (not just enum variants): when
 // find_enum_by_variant returns none, we fall back to ctx.struct_types.
-fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qualifier: Str?, named_fields: List<NamedPatternField>) {
+pub fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qualifier: Str?, named_fields: List<NamedPatternField>) {
     let ei = find_enum_by_variant(ctx, cname, qualifier)
     match ei {
         some(enum_info) => match enum_info.variants.get(cname) {
@@ -5413,29 +5435,27 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
     // Simple path: single arm or no constructors, no guards, no refutable
     // sub-tests — bind and execute directly
     if (!has_constructor || (arms.len() == 1)) && !has_guard && !has_refutable_extra {
+        let saved_named = ctx.named_values
+        ctx.named_values = map_clone(saved_named)
         let arm = arms[0]
         match arm.pattern {
             Pattern::Binding { name, .. } => {
                 let alloca = build_entry_alloca(ctx, ctx.ptr_type, name)
                 discard(LLVMBuildStore(ctx.builder, error_val, alloca))
                 ctx.named_values.insert(name, alloca)
-                return gen_llvm_expr(ctx, arm.body)
             },
-            Pattern::Wildcard { .. } => {
-                return gen_llvm_expr(ctx, arm.body)
-            },
-            Pattern::Constructor { name, fields, .. } => {
+            Pattern::Wildcard { .. } => {},
+            Pattern::Constructor { .. } => {
                 bind_nested_pattern(ctx, error_val, arm.pattern)
-                return gen_llvm_expr(ctx, arm.body)
             },
-            Pattern::NamedConstructor { name, fields, .. } => {
+            Pattern::NamedConstructor { .. } => {
                 bind_nested_pattern(ctx, error_val, arm.pattern)
-                return gen_llvm_expr(ctx, arm.body)
             },
-            _ => {
-                return gen_llvm_expr(ctx, arm.body)
-            },
+            _ => {},
         }
+        let body_val = gen_llvm_expr(ctx, arm.body)
+        ctx.named_values = saved_named
+        return body_val
     }
 
     // Guarded catch arms: if-else chain (#206).  A switch gives each tag exactly
@@ -5459,6 +5479,8 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
         for i in 0..total {
             match arms.get(i) {
                 some(arm) => {
+                    let saved_named = ctx.named_values
+                    ctx.named_values = map_clone(saved_named)
                     let is_last = i == total - 1
                     let has_arm_guard = match arm.guard { some(_) => true, none => false }
                     match arm.pattern {
@@ -5524,11 +5546,16 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
                             match ei_check_n {
                                 some(enum_info_c) => match enum_info_c.variants.get(cname) {
                                     some(vi_c) => {
-                                        check_named_fields_nested_tags(ctx, error_val, enum_info_c, vi_c.field_names, nfields, next_bb, current_fn)
+                                        check_named_fields_nested_tags(ctx, error_val, enum_info_c.llvm_type, vi_c.field_names, nfields, 1, next_bb, current_fn)
                                     },
                                     none => {},
                                 },
-                                none => {},
+                                none => match resolve_struct_type(ctx, cname) {
+                                    some(struct_info_c) => {
+                                        check_named_fields_nested_tags(ctx, error_val, struct_info_c.llvm_type, struct_info_c.field_names, nfields, 0, next_bb, current_fn)
+                                    },
+                                    none => {},
+                                },
                             }
                             // Phase 2: all nested tags verified — bind fields
                             bind_named_constructor_fields(ctx, error_val, cname, qualifier, nfields)
@@ -5560,6 +5587,7 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
                         },
                         _ => {},
                     }
+                    ctx.named_values = saved_named
                 },
                 none => {},
             }
@@ -5605,8 +5633,12 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
     match enum_info_opt {
         none => {
             // Fallback: if we can't find enum info, execute the first arm
+            let saved_named = ctx.named_values
+            ctx.named_values = map_clone(saved_named)
             bind_nested_pattern(ctx, error_val, arms[0].pattern)
-            return gen_llvm_expr(ctx, arms[0].body)
+            let body_val = gen_llvm_expr(ctx, arms[0].body)
+            ctx.named_values = saved_named
+            return body_val
         },
         _ => {},
     }
@@ -5634,6 +5666,8 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
     let mut has_wildcard = false
 
     for arm in arms {
+        let saved_named = ctx.named_values
+        ctx.named_values = map_clone(saved_named)
         match arm.pattern {
             Pattern::Wildcard { .. } => {
                 has_wildcard = true
@@ -5696,6 +5730,7 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
             },
             _ => {},
         }
+        ctx.named_values = saved_named
     }
 
     // If no wildcard arm, default block is unreachable (exhaustive catch)
