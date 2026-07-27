@@ -12,4 +12,14 @@
 
 ---
 
-目前没有待处理的 durable feedback。
+## B-163 Phase 2 P2.1 parity 基线（2026-07-27）[通知]
+
+merge `156b005` 已把 Phase 2 的证据层落成机器门：81 行 matrix（65 covered / 13 known-gap / 3 manual），enum variant closure、完整双后端 lane bundle、repo-relative gap identity、orphan companion 与 `EXPECT_PANIC` 作用域都由 runner 反向校验。完整结果与五个 LLVM 间歇 `0xC0000005` 样本已回填 backlog B-163。
+
+后续恢复顺序固定为：
+
+1. P2.2 对 11 个 shared-positive + 1 个 check-only gap 做根因聚类并修复；LLVM-only `default_effect_topo` 保留为退役证据，不为即将删除的后端扩修。
+2. 把三个 manual 项变成自动门或删除死面：`HStmt::Dup` 无生产者、C `#line`、extern-handle RC 结构断言。
+3. 对抗 review + 全量 C/LLVM/diff/RC/self-compile 固定点；只有认证门闭合后才创建 `llvm-c-backend-final` tag 并进入删除清单。
+
+当前禁止把 matrix 的 wiring PASS 当语义执行 PASS；`--suite parity` 输出已明确标注这一点。LLVM tag/删除、dist-c anchor 与 CI bootstrap 尚未开始。

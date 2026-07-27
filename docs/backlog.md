@@ -1129,7 +1129,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [doing: phase2-parity]
+### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [doing: phase2-gap-fix]
 
 > 2026-07-10 立项（Discussion，B-155 泥潭止损 + 后端信道结构性分析）。**完整执行计划见 `docs/plan-c-backend.md`**，执行前必读。
 
@@ -1151,7 +1151,11 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 >
 > 固定点：C self-host 三代 `main.c` 均为 17,837,093 bytes、SHA256 `7F65EB315DE702FB2C1B75EC5542DA30471ECE8495FE3DFA95801025027983C3`；9741 个 `ring_cstr` 的 raw-byte/escape hard scan 无 NUL/control、长度错配、坏 escape、异常 padding、`[109]`/`[1410]` 或 ≥1000-byte 膨胀。LLVM anchor 三代 `main.o` 均为 4,744,208 bytes、SHA256 `F481CC52F6CDF89CDC42B36C3365231A71A5247567811677D6DC51828FFB6DA3`，已写回 `dist-llvm/main.o`。最终门：C e2e `449/0/17`、C golden `220/0/1`、diff `552/0/20`、RC 三轮各 `542/0/2`；最终聚合 runner `1211/0`（LLVM e2e `445/0/21`、golden `220/0/1`、RC `542/0/2`、self-compile `4/0`）。ASan gating 15/15，full-strength capstone（`quarantine_size_mb=256:malloc_context_size=12`）4:07:21 完成、零 sanitizer error，产出的 `main.c` 与三代 C 固定点同哈希。聚合绿轮前两次独立 LLVM e2e 曾分别出现 3 个和 1 个无诊断 `0xC0000005`（`442/3/21`、`444/1/21`），四个信号均独立 ×3 全绿且未跨轮重复，按 B-155 既有 LLVM 信道残留如实保留；最终完整绿轮不抹除间歇证据，也不阻塞已由 C/diff/固定点/ASan 闭合的 Phase 1。**停止于 Phase 1；Phase 2 尚未开始。**
 
-**Phase 2（已排队，尚未开始）**：B-100 (Z) 策略 parity 认证 → LLVM-C 后端 tag `llvm-c-backend-final` 归档删除 → dist-c/（.c 文本）成为 stage 0 信任锚 → CI bootstrap 重启（文本 diff）→ 文档 bookkeeping（清单见 plan §3）。
+**Phase 2（进行中）**：B-100 (Z) 策略 parity 认证 → LLVM-C 后端 tag `llvm-c-backend-final` 归档删除 → dist-c/（.c 文本）成为 stage 0 信任锚 → CI bootstrap 重启（文本 diff）→ 文档 bookkeeping（清单见 plan §3）。
+
+> **Phase 2 P2.1 parity 证据基线 ✅（2026-07-27，merge `156b005`）**：新增 machine-readable `tests/parity_matrix.json` 与 `--suite parity`，由 `hir.ring` / `ast.ring` 反向校验 HExpr 27 + HStmt 13 + HDecl 13 + Pattern 7 全变体，并覆盖 8 个后端结构面；runner 的旧 `LLVM_SKIP` 已拆成 repo-relative 的 LLVM-only / shared-positive / check-only 三类真实 gap，`native_only` 四个手写 oracle（含 `EXPECT_PANIC`）恢复进 Python runner，C self-compile 现真正比较 `main.c`，新增 `HDecl::Test` 双后端独立用例。对抗 review 修复了 marker 越界假绿、单 lane 自证、basename 串线、错误 HIR evidence、orphan golden 和字符串伪 enum 六类证据门漏洞；当前矩阵 **65 covered / 13 known-gap / 3 manual-evidence / 0 fail**。
+>
+> 合并前真实全集：C e2e `458/0/12` + golden `222/0`；LLVM e2e `457/0/13` + golden `222/0`。全量 diff 两轮分别 `563/2/12`、`562/3/12`，5 个失败全为 LLVM 编译进程无诊断 `0xC0000005`，且五个用例互不重复、各自独立 ×3 全绿；原始整轮失败如实保留，未伪造全绿。audit #220 的 `exhaustive_generic_payload` 已在 C/LLVM/diff 恢复并删单。当前硬门仍有 **1 LLVM-only + 11 shared-positive + 1 check-only** gap，以及 **3 个 manual-evidence**（死的 `HStmt::Dup`、C `#line`、extern-handle RC 结构断言）。**下一步 = P2.2 gap 修复与 manual gate 自动化；LLVM tag/删除、dist-c 切换均未开始。**
 
 **验收标准**：
 - Phase 1：全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）

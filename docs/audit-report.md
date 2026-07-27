@@ -220,38 +220,25 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 > **2026-07-12 差分证据（B-163 step 6 重评估）**：两用例在 C 后端**同构失败**（同 assertion）——缺陷定位收窄至 HIR/checker/perceus **共享层**，codegen 单侧嫌疑排除。原「pre-existing LLVM backend bugs」归类作废。
 
-**LLVM_SKIP**：`effect_custom_and_fail.ring`、`effect_custom_multi_effect.ring`。修好后移除。
-
-发现者：B-151 CI
-
-### #220 exhaustive match + generic payload runtime crash [medium] [judgment] [open]
-
-`exhaustive_generic_payload.ring` runtime assertion "some-false" 失败。泛型 enum payload 在穷尽 match 的某个分支 codegen 有误（可能是 tag 比较或 payload 提取问题）。
-
-> **2026-07-12 差分证据（B-163 step 6 重评估）**：该用例在 C 后端 **PASS**（all tests passed）——与 #219/#221 的同构失败相反，此缺陷是 **LLVM codegen 单侧**（大概率已被 #245 嵌套模式修复顺带修好或与之同族）。后续波把它从 LLVM_SKIP 挪出实测 LLVM 现状；仍挂则维持单侧归因。
-
-**LLVM_SKIP**：`exhaustive_generic_payload.ring`。修好后移除。
+**SHARED_POSITIVE_GAPS**：`tests/cases/effects/effect_custom_and_fail.ring`、`tests/cases/effects/effect_custom_multi_effect.ring`。修好后移除。
 
 发现者：B-151 CI
 
 ### #221 struct match pattern + tuple eq dispatch runtime crash [medium] [judgment] [open]
 
-三个用例 runtime assertion 失败：`struct_match_pattern.ring`（"y-axis"）、`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。struct 的 match pattern 和 tuple 的 eq 比较在 LLVM 后端有 codegen 问题。
+三个用例 runtime assertion 失败：`struct_match_pattern.ring`（"y-axis"）、`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。struct 的 match pattern 和 tuple 的 eq 比较在共享层有误。
 
 > **2026-07-12 差分证据（B-163 step 6 重评估）**：三用例在 C 后端**同构失败**（同 assertion）——缺陷在**共享层**（tuple `==` 派发 / struct pattern 的 HIR 下沉），非 LLVM codegen。「LLVM 后端 codegen 问题」表述作废。
 
-**LLVM_SKIP**：`struct_match_pattern.ring`、`tuple_eq.ring`、`tuple_eq_struct.ring`。修好后移除。
+**SHARED_POSITIVE_GAPS**：`tests/cases/struct_match_pattern.ring`、`tests/cases/tuple_eq.ring`、`tests/cases/tuple_eq_struct.ring`。修好后移除。
 
 发现者：B-151 CI
 
-### #222 ring.exe check 行为与 in-process checker 不一致（2 个负向用例）[low] [judgment] [open]
+### #222 ring.exe check 对 tuple 越界 panic 而非报 E0304 [low] [judgment] [open]
 
-- `error_occurs_check.ring`：ring.exe check 无输出（预期 E0302），in-process checker 正确报错
-- `error_tuple_oob.ring`：ring.exe check panic（"unreachable: tuple index bounds already checked"）而非报 E0304
+`error_tuple_oob.ring`：`ring.exe check` panic（"unreachable: tuple index bounds already checked"）而非报 E0304。
 
-两者均为 frozen dist-llvm 编译的 ring.exe 与最新 checker 源码的行为差异。可能在下次 dist-llvm rebuild 后自然修复。
-
-**LLVM_SKIP**：`error_occurs_check.ring`、`error_tuple_oob.ring`。修好后移除。
+> **2026-07-27 B-163 Phase 2 P2.1 重评估**：原同条的 `error_occurs_check.ring` 已由最终 anchor 正确报告 E0302，恢复进 runner 并通过；仅 tuple-oob 仍失败。该 gap 属 backend-independent checker 路径，已从旧 LLVM_SKIP 拆入 `CHECK_ONLY_GAPS`，Phase 2 parity matrix 会持续显式报告。
 
 发现者：B-151 CI
 

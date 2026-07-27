@@ -165,7 +165,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 ### 基础设施
 
-- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows（check + test 两阶段）。C self-host 文本固定点已干净且确定，但 Phase 2 前 LLVM 仍是主 anchor，并残留间歇执行信号，因此 bootstrap 保持禁用；Phase 2 切换 dist-c 后再恢复。Linux CI 待后续
+- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows（check + test 两阶段）。C self-host 文本固定点已干净且确定；B-163 Phase 2 已启动 parity 认证，但 LLVM 仍是当前 anchor 且残留间歇执行信号，因此 bootstrap 保持禁用，待 gap 门闭合并切换 dist-c 后再恢复。Linux CI 待后续
 - 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
 - Checker 多错误恢复是 declaration 级（同一函数内停于首错）
 - LSP 暂不可用（TS 实现未移植）
@@ -173,7 +173,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 ## 路线图
 
-**当前**：**B-163 C 后端迁移 Phase 1 ✅**——steps 1–9 完成，C 单文件/project/self-host、C 文本固定点与 LLVM anchor 固定点均已闭合；**Phase 2 已排队但尚未开始**，在 parity 认证后才退役 LLVM、切换 dist-c 并恢复 CI bootstrap。测试状态以 Python runner 实跑为准，不在此记录具体计数。
+**当前**：**B-163 C 后端迁移 Phase 1 ✅ / Phase 2 进行中**——steps 1–9 完成，C 单文件/project/self-host、C 文本固定点与 LLVM anchor 固定点均已闭合；Phase 2 P2.1 machine-readable parity matrix 与诚实 skip/gap 分流已落地，当前进入 P2.2 shared/check gap 修复与 manual gate 自动化。认证完成前不退役 LLVM、不切换 dist-c、不恢复 CI bootstrap。测试状态以 Python runner 实跑为准，不在此记录具体计数。
 
 **后续**：先完成 B-163 Phase 2；B-152 RIIR std 的剩余 P4 Set / P1 Step 2 Str / P5 在整个 B-163 完成前保持暂停，之后恢复 → B-002p2 unwind 补全；再后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
 
