@@ -1,0 +1,676 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "feature_id": "HExpr.IntLit",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Integer literals execute under both golden lanes and the differential lane."
+    },
+    {
+      "feature_id": "HExpr.FloatLit",
+      "evidence": ["tests/cases/llvm/str_lte_gte_float_mod.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Float literals and arithmetic execute under both backends."
+    },
+    {
+      "feature_id": "HExpr.StrLit",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "String literals execute under both golden lanes and diff."
+    },
+    {
+      "feature_id": "HExpr.BoolLit",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Boolean literals execute under both golden lanes and diff."
+    },
+    {
+      "feature_id": "HExpr.Ident",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Local and const identifier reads are observed in executable output."
+    },
+    {
+      "feature_id": "HExpr.BinOp",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Arithmetic, comparison, and modulo binary operations are executable."
+    },
+    {
+      "feature_id": "HExpr.UnaryOp",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Numeric negation and boolean not execute under both backends."
+    },
+    {
+      "feature_id": "HExpr.Call",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Function calls produce observable output in all listed lanes."
+    },
+    {
+      "feature_id": "HExpr.FieldAccess",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Nested struct field reads and assignment targets execute."
+    },
+    {
+      "feature_id": "HExpr.StructLit",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Plain, nested, and spread struct literals execute."
+    },
+    {
+      "feature_id": "HExpr.NamedVariantConstruct",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Named enum variant construction executes under both backends."
+    },
+    {
+      "feature_id": "HExpr.MatchExpr",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Match expressions cover tags, literals, guards, and nested patterns."
+    },
+    {
+      "feature_id": "HExpr.Block",
+      "evidence": ["tests/cases/llvm/block_expr.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Value-producing expression blocks execute in all listed lanes."
+    },
+    {
+      "feature_id": "HExpr.IfExpr",
+      "evidence": ["tests/cases/llvm/if_elseif_return.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "If/else expressions and nested branches produce golden output."
+    },
+    {
+      "feature_id": "HExpr.StringInterp",
+      "evidence": ["tests/cases/llvm/string_interp.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "String interpolation is compared against a golden and across backends."
+    },
+    {
+      "feature_id": "HExpr.TryCatch",
+      "evidence": ["tests/cases/llvm/c_backend_step6.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Successful, aborting, guarded, and nested catch paths execute."
+    },
+    {
+      "feature_id": "HExpr.HandleExpr",
+      "evidence": ["tests/cases/llvm/c_backend_step6.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Custom, nested, abort, and default effect handlers execute."
+    },
+    {
+      "feature_id": "HExpr.Lambda",
+      "evidence": ["tests/cases/llvm/closure_capture_nonloop.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "A capturing lambda is constructed, invoked, and observed."
+    },
+    {
+      "feature_id": "HExpr.EffectOp",
+      "evidence": ["tests/cases/llvm/c_backend_step6.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Multiple custom effect operations execute through evidence slots."
+    },
+    {
+      "feature_id": "HExpr.RangeExpr",
+      "evidence": ["tests/cases/llvm/for_range_variants.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Exclusive and inclusive range expressions execute."
+    },
+    {
+      "feature_id": "HExpr.ListLit",
+      "evidence": ["tests/cases/llvm/list_contains.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "List literals flow through collection operations and output."
+    },
+    {
+      "feature_id": "HExpr.TupleLit",
+      "evidence": ["tests/cases/llvm/tuple_literal_pattern.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Tuple construction and consumption execute under both backends."
+    },
+    {
+      "feature_id": "HExpr.IndexExpr",
+      "evidence": ["tests/cases/llvm/index_expr.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "List, map, and string index expressions are executable."
+    },
+    {
+      "feature_id": "HExpr.DictConstruct",
+      "evidence": ["tests/cases/llvm/dynamic_wrapped_dict.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "dict_lower creates a dynamic wrapped dictionary consumed at runtime."
+    },
+    {
+      "feature_id": "HExpr.Clone",
+      "evidence": ["tests/cases/llvm/rc_alias_read_projection.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Perceus inserts Clone for escaping index and field projections."
+    },
+    {
+      "feature_id": "HExpr.ReturnExpr",
+      "evidence": ["tests/cases/llvm/match_return_expr.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Return expressions embedded in match arms execute under both backends."
+    },
+    {
+      "feature_id": "HExpr.UnsafeBlock",
+      "evidence": ["tests/cases/unsafe_block.ring"],
+      "oracle": "handwritten-golden+dual-backend",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "covered",
+      "reason": "An unsafe discharge block executes through both codegen backends."
+    },
+
+    {
+      "feature_id": "HStmt.Let",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Immutable bindings feed observable computations."
+    },
+    {
+      "feature_id": "HStmt.Var",
+      "evidence": ["tests/cases/llvm/let_mut_reassign.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Mutable bindings execute with reassignment."
+    },
+    {
+      "feature_id": "HStmt.Assign",
+      "evidence": ["tests/cases/llvm/let_mut_reassign.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Local and compound assignments affect observable output."
+    },
+    {
+      "feature_id": "HStmt.ExprStmt",
+      "evidence": ["tests/cases/llvm/exprstmt_discard_drop.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Discarded call results and mutators execute in statement position."
+    },
+    {
+      "feature_id": "HStmt.Return",
+      "evidence": ["tests/cases/llvm/if_elseif_return.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Return statements execute across nested control flow."
+    },
+    {
+      "feature_id": "HStmt.While",
+      "evidence": ["tests/cases/llvm/while_break_continue.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "While loops execute with exit and continuation paths."
+    },
+    {
+      "feature_id": "HStmt.ForIn",
+      "evidence": ["tests/cases/llvm/for_range_variants.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "For-in over range iterators executes under both backends."
+    },
+    {
+      "feature_id": "HStmt.Break",
+      "evidence": ["tests/cases/llvm/while_break_continue.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Break exits an executable loop."
+    },
+    {
+      "feature_id": "HStmt.Continue",
+      "evidence": ["tests/cases/llvm/while_break_continue.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Continue takes executable loop increment paths."
+    },
+    {
+      "feature_id": "HStmt.LetDestructure",
+      "evidence": ["tests/cases/llvm/letdestructure_init_drop.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Tuple destructuring covers fresh and borrowed initializers."
+    },
+    {
+      "feature_id": "HStmt.IfLet",
+      "evidence": ["tests/cases/llvm/if_let_basic.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "If-let success and else paths execute for multiple patterns."
+    },
+    {
+      "feature_id": "HStmt.Drop",
+      "evidence": ["tests/cases/llvm/rc_alias_read_projection.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Perceus-inserted scope-end drops are exercised by owned projections."
+    },
+    {
+      "feature_id": "HStmt.Dup",
+      "evidence": ["compiler/hir.ring"],
+      "oracle": "manual-source-inspection",
+      "lane": ["manual-source"],
+      "status": "manual-evidence",
+      "reason": "HStmt.Dup has consumers and walker reconstruction but no producer; it is currently dead/unreachable and awaits cleanup."
+    },
+
+    {
+      "feature_id": "HDecl.Fn",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Function declaration, emission, and invocation are executable."
+    },
+    {
+      "feature_id": "HDecl.Struct",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Struct layout, constructors, fields, and mutation execute."
+    },
+    {
+      "feature_id": "HDecl.Enum",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Positional, named, recursive, and nullary enum declarations execute."
+    },
+    {
+      "feature_id": "HDecl.Impl",
+      "evidence": ["tests/cases/llvm/trait_default_method.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Trait implementation methods and dispatch execute."
+    },
+    {
+      "feature_id": "HDecl.Effect",
+      "evidence": ["tests/cases/llvm/c_backend_step6.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Effect declarations with multiple and default operations execute."
+    },
+    {
+      "feature_id": "HDecl.Test",
+      "evidence": ["tests/cases/llvm/test_decl.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Multiple test blocks without main assert and print in source order."
+    },
+    {
+      "feature_id": "HDecl.Trait",
+      "evidence": ["tests/cases/llvm/trait_default_method.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Trait declarations, defaults, and dispatch execute."
+    },
+    {
+      "feature_id": "HDecl.ExternFn",
+      "evidence": ["tests/cases/effect_annotation_extern.ring"],
+      "oracle": "handwritten-golden+dual-backend",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "covered",
+      "reason": "An extern function declaration with an effect contract compiles in both backends."
+    },
+    {
+      "feature_id": "HDecl.ExternType",
+      "evidence": ["tests/cases/llvm/extern_handle_rc_exclusion.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "An extern type declaration flows through both compilation pipelines."
+    },
+    {
+      "feature_id": "HDecl.TypeAlias",
+      "evidence": ["tests/cases/llvm/type_alias.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Multiple alias forms compile and execute under both backends."
+    },
+    {
+      "feature_id": "HDecl.Const",
+      "evidence": ["tests/cases/llvm/basic_ops.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Typed and inferred constants are read by executable code."
+    },
+    {
+      "feature_id": "HDecl.ModBlock",
+      "evidence": ["tests/cases/llvm/mod_inline.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Inline module declarations and qualified references execute."
+    },
+    {
+      "feature_id": "HDecl.Sig",
+      "evidence": ["tests/cases/sig_basic.ring"],
+      "oracle": "handwritten-golden+dual-backend",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "covered",
+      "reason": "Signature declarations compile in both pipelines alongside executable code."
+    },
+
+    {
+      "feature_id": "Pattern.Wildcard",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Wildcard fallback patterns execute in match and if-let paths."
+    },
+    {
+      "feature_id": "Pattern.Binding",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Binding patterns expose payload values used in output."
+    },
+    {
+      "feature_id": "Pattern.Constructor",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Positional constructor patterns execute across enum variants."
+    },
+    {
+      "feature_id": "Pattern.NamedConstructor",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Named, partial, and nested constructor patterns execute."
+    },
+    {
+      "feature_id": "Pattern.Literal",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Integer and string literal patterns select observable arms."
+    },
+    {
+      "feature_id": "Pattern.TuplePattern",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Tuple patterns combine constructor and literal subpatterns."
+    },
+    {
+      "feature_id": "Pattern.OrPattern",
+      "evidence": ["tests/cases/llvm/c_backend_step4.ring"],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Or-pattern alternatives execute and are compared across backends."
+    },
+
+    {
+      "feature_id": "backend.c_text_determinism",
+      "evidence": ["compiler/main.ring"],
+      "oracle": "byte-identical-generated-c",
+      "lane": ["self-compile-c"],
+      "status": "covered",
+      "reason": "The self-compile suite generates main.c three times and compares bytes; parity only validates this wiring."
+    },
+    {
+      "feature_id": "backend.c_line_directives",
+      "evidence": ["compiler/codegen_c_ctx.ring"],
+      "oracle": "manual-source-inspection",
+      "lane": ["manual-source"],
+      "status": "manual-evidence",
+      "reason": "#line emission and --no-c-lines remain source-inspection evidence, not semantic execution."
+    },
+    {
+      "feature_id": "backend.c_symbol_link_contract",
+      "evidence": ["tests/cases/modules/c_symbol_ring_prefix_collision/main.ring"],
+      "oracle": "module-golden+dual-backend",
+      "lane": ["module-llvm", "module-c", "module-diff"],
+      "status": "covered",
+      "reason": "Project linking exercises Ring/runtime symbol-prefix collision handling."
+    },
+    {
+      "feature_id": "backend.extern_handle_rc_structural",
+      "evidence": ["tests/cases/llvm/extern_handle_rc_exclusion.ring"],
+      "oracle": "manual-generated-code-inspection",
+      "lane": ["manual-source"],
+      "status": "manual-evidence",
+      "reason": "The executable does not call foreign-handle paths; no dup/drop is established by structural inspection only."
+    },
+    {
+      "feature_id": "backend.frontend_check_only",
+      "evidence": ["tests/cases/error_occurs_check.ring"],
+      "oracle": "diagnostic-substring",
+      "lane": ["check"],
+      "status": "covered",
+      "reason": "The backend-independent check lane now reports the expected occurs-check diagnostic."
+    },
+    {
+      "feature_id": "backend.module_project",
+      "evidence": ["tests/cases/modules/basic_import/main.ring"],
+      "oracle": "module-golden+dual-backend",
+      "lane": ["module-llvm", "module-c", "module-diff"],
+      "status": "covered",
+      "reason": "A multi-file project is collected, built, linked, and run in both backends."
+    },
+    {
+      "feature_id": "backend.ffi",
+      "evidence": ["tests/cases/modules/extern_fn/main.ring"],
+      "oracle": "module-golden+dual-backend",
+      "lane": ["module-llvm", "module-c", "module-diff"],
+      "status": "covered",
+      "reason": "Cross-module extern function declarations resolve to runtime ABI calls."
+    },
+    {
+      "feature_id": "backend.native_handwritten_semantics",
+      "evidence": [
+        "tests/cases/native_only/i64_boundary.ring",
+        "tests/cases/native_only/i64_overflow.ring",
+        "tests/cases/native_only/int_divzero.ring",
+        "tests/cases/native_only/int_modzero.ring"
+      ],
+      "oracle": "handwritten-golden-or-expected-panic",
+      "lane": ["native-llvm", "native-c", "native-diff"],
+      "status": "covered",
+      "reason": "Full-width integer output and explicit panic semantics run in both native backends."
+    },
+
+    {
+      "feature_id": "gap.llvm.default_effect_topo",
+      "evidence": ["tests/cases/default_effect_topo.ring"],
+      "oracle": "c-golden-no-llvm-oracle",
+      "lane": ["e2e-llvm", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "llvm-backend",
+      "reason": "LLVM backend access violation; C backend passes (B-163 Phase2 P2.1 probe 2026-07-27)"
+    },
+    {
+      "feature_id": "gap.shared.default_effect_body_io",
+      "evidence": ["tests/cases/default_effect_body_io.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends hit the same deep-handler heap failure (B-163 Phase2 P2.1 probe 2026-07-27)"
+    },
+    {
+      "feature_id": "gap.shared.mod_effect_evidence",
+      "evidence": ["tests/cases/mod_effect_evidence.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends access-violate in shared effect-evidence handling (B-163 Phase2 P2.1 probe 2026-07-27)"
+    },
+    {
+      "feature_id": "gap.shared.api_clone",
+      "evidence": ["tests/cases/api_clone.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends access-violate in the shared clone/runtime path (B-163 Phase2 P2.1 probe 2026-07-27)"
+    },
+    {
+      "feature_id": "gap.shared.iterator",
+      "evidence": ["tests/cases/iterator.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends access-violate in the shared iterator/runtime path (B-163 Phase2 P2.1 probe 2026-07-27)"
+    },
+    {
+      "feature_id": "gap.shared.set_struct_eq",
+      "evidence": ["tests/cases/set_struct_eq.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends access-violate in structural Set equality (B-163 Phase2 P2.1 probe 2026-07-27)"
+    },
+    {
+      "feature_id": "gap.shared.set_ops_deep_eq",
+      "evidence": ["tests/cases/set_ops_deep_eq.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends access-violate in deep Set operations (B-163 Phase2 P2.1 probe 2026-07-27)"
+    },
+    {
+      "feature_id": "gap.shared.effect_custom_and_fail",
+      "evidence": ["tests/cases/effect_custom_and_fail.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends fail the same 'fail on bad port' assertion (audit #219)"
+    },
+    {
+      "feature_id": "gap.shared.effect_custom_multi_effect",
+      "evidence": ["tests/cases/effect_custom_multi_effect.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends fail the same 'log called twice' assertion (audit #219)"
+    },
+    {
+      "feature_id": "gap.shared.struct_match_pattern",
+      "evidence": ["tests/cases/struct_match_pattern.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends fail the same 'y-axis' assertion (audit #221)"
+    },
+    {
+      "feature_id": "gap.shared.tuple_eq",
+      "evidence": ["tests/cases/tuple_eq.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends fail the same tuple equality assertion (audit #221)"
+    },
+    {
+      "feature_id": "gap.shared.tuple_eq_struct",
+      "evidence": ["tests/cases/tuple_eq_struct.ring"],
+      "oracle": "shared-failure-no-parity",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "known-gap",
+      "gap_scope": "shared-positive",
+      "reason": "both backends fail the same structural tuple equality assertion (audit #221)"
+    },
+    {
+      "feature_id": "gap.check.error_tuple_oob",
+      "evidence": ["tests/cases/error_tuple_oob.ring"],
+      "oracle": "expected-diagnostic-unavailable",
+      "lane": ["check"],
+      "status": "known-gap",
+      "gap_scope": "check-only",
+      "reason": "ring check panics before reporting expected E0304 (audit #222)"
+    }
+  ]
+}
