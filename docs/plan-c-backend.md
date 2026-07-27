@@ -158,7 +158,7 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 **退役清单**：
 1. tag `llvm-c-backend-final` 归档
 2. 删除 codegen_llvm*（5 模块）+ llvm_ffi.ring + llvm-addon 依赖 + `-lLLVM-C` 链接
-3. dist-c/（冻结 .c 文本 + 构建脚本）成为 stage 0 信任锚；dist/（JS）+ dist-llvm/ 的去留单独上报用户拍板（建议：tag 后删除，紧急回退靠 tag checkout）
+3. dist-c/（冻结 .c 文本 + 构建脚本）成为唯一 stage 0 信任锚；**2026-07-28 用户拍板**：在 tag 与 dist-c 独立构建/固定点验证完成后，从 main 删除 dist/（JS）和 dist-llvm/，不保留第二份 legacy archive，紧急回退统一通过 `llvm-c-backend-final` tag checkout
 4. CI：bootstrap 一致性检查重新启用（.c 文本 diff，比 .o 比较更强）
 
 **文档 bookkeeping**（全部完成才算关单）：

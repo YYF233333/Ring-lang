@@ -108,10 +108,16 @@ LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理
 ### #251 abort handler 的 arm body 从不执行——checker 放行非恒等 body 但 codegen 忽略 [critical] [judgment] [open]
 
 > 2026-07-12 B-163 step 6 worker 实测确认（双后端一致，共享设计缺陷；C 侧 faithful port 保持 diff=0）。
+>
+> **2026-07-27 用户决策：采用方案 A——执行 abort arm body。** checker-identity 限制方案否决；写下的 handler body 必须有语义。
 
 `handle { body } with { fail.raise(e) => <arm> }` 的实现是「raise 的值直接成为 handle 结果」——**arm body 从不执行**（LLVM `gen_handle_expr` 注释自述 "the catch path simply returns the error value"）。arm body 非恒等时（如 `fail.raise(e) => match e {...}` 做映射），checker 类型检查通过，但运行时拿到原始 error 值——enum 指针被当 Int 打印出垃圾数字（step 6 用例开发中实测）= 静默 wrong-code。
 
-**修复方向**（二选一，涉及语义设计需讨论）：① codegen 真正执行 arm body（abort 路径把 error 绑定进 arm 作用域求值——两后端同改）；② checker 限制 abort effect 的 arm body 只允许恒等形（贫化但诚实）。倾向 ①（用户可见语义应与写下的代码一致）。修复时新增回归用例 expected 手写。
+**已拍板语义**：捕获 `fail.raise(payload)` 后，先使当前 handle 的 catch frame 与 handler evidence 失活并恢复外层 evidence，再把 `payload` 绑定到对应 op 参数的词法作用域，**恰好执行一次**该 arm body；arm body 的结果就是整个 `handle` 的结果。abort arm 没有 resume。arm 内重新 `fail.raise` 必须传播给外层 handler，不能被当前 handle 自捕获；arm 内的普通 effect、外层变量捕获与可变捕获按普通表达式语义保留。
+
+**实现范围**：同时修改 `compiler/infer.ring::infer_handle`、`compiler/codegen_c_expr.ring::gen_c_handle_expr` 与 `compiler/codegen_llvm_expr.ring::gen_handle_expr`。checker 必须把 abort arm body 类型与整个 `handle` 的 body 结果类型统一，并把 abort arm 自身的 effects 作为 handle 退出后的 effects 合入；不能被“移除已处理 fail”步骤吞掉 re-raise。catch 路径必须在运行 arm 前取得 payload、pop 当前 catch frame、drop 当前非 abort evidence，并在 codegen 词法环境中恢复外层 evidence；normal path 行为保持不变。tail-resumptive arm 的同类静态契约缺口独立归 audit #258，不借本项静默扩面。
+
+**验收**：新增手写 expected 的双后端回归，至少覆盖非恒等映射、arm 副作用/恰好一次、嵌套 abort、arm 内 re-raise 逃向外层、外层普通/可变捕获，以及 cleanup/RC 平衡；新增负向 checker 用例锁定 abort arm 结果类型不匹配，并证明 arm 的 io/fail 等 effects 出现在外层签名检查中。`effect_custom_and_fail` 从 known-gap 恢复为真实 C/LLVM/diff 执行，并同步清理 `tests/cases/llvm/c_backend_step6.ring` 等旧行为断言。定向 C/LLVM/diff/RC 各 ×3、全量门与自编译固定点通过后方可关闭。
 
 发现者：step 6 worker（feedback 分诊）
 
@@ -214,25 +220,35 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 发现者：Opus+DS
 
 
-### #219 effect handler 交互：custom effect + fail 组合 runtime crash [medium] [judgment] [doing]
+### #221 tuple eq dispatch runtime crash [medium] [judgment] [open]
 
-`effect_custom_and_fail.ring`（"fail on bad port"）和 `effect_custom_multi_effect.ring`（"log called twice"）runtime assertion 失败。custom effect handler 与 fail effect 交互时 evidence 传递或 handler 栈有误。
+两个用例 runtime assertion 失败：`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。tuple 的 `==` 派发在共享层有误。
 
-> **2026-07-12 差分证据（B-163 step 6 重评估）**：两用例在 C 后端**同构失败**（同 assertion）——缺陷定位收窄至 HIR/checker/perceus **共享层**，codegen 单侧嫌疑排除。原「pre-existing LLVM backend bugs」归类作废。
+> **2026-07-12 差分证据（B-163 step 6 重评估）**：两用例在 C 后端**同构失败**（同 assertion）——缺陷在**共享层**（tuple `==` 派发），非 LLVM codegen。「LLVM 后端 codegen 问题」表述作废。
 
-**SHARED_POSITIVE_GAPS**：`tests/cases/effects/effect_custom_and_fail.ring`、`tests/cases/effects/effect_custom_multi_effect.ring`。修好后移除。
+> **2026-07-27 部分闭环**：`struct_match_pattern.ring` 的独立根因是 C/LLVM codegen 未检查 struct named-pattern 字段值，且 pattern/arm bindings 会污染后续分支；已由双后端字段递归检查、字段名映射和 lexical scope 恢复修复，并补 match / catch / if-let / nested / or-pattern 回归。该用例已移出本条。
 
-发现者：B-151 CI
-
-### #221 struct match pattern + tuple eq dispatch runtime crash [medium] [judgment] [doing]
-
-三个用例 runtime assertion 失败：`struct_match_pattern.ring`（"y-axis"）、`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。struct 的 match pattern 和 tuple 的 eq 比较在共享层有误。
-
-> **2026-07-12 差分证据（B-163 step 6 重评估）**：三用例在 C 后端**同构失败**（同 assertion）——缺陷在**共享层**（tuple `==` 派发 / struct pattern 的 HIR 下沉），非 LLVM codegen。「LLVM 后端 codegen 问题」表述作废。
-
-**SHARED_POSITIVE_GAPS**：`tests/cases/struct_match_pattern.ring`、`tests/cases/tuple_eq.ring`、`tests/cases/tuple_eq_struct.ring`。修好后移除。
+**SHARED_POSITIVE_GAPS**：`tests/cases/tuple_eq.ring`、`tests/cases/tuple_eq_struct.ring`。修好后移除。
 
 发现者：B-151 CI
+
+### #257 verify_rc 对同名 local shadow 仍假定共享 alloca [medium] [judgment] [open]
+
+`verify_rc.ring` 的 shadow 检查仍假定同名 local 复用一个 alloca；当前 C/LLVM codegen 已为每个 lexical binding 分配独立存储并在离开 match / catch / if-let 分支时恢复外层名称。因此合法的 `let x = ...` 后再以 pattern binding shadow `x` 会被误报为 `uaf-shadow-mismatch` / `uaf-drop-borrow`，而双后端直接执行结果正确。
+
+**证据**：`compiler/verify_rc.ring:350-365` 的注释和判定仍编码旧假设；含 match / catch / if-let local shadow 的直接 probe 产生 12 条误报，等价的参数 shadow 回归在 C/LLVM 均保持外层值。修复应让 verifier 按 binding identity / lexical scope 跟踪，而不是按裸名称合并；不得削弱真实 use-after-free 检查。
+
+发现者：B-163 Phase 2 P2.2 对抗 review
+
+### #258 infer_handle 丢弃 handler arm effect 且不约束 arm 结果类型 [critical] [judgment] [open]
+
+`infer_handle` 会推断每个 `hbr`，但只保留 HIR body：没有把 `hbr.effects` 合入整个 `handle` 的 effect row，也没有把 tail-resumptive arm body 类型与 op return type 统一。结果是 handler arm 可以在未声明 `io` 的纯函数内调用 `print`，也可以给声明返回 `Int` 的 op 写返回 `Str` 的 arm，checker 都报告 `OK`；前者绕过 effect capability，后者进入 codegen 后是潜在静默 wrong-code。
+
+**证据**（2026-07-27 root 最小 probe）：`effect Probe { fn value() -> Int }` 的 `Probe.value() => { print("side"); 1 }` 放在无 effect 标注函数中通过 check；`Probe.value() => "wrong"` 同样通过，且 `HExpr::HandleExpr.ty` 仍直接取 body type。源码锚点为 `compiler/infer.ring::infer_handle`：`hbr` 后只写 `hhandlers`，最终 effects 只由 `body_r.effects` 过滤得到。
+
+**修复方向**：tail-resumptive arm body 与对应 op return type 统一（`Never` 按既有 bottom 规则兼容）；先从 body effects 中移除本 handle 消除的 effect，再把所有 handler arm 自身的 effects 合回外层 effect row，因为 arm 在当前 handler 之外求值，不能自我消除。新增返回类型负例、arm `io` 签名负例、arm 同 effect/re-raise 向外传播和双后端正例。abort arm 的结果类型/effect 半边是已拍板语义的必要条件，随 #251 修；本项保留到 tail-resumptive 通用契约也闭合后再关闭。
+
+发现者：B-163 Phase 2 P2.2 abort 语义实现前核对
 
 ### #217 Perceus 未对 block-expr / IIFE 临时值插入 HIR 层 drop [low] [judgment] [open]
 
