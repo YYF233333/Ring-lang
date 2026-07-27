@@ -23,12 +23,3 @@ merge `156b005` 已把 Phase 2 的证据层落成机器门：81 行 matrix（65 
 3. 对抗 review + 全量 C/LLVM/diff/RC/self-compile 固定点；只有认证门闭合后才创建 `llvm-c-backend-final` tag 并进入删除清单。
 
 当前禁止把 matrix 的 wiring PASS 当语义执行 PASS；`--suite parity` 输出已明确标注这一点。LLVM tag/删除、dist-c anchor 与 CI bootstrap 尚未开始。
-
-## B-163 Phase 2 Set 语义选择（2026-07-27）[决策]
-
-剩余的 `api_clone`、`set_struct_eq`、`set_ops_deep_eq` 同属 native Set 泛型 ABI 缺口：现实现只真正支持 Int/Str，`Set<Point>` 会被错当 `RingStr`。B-152 P4 原计划让 Set 复用纯 Ring Map，但当前公开约束是 `Set<T: Eq>`，而 Map 需要 `Hash + Eq`，derive Hash 又尚未落地。
-
-- 方案 A：以纯 Ring List + Eq 实现 Set，保留现有 `Set<T: Eq>` 兼容性，代价是线性复杂度且偏离“复用 Map”的旧计划。
-- 方案 B：按旧计划复用 Map，把 Set 收紧为 `Hash + Eq`；需同步提前 derive Hash 或接受现有 `Set<Point>` 源码不兼容。
-
-该决策只阻塞 Set 三项；handler autobox、abort effect arm、struct pattern、tuple equality 与 Iterator 可独立继续。

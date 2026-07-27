@@ -386,6 +386,7 @@ fn test_fetch() {
 > **2026-07-10 暂停**：B-163 C 后端迁移插队 P0，剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。P3 Map 已 merge（`8871592`），但 trait-bounded impl 方法 dict 转发 bug 迫使 Map 方法仍走 `method_to_runtime` + C++ bootstrap shim——P3 验收「~30 个 ring_map_* 删除」未闭环，调查并入 B-163 计划（plan-c-backend.md §2.5 #1），修好后回本条目关 P3。
 > **2026-07-11 调查结论（B-163 step 5 worker）**：dict 转发 bug **HEAD 无法复现**——bounded impl 五场景 probe（调用位 dict 解析/方法内 bound dispatch/impl 互调转发/HOF closure 捕获 dict/双 bounds）+ Map 真实形状 Ring 路径 probe，LLVM/C 双后端全绿。共享层（resolve_dicts_from_scheme/dict_lower）无缺陷；P3 当时的 double bootstrap 崩溃疑似已被后续修复序列消除，或需自编译规模触发。**闭环实验留 B-163 step 9 后**：C 后端删 Map method_to_runtime 条目 + 全量 sweep + self-compile via C，全绿则删 C++ ring_map_* bootstrap shim，关 P3 遗留验收。
 > **2026-07-27 P3 闭环（B-163 step 9）**：Map 的 LLVM/C `method_to_runtime` 映射、下标特殊发射与全部 `ring_map_*` C++ bootstrap shim 已删除；`Map<K,V>` 只走纯 Ring `K: Hash + Eq` 实现，用户 struct 的手写 Hash/Eq dict 已有双后端回归。C/LLVM 三代固定点、全量双后端门禁、RC ×3 与 ASan capstone 通过，P3 遗留验收正式关闭。B-152 仍整体暂停，待 B-163 Phase 2 完成后从 P4 / P1s2 / P5 恢复。
+> **2026-07-27 P4 carve-out 决策（Discussion）**：为关闭 B-163 Phase 2 的 Set parity gap，P4 Set 与 B-107 自动 `derive Hash` 从暂停队列提前进入 B-163 P2.2；P1s2 Str 与 P5 仍保持暂停。标准 `Set<T>` 定位为有明确性能契约的哈希集合：语义等价关系来自 `Eq`，高性能表示要求 `Hash + Eq`，复用纯 Ring `Map<T, Unit>`，不得在缺 Hash 时静默退化为 O(n) List 扫描。
 
 **前置**：B-125（unsafe/Ptr<T> 原语）+ B-002 Phase 1（精简版 Drop）
 
@@ -667,7 +668,36 @@ pub struct Map<K, V> {
 - 自举一致（double bootstrap fixpoint）
 - ASan gating 档 clean
 
-**吸收 B-107**：P3 自然包含 Hash trait + primitive impl，不再需要单独做 B-107。
+**B-107 边界**：P3 已吸收 Hash trait、primitive impl 与泛型 Map；用户 struct/enum 的自动 `derive Hash` 保留在 B-107，并因 P4 Set 的性能契约提前为 B-163 Phase 2 gate。
+
+#### P4: Set\<T\> RIIR — Map-backed `Hash + Eq` 哈希集合
+
+> 2026-07-27 Discussion 拍板。数学集合的最小语义能力是 `Eq`，但只给 equality oracle 时，任意负向 membership 查询最坏必须检查全部元素，无法提供次线性通用实现。标准库 `Set` 因此把 expected O(1) 作为性能契约，额外要求 `Hash`；Eq-only 容器若未来确有需求，使用显式 `LinearSet<T>` 名称另行立项，不在 `Set` 内做不可见 fallback。
+
+**表示与 API**：
+- `std/set.ring`：`pub extern type Set<T>` 改为 `pub struct Set<T> { entries: Map<T, Unit> }`。
+- `set_new`、`len`、`is_empty`、`to_list`、`clear` 与结构 clone 不需要做线性查找；`set_from`、`insert`、`remove`、`contains`、`has`、`union`、`intersect`、`difference` 的查询/变更路径统一要求 `T: Hash + Eq` 并委托 `Map<T, Unit>`。
+- `SetIterator` 继续基于 `to_list()`，不改变迭代顺序未指定的既有契约。
+- 不允许根据 trait 是否存在自动选择 Map/List 表示；Ring 无 overlap/specialization，此类隐藏分流也会让复杂度不可从签名判断。
+
+**自动 Hash 契约（实现归 B-107）**：
+- 普通 struct/enum 在所有组成字段可 Hash 且 Eq 为编译器结构化派生时，自动结构化派生 Hash；`Set<Point>` 等既有源码保持零标注。
+- 若类型手写了自定义 Eq，编译器不得再偷偷生成结构化 Hash，以免出现 `a == b` 但 `hash(a) != hash(b)`；调用 Set/Map 时要求用户显式提供匹配的 Hash。
+- manual Eq/Hash 的一致性属于显式 trait law；本期至少保证编译器自动生成路径由同一结构分解产生。安全的自定义 canonical-key API 可在出现真实需求时另行设计，不扩入本 gate。
+
+**涉及修改**：
+1. `std/set.ring`：Map wrapper、全部 Set API、iterator 与 clone。
+2. `compiler/builtins.ring` / `compiler/derive.ring` / HIR derived impl 发射：B-107 自动 Hash 与 bound/evidence。
+3. C/LLVM codegen：删除 Set/SetInt runtime 特殊映射，直到 LLVM 退役前保持双后端 parity。
+4. `ring_runtime.cpp`：删除被新 Ring Set 取代的 `ring_set_*` / `ring_set_int_*` 实现与旧布局 drop 路径；保留 Map/slot 所需 bridge。
+5. `tests/cases/`：现有 `api_clone`、`set_struct_eq`、`set_ops_deep_eq` 恢复为双后端正向门，并新增 hash collision、nested/generic struct/enum、manual Eq 无自动 Hash 的负面回归。
+
+**P4 验收标准**：
+- Set 的 membership/insert/remove/集合运算只走 Map probe，不存在 List 扫描 fallback；平均复杂度契约为 O(1)。
+- Int/Str/Bool、自动 Hash 的 struct/enum、显式一致 Hash+Eq 的自定义类型均双后端行为正确；相等值去重、contains/remove 与 union/intersect/difference 一致。
+- 手写 Eq 且无显式 Hash 的 Set/Map 调用给出精确 trait-bound 诊断。
+- `api_clone`、`set_struct_eq`、`set_ops_deep_eq` 从 parity known-gap 删除；C/LLVM/diff/RC 相关门 ×3。
+- compiler fixed-point 一致；LLVM 退役前更新 `dist-llvm/main.o`，无新增 verifier 差异。
 
 **验收标准**：
 - 各阶段：替换的容器类型 E2E 行为与 C++ 版一致
@@ -695,28 +725,24 @@ pub struct Map<K, V> {
 - `for (i, x) in xs.enumerate()` 可用且行为正确
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-107 `derive Hash`（泛型 Map key 剩余项）[feature] [P2] [L] [judgment] [queued] [after: B-163]
+### B-107 自动 `derive Hash` + Set P4 性能契约 [feature] [P0] [L] [judgment] [queued]
 
-> **2026-07-10 注记**：P3 已落地 Hash trait + 泛型 Map struct，但 dict 转发 bug 致方法调用仍走 C++ bootstrap shim（shim 内联 hash 仅支持 tagged Int/Bool + Str；`K: Hash` bound 把 key 限在这三类内，行为安全但泛型 key 承诺未兑现）。本条目保留至 shim 删除（B-163 plan §2.5 #1）+ derive Hash 落地后再关单。
-> **2026-07-27 更新（B-163 step 9）**：shim 与后端特殊映射已全部删除，泛型 Map 和用户自定义 key 已通过手写 `impl Hash + Eq`（struct 回归）在双后端兑现；本条现只剩 `derive Hash` 语法/派生实现及对应回归，B-163 全部完成后再排期。
+> 2026-06-07 立项；2026-07-27 B-163 step 9 已关闭 Map runtime/shim 部分。2026-07-27 Discussion 用户拍板将剩余自动 Hash 与 B-152 P4 Set 一并提前，作为 B-163 Phase 2 parity gate；优先级随阻塞中的 B-163 P0 上调。完整 Set 表示/API 规范见 B-152 P4。
 
-> 2026-06-07 立项（Discussion）。**类型系统说谎的缺口**：`std/map.ring` 的 `Map<K,V>` 类型层全泛型（`get(key:K)`/`insert(key:K,..)` 用类型变量 K），类型检查器放行 `Map<Int,T>`/`Map<MyEnum,T>`，但 runtime（LLVM `unordered_map<std::string,void*>`、JS 同样 Str-key）只兑现 Str key。非 Str key 静默错误，**两后端皆有，LLVM 上具体化**。bootstrap 阶段编译器自身的 Map 几乎全是 `Map<Str,...>` 故未暴露（migration diary 记录的简化）。
+**自动派生**：
+1. `compiler/derive.ring`：把 Hash 纳入 Eq/Clone/Ord/Debug 同一 fixpoint 框架；struct 按字段声明序 combine，enum 必须先混入稳定 variant discriminator 再按字段序 combine，generic 字段产生 `T: Hash` bound。
+2. `compiler/hir.ring` 及 C/LLVM derived impl 发射：增加 Hash 方法的 field action / method body，复用 primitive `hash()` evidence 与确定性 `ring_hash_combine`，不得按类型名或地址生成 hash。
+3. coherence guard：检测到 manual Eq 时不自动派生结构化 Hash；缺 Hash 的 Map/Set 使用点正常报 trait-bound 错误。编译器自动 Eq+Hash 路径必须共享同一字段/variant 分解。
+4. P4 Set：`std/set.ring` 改为 `Map<T, Unit>` wrapper，所有 membership/变更/集合运算要求 `T: Hash + Eq`；不实现隐式 List fallback。
 
-**设计方向**：加 `Hash` trait + derive，镜像现有 Eq/Ord/Clone/Debug 的 derive 机制；runtime Map 改为 key 为 void*，经 Eq/Hash dict 派发——**复用 `List.contains` 已走的 `ring_get_builtin_dict` 泛型 Eq 派发路径**。与 B-080（标量 unboxing）协同：Int unbox 后 hash Int key trivial。
-
-**涉及修改**：
-1. `compiler/builtins.ring` / `std/`：定义 `Hash` trait（`fn hash(self) -> Int` 或等价）；内置类型 + 用户 struct/enum derive。
-2. `compiler/derive.ring`：Hash derive（同 Eq/Ord 模式）。
-3. `ring_runtime.cpp`：Map key 从 `std::string` 泛化为 void* + 自定义 hash/eq（经 dict），或等价方案。
-4. `compiler/codegen_llvm_*.ring`：Map 操作传 Eq/Hash dict（同泛型 Eq 派发）。
-5. `compiler/codegen.ring`：JS 后端对应（非 Str key 正确处理）。
-6. checker：`Map<K,V>` 的 K 要求 `K: Hash + Eq` bound（内置类型自动 derive）。
+**涉及修改**：`compiler/derive.ring`、`compiler/hir.ring`、C/LLVM derived impl codegen、必要的 builtin/runtime hash combine 注册、`std/set.ring`、Set runtime/mapping 清理及正负面测试。
 
 **验收标准**：
-- `Map<Int,T>` / `Map<MyEnum,T>` / `Map<用户struct,T>` get/insert/contains_key 两后端行为一致且正确
-- `K: Hash + Eq` bound 缺失时报错
-- 现有 `Map<Str,...>` 全部不回归
-- 全部 E2E + llvm_diff 通过；自举一致
+- 自动派生覆盖 plain/nested/generic struct、positional/named/recursive enum；相等值在 C/LLVM 两后端产生相同 hash。
+- enum variant discriminator 参与 hash；构造顺序、Map 迭代顺序或地址不影响 hash，compiler fixed-point 保持确定。
+- manual Eq 类型不会获得不匹配的结构化 auto-Hash；显式 manual Hash+Eq 仍可用于 Map/Set。
+- `Map<自动Hash类型, V>` 与 P4 `Set<自动Hash类型>` 的 insert/get/contains/remove、扩容/rehash和强碰撞回归全绿。
+- 关闭三个 Set shared-positive gaps；C/LLVM/diff/RC 相关门 ×3、完整 fixed-point 与 workflow validator 通过。
 
 ### B-133 UTF-8 字节串模型落地（B-131 probe 拍板 A）[feature] [P3] [L] [judgment] [queued]
 
@@ -1162,6 +1188,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 > module-qualified effect evidence ✅——统一反解 `__ring_ev_` 参数，结构性保留 file-module `$$_` canonical boundary，仅还原 inline `::`；C/LLVM 的 main、lookup 与 user-drop 五个消费点已收口。新增 unqualified/inline 与真实多文件 `pkg$effects$$_child::InlineDefault` 双后端回归，独立对抗 review PASS；matrix 现为 **68 covered / 11 known-gap / 3 manual-evidence**，剩余 1 LLVM-only + 10 shared-positive。LLVM bootstrap 的 verifier warning 在 clean `97bbd64` 与 patched 同命令下逐字一致且都产出对象，排除本补丁回归。
 >
 > default effect body pipeline ✅——default body 现完整穿过 `andor_lower`、`dict_lower`、ANF、Perceus 与 HIR verifier，参数作用域、borrow/escape 与五字段 `HEffectOp` 重建均纳入正式回归；定向 C/LLVM/diff 各 ×3、RC 与 self-verify 通过。LLVM anchor 三代 fixed-point 对象逐字节一致（4,749,677 bytes，SHA256 `A1604D96EDD13A449905A85B81415B6207D805BF24F19D44F113F68ADF6794D8`）并写回 `dist-llvm/main.o`；matrix 现为 **69 covered / 10 known-gap / 3 manual-evidence**，剩余 1 LLVM-only + 9 shared-positive。完整 C 聚合门 `1296/0`（e2e 462、llvm 222、RC 543、parity 69；24 项按 matrix/既有契约 skip）。LLVM 聚合首轮为 e2e `461/0/10`、llvm `220/2`、parity `69/0/13`；`adversarial_effect_closure` 与 `recursive_fn` 均无诊断退出 `0xC0000005`，各自独立 ×3 全绿，按 B-155 既有 LLVM 信道间歇证据如实保留，不伪记全绿。
+>
+> Set P4 方向已拍板（2026-07-27）——标准 `Set` 保留数学上的 Eq 语义，但以 expected O(1) 为公开性能契约，要求 `Hash + Eq` 并复用 `Map<T, Unit>`；自动 `derive Hash` 提前为本 Phase 2 gate，普通结构类型保持零标注。禁止缺 Hash 时静默退化为 O(n) List；实现与验收归 B-107 / B-152 P4。
 
 **验收标准**：
 - Phase 1：全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）

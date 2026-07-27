@@ -1866,7 +1866,7 @@ buffer 内的值 = RC 世界之外、所有权由封装作者人工记账。拆�
 | 内容 | 迁出方式 |
 |------|---------|
 | Map / MapInt（`std::unordered_map`） | P3：Ring 开放寻址哈希表 + Hash trait |
-| Set / SetInt（`std::unordered_set`） | P4：复用 Map 实现 |
+| Set / SetInt（`std::unordered_set`） | P4：`Map<T, Unit>` wrapper；公开操作要求 `Hash + Eq`，expected O(1)，无隐式线性 fallback |
 | StringBuilder（`std::string`） | P0（pilot） |
 | Str 操作中的 `std::string` 临时计算（replace/pad_start/pad_end） | P1 Step 2 |
 | List HOF（map/filter/fold/any/all/find 等） | 已部分迁移（P2），HOF 可全迁 Ring |
@@ -2282,6 +2282,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | RC 语义立场 = 与 Rust 四通道可观测等价（2026-06-13）| 语义模仿 Rust + RC 实现的全部可观测分叉收敛四通道：① Drop 副作用——「Drop 禁 Clone」+ B-110 move 使 Drop 类型恒计数 1、与 Rust 逐点一致（该规则实为 COW 不可观测承重墙，非仅「资源不可复制」）② identity——永不提供 ptr_eq/is 类算子（负面承诺，主动与 Rust `Rc::ptr_eq` 分叉）；audit #156 已关闭（contains/index_of 改 Eq trait 派发，2026-06-15）；Map key 残留归 B-107 ③ 析构顺序——已定 = 对齐 Rust（2026-06-13，§7.9 表已更新）④ drop 时机——D-1 as-if 已封。COW 定性 = 「clone = dup」的语义修复机制而非独立优化（rc=1 原地写 = FBIP 入口，RC 独有能力）。详见 §7.9 | 纯内存值无「何时 free」观测窗口 → RC vs 静态 drop 的分叉只能经 Drop 副作用/identity/顺序/时机四通道传播；逐通道封堵即「与 Rust 行为等价」的可枚举证明，与 unsafe discharge 清单同手法（暴露面有界可审计）|
 | `List.sort()` Ord bound + runtime 死代码清理（2026-06-15，B-130）| sort 从 `impl<T> List`（extern）移入 `impl<T: Ord> List`（Ring impl = `sort_by` + `<`/`>` 比较），同 contains/index_of 迁移模式。runtime 死代码（`ring_list_sort_default` / `ring_list_contains` / `ring_list_index_of`）一并清理。audit #156 关闭（Eq 侧已修），#159 并入 | 两后端均不正确（JS 用 JS `<` 对 struct 出垃圾、LLVM 按半地址排序）；所有自举 .sort() 调用为 List<Str>/List<Int>（均有 Ord），零迁移破坏 |
 | COW 性能可预测性 = 三支柱（2026-06-13）| ① 成本上界定理：COW ≤ eager 深拷贝，预算按语义成本、优化只省不加、无凭空悬崖且确定可复现 ② move 锚点：B-110 后「rc>1 且被写」仅源于显式 clone/Rc——每次分叉数据流上游必有词法锚点，Swift 隐式共享病根结构性不存在 ③ 工具层（待 B-110 写时分叉落地后立项）：`ring audit cow` 静态分叉面枚举 + debug 分叉归因 profiler（复用 RING_BOX_PROFILE 基建）+ fbip 式零分叉断言（Koka 血统）。详见 §7.9 | COW 经典软肋 = 归因漂移/非局部性/路径依赖（Swift 前车之鉴）；Swift 解药 isKnownUniquelyReferenced = 运行时唯一性查询 = identity 观测 API，被四通道之②封死——Ring 必须以「预算上界 + 结构锚点 + 可枚举工具」替代，与 unsafe/audit 同手法 |
+| Set 语义与性能契约分层（2026-07-27，B-163 P2.2） | 数学集合的等价关系只依赖 `Eq`；标准库 `Set<T>` 作为高性能具体容器，membership/变更/集合运算要求 `Hash + Eq`，用纯 Ring `Map<T, Unit>` 实现并承诺 expected O(1)。struct/enum 在结构化 Eq 路径上自动派生一致的 Hash；manual Eq 不触发结构化 auto-Hash。缺 Hash 不静默回退 List；Eq-only 容器若有需求另以 `LinearSet` 显式立项 | 只给 equality oracle 时负向 membership 最坏 Ω(n)，无法同时保留 Eq-only 与次线性通用实现。把 Hash 作为性能能力而非数学语义，既保持概念准确，也让复杂度从 API 约束可见；否决 optional-trait/specialization 自动分流（Ring 明确无 specialization，且会隐藏性能） |
 | 公理体系 4→6 条 + GC 取舍成文（2026-06-12）| 新增公理 5「编译器必须终止」（可判定性成文，lang-design §11.7 放弃清单挂其下）+ 公理 6「确定性资源语义」（RC/move/Weak/unsafe 区的公理地基补全）；会话原则归推论（标注是文档→3；失真必须响/优化不可观测/审查面可枚举→4）；philosophy.md 为唯一真值源，本文件公理节改速记，CLAUDE.md/README 加速查指针；GC 取舍理由成文于公理 6（语义层费用 GC 省不掉 + 引擎层四收益 + 不可逆性不对称；「GC 停顿」不是理由；B-089 re-measure 为可证伪锚点）| 推导审计发现资源管理体系站在未成文承诺上——四公理字面下 GC 严格更优、推导不闭合；philosophy/design 公理全文双真值源已现漂移隐患 |
 
 ### 幽灵功能（已解析但无语义效果）
