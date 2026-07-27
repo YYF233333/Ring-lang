@@ -2854,6 +2854,11 @@ fn gen_c_match_expr(mut ctx: CCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> S
 
 // One arm: pattern tests (fail → next label) → binds → guard → body.
 fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl: Str) {
+    // Checker parity: every match/catch arm owns a lexical scope.  Clone the
+    // inherited bindings before pattern binding / guard / body emission, then
+    // restore the outer snapshot before the next arm is generated.
+    let saved_named = ctx.named_values
+    ctx.named_values = map_clone(saved_named)
     let next_lbl = fresh_label(ctx, "mnext")
     let mut next_used = false
 
@@ -2893,13 +2898,20 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
             match find_c_enum_by_variant(ctx, cname, qualifier) {
                 some(ei) => match ei.variants.get(cname) {
                     some(vi) => {
-                        if check_c_named_fields_nested_tags(ctx, scrut, vi.field_names, nfields, next_lbl) {
+                        if check_c_named_fields_nested_tags(ctx, scrut, vi.field_names, nfields, 1, next_lbl) {
                             next_used = true
                         }
                     },
                     none => {},
                 },
-                none => {},
+                none => match resolve_c_struct_type(ctx, cname) {
+                    some(si) => {
+                        if check_c_named_fields_nested_tags(ctx, scrut, si.field_names, nfields, 0, next_lbl) {
+                            next_used = true
+                        }
+                    },
+                    none => {},
+                },
             }
             bind_c_named_constructor_fields(ctx, scrut, cname, qualifier, nfields)
         },
@@ -3049,6 +3061,7 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
     if next_used {
         c_raw(ctx, "${next_lbl}:;")
     }
+    ctx.named_values = saved_named
 }
 
 // ============================================================
@@ -3182,7 +3195,10 @@ fn check_c_nested_ctor_tags(mut ctx: CCtx, val: Str, pat: Pattern, fail_lbl: Str
                     },
                     none => false,
                 },
-                none => false,
+                none => match resolve_c_struct_type(ctx, cname) {
+                    some(si) => check_c_named_fields_nested_tags(ctx, val, si.field_names, nfields, 0, fail_lbl),
+                    none => false,
+                },
             }
         },
         Pattern::Literal { value, .. } => {
@@ -3250,7 +3266,8 @@ fn check_c_positional_fields_nested_tags(mut ctx: CCtx, scrut: Str, fields: List
 
 // Phase-1 nested-tag checking for named constructor fields (port of
 // check_named_fields_nested_tags): resolve each named field's declared slot.
-fn check_c_named_fields_nested_tags(mut ctx: CCtx, scrut: Str, field_names: List<Str>, named_fields: List<NamedPatternField>, fail_lbl: Str) -> Bool {
+// field_offset is 1 for enum payloads (slot 0 is the tag) and 0 for structs.
+fn check_c_named_fields_nested_tags(mut ctx: CCtx, scrut: Str, field_names: List<Str>, named_fields: List<NamedPatternField>, field_offset: Int, fail_lbl: Str) -> Bool {
     let mut used = false
     for j in 0..named_fields.len() {
         match named_fields.get(j) {
@@ -3266,7 +3283,7 @@ fn check_c_named_fields_nested_tags(mut ctx: CCtx, scrut: Str, field_names: List
                             }
                         }
                         let fv = fresh_tmp(ctx)
-                        c_emit(ctx, "${fv} = ((void**)${scrut})[${fidx + 1}];")
+                        c_emit(ctx, "${fv} = ((void**)${scrut})[${fidx + field_offset}];")
                         if check_c_nested_ctor_tags(ctx, fv, nf.pattern, fail_lbl) {
                             used = true
                         }
@@ -3831,6 +3848,10 @@ fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr
         Type::EnumType { name: en, .. } => en,
         _ => "Option",
     }
+    // The pattern and then block share one checker scope.  Else has a separate
+    // sibling scope, and the join must see the original outer bindings.
+    let saved_named = ctx.named_values
+    ctx.named_values = map_clone(saved_named)
 
     match pattern {
         Pattern::Constructor { name, fields, .. } => {
@@ -3858,10 +3879,12 @@ fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr
                     }
                     discard_c(gen_c_expr(ctx, then_block))
                     ctx.indent = ctx.indent - 1
+                    ctx.named_values = saved_named
                     match else_block {
                         some(eb) => {
                             c_emit(ctx, "} else {")
                             ctx.indent = ctx.indent + 1
+                            ctx.named_values = map_clone(saved_named)
                             discard_c(gen_c_expr(ctx, eb))
                             ctx.indent = ctx.indent - 1
                             c_emit(ctx, "}")
@@ -3876,52 +3899,44 @@ fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr
                 },
             }
         },
-        Pattern::NamedConstructor { name: cname, fields: nfields, .. } => {
-            let vi_opt = match ctx.enum_types.get(enum_name) {
-                some(ei) => ei.variants.get(cname),
-                none => none,
-            }
-            match vi_opt {
-                some(vi) => {
-                    c_emit(ctx, "if (*(int64_t*)${scrut} == ${vi.tag}) {")
-                    ctx.indent = ctx.indent + 1
-                    for i in 0..nfields.len() {
-                        match nfields.get(i) {
-                            some(nf) => {
-                                let mut field_idx = i
-                                for fi in 0..vi.field_names.len() {
-                                    if vi.field_names[fi] == nf.name {
-                                        field_idx = fi
-                                    }
-                                }
-                                match nf.pattern {
-                                    Pattern::Binding { name: bname, .. } => {
-                                        let bv = c_local(ctx, bname)
-                                        c_emit(ctx, "${bv} = ((void**)${scrut})[${field_idx + 1}];")
-                                    },
-                                    _ => {},
-                                }
-                            },
-                            none => {},
-                        }
-                    }
-                    discard_c(gen_c_expr(ctx, then_block))
-                    ctx.indent = ctx.indent - 1
-                    match else_block {
-                        some(eb) => {
-                            c_emit(ctx, "} else {")
-                            ctx.indent = ctx.indent + 1
-                            discard_c(gen_c_expr(ctx, eb))
-                            ctx.indent = ctx.indent - 1
-                            c_emit(ctx, "}")
-                        },
-                        none => c_emit(ctx, "}"),
-                    }
+        Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
+            let else_lbl = fresh_label(ctx, "iflet_else")
+            let end_lbl = fresh_label(ctx, "iflet_end")
+
+            // Enum patterns first test their tag. Struct patterns have no tag,
+            // so emit_c_ctor_tag_fail_test is a no-op and their 0-based field
+            // checks begin immediately.
+            discard_c_bool(emit_c_ctor_tag_fail_test(ctx, scrut, cname, qualifier, else_lbl))
+            match find_c_enum_by_variant(ctx, cname, qualifier) {
+                some(ei) => match ei.variants.get(cname) {
+                    some(vi) => {
+                        discard_c_bool(check_c_named_fields_nested_tags(ctx, scrut, vi.field_names, nfields, 1, else_lbl))
+                    },
+                    none => {},
                 },
-                none => {
-                    discard_c(gen_c_expr(ctx, then_block))
+                none => match resolve_c_struct_type(ctx, cname) {
+                    some(si) => {
+                        discard_c_bool(check_c_named_fields_nested_tags(ctx, scrut, si.field_names, nfields, 0, else_lbl))
+                    },
+                    none => {},
                 },
             }
+
+            // Bind only after every refutable sub-pattern has passed.
+            bind_c_named_constructor_fields(ctx, scrut, cname, qualifier, nfields)
+            discard_c(gen_c_expr(ctx, then_block))
+            c_emit(ctx, "goto ${end_lbl};")
+            ctx.named_values = saved_named
+
+            c_raw(ctx, "${else_lbl}:;")
+            match else_block {
+                some(eb) => {
+                    ctx.named_values = map_clone(saved_named)
+                    discard_c(gen_c_expr(ctx, eb))
+                },
+                none => {},
+            }
+            c_raw(ctx, "${end_lbl}:;")
         },
         Pattern::Binding { name: bname, .. } => {
             // Irrefutable: bind the scrutinee, run then, skip else.
@@ -3938,6 +3953,7 @@ fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr
             panic("C codegen: unsupported pattern type in if-let")
         },
     }
+    ctx.named_values = saved_named
 }
 
 // ============================================================
