@@ -45,6 +45,8 @@ extern fn unbox_to_i1(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef
 extern fn unbox_int(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef
 extern fn box_int(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef
 extern fn box_bool(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef
+extern fn check_named_fields_nested_tags(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, aggregate_type: LLVMTypeRef, field_names: List<Str>, named_fields: List<NamedPatternField>, field_offset: Int, fail_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) -> Unit
+extern fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qualifier: Str?, named_fields: List<NamedPatternField>) -> Unit
 // B-091: boxed mut-cell helpers (defined in codegen_llvm_expr).
 extern fn is_boxed_def(ctx: LlvmCtx, def_id: Int?) -> Bool
 extern fn build_cell_alloc(mut ctx: LlvmCtx, init_val: LLVMValueRef) -> LLVMValueRef
@@ -730,6 +732,10 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
     let then_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "iflet.then")
     let else_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "iflet.else")
     let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "iflet.merge")
+    // Checker parity: the pattern bindings and then block share one lexical
+    // scope; else is a sibling scope; the merge inherits the outer bindings.
+    let saved_named = ctx.named_values
+    ctx.named_values = map_clone(saved_named)
 
     // Generate condition based on pattern
     match pattern {
@@ -770,11 +776,15 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                             }
                             discard(gen_llvm_expr(ctx, then_block))
                             discard(LLVMBuildBr(ctx.builder, merge_bb))
+                            ctx.named_values = saved_named
 
                             // Else
                             LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
                             match else_block {
-                                some(eb) => { discard(gen_llvm_expr(ctx, eb)) },
+                                some(eb) => {
+                                    ctx.named_values = map_clone(saved_named)
+                                    discard(gen_llvm_expr(ctx, eb))
+                                },
                                 none => {},
                             }
                             discard(LLVMBuildBr(ctx.builder, merge_bb))
@@ -787,6 +797,7 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                             LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
                             discard(gen_llvm_expr(ctx, then_block))
                             discard(LLVMBuildBr(ctx.builder, merge_bb))
+                            ctx.named_values = saved_named
                             LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
                             discard(LLVMBuildBr(ctx.builder, merge_bb))
                             LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
@@ -799,6 +810,7 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                     LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
                     discard(gen_llvm_expr(ctx, then_block))
                     discard(LLVMBuildBr(ctx.builder, merge_bb))
+                    ctx.named_values = saved_named
                     LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
                     discard(LLVMBuildBr(ctx.builder, merge_bb))
                     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
@@ -806,83 +818,73 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
             }
         },
         Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
-            // Named constructor pattern (e.g. AppError::NotFound { key })
-            // Get enum name from scrutinee type, same approach as Constructor arm
-            let nc_enum_name = match scrut_ty {
-                Type::EnumType { name: ename, .. } => ename,
-                _ => "Option",
-            }
-            match ctx.enum_types.get(nc_enum_name) {
-                some(enum_info) => {
-                    match enum_info.variants.get(cname) {
-                        some(vi) => {
-                            let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, 0, fresh_name(ctx, "tp"))
-                            let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tag"))
-                            let expected_tag = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                            let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected_tag, fresh_name(ctx, "eq"))
-                            discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb))
-
-                            // Then: bind named fields by name
-                            LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
-                            for i in 0..nfields.len() {
-                                match nfields.get(i) {
-                                    some(nf) => {
-                                        // Find positional index for this named field
-                                        let mut field_idx = i
-                                        for fi in 0..vi.field_names.len() {
-                                            if vi.field_names[fi] == nf.name {
-                                                field_idx = fi
-                                            }
-                                        }
-                                        match nf.pattern {
-                                            Pattern::Binding { name: bname, .. } => {
-                                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
-                                                let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                                let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
-                                                discard(LLVMBuildStore(ctx.builder, field_val, alloca))
-                                                ctx.named_values.insert(bname, alloca)
-                                            },
-                                            _ => {},
-                                        }
-                                    },
-                                    none => {},
-                                }
-                            }
-                            discard(gen_llvm_expr(ctx, then_block))
-                            discard(LLVMBuildBr(ctx.builder, merge_bb))
-
-                            // Else
-                            LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
-                            match else_block {
-                                some(eb) => { discard(gen_llvm_expr(ctx, eb)) },
-                                none => {},
-                            }
-                            discard(LLVMBuildBr(ctx.builder, merge_bb))
-
-                            LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+            // Resolve the aggregate layout from the scrutinee type. Enum
+            // patterns first test the tag; structs have no tag and begin
+            // directly with their 0-based named-field checks.
+            let mut pattern_resolved = false
+            match scrut_ty {
+                Type::EnumType { name: enum_name, .. } => {
+                    match ctx.enum_types.get(enum_name) {
+                        some(enum_info) => match enum_info.variants.get(cname) {
+                            some(vi) => {
+                                let fields_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "iflet.fields")
+                                let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, 0, fresh_name(ctx, "tp"))
+                                let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tag"))
+                                let expected_tag = LLVMConstInt(ctx.i64_type, vi.tag, 0)
+                                let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected_tag, fresh_name(ctx, "eq"))
+                                discard(LLVMBuildCondBr(ctx.builder, cond, fields_bb, else_bb))
+                                LLVMPositionBuilderAtEnd(ctx.builder, fields_bb)
+                                check_named_fields_nested_tags(ctx, scrut_val, enum_info.llvm_type, vi.field_names, nfields, 1, else_bb, current_fn)
+                                pattern_resolved = true
+                            },
+                            none => {},
                         },
-                        none => {
-                            // Variant not found — just execute then block
-                            discard(LLVMBuildBr(ctx.builder, then_bb))
-                            LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
-                            discard(gen_llvm_expr(ctx, then_block))
-                            discard(LLVMBuildBr(ctx.builder, merge_bb))
-                            LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
-                            discard(LLVMBuildBr(ctx.builder, merge_bb))
-                            LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-                        },
+                        none => {},
                     }
                 },
-                none => {
-                    // Enum not registered
-                    discard(LLVMBuildBr(ctx.builder, then_bb))
-                    LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
-                    discard(gen_llvm_expr(ctx, then_block))
-                    discard(LLVMBuildBr(ctx.builder, merge_bb))
-                    LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
-                    discard(LLVMBuildBr(ctx.builder, merge_bb))
-                    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+                Type::StructType { name: struct_name, .. } => {
+                    match ctx.struct_types.get(struct_name) {
+                        some(struct_info) => {
+                            check_named_fields_nested_tags(ctx, scrut_val, struct_info.llvm_type, struct_info.field_names, nfields, 0, else_bb, current_fn)
+                            pattern_resolved = true
+                        },
+                        none => {},
+                    }
                 },
+                _ => {},
+            }
+
+            if pattern_resolved {
+                // All refutable checks passed. Reuse the full recursive
+                // binding path so nested struct/enum/tuple bindings work too.
+                bind_named_constructor_fields(ctx, scrut_val, cname, qualifier, nfields)
+                discard(LLVMBuildBr(ctx.builder, then_bb))
+                LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
+                discard(gen_llvm_expr(ctx, then_block))
+                discard(LLVMBuildBr(ctx.builder, merge_bb))
+                ctx.named_values = saved_named
+
+                LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
+                match else_block {
+                    some(eb) => {
+                        ctx.named_values = map_clone(saved_named)
+                        discard(gen_llvm_expr(ctx, eb))
+                    },
+                    none => {},
+                }
+                discard(LLVMBuildBr(ctx.builder, merge_bb))
+                LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+            } else {
+                // Defensive parity with the prior best-effort behavior for an
+                // unresolved constructor: execute the then branch.
+                discard(LLVMBuildBr(ctx.builder, then_bb))
+                LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
+                discard(gen_llvm_expr(ctx, then_block))
+                discard(LLVMBuildBr(ctx.builder, merge_bb))
+                ctx.named_values = saved_named
+                LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
+                discard(LLVMBuildBr(ctx.builder, merge_bb))
+                LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
             }
         },
         Pattern::Binding { .. } | Pattern::Wildcard { .. } => {
@@ -899,9 +901,13 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
             }
             discard(gen_llvm_expr(ctx, then_block))
             discard(LLVMBuildBr(ctx.builder, merge_bb))
+            ctx.named_values = saved_named
             LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
             match else_block {
-                some(eb) => { discard(gen_llvm_expr(ctx, eb)) },
+                some(eb) => {
+                    ctx.named_values = map_clone(saved_named)
+                    discard(gen_llvm_expr(ctx, eb))
+                },
                 none => {},
             }
             discard(LLVMBuildBr(ctx.builder, merge_bb))
@@ -913,4 +919,5 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
             panic("LLVM codegen: unsupported pattern type in if-let")
         },
     }
+    ctx.named_values = saved_named
 }
