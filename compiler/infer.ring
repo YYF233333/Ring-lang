@@ -2326,75 +2326,84 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
     for handler in handlers {
         ctx.env.push_scope()
-        let effect_def = ctx.env.types.effects.get(handler.effect_name)
-        let canonical_effect_name = match effect_def {
-            some(ed) => ed.name,
-            none => handler.effect_name
-        }
-
-        // Instantiate effect type params with fresh variables for handler
-        let mut handler_inst_map: Map<Int, Type> = map_new()
-        match effect_def {
-            some(ed) => {
-                for tpv in ed.type_param_vars {
-                    let fresh = ctx.env.fresh_var()
-                    handler_inst_map.insert(tpv, fresh)
-                }
-            },
-            none => {}
-        }
-
-        let mut op_def: EffectOpDef? = none
-        match effect_def {
-            some(ed) => { op_def = ed.ops.find(fn(o) { o.name == handler.op_name }) },
-            none => {}
-        }
-
-        let mut hparams: List<HParam> = []
-        let mut hi = 0
-        for p in handler.params {
-            let pt = match p.type_annotation {
-                some(ta) => resolve_type_expr(ctx, ta),
-                none => match op_def {
-                    some(od) => match od.params.get(hi) {
-                        some(odt) => apply_subst_map(handler_inst_map, odt),
-                        none => ctx.env.fresh_var()
-                    },
-                    none => ctx.env.fresh_var()
-                }
+        // Handler arms are lowered to closures by both backends. Infer the
+        // entire arm at one deeper lambda depth so mutable outer captures use
+        // the same shared cell as ordinary closures. Save/restore the exact
+        // enclosing depth, and keep all fallible arm setup inside the bracket,
+        // so nested handlers and failed inference cannot leak scope state.
+        let enclosing_lambda_depth = ctx.lambda_depth
+        ctx.lambda_depth = enclosing_lambda_depth + 1
+        let handler_result = some({
+            let effect_def = ctx.env.types.effects.get(handler.effect_name)
+            let canonical_effect_name = match effect_def {
+                some(ed) => ed.name,
+                none => handler.effect_name
             }
-            ctx.env.bind_mono(p.name, pt)
-            hparams.push(HParam { name: p.name, ty: pt, def_id: none, is_mutable: false })
-            hi = hi + 1
-        }
 
-        match handler.resume_name {
-            some(rn) => {
-                let resume_param = match op_def {
-                    some(od) => apply_subst_map(handler_inst_map, od.return_type),
-                    none => ctx.env.fresh_var()
+            // Instantiate effect type params with fresh variables for handler
+            let mut handler_inst_map: Map<Int, Type> = map_new()
+            match effect_def {
+                some(ed) => {
+                    for tpv in ed.type_param_vars {
+                        let fresh = ctx.env.fresh_var()
+                        handler_inst_map.insert(tpv, fresh)
+                    }
+                },
+                none => {}
+            }
+
+            let mut op_def: EffectOpDef? = none
+            match effect_def {
+                some(ed) => { op_def = ed.ops.find(fn(o) { o.name == handler.op_name }) },
+                none => {}
+            }
+
+            let mut hparams: List<HParam> = []
+            let mut hi = 0
+            for p in handler.params {
+                let pt = match p.type_annotation {
+                    some(ta) => resolve_type_expr(ctx, ta),
+                    none => match op_def {
+                        some(od) => match od.params.get(hi) {
+                            some(odt) => apply_subst_map(handler_inst_map, odt),
+                            none => ctx.env.fresh_var()
+                        },
+                        none => ctx.env.fresh_var()
+                    }
                 }
-                let resume_ret = ctx.env.fresh_var()
-                ctx.env.bind_mono(rn, Type::FnType { params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW })
-            },
-            none => {}
-        }
+                ctx.env.bind_mono(p.name, pt)
+                hparams.push(HParam { name: p.name, ty: pt, def_id: none, is_mutable: false })
+                hi = hi + 1
+            }
 
-        let handler_body_result = some(infer_expr(ctx, handler.body, s)) catch { _ => none }
+            match handler.resume_name {
+                some(rn) => {
+                    let resume_param = match op_def {
+                        some(od) => apply_subst_map(handler_inst_map, od.return_type),
+                        none => ctx.env.fresh_var()
+                    }
+                    let resume_ret = ctx.env.fresh_var()
+                    ctx.env.bind_mono(rn, Type::FnType { params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW })
+                },
+                none => {}
+            }
+
+            let hbr = infer_expr(ctx, handler.body, s)
+            s = hbr.subst
+            hhandlers.push(HEffectHandler {
+                effect_name: canonical_effect_name, op_name: handler.op_name,
+                params: hparams, resume_name: handler.resume_name, body: hbr.hexpr
+            })
+            handled_effects.insert(canonical_effect_name)
+            true
+        }) catch { _ => none }
+        ctx.lambda_depth = enclosing_lambda_depth
         ctx.env.pop_scope()
 
-        match handler_body_result {
-            some(hbr) => {
-                s = hbr.subst
-                hhandlers.push(HEffectHandler {
-                    effect_name: canonical_effect_name, op_name: handler.op_name,
-                    params: hparams, resume_name: handler.resume_name, body: hbr.hexpr
-                })
-            },
+        match handler_result {
+            some(_) => {},
             none => fail.raise(CompileError {})
         }
-
-        handled_effects.insert(canonical_effect_name)
     }
 
     let resolved_effects = apply_subst_row(s, effects)
