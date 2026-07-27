@@ -173,7 +173,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 ## 路线图
 
-**当前**：**B-163 C 后端迁移 Phase 1 ✅ / Phase 2 进行中**——steps 1–9 完成，C 单文件/project/self-host、C 文本固定点与 LLVM anchor 固定点均已闭合；Phase 2 P2.1 machine-readable parity matrix 与诚实 skip/gap 分流已落地，当前进入 P2.2 shared/check gap 修复与 manual gate 自动化。认证完成前不退役 LLVM、不切换 dist-c、不恢复 CI bootstrap。测试状态以 Python runner 实跑为准，不在此记录具体计数。
+**当前**：**B-163 C 后端迁移 Phase 1 ✅ / Phase 2 进行中**——steps 1–9 完成，C 单文件/project/self-host、C 文本固定点与 LLVM anchor 固定点均已闭合；Phase 2 P2.1 machine-readable parity matrix 与诚实 skip/gap 分流已落地，当前进入 P2.2 shared gap 修复与 manual gate 自动化（check-only gap 已清零）。认证完成前不退役 LLVM、不切换 dist-c、不恢复 CI bootstrap。测试状态以 Python runner 实跑为准，不在此记录具体计数。
 
 **后续**：先完成 B-163 Phase 2；B-152 RIIR std 的剩余 P4 Set / P1 Step 2 Str / P5 在整个 B-163 完成前保持暂停，之后恢复 → B-002p2 unwind 补全；再后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
 

@@ -664,13 +664,12 @@
       "reason": "both backends fail the same structural tuple equality assertion (audit #221)"
     },
     {
-      "feature_id": "gap.check.error_tuple_oob",
+      "feature_id": "backend.frontend_tuple_oob",
       "evidence": ["tests/cases/error_tuple_oob.ring"],
-      "oracle": "expected-diagnostic-unavailable",
+      "oracle": "diagnostic-substring",
       "lane": ["check"],
-      "status": "known-gap",
-      "gap_scope": "check-only",
-      "reason": "ring check panics before reporting expected E0304 (audit #222)"
+      "status": "covered",
+      "reason": "The backend-independent check lane reports E0304 without panicking on an out-of-bounds tuple field."
     }
   ]
 }

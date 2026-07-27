@@ -112,11 +112,7 @@ SHARED_POSITIVE_GAPS = {
     ),
 }
 
-CHECK_ONLY_GAPS = {
-    "tests/cases/error_tuple_oob.ring": (
-        "ring check panics before reporting expected E0304 (audit #222)"
-    ),
-}
+CHECK_ONLY_GAPS = {}
 
 # Root-level positives that import sibling files and therefore use the
 # compiler's project-mode --out-dir contract.

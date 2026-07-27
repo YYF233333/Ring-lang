@@ -18,7 +18,7 @@ merge `156b005` 已把 Phase 2 的证据层落成机器门：81 行 matrix（65 
 
 后续恢复顺序固定为：
 
-1. P2.2 对 11 个 shared-positive + 1 个 check-only gap 做根因聚类并修复；LLVM-only `default_effect_topo` 保留为退役证据，不为即将删除的后端扩修。
+1. P2.2 对 11 个 shared-positive gap 做根因聚类并修复；唯一 check-only gap audit #222 已闭合，LLVM-only `default_effect_topo` 保留为退役证据，不为即将删除的后端扩修。
 2. 把三个 manual 项变成自动门或删除死面：`HStmt::Dup` 无生产者、C `#line`、extern-handle RC 结构断言。
 3. 对抗 review + 全量 C/LLVM/diff/RC/self-compile 固定点；只有认证门闭合后才创建 `llvm-c-backend-final` tag 并进入删除清单。
 

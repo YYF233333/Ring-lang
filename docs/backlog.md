@@ -1156,6 +1156,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 > **Phase 2 P2.1 parity 证据基线 ✅（2026-07-27，merge `156b005`）**：新增 machine-readable `tests/parity_matrix.json` 与 `--suite parity`，由 `hir.ring` / `ast.ring` 反向校验 HExpr 27 + HStmt 13 + HDecl 13 + Pattern 7 全变体，并覆盖 8 个后端结构面；runner 的旧 `LLVM_SKIP` 已拆成 repo-relative 的 LLVM-only / shared-positive / check-only 三类真实 gap，`native_only` 四个手写 oracle（含 `EXPECT_PANIC`）恢复进 Python runner，C self-compile 现真正比较 `main.c`，新增 `HDecl::Test` 双后端独立用例。对抗 review 修复了 marker 越界假绿、单 lane 自证、basename 串线、错误 HIR evidence、orphan golden 和字符串伪 enum 六类证据门漏洞；当前矩阵 **65 covered / 13 known-gap / 3 manual-evidence / 0 fail**。
 >
 > 合并前真实全集：C e2e `458/0/12` + golden `222/0`；LLVM e2e `457/0/13` + golden `222/0`。全量 diff 两轮分别 `563/2/12`、`562/3/12`，5 个失败全为 LLVM 编译进程无诊断 `0xC0000005`，且五个用例互不重复、各自独立 ×3 全绿；原始整轮失败如实保留，未伪造全绿。audit #220 的 `exhaustive_generic_payload` 已在 C/LLVM/diff 恢复并删单。当前硬门仍有 **1 LLVM-only + 11 shared-positive + 1 check-only** gap，以及 **3 个 manual-evidence**（死的 `HStmt::Dup`、C `#line`、extern-handle RC 结构断言）。**下一步 = P2.2 gap 修复与 manual gate 自动化；LLVM tag/删除、dist-c 切换均未开始。**
+>
+> **P2.2 进度（2026-07-27）**：audit #222 ✅——tuple 越界字段访问记录 E0304 后不再继续索引/panic，以 `ErrorType` 安全恢复；含补丁的 C-self-host compiler 实测负向诊断 E0304、合法 tuple field access 通过，matrix 变为 **66 covered / 12 known-gap / 3 manual-evidence**。`CHECK_ONLY_GAPS` 已清零；剩余语义门为 1 LLVM-only + 11 shared-positive。
 
 **验收标准**：
 - Phase 1：全部 E2E + golden 210+ 在 C 后端通过；双后端差分 diff = 0（除显式 skip）

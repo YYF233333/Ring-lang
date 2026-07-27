@@ -234,14 +234,6 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 发现者：B-151 CI
 
-### #222 ring.exe check 对 tuple 越界 panic 而非报 E0304 [low] [judgment] [doing: B-163p2]
-
-`error_tuple_oob.ring`：`ring.exe check` panic（"unreachable: tuple index bounds already checked"）而非报 E0304。
-
-> **2026-07-27 B-163 Phase 2 P2.1 重评估**：原同条的 `error_occurs_check.ring` 已由最终 anchor 正确报告 E0302，恢复进 runner 并通过；仅 tuple-oob 仍失败。该 gap 属 backend-independent checker 路径，已从旧 LLVM_SKIP 拆入 `CHECK_ONLY_GAPS`，Phase 2 parity matrix 会持续显式报告。
-
-发现者：B-151 CI
-
 ### #217 Perceus 未对 block-expr / IIFE 临时值插入 HIR 层 drop [low] [judgment] [open]
 
 block 表达式作为 if/match 条件（`if { let v = 5; v > 3 } { ... }`）和 IIFE（`(fn(x) { x * x })(5)`）产出的 owned 临时值在 HIR 层无显式 drop。codegen 层正确处理（unbox 后丢弃 / 调用后释放闭包），运行时无泄漏，但 verify_rc 静态检查报 `leak-temp`。

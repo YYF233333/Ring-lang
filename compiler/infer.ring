@@ -1676,10 +1676,12 @@ fn infer_field_access(mut ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                         let _ = type_error(ctx.sink, E0304,
                             "Tuple index ${field} out of bounds; tuple has ${elements.len().to_str()} elements",
                             span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none })
-                    }
-                    match elements.get(i) {
-                        some(t) => { field_type = t },
-                        none => panic("unreachable: tuple index bounds already checked")
+                        field_type = Type::ErrorType
+                    } else {
+                        match elements.get(i) {
+                            some(t) => { field_type = t },
+                            none => { field_type = Type::ErrorType }
+                        }
                     }
                 }
             }
