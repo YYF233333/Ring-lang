@@ -886,6 +886,14 @@ handle {
 }
 ```
 
+**一等 effectful function value 的 evidence 绑定（2026-07-28，过渡语义）**：
+
+- 在 LLVM 与 C 双后端并存期间，closure 使用**创建处词法捕获**的 custom-effect evidence；调用点不会给既有 function value 动态换绑 evidence。
+- custom handler 只消除 body effect row 中**显式出现**的同名 effect label；未知 open tail 必须原样向外传播，不能因为 `handle { callback() }` 就假定 callback 的未知 effect 已被内层 handler 截获。
+- 因此，直接 effect 调用和 handler 内创建的 closure 可以使用当前 handler；handler 外创建后再传入的 effectful callback 仍使用其创建处 evidence。`with_mock_fs(callback)`、`capture_logs(callback)` 等动态注入式高阶封装在此阶段需要显式 capability、把 closure 创建移入 handler，或保留 effect 向外传播。
+
+这是 C 方案的 sound 过渡边界，不是最终语言语义。B-163 完成 LLVM 后端退役、`dist-c` 与 CI 稳定后，B-167 将改为 **A：调用点动态 evidence ABI**；届时外部创建的 callback 也由调用点内层 handler 截获。C → A 是可观测的语义升级，必须作为 breaking change 发布并以迁移测试锁定。
+
 > **Phase 3 目标：full algebraic effect**（post-resume handler，需要 delimited continuation）：
 >
 > ```
@@ -2237,6 +2245,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | 多行字符串 | `"..."` 允许跨行，空白原样保留 | 减少字符串拼接需求 |
 | Raw string | `r"..."` 和 `r#"..."#`，无转义无插值 | 正则表达式/codegen 场景减少转义噪音 |
 | Effect 派发 hybrid（2026-06-03）| fail/abort → handler stack + setjmp（ambient）；tail-resumptive → evidence 值线程化（lexical）。两类绑定语义不同，同构 JS oracle | evidence 保留优化器可见性 + async 线程迁移安全 |
+| effectful function value evidence 路线（2026-07-28，audit #258） | **先 C 后 A**：双后端阶段保留创建处词法 evidence，handler 只消除显式 label、绝不吞掉未知 open tail；LLVM 退役且 C bootstrap/CI 稳定后由 B-167 切到调用点动态 evidence ABI | C 先闭合 checker soundness 且避免同时改两套 closure ABI；代价是外部 callback 暂不能被内层 handler 动态截获。A 是最终高阶组合语义，C → A 明确按 breaking change 管理 |
 | abort handler arm 语义（2026-07-27，audit #251） | 捕获 `fail.raise(payload)` 后先退出当前 catch/evidence 作用域，再将 payload 绑定到 op 参数并恰好执行一次 arm body；arm body 结果即整个 `handle` 结果，无 resume。静态上 arm 结果类型必须与 handle body 结果统一，arm 自身 effects 合回外层；运行时 arm 内 re-raise 传播给外层 handler，普通 effect 与词法捕获照常生效 | 源码中的 handler body 必须有语义；否决把 checker 限制为恒等 body 的贫化方案。先退出当前 handler 可避免 re-raise 自捕获，并使 arm 的 effect 解析遵循外层词法环境 |
 | 类型系统代价分配 | 复杂度由 LLM 承担（编译器错误循环），收益由用户享受（零 runtime surprise） | LLM 不是人、编译器搏斗十轮也无所谓 |
 | Refinement × Ownership × Effects 交互 | 详见 1.6b 交互矩阵 | 三系统正交 + RAII（Drop trait）处理 Drop 值在所有路径的释放 |

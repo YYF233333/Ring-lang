@@ -12,18 +12,6 @@
 
 ---
 
-## audit #258 custom open-row handler 的 evidence 语义待决（2026-07-28）[决策]
-
-显式 custom-effect row 的 tail-resumptive arm result/effect/type-arg 契约已在隔离分支实现并通过新 compiler 的 checker probes；继续对真 open body tail 做对抗验证时确认：first-class closure 在创建处词法捕获 effect evidence，closure call ABI 不从调用点动态注入 evidence。因此 `handle { callback() }` 当前不能截获外部创建 callback 内部的 custom effect；callback effect 会沿已捕获 evidence 向外传播。#251 的 `fail` 依赖 ambient setjmp，不能机械类推。
-
-待用户在三案中拍板：
-
-1. A：扩大为 C/LLVM closure ABI + RC/codegen 改造，让 effectful function value 在调用点动态接收 evidence；
-2. B：custom handler 遇真 open body row 时 fail-closed；
-3. C（root 推荐）：保留词法 evidence；只消除 body row 中显式 custom label，未知 open tail 原样传播。
-
-WIP 位于 `codex/a258-tail-handler-contract`，commit `29cabc4ec73c27959109e7db32bc7380e948b3db`，worktree clean。checkpoint 含 explicit-row/result/effect 修复、exact-tail 实验和 probes；选择 C 时需移除 exact-tail 实验并把 outer-evidence HOF 设为双后端正例。两项 open-HOF 内层截获 probe 在 C/LLVM 均为 `0xC0000005`，其余 relay/closed/generic/Never 拆分 probe 通过。
-
 ## B-163 Phase 2 P2.2 当前状态（2026-07-28）[通知]
 
 Phase 2 的机器证据门继续有效；audit #251 的 abort 半边已按用户拍板的方案 A 实现并通过独立 review。matrix 当前 **77 covered / 7 known-gap / 3 manual-evidence**，剩余 1 LLVM-only + 6 shared-positive：

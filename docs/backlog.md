@@ -378,6 +378,26 @@ fn test_fetch() {
 - 现有 std/ + compiler/ extern fn 全部通过（迁移后）
 - 自举一致
 
+### B-167 effectful function value 调用点动态 evidence ABI [refactor] [P0] [L] [judgment] [queued] [after: B-163]
+
+> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。本项是最终 A 语义，必须等 B-163 完成 LLVM 后端退役、`dist-c/` 成为唯一 bootstrap 锚且 CI 恢复稳定后再启动；不为即将退役的 LLVM 后端实现第二套新 ABI。
+
+**目标语义**：effectful function value 在调用点接收当前 effect evidence。外部创建的 callback 传入 `with_mock_clock` / `with_mock_fs` / `capture_logs` 等高阶 handler 后，其 effect 由调用点内层 handler 截获，而不是继续使用 callback 创建处的旧 evidence。静态 effect row 仍是 capability 真值；调用点只传递签名要求的 evidence，未知 open tail 必须逐项转发，不能被机械消除。
+
+**涉及修改**：
+1. HIR / function type lowering：为 effectful function value 固化调用点 evidence 参数布局，覆盖 closed row、open row、泛型 effect row、递归与互递归 closure；共享布局 helper，禁止 codegen 按字符串猜参数顺序。
+2. C 后端：统一 closure function-pointer prototype、closure 构造、直接/间接调用、跨模块声明与单态化实例的 evidence ABI；纯函数与无 custom-effect 的调用不承担不必要的动态 evidence。
+3. Perceus / RC：明确 evidence 参数为 borrow 还是 owned，验证 env capture、转发、嵌套 handler 和 early return 的 dup/drop 平衡；不得通过泄漏 evidence 规避生命周期问题。
+4. 迁移与诊断：把 C → A 作为 breaking change 记录；若旧代码依赖创建处 handler，诊断应指向 callback 创建/调用边界并给出显式 capability 或重构建议。
+5. 测试：新增外部 callback 动态截获、handler 内创建 callback、嵌套 handler、多 effect、open-tail 转发、跨模块 callback、泛型 HOF、递归 closure 及 RC/负面回归。
+
+**验收标准**：
+- 外部创建的 `Clock` callback 传入内层 fake-clock handler 后使用内层 evidence；同类 mock-fs、capture-logs 形态有正式回归。
+- 显式 effect 被当前 handler 消除，未知 open tail 和未处理的其他 effect 精确向外传播；不出现 capability 漏报或错误消除。
+- 直接调用、间接 closure 调用、跨模块与泛型 HOF 使用同一共享 ABI 契约；C 生成物的 function-pointer 声明与调用实参一致。
+- RC verifier、定向 ASan、完整 C E2E/golden、自编译与 `dist-c` 文本固定点通过；CI bootstrap 在 clean clone 上通过。
+- main 不重新引入 LLVM-C、`dist-llvm` 或双后端兼容层；迁移说明明确记录 C → A 的行为变化。
+
 ## RIIR
 
 ### B-152 RIIR 标准库（纯 Ring 重写 ring_runtime.cpp）[feature] [P1] [XL] [judgment] [paused: B-163]
