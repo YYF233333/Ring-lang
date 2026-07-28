@@ -224,7 +224,7 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 发现者：B-163 Phase 2 P2.2 对抗 review
 
-### #258 infer_handle 的 tail-resumptive arm effect/结果类型契约仍缺失 [critical] [judgment] [doing]
+### #258 infer_handle 的 tail-resumptive arm effect/结果类型契约仍缺失 [critical] [judgment] [doing] [waiting-feedback: lexical-evidence]
 
 audit #251 已补齐 abort arm 的 result/effect 契约；`infer_handle` 的 tail-resumptive 分支仍只保留 HIR body，没有把 `hbr.effects` 合入整个 `handle` 的 effect row，也没有把 arm body 类型与 op return type 统一。结果是非 abort handler arm 可以在未声明 `io` 的纯函数内调用 `print`，也可以给声明返回 `Int` 的 op 写返回 `Str` 的 arm，checker 都报告 `OK`；前者绕过 effect capability，后者进入 codegen 后是潜在静默 wrong-code。
 
