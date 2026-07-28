@@ -1,57 +1,41 @@
 ---
 name: discussion
-description: Discuss Ring-lang language design, architecture, feature planning, backlog changes, or durable worker/audit feedback. Use for requests containing “讨论”, “设计”, “聊聊”, “想法”, “backlog”, or when a waiting-feedback item needs a user decision.
+description: Discuss Ring-lang language direction, architecture, backlog, or batched Repository Steward decisions. Use for “讨论”, “设计”, “聊聊”, “想法”, “backlog”, check-ins, or resolving a waiting-feedback item that needs a user-reserved decision.
 ---
 
 # Discussion
 
-作为用户前台处理设计，不实现编译器代码。先完整读取 `AGENTS.md`、`CLAUDE.md` 和 `docs/workflow.md`。
+作为用户与 Repository Steward 的低频设计和决策界面，不实现编译器代码。先完整读取 `AGENTS.md`、`CLAUDE.md`、`docs/workflow.md`、相关设计/看板和 Steward Inbox。
 
-## 建立上下文
+## 用户保留决定
 
-按问题读取：
+只有以下事项必须由用户拍板：
 
-- `docs/design.md` / `docs/lang-design.md` 的相关章节；
-- `docs/backlog.md` 和 `docs/audit-report.md`；
-- `docs/worker_feedback.md` 中尚未处理的 `[决策]`、`[通知]`、`[观察]`。
+- 改变语言公开语义、语法、effect / ownership / safety 保证或设计公理；
+- breaking public API/ABI、平台支持撤销、永久依赖或 runtime TCB 扩张；
+- 新 P0、长期路线重排或显著扩大投入；
+- 降低测试、验证、可移植性或安全门槛的豁免；
+- release、公开发布、历史重写、不可恢复删除、仓库外权限/秘密/付费资源。
 
-不要修改 `planning` / `doing` item；Worker 明确要求更新 spec 时除外。
+修复违反既有公开语义、safety 或 ownership 保证的 bug，是恢复既有契约，不等于修改保证，也不因 safety/ownership 关键词自动进入用户 Inbox。候选都恢复既有契约时，由 Steward 做 Argument + 独立反驳并选择内部实现；只有接受已知违约、降低/豁免保证或修改契约才呈交用户。
 
-## 讨论
+普通实现、维护和 refactor 的多个工程方案不进入用户 Inbox；Steward 应先做事实核验、Argument 和独立 review，再在授权内决定。
 
-1. 先确认事实和现有实现。基于旧限制、旧 review 或 TS 时代记录立项时，先做分钟级双后端 probe。
-2. 一次聚焦一个决策，给出 2–3 个方案、推荐和 trade-off。
-3. 不替用户决定非 trivial 方向；不以“推迟”或“不重要”为由隐藏问题。
-4. 用户拍板后才更新设计真值和 backlog。
+## 处理顺序
+
+1. 先呈现开放的用户保留 `[决策]`：一句话问题、影响、最多三条事实、明确推荐和 1–2 个真实备选；随后压缩呈现 `[里程碑]` / `[全局阻塞]`。
+2. 用户答复后先把 verdict / 约束写入所属 design、backlog 或 workflow 真值并 commit；再删除 dossier；最后把对应 item 从 `waiting-feedback` 改回 `queued`。禁止先删 dossier。
+3. 再处理用户主动提出的新设计、架构或 backlog 方向。
+4. 基于旧限制、旧 review 或 TS 时代记录立项前，先做分钟级双后端 probe 核验前提。
 
 ## 写入
 
-只写 `docs/`：
+只写 `docs/` 治理真值，不碰编译器代码。新 backlog item 必须包含唯一 ID、优先级、复杂度、dispatch、具体文件/模块和可证伪验收标准；新 P0 由用户决定，Steward 可按证据创建 P1–P3 工程项。
 
-- 更新受影响的设计描述和决策表；
-- 新实现工作写入 backlog；
-- 处理完成的 durable feedback 从 `worker_feedback.md` 删除。
+不要修改无关的 `planning` / `doing` spec；治理真值同步或 Steward 明确请求的 spec 修订除外。
 
-Backlog 条目遵循 `docs/workflow.md`，必须包含：
+## 用户 check-in
 
-- 唯一递增 ID；
-- 类型、用户确认的优先级、复杂度和 dispatch；
-- 具体涉及文件或模块；
-- 可验证的验收标准。
+保持低噪声，按“需要拍板 → 已完成结果 → 仓库健康/真实风险 → 下一步自主方向”汇报。不要呈现 subagent/命令等待、普通实现取舍、工具过程、原始日志或逐文件实现流水。
 
-`dispatch` 判断：
-
-- `mechanical`：spec 已给出唯一实现路径；
-- `judgment`：执行者仍需跨模块推理或选择方案。
-
-## Feedback 分流
-
-- `[决策]`：呈现选项；用户拍板后更新 spec，并把 `waiting-feedback` 改回 `queued`。
-- `[通知]`：判断是可排队、已有追踪还是纯信息；只把需要持久行动的内容留在仓库。
-- `[观察]`：由用户决定转 backlog / audit item，或确认无需处理。
-
-Codex agent 在当前 session 内已经闭环的进度和 review 消息不再补写为强制 `[通知]`。
-
-## 完成
-
-运行 `python .agents/scripts/validate_workflow.py`。需要提交时，一个 Discussion session 只产出一个 docs commit，摘要覆盖本轮全部设计与队列变更。
+完成治理修改后运行 `python .agents/scripts/validate_workflow.py`。一次 Discussion 只生成一个治理/docs commit。
