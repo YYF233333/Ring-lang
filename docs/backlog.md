@@ -39,6 +39,13 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 - **交互规则（B-043 决策）**：refinement 是值级谓词，不允许引用可变绑定；跨 effect/await 边界恒成立；handler resume 值须满足 refinement 约束；`mut` 参数带 refinement 时每次赋值重新验证（SSA 流分析，复杂度归入本 item）。详见 design.md 1.5
 - **可判定片段条款（2026-06-12 D-5 拍板，公理⑤做实）**：SMT 查询限于**具名可判定片段**（QF_LIA + enum/bool 等式类，Liquid-style；具体片段定义 = lang-design §10 TODO「Refinement types 的可判定片段定义」，实现前必须完成）；超出片段 = 编译错误，要求显式 runtime check 兜底。**禁止 timeout 语义**——SMT timeout 即「耗时不可预期」，违反公理⑤
 - **含 const generic 参数谓词**（2026-05-25，原 B-003 吸收）：refinement predicates 作用于 const generic 参数（如 `where N > 0`）归入本 item 的 SSA 约束传播。详见 design.md 1.3
+- **验证架构约束（2026-07-28 竞品复查，Verus / `moon prove` 映射）**：
+  1. checker 约束先降到独立、可打印、可缓存的 verification IR，再交给具名可判定片段的 decision procedure；proof/ghost 信息不得渗入 runtime ABI 或改变未启用 refinement 的 codegen
+  2. 语言规范必须逐种数值类型声明谓词采用机器整数还是数学整数语义，以及 overflow/wrap/trap 的关系；**禁止以无界整数证明替代可能溢出的机器整数执行**
+  3. 每次证明结果携带可审计 trust/assumption ledger：verification IR 指纹、算法/solver 及版本与配置、语言内 assumption/axiom/external specification、使用的整数/内存模型、资源预算
+  4. solver 缺失、`unknown`、超预算或遇到不支持构造时不得静默视为已证明；只有规范明确允许的 predicate 才能生成显式 runtime check 兜底，其余 fail closed
+  5. 相同输入、工具链与预算必须得到相同结果；缓存只按完整 proof fingerprint 命中，禁止把历史成功掩盖成当前成功
+- **新增验收锚点（2026-07-28）**：正例/反例之外，至少覆盖 overflow 模型差异、assumption 可见性、solver 缺失/unknown、资源预算耗尽、proof cache 失效、runtime fallback 可观察性；每例同时断言 verification IR 与 ledger 稳定
 
 ### B-002 Drop / RAII [feature] [P1] [XL] [judgment] [phase1-done]
 
@@ -924,18 +931,24 @@ source-map 支持 + 断点调试。
 
 > 2026-06-12 D-7 拍板：P2→P1——层 0 判据（公理④）的测量仪，地位等价公理⑥的 B-089 锚点；只改优先级，不动排程（B-104 里程碑照旧先行）。
 > 2026-06-11 立项（Discussion）。design.md §11.3 五指标至今零测量——「LLM 写 Ring 优于 TS」是项目存在理由，须从信念变数据，且结果反向校准语言面特性优先级（哪类 papercut 真烧 token）。拍板：**对照组 TS only**；**题目从既有 benchmark（HumanEval/MBPP 风格）改编**（防自选偏差，题目分布不由我们控制）。
+> 2026-07-28 竞品复查：TypeScript 7 已正式发布并有生产反馈，本项不再对 beta/旧 `tsc` 做历史对比；对照固定为正式 TypeScript 7 native compiler。目标是证伪或证实「行为签名降低 agent 总成本」，不是证明 Ring 在所有任务都更强。
 
 **形态（MVP）**：
 1. **任务集**：15–25 题（字符串/数据变换/小算法/小 CLI），每题 = 自然语言 spec + 隐藏测试套件 ×（Ring + TS）。改编只替换语言表面（std API 名），不改任务实质。
 2. **Ring primer**（关键产物，独立价值 = 未来所有 LLM 的标准 onboarding 文档）：~1–2K token 语法速查 + std 签名表。harness 喂 primer——「零训练数据 + 签名即够」是命题本身。
-3. **驱动循环**：headless 驱动被测模型——生成 → 编译（Ring 用 `--error-format=llm`；TS 用 tsc）→ 错误喂回 → 重试（上限 N 轮）→ 跑隐藏测试。两语言协议完全相同；每题 ×3 取均值压噪音。
+3. **驱动循环**：headless 驱动被测模型——生成 → 编译（Ring 用 `--error-format=llm`；TS 用正式 TypeScript 7 native CLI，`strict=true`）→ 错误喂回 → 重试（上限 N 轮）→ 跑隐藏测试。两语言协议完全相同；每题 ×3 取均值压噪音。
 4. **指标**：首次编译通过率 / 到绿轮数 / 隐藏测试运行时错误率 / 总 token（design.md §11.3 前四项）。
 5. 被测模型 Sonnet 级（平均 agentic 代表 + 便宜可多跑；顶级模型硬实力会掩盖语言差异）。放 `eval/`，手动触发，不进 CI（烧 token）。
+6. **行为契约子集**：任务集中预注册一组 signature-only/API-use 题；只提供模块签名，不提供实现，覆盖纯函数误用、`io`、`fail<E>`、`mut` 与资源生命周期。TS 题提供语义等价的 `.d.ts`/文档，不额外泄漏答案。该子集直接测量「签名信息密度」，不得事后挑题。
+7. **可复现协议**：锁定并记录模型名/版本、system prompt、temperature、上下文和输出预算、Ring/TS compiler commit/version、TS config、机器环境、每轮完整 prompt/diagnostic/patch、token 与 wall-clock。onboarding primer token 单独报告，不得藏入免费上下文。
+8. **分析纪律**：预先固定主指标、重试上限与失败分类；报告均值同时给出原始样本和离散程度。结果允许为 Ring 无优势或更差，禁止只发布胜例；版本/协议不一致的 run 标 invalid，不与正式结果合并。
 
 **验收标准**：
 - ≥15 题 × 2 语言 × 3 重复跑通，产出指标对比报告
 - Ring primer 成文且被 harness 实际使用
 - 失败案例归类（语法迁移 / 类型 / effect / std API），形成修缮清单回流 backlog
+- 至少 5 题属于预注册的行为契约子集；两语言输入信息量差异逐题可审计
+- 发布可重放 manifest 与逐轮原始记录；报告明确列出 null/负向结果、无效 run 和已知混杂因素
 
 ## 设计验证（Stabilize 前置）
 

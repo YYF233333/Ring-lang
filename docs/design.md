@@ -415,7 +415,7 @@ GADT 的 scoped type equality 是编译期 unification，effect evidence 是运�
 
 ### 1.7 语义规范（后端无关，2026-05-24 确定）
 
-Ring 语言的语义规范。LLVM 是唯一后端（JS 后端已归档，B-100 Phase 2，commit `5df6c99`）。
+Ring 语言的语义规范与后端无关。JS 后端已归档（B-100 Phase 2，commit `5df6c99`）；截至 2026-07-28，LLVM 与 C11 后端处于 B-163 迁移期双轨，LLVM 暂为 native 默认/差分 oracle，C 后端已覆盖单文件、project/module 与 self-host，待 Phase 2 parity gate 闭合后切换。
 
 #### 数值类型（2026-05-25 更新）
 
@@ -1973,9 +1973,11 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 ### 10.4 后端策略
 
-**LLVM 是唯一后端。** JS 后端已归档（B-100 Phase 2，commit `5df6c99`）。dist/ JS 编译产出冻结作 stage 0 回退。
+**当前为 B-163 迁移期双后端。** JS 后端已归档（B-100 Phase 2，commit `5df6c99`），dist/ JS 编译产出冻结作 stage 0 回退。C11 后端 Phase 1 steps 1–9 已完成，支持单文件、project/module 与 self-host；Phase 2 parity 认证完成前，LLVM 后端继续作为 native 默认、bootstrap anchor 与差分 oracle。既定终态是切换到 C 源码发射并归档 LLVM-C 后端，具体 gate 以 `docs/plan-c-backend.md` 为准。
 
-**LLVM 后端**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。codegen 用 Ring 编写、调用 LLVM-C API。Bootstrap 阶段经 N-API addon（`compiler/llvm-addon/`，不入仓库）；自举后直接 C ABI。**值表示**：uniform boxing（`ptr`），Int/Bool 用低位 tagged pointer（B-080，codegen inline shl/or/ashr）。Float 留 boxed。**Runtime**：`ring_runtime.cpp`（~3600 行 C++ STL wrapper），`extern "C"` 暴露；**RIIR 已拍定全部自己实现**（B-125 unsafe 原语后立项）。最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 §7.12。**fail/catch**：`setjmp`/`longjmp`；**tail-resumptive effect**：evidence passing（hybrid，详见 backlog B-090）。多文件编成单 Module/单 .o（增量编译 → B-105 deferred）。LLVM O2 管线已接入（B-126）。
+**C11 后端**：codegen 用 Ring 编写，发射 C11 后调用 clang；与 LLVM 后端共享前端、HIR、Perceus 与 runtime ABI。当前迁移状态与 parity matrix 见 B-163。
+
+**LLVM 后端（迁移期 anchor/oracle）**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。codegen 用 Ring 编写、调用 LLVM-C API。Bootstrap 阶段经 N-API addon（`compiler/llvm-addon/`，不入仓库）；自举后直接 C ABI。**值表示**：uniform boxing（`ptr`），Int/Bool 用低位 tagged pointer（B-080，codegen inline shl/or/ashr）。Float 留 boxed。**Runtime**：`ring_runtime.cpp`（约 3200 行 C++ STL wrapper），`extern "C"` 暴露；**RIIR 已拍定全部自己实现**。最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 §7.12。**fail/catch**：`setjmp`/`longjmp`；**tail-resumptive effect**：evidence passing（hybrid，详见 backlog B-090）。
 
 ### 10.5 FFI 设计
 
@@ -2075,7 +2077,11 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 详细分析见 [`docs/competitive-analysis.md`](competitive-analysis.md)。核心结论：
 
-**Ring-lang 的独特组合（完整代数效果 + HM 推断 + LLM 友好性）仍无直接竞品。** 最接近的三个方向各有缺失：Zero 有工具链但无效果系统，MoonBit 有成熟度但只追踪错误，Mog 有极简规范但无高级类型。
+截至 2026-07-28，尚未发现一个项目**同时交付** Ring 的完整默认路径：面向应用开发的低标注表面 + HM 类型/effect inference + `io/fail/mut` 行为签名 + tail-resumptive/abort handler + Perceus RC/native/自举 + 可测量的 agent 闭环。这里的差异是**组合与默认体验**，不是任何单项机制无人实现；也不能用搜索空集证明「无竞品」。
+
+最近邻必须按不同轴描述：Koka/Flix/Effekt 是 effect 与 handler 机制近邻，Unison 是 abilities + semantic codebase 近邻，MoonBit 是应用语言产品与实验性验证近邻，Zero 是 graph-native agent workflow 近邻，Verus 是权限/SMT/AI proof 近邻；TypeScript 7、Python 与 Rust 则构成强大的「够用就行」替代。Ring 对外定位因此收窄为：**把可推断的行为契约、确定性资源语义和 agent 验证闭环放在同一条 application-native 默认路径上，并用 B-111 的可复现实验证明收益。**
+
+当前已发货边界也必须诚实陈述：`io/fail/mut` 与有限 handler 已有，async 尚未实现，full AE 不计划实现，refinement 仍在 B-001，C 后端仍处于 B-163 parity 认证。宣传材料不得把这些计划项写成现状。
 
 ---
 
@@ -2091,7 +2097,7 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 
 ### 14.2 编译目标
 
-LLVM native 是唯一后端（JS 后端已归档，B-100 Phase 2）。当前性能基线：native 自编译 290s（-O2 + B-080 tagged pointer）——主因非标量堆分配 + 零 LLVM 属性标注。
+native 是唯一产品编译目标，codegen 当前为 LLVM/C11 迁移期双轨（JS 后端已归档，B-100 Phase 2）。C11 后端将作为 B-163 完成后的主路径；LLVM 在 parity 认证完成前保留为 anchor/oracle。性能数据必须注明后端、compiler commit、优化级别和机器，旧的单点“native 自编译 290s”不再作为当前基线。
 
 ### 14.3 泛型单态化策略（2026-05-24 决策）
 
@@ -2121,7 +2127,7 @@ LLVM native 是唯一后端（JS 后端已归档，B-100 Phase 2）。当前性�
 
 ### 14.4 关键技术路径
 
-- **LLVM native** 用于桌面/服务端。Koka 编译到 C 再 gcc/clang，Kotlin/Native 直接用 LLVM。已证明可行。
+- **C11 → clang native** 是 B-163 的既定主路径；迁移期 LLVM native 保留为差分 oracle。语义优化必须尽量在 backend-neutral HIR/Perceus 层完成，避免重新把语言语义绑定到某一 codegen。
 - **Perceus 引用计数** 替换 GC。无停顿、确定性析构、函数式代码可就地复用已死对象的内存。语言设计无需修改——Perceus 是编译器优化，用户代码不感知。
 - **Evidence passing** 替换 generator effect handler。同样是编译器优化，用户代码不感知。
 
@@ -2131,9 +2137,9 @@ LLVM native 是唯一后端（JS 后端已归档，B-100 Phase 2）。当前性�
 - **Kotlin**：JVM → LLVM native，与 Swift 性能差距 ~15%
 - **Koka**：已达到 C 的 75-85%，纯研究院项目
 
-### 14.6 双层优化架构（2026-05-28 决策）
+### 14.6 后端中立的双层优化架构（2026-07-28 澄清）
 
-Ring 的静态信息（effect、linearity、refinement、purity）比市面上绝大部分语言都丰富。LLVM 能直接消费其中一部分，但不是全部。优化架构因此分两层：
+Ring 的静态信息（effect、linearity、refinement、purity）必须先在后端中立层消费；LLVM 或 clang 只能继续利用其中可降为标准属性/结构的子集。优化架构因此分两层：
 
 ```
 HIR（完整 type + effect + linearity 信息）
@@ -2146,15 +2152,12 @@ HIR（完整 type + effect + linearity 信息）
   │   └─ Dead effect 消除（handle 掉的 effect → 对应 evidence 代码全删）
   │
   ▼
-LLVM IR（附带 Ring 生成的属性和 metadata）
-  │
-  ├─ LLVM 标准优化 pass（利用前端标注的属性，效果优于 C/C++）
-  │   └─ SROA, GVN, LICM, 向量化, 内联...
-  ▼
-机器码
+后端分流
+  ├─ C11（属性/受控代码形态）→ clang 优化 → 机器码〔既定主路径〕
+  └─ LLVM IR（属性/metadata）→ LLVM pass → 机器码〔迁移期 oracle〕
 ```
 
-**LLVM 能直接消费的 Ring 信息**：
+**LLVM oracle / 未来可选 LLVM target 能直接消费的 Ring 信息**：
 
 | Ring 信息 | LLVM 属性/metadata | 优化器用途 |
 |-----------|-------------------|-----------|
@@ -2175,7 +2178,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 - 纯函数间的可交换性/可并行性（LLVM auto-parallelization 几乎不可用）
 - Linear type 的"恰好消费一次"约束
 
-**Bootstrap 阶段要求**：Ring 自己的 HIR 优化 pass 是远期工作，但 **LLVM 属性标注从第一天就做**——成本极低（每个函数多几行 `LLVMAddAttributeAtIndex` 调用），收益立竿见影（LLVM 标准 pass 因属性存在而做得更好）。具体地：
+**后端映射要求**：下列 LLVM 属性只描述 LLVM lane；C11 主路径必须给出等价的 C attribute、受控代码形态或“无等价表达、已在 HIR 处理”的显式映射，不得因迁移静默丢失语义优化机会。LLVM lane 的直接映射包括：
 - 每个函数检查 effect row：无 effect → `readnone`；只有 fail → 不标 readnone（可能 longjmp）；有 io/mut → 不标
 - 每个参数检查类型：非 Option → `nonnull`
 - 每个函数检查 fail 可能性：不 raise → `nounwind`
@@ -2186,7 +2189,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 
 ## 15. 编译器实现
 
-**自举里程碑（2026-05-21）**：编译器从 TypeScript 完全翻译为 Ring，编译到 JS 运行于 V8。TS 原始实现归档于 git tag `ts-compiler-final`。**现状（2026-06-24）**：44 个 Ring 源文件（~35,600 行）。LLVM native 后端（codegen_llvm* 5 模块）+ Perceus RC pass + 静态 RC verifier 已落地。Native 自举 Level 1 完成（2026-06-16）——B-089 三门全绿（G-a 内存 ✅ / G-b 双 bootstrap 字节一致 ✅ / G-c golden 快照 ✅）。B-100 Phase 2 完成（2026-06-27）——JS 后端归档，LLVM 为唯一后端。
+**自举里程碑（2026-05-21）**：编译器从 TypeScript 完全翻译为 Ring，编译到 JS 运行于 V8。TS 原始实现归档于 git tag `ts-compiler-final`。**现状（2026-07-28）**：LLVM native 后端、Perceus RC pass 与静态 RC verifier 已落地；B-100 Phase 2 已归档 JS 后端。B-163 C 后端 Phase 1 steps 1–9 已完成，C 单文件/project/self-host 与 C 文本固定点已闭合；Phase 2 parity 认证进行中，因此 LLVM 仍是默认/anchor/oracle，尚未切换 dist-c 或恢复 CI bootstrap。
 
 **Koka 作为参考实现**：Effect 推断（`InferEffect.hs`）和 evidence passing（`Evidence.hs`）的算法翻译自 Koka 编译器（MIT 许可）。Perceus 引用计数已翻译其 POPL'21 实现落地（§7.11）。
 

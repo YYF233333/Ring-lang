@@ -1,258 +1,572 @@
 # Ring-lang 竞品与行业定位
 
-> 最后更新：2026-06-11（增量节，深度研究三票对抗验证）；全景基线 2026-05-22。数据来源：官方 GitHub、官网、科技媒体报道。
+> 最后更新：2026-07-28
+>
+> 事实截止：2026-07-28（版本、活跃度与 stars 均为时点数据）
+>
+> 用途：产品定位、路线图取舍、B-001 Refinement Types 与 B-111 LLM eval harness 的证据输入
 
-## 2026-06-11 增量：窗口期评估（深度研究，21 源 / 25 主张三票验证 / 4 否决）
+## 0. 本轮任务记录（已完成）
 
-**窗口期分层判断**：
-- **机制窗口（核心组合）≥ 2-3 个季度**：「全推断代数效果（io/fail/mut 已发货；async 设计定案 B-007 未实现）+ HM 零标注 + Perceus RC native + 自举」截至 2026-06-11 无人在做或宣布。三个最近邻方向各异且均非此路：MoonBit 向**显式标注**移动（反向）、Zero 押**显式 capability + graph-native**（反面）、Mojo 只打类型安全牌（无 effect）。
-- **叙事窗口以月计**：Mojo 26.2（2026-03-19）已官方采用「编译期报错 = 省 LLM token」话术；Zero 被二级报道贴「explicit effects」标签。「签名即 LLM 行为契约」的话语权正被相邻叙事侵占——先发证据（可运行 native + 量化 benchmark）比机制本身更紧迫。
-- **native 已从差异化变入场券**：同一周（2026-06-08）Zero v0.3.0 加实验性 LLVM 后端、MoonBit v0.10.0 加 native 后端。
+**目标**：在 2026-06-11 报告保鲜期到期后，重新核验 Ring-lang 的竞品全景、机制窗口、叙事窗口和「够用就行」替代力量；补齐 Verus / AI proof synthesis 缺口，并清除旧版本、旧 stars、旧路线图和失效判断。
 
-**逐对象事实更新（全部已验证，区分发货/宣称）**：
+**覆盖范围**：
 
-| 对象 | 增量事实 | 对 Ring 威胁 |
-|------|----------|--------------|
-| **MoonBit** | 1.0 **滑期 Q3 2026**（官方 v0.10.0 notes 改口，原 H1）；v0.8.0 **弃用局部 fn effect 推断、改显式标注**（与 Ring 全推断**反向**）；1.0 路线图选 Kotlin 式协程而非代数效果；fd-leak 检查是运行时开关非类型级；Pilot 仍是工具链牌（零类型系统牌） | 机制威胁**下调**（effect 维度反向移动）；工程成熟度威胁维持中 |
-| **Zero** | 动量强劲：25 天 10 版本、4,972 stars、1,057 commits（GitHub API 实测非自报）；v0.3.0 起 **graph-native**（`zero.graph` 语义图是编译器输入，.0 文件仅人类投影，agent 经 `zero query/patch` 对图做 checked edits）+ **实验性 LLVM 后端**；World capability 维持显式传递，无任何 effect 推断演进迹象 | **高**（叙事+动量+Vercel 品牌）；机制是不同的 LLM-first 赌注：「agent 直接操作语义图」vs Ring「签名携带语义」 |
-| **Mojo/Modular** | 26.2（03-19）官方 token-economy 叙事 + agent skills（可装 Claude/Cursor/Codex）+ 750K 行开源 kernel；26.3（05-07）Mojo 1.0 Beta 1；Phase 1 仍明确限 GPU/CPU kernel | 叙事最近邻 + 大厂资源（**中**）；定位不重叠（**低**） |
-| **TypeScript 7** | Beta 2026-04-21（tsgo），官方计划「两个月内」stable（即 ~6 月，RC 先行数周）；截至 06-11 **RC 未发**，可能小幅滑出 6 月；VS 2026 18.6 Insiders 已默认启用 Beta | 「够用就行」主向量，**极高**（不变） |
-| **OpenAI×Astral** | 2026-03-19 收购协议（并入 Codex 团队），**未交割**（待监管）；自述方向 = 开源工具与 Codex 深度整合 | Python「够用就行」最强确认，**高** |
-| **学术** | arXiv 2507.22048：effect handler 用于 LLM 脚本**编排**（OCaml，LLM 调用/IO/并发作为效果）——方向是编排非语言设计；「effect 签名帮 LLM 写代码」**未被学术抢注** | 低；交叉研究已开始出现 |
+1. 直接与相邻语言：MoonBit、Zero、Mojo、Koka、Effekt、Flix、Unison、Rue、Mog；
+2. 主流替代力量：TypeScript 7、Python 工具链、Rust 与 agent 工具集成；
+3. 形式化验证与 agent：Verus、MoonBit `moon prove`、AlphaVerus / AutoVerus / RAG-Verus / KVerus / VeriStruct 等；
+4. Ring 自身对照：当前 C 后端迁移、RIIR、effect、Perceus RC、自举，以及 B-001 / B-111 的真实状态。
 
-**覆盖缺口（验证管线空集 ≠ 确认无动态）**：Koka/Effekt/Flix/Unison/Scala caprese/OCaml effects 的 Q2 动态、4-6 月其他大厂/初创新语言、LLM×强类型语言新 benchmark——下轮定向补查。**报告保鲜期 ~4-6 周，2026 年 7 月中复查**（TS7 stable 随时落地、MoonBit 1.0 定 Q3、Zero 周更 2-3 版）。
+**证据纪律**：
 
-**行动衔接（2026-06-11 Discussion 已立项）**：B-111 eval harness = 叙事武器（Mojo 的 token 话术只有定性说法，Ring 实测「effect 签名省 X% token/轮数」可越级）；B-104/B-089 native 收口 = 入场券；公开发布时机 = native + benchmark 两证据齐后（Zero 案例证明窗口内发布有 25 天 5k stars 级红利）。
+- 时效事实只采用项目官网、官方 GitHub、官方 release notes、论文或会议页面；
+- 明确区分「已发货 / 实验性 / 宣称 / 计划」，不把 roadmap 当产品能力；
+- 无法确认的事实标为未知，不以搜索空集证明不存在；
+- 不把默认语言安全、可选 refinement 和完整功能正确性混成同一级保证；
+- stars 只表示关注度，不表示采用率、成熟度或技术正确性。
 
-## 竞品全景（2026-05-22）
+**已落地**：
 
-| 项目 | 启动 | 当前版本 | 团队 | Stars | 编译器语言 | 自举 | Effect 系统 | AI 集成 |
-|------|------|---------|------|-------|-----------|------|-------------|---------|
-| **Ring-lang** | 5/16（7天） | 自举完成 | 1人+AI | — | Ring（自举） | ✓ | io/fail/mut 已发货；async 设计定案（B-007 未实现） | 编译器反馈+签名信息密度 |
-| **MoonBit** | 2023（3年+） | v0.9.2 | 数十人 | ~4k | OCaml | ✗ | ✗（checked raise） | MoonBit Pilot agent |
-| **Zero** | 5/15（8天） | v0.1.3 | Vercel小组 | ~1.5k | C（1.7MB） | N/A | ✗（World capability） | JSON诊断+修复计划 |
-| **Rue** | 12/2025 | 早期 | 1人+AI | 1.1k | Rust | ✗ | ✗ | ✗ |
-| **Mog** | 3/2026 | 发布后停滞 | Voltropy | — | Rust | ✗ | ✗ | 3200-token规范 |
-
-### Ring-lang 开发速度
-
-- 7 天、1 人 + AI、242 commit、15.5k 行 Ring 代码、348 E2E 测试
-- 自举（31 个 .ring 文件翻译 + 验证）在 **~9 小时**内完成
-- Phase 3 整合（语法修订 + 新特性 + 重构 + 多错误恢复）在 **1 天内**完成
-- 新功能开发周期：agent 约 2 小时交付一个完整特性（含测试），基本零返工
-
-对比参考：Rue 用 ~2 周写了 100k 行 Rust，但无类型推断、无 effect 系统、无自举。Zero 用 ~1 周写了 1.7MB C，但功能仅覆盖基础编译 + 工具链 shell。
+- 本文已改为单一全景基线，并补全 Verus、effect-language 与主流替代力量；
+- `design.md §13` 同步收窄「独特组合」表述；
+- B-001、B-111 的既有排队规格吸收了验证边界与可复现实验要求；
+- 未新建 backlog item：`verify_ptr` 等候选方向尚缺用户确认的优先级，不绕过工作流自行立项。
 
 ---
 
-## MoonBit——最直接的竞品
+## 1. 结论先行
 
-MoonBit（ICSE 2024 论文，2023 启动）由张宏波创建（OCaml 核心贡献者、BuckleScript/ReScript 作者），深圳 IDEA 研究院。v0.9.2（2026-05-12），1.0 计划 H1 2026。编译器为 OCaml 实现（未自举）。
+### 1.1 Ring 仍有差异化，但不能再表述为「无直接竞品」
 
-**重叠度高：**
+截至 2026-07-28，尚未发现一个项目**同时交付**以下组合：
 
-| 特性 | MoonBit | Ring-lang |
-|------|---------|-----------|
-| 类型系统 | ML 系：ADT + 泛型 + trait + 推断 | ML 系：ADT + 泛型 + trait + 推断 |
-| 不可变优先 | 是 | 是 |
-| 编译目标 | WASM + JS + Native（Perceus RC） | JS（bootstrap）+ LLVM native（开发中，编译器自身已编为 native） |
-| AI 友好 | MoonBit Pilot + constrained decoding | 语言设计 + 编译器反馈 + 签名信息密度 |
-| 编译速度 | 极快（号称 9x Rust） | 亚秒级（JS） |
+- 面向应用开发、接近脚本语言的低标注表面；
+- HM 类型推断与 application-facing effect inference；
+- `io` / `fail` / `mut` 的签名可见性和 handler；
+- Perceus 风格确定性 RC、native、自举；
+- 把 agent 可修复诊断和签名信息密度作为产品目标。
 
-**核心差异——Ring-lang 追踪的范围更广：**
+但每个单项都有强先例，部分组合也已出现：
 
-| | MoonBit | Ring-lang |
-|---|---------|-----------|
-| 错误追踪 | `raise`/`suberror`，编译时追踪 | `fail<E>` effect，编译时追踪 |
-| IO 追踪 | 不追踪——签名看不出是否有 IO | `io` effect 签名可见 |
-| 可变性追踪 | 不在类型中追踪 | `mut` effect 签名可见 |
-| 异步追踪 | 不追踪 | `async` effect 签名可见（设计定案 B-007，未实现） |
-| Effect handler | 无 | tail-resumptive + abort（声明/推断/重解释/测试 mock 全链路；full AE 不计划） |
-| Refinement types | 无（用 `proof_ensure` 走形式化验证路线） | 核心特性（类型层表达） |
-| Row polymorphism | 无 | 核心特性 |
+- **Koka / Effekt / Flix**：effect inference、effect polymorphism、handler 与优化；
+- **Unison**：abilities（代数效果）+ 内容寻址代码库 + 语义化编辑/agent 工具；
+- **MoonBit**：ML 风格应用语言 + 完整工具链 + native + 实验性形式化验证；
+- **Zero**：graph-native 程序数据库 + agent checked edits；
+- **Verus**：Rust 上的规范、proof/exec 分层、权限模型、SMT 验证与 AI proof 生态；
+- **TypeScript 7 / Python / Rust**：凭生态、训练语料和工具链形成极强的「已经够好」替代。
 
-一句话：**MoonBit 追踪错误，Ring-lang 追踪一切副作用。** 对 LLM 而言，Ring-lang 的模块签名携带更多信息，LLM 需要更少上下文即可正确使用 API。
+因此，Ring 的可辩护定位不是“发明了无人拥有的单项机制”，而是：
 
-**MoonBit 2026 新动向（需关注）：**
+> **把可推断的行为契约、确定性资源语义和 agent 闭环放在同一条 application-native 默认路径上，并用可复现实验说明它比主流工具链减少了多少上下文、重试和运行时失败。**
 
-1. **形式化验证**（v0.9+）：`proof_ensure` 语法 + `moon prove` 命令。走的是"外部验证工具"路线而非"类型层约束"路线。与 Ring-lang 的 refinement types 形成正面叙事竞争——MoonBit 已发货，Ring-lang 尚在规划。
-2. **MoonBit Pilot**：AI code agent，号称 6 分钟生成完整 TOML parser（vs Cursor 16min / Codex CLI 35min）。自定义 Agent Server Protocol（ASP），支持 Sub-Agent 并发修改。
-3. **Python 互操作**：`moon-agent` 框架批量生成 Python 库绑定。
-4. **其他**：reverse pipeline `<|`、workspace 支持、async v0.17.0、`Debug` trait 替代 `Show`。
+这仍是一个有窗口的组合，但窗口必须靠实现和数据守住，不能靠空集论证。
 
-**诚实评估**：MoonBit 在工程成熟度上全面领先（3 年 + 数十人 + 完整工具链）。但：
-- GitHub compiler 仅 689 stars，社区渗透率有限
-- OCaml 实现未自举，Ring-lang 在"吃自己狗粮"上领先
-- `proof_ensure` 是外挂工具，非类型系统内生——Ring-lang 的 refinement types 在理论整合度上更优
-- MoonBit Pilot 的"更快"叙事基于自报数据，无独立基准验证
+### 1.2 当前威胁排序
 
-注：MoonBit Public License（魔改 SSPL）禁止商业 fork。
+| 层级 | 对象 | 主要威胁 | 结论 |
+|---|---|---|---|
+| **极高** | TypeScript 7 | 主流替代、native 工具链速度、编辑器与训练数据 | 已从 beta 风险变成正式发货事实 |
+| **高** | MoonBit | 最接近的应用语言产品、团队与工具链、`moon prove` | 工程威胁上调，effect 机制仍不同 |
+| **高** | Python + Astral/Codex | agent 生态与低摩擦「够用」路径 | 语言保证弱，但采用阻力最低 |
+| **高** | Zero | agent-first 叙事、语义图与 checked edits | 机制是另一条路线，叙事竞争直接 |
+| **中高** | Rust + Verus | 安全基线、证明能力、训练数据、系统生态 | Ring 的安全/验证措辞必须分层且可证 |
+| **中** | Flix / Koka / Effekt / Unison | effect 与语义工具机制先例 | 市场替代低，技术与叙事纠偏价值高 |
+| **中** | Mojo | 大厂资源、AI compute、agent skills | 资源/叙事强，应用语言定位重叠有限 |
+| **中** | Rue | 一人 + agent 的编译器工程速度与纪律 | 非直接产品竞品，是执行力基准 |
+| **低** | Mog | 小规范、嵌入式 capability 模型 | 活跃度低，保留为规格压缩启发 |
 
----
+### 1.3 三个最重要的路线图含义
 
-## Zero（Vercel Labs, 2026-05-15）——agent-first 系统语言
-
-Zero（zerolang.ai）由 Vercel 工程师 Chris Tate 创建，**2026-05-15 发布**（与 Ring-lang 同周启动）。v0.1.3，Apache-2.0，~1,500 stars（首日 ~900）。
-
-**编译器架构**：100% C 实现（12 个源文件，~1.7MB），直接手写 x86-64/ARM64 机器码 + ELF/Mach-O/COFF 构造。无 LLVM、无 QBE。Runtime 以 C 字符串数组嵌入二进制。
-
-**Zero vs Ring-lang 对比：**
-
-| 维度 | Zero | Ring-lang |
-|------|------|-----------|
-| 切入点 | **工具链** — JSON 诊断、修复计划、machine-readable 一切 | **语言** — effect 系统、严格编译器、最小语法面 |
-| 类型系统 | 中等：泛型 + interface + choice | 激进：HM 推断 + effect + row poly |
-| 副作用追踪 | `World` capability，仅区分有IO/无IO | 完整代数效果系统（4种 effect 独立追踪） |
-| 所有权 | `owned<T>`/`ref<T>`/`mutref<T>` + borrow check | Perceus RC + ownership 推断（无 borrow checker、无 GC），零标注负担 |
-| 编译目标 | 原生二进制（手写 emitter） | JS（bootstrap）→ LLVM native（开发中） |
-| 错误处理 | `raises { ErrorName }` + `check`/`rescue` | `fail<E>` effect + catch + handler |
-
-**Zero 的工具链亮点（Ring-lang 应借鉴）：**
-- `zero check --json`：stable error code + typed repair object
-- `zero fix --plan --json`：machine-readable 修复步骤
-- `zero explain <code>`：版本匹配的错误解释
-- `zero graph --json`：依赖拓扑
-- `zero skills get zero --full`：agent 引导指南
-
-**评估**：
-- Zero 和 Ring-lang 同龄同阶段，但 Vercel 品牌带来 1,500 stars + 大量媒体曝光（TechTimes/HackerNoon/The Stack/MarkTechPost）
-- Ring-lang 类型系统维度远超 Zero——Zero 无 HM 推断、无 effect 系统、无 row poly
-- Borrow checker 不成熟，社区评价褒贬不一（"LLM 已经能处理 Rust/Go 的错误了"）
-- 两者定位不直接冲突：Zero 是系统语言，Ring-lang 是应用语言
-- **真正的竞争在叙事层面**：Zero 有 Vercel 品牌，Ring-lang 有技术深度
+1. **B-111 是立论门，不是营销附件。** TS7 已正式发布，Ring 必须用同协议、同模型、同预算的实验回答“effect 签名是否真的减少 token/轮数/运行时错误”。
+2. **B-001 应做 bounded refinement，不应复制 Verus。** 普通 Ring 代码继续依靠默认类型/effect/资源检查；refinement 先限定可判定片段、机器整数语义和运行时兜底，再谈通用 SMT。
+3. **形式化验证必须显式管理信任。** Verus 与 `moon prove` 都说明“证明成功”不等于“无假设”：solver、整数模型、axiom/external spec、编译器和 runtime 都属于保证边界。
 
 ---
 
-## Mog（Voltropy, 2026-03）——嵌入式 agent 语言
+## 2. 相比 2026-06-11 的决策变化
 
-定位"静态类型的 Lua"。MIT 许可。2026-03-09 Show HN 发布后无更新。
-
-**核心卖点：完整语言规范仅 3,200 tokens。** 用 Voltropy 自研"Volt" coding agent 构建。无泛型、无宏、无线程。编译到 native（via Rust）。Capability 沙箱安全模型。
-
-| 维度 | Mog | Ring-lang |
-|------|-----|-----------|
-| 定位 | 嵌入式脚本 | 通用应用语言 |
-| 规范大小 | ~3,200 tokens | 远大于此 |
-| 安全模型 | Capability 沙箱 | Effect 系统编译时追踪 |
-| 类型系统 | 基础静态类型 | HM + effect + row poly |
-
-**启发**："规范塞进上下文窗口"是强力叙事角度。
+| 旧判断 | 2026-07-28 新证据 | 处置 |
+|---|---|---|
+| TypeScript 7 仍是 beta，stable 可能滑期 | TypeScript 7.0 已于 2026-07-08 正式发布；官方报告典型完整构建提升 8–12×，并给出 Slack、Vanta、Canva 等生产案例 | **上调**：从潜在风险改为已验证的极高替代威胁 |
+| MoonBit v0.9.2，formal verification 仅一条动态 | 已到 v0.10.4；`moon prove` 文档公开 Why3 + Z3/cvc5/Alt-Ergo 管线、contracts、invariant、termination 与 axiomatization；仍明确为 experimental | **上调工程与验证威胁**，同时记录整数溢出模型与受支持子集限制 |
+| Zero 处于首发爆发期 | v0.3.4 后 graph patching 成为主要 agent 编辑循环；6 月底后公开提交节奏较首发期降温 | **维持高叙事威胁、下调短期动量判断** |
+| Rue 2026-03 后无显著更新 | 2026-07-28 仍有提交；官网 2026-07-22 快照报告 779/779 规范规则可追踪、1,950 个 spec tests，并覆盖 x86-64/arm64/macOS | **撤回“停滞”**，改列 agent 编译器工程基准 |
+| Koka/Effekt/Flix/Unison 是待补空白 | 四者均活跃；Effekt 2026-07-27 发 v0.74.0，Flix 2026-07-09 发 v0.75.1，Unison 已到 1.3.0，Koka 2026-07-28 仍有修复 | **撤回空白结论**，纳入 effect/semantic 主比较轴 |
+| Verus 仅以 AlphaVerus 一行出现 | Verus 每周滚动发布、公开完整 verifier 管线与 TCB；SOSP 系统案例、VerusBelt soundness 工作及多个 AI proving 项目形成生态 | **新增独立赛道**：不是直接产品竞品，是验证架构与 agent proof 的首要参照 |
+| “完整代数效果 + HM + LLM 友好无直接竞品” | Flix/Koka/Effekt 覆盖 effect 机制，Unison 覆盖 abilities + semantic codebase，Zero 覆盖 graph-native agent edits | **收窄**为“尚无项目交付 Ring 的完整默认路径组合” |
+| OpenAI 已收购 Astral | OpenAI 与 Astral 官方页面仍表述为已签协议/拟加入，未找到官方交割公告 | **纠正措辞**：只写“收购协议”，不写“已完成并购” |
 
 ---
 
-## Rue（Steve Klabnik, 2025-12）——简化版 Rust
+## 3. 比较框架：不要把不同保证混在一起
 
-Steve Klabnik（Rust 核心团队）用 Claude 在 ~2 周内完成。~100k 行 Rust，700+ commit，1,100 stars，4 contributors。
+### 3.1 保证阶梯
 
-编译到 native（自定义 backend，非 LLVM）。基础控制流、enum、pattern matching、borrow/inout 已工作。无 LSP、无包管理、无并发。Klabnik 明确表示是个人探索，不追求采用。
+| 层级 | 保证 | 代表 | Ring 对应状态 |
+|---|---|---|---|
+| G0 | 语法、格式化、结构化诊断与可修复编辑 | Zero checked patch、LSP/MCP 工具 | `--error-format=llm` 等 agent 面已有基础，仍缺可量化证据 |
+| G1 | 默认类型/效果/所有权或资源安全 | Rust、Flix/Koka effects、MoonBit 类型系统 | `io/fail/mut`、HM/trait、Perceus RC 与 verifier 已有；完整 Rust 级安全措辞仍需逐项证据 |
+| G2 | 有界值级性质，编译期证明 + 明示运行时兜底 | Liquid-style refinement | B-001 规划中，尚未发货 |
+| G3 | 用户规范下的功能正确性证明 | Verus、实验性 `moon prove` | 非 Ring 当前默认目标；只借鉴可组合的 verification lane |
 
-2026-03 后无显著更新。
+G1 和 G3 解决的问题不同。Verus 的证明能力更强，但要求规范、lemma、trigger/invariant 与显式权限；Ring 的目标是让普通应用代码在 G1 路径保持低标注，再为局部高价值性质增加 G2。
 
----
+### 3.2 威胁维度
 
-## 其他 agent-first 项目
+- **产品替代**：用户今天能否直接选择它完成同类工作；
+- **机制重叠**：是否已经实现 Ring 的核心技术；
+- **agent 叙事**：是否占据“为 AI 编程而生”的心智；
+- **证据强度**：是否有公开基准、论文、生产案例或 soundness 边界；
+- **执行速度**：团队能否在 Ring 窗口内追平组合。
 
-- **Pel**（2025, arXiv 2505.13453）：Lisp 风格 agent 编排语言，内置 NL 条件由 LLM 评估，Common Lisp 风格 restarts
-- **Quasar**（2026, arXiv 2506.12202）：LLM 代码动作语言，自动并行化 + 不确定性量化
-- **Dana**（Aitomatic / AI Alliance, 2025）：agent 编排语言，企业定位
-- **Darklang-GPT**（Paul Biggar）：转向"AI 是唯一的代码编写者"
-- **PACT**：概念级 LLM 友好语言，编译到 Rust
-
-**Ring-lang 的独特组合（完整代数效果 + HM 推断 + 自举 + LLM 友好性）仍无直接竞品。**
-
----
-
-## "够用就行"威胁——现有语言的 AI 适配
-
-| 力量 | 做什么 | 威胁等级 | 最新状态 |
-|------|--------|---------|---------|
-| **TypeScript 7 / Project Corsa** | Go 重写 TS 编译器，10x 加速 | **极高** | Beta 2026-04-21，stable 预计 6-7月 |
-| **Constrained decoding** | 限制 LLM token 采样，保证输出符合语法 | 高 | 持续进展 |
-| **OpenAI 收购 Astral** | Ruff + uv + ty 集成 Codex，Python "够用"上限拉高 | 高 | 持续推进 |
-| **LSP 桥接** | 任意语言的 LSP 包装为 MCP/agent 接口 | 中 | 生态成熟中 |
-| **Spec-driven 开发** | 结构化意图层补偿语言弱点 | 中 | 行业趋势 |
-
-**TypeScript 7 是最大的"够用就行"威胁**：10x 编译加速 + 更好的 AI 工具集成会大幅提升"为什么不用 TS"的论点。
-
-**Ring-lang 的反论**：工具层补丁无法改变签名信息密度、副作用 bug 捕获、业务规则编码深度。TS 7 快 10x 仍然是"快速检查不完整的类型"。
+stars 和发布频率只辅助判断后两项，不直接证明产品质量。
 
 ---
 
-## 学术验证
+## 4. 全景矩阵
 
-- **LMPL 2025**：代数效果分离 LLM 工作流副作用，验证 effect 系统赌注
-- **TypePilot**（EPFL）：高级类型系统是 AI 代码正确性的乘数
-- **SimPy**（ISSTA 2024）：为 AI 优化语法有实际收益
-- **AlphaVerus**：LLM 生成形式化验证代码
-- **Kleppmann "Vericoding"**：AI 将使形式化验证主流化
-
----
-
-## Koka——最近的学术对标（2026-05-23 新增）
-
-Koka（Daan Leijen，Microsoft Research）是 Ring effect system 的直接理论来源。编译器代码参考 Koka 的 Haskell 实现翻译。
-
-**核心重叠**：代数 effect system、evidence passing、effect 推断、Perceus RC（Ring 计划中）、ML 风类型系统。
-
-**Ring vs Koka 差异化**：
-
-| 维度 | Koka | Ring | 差异强度 |
-|------|------|------|---------|
-| Effect 完整度 | Full AE（multi-shot continuation） | Tail-resumptive + abort | Ring 是子集 |
-| Mutation 追踪 | state effect（有 handler，有运行时成本） | mut\<T\> marker effect（零成本编译期追踪） | **设计创新** |
-| OOP 手感 | 纯函数式 | struct + impl + trait | 中 |
-| Refinement types | 无 | 核心特性（计划） | **品类差异** |
-| 编译优化 | C backend，无 JIT | LLVM AOT + JIT 愿景，语义驱动优化 | **架构差异** |
-| LLM 友好 | 无此设计目标 | 核心设计目标 | 中 |
-| 自举 | Haskell 实现 | Ring 自举 | 中 |
-
-**诚实评估**：Ring 的 effect system 源于 Koka，但定位完全不同。Koka 是学术研究语言（纯函数式，无 OOP 手感），Ring 是面向工程的应用语言（Rust 语法 + ML 推断 + Koka effects）。核心差异化不在 effect 系统本身，而在三支柱的组合——推断一切（零标注）+ 追踪一切（签名即契约）+ 语义驱动性能（LLVM + 类型信息驱动优化）。Refinement types 是实验赌注（Z3 集成编译器路径未经充分验证），成了是品类创新，不成前三支柱自洽。
+| 项目 | 2026-07-28 状态 | 已发货核心 | Agent 路线 | 保证层 | 对 Ring 的关系 |
+|---|---|---|---|---|---|
+| **Ring** | 自举；C 后端迁移 Phase 2 进行中，LLVM 仍为 anchor/oracle；RIIR 后续暂停等待 | HM + trait、`io/fail/mut`、tail-resumptive/abort handler、Perceus RC、native | 诊断 + 高信息签名；B-111 待测 | G1（部分目标仍在收口） | 被比较对象 |
+| **TypeScript 7** | 2026-07-08 正式发布 | Go native 编译器、LSP、`strict` 默认、并行检查 | 海量训练数据 + 编辑器/agent 生态 | G1 的结构类型子集 | 最大主流替代 |
+| **Python + Astral** | Ruff/uv/ty 持续发展；OpenAI 收购协议未确认交割 | 极低摩擦生态与高速工具链 | Codex/agent 原生使用场景 | G0–G1（依工具） | 最大低阻力替代 |
+| **Rust** | 成熟系统生态 | ownership/borrow、trait、unsafe 隔离、native | 高训练覆盖 + LSP/agent 工具 | 强 G1 | 安全基线与底层替代 |
+| **MoonBit** | v0.10.4；1.0 目标 Q3 2026 | ML 风类型、Wasm/JS/C/native、LSP、包管理、Pilot | 专用 coding agent 与工具链 | G1；`moon prove` 为实验性 G3 | 最接近产品竞品 |
+| **Zero** | v0.3.4；约 5.2k stars | semantic graph、query/patch、World capability、实验性 LLVM | agent 直接操作程序图 | G0–G1 | 最直接 agent 叙事竞品 |
+| **Mojo** | 1.0 Beta 2；Modular 主仓约 26.6k stars | Pythonic syntax、linear types、compile-time reflection、AI compute | 官方 agent skills | G1 | 资源/叙事强，定位偏 AI compute |
+| **Koka** | v3.2.3；活跃研究语言 | effect inference/handlers、evidence passing、Perceus、C backend | 非主要目标 | G1 | Ring 最接近理论与实现来源 |
+| **Flix** | v0.75.1；活跃 | effect polymorphism、subeffecting/exclusion、handlers、purity-driven optimization | 官方已直接研究 LLM 对新语言的影响 | G1 | 被旧报告低估的机制近邻 |
+| **Effekt** | v0.74.0（2026-07-27） | algebraic effects、contextual effect polymorphism、capabilities/resources | 非主要目标 | G1 | 活跃的 effect 实验场 |
+| **Unison** | 1.3.0；已过 1.0 | abilities、content-addressed codebase、语义重构、分布式能力 | MCP/agent 工具持续增加 | G1 | “效果 + 语义程序库”最强先例 |
+| **Verus** | 每周滚动发布；约 2.8k stars | Rust 子集、spec/proof/exec、ghost erasure、SMT、权限模型 | 多个 proof synthesis/repair 项目 | G3 | 形式化验证首要参照，非应用语言直接替代 |
+| **Rue** | 活跃；约 1.1k stars、1,942 commits | affine ownership、native、自研 IR、spec/test/fuzz/sanitizer | 主要由 Claude 协助构建 | G1 目标，仍实验性 | 一人+agent 工程基准 |
+| **Mog** | 2026-03 后未见新提交；约 139 stars | 3,200-token spec、host capabilities、native | 为 agent 使用而压缩规范 | G0–G1 | 小型规格/嵌入式启发 |
 
 ---
 
-## 战略判断（2026-05-23 更新）
+## 5. 主流「够用就行」替代
 
-### Ring-lang 的核心定位（2026-05-24 更新）
+### 5.1 TypeScript 7：威胁已从计划变为现实
 
-**Rust 的安全性 + Python 的书写体验 + 效果系统让编译器知道一切，然后用这些信息优化性能。**
+TypeScript 7.0 已在 2026-07-08 正式发布，不应再称为 tsgo beta。官方数据包括：
 
-**三支柱**：
+- Go native port 对典型完整构建带来约 8–12× 提升；
+- 新 LSP 相对 TypeScript 6 显著降低失败命令和 crash；
+- Slack 报告 CI 从 7.5 分钟降到 1.25 分钟，Canva 报告首次错误从 58 秒降到 4.8 秒；
+- 7.0 默认启用 `strict`，支持稳定类型排序与并行检查；
+- 7.0 暂无旧式 programmatic API，Vue/MDX/Astro/Svelte 及部分 Angular 嵌入式流程仍可能需要 TypeScript 6；官方提供 `@typescript/typescript6` 并行安装路径。
 
-1. **推断一切**：类型 + effect + 可变性 + 所有权，全推断。写起来像 Python，安全性像 Rust。Rust 的标注负担（lifetime、turbofish、trait bound）由编译器承担，不由人承担
-2. **追踪一切**：签名即完整行为契约（io/fail/mut/async）。LLM 和人都能从签名读出全部副作用。模块签名信息密度最大化，LLM 只需签名即可正确使用 API
-3. **语义驱动性能**：LLVM 后端 + effect purity / linearity 信息直接转化为编译优化——bounds check 消除、RC 省略、纯函数重排/并行化。前两个支柱产生的类型信息是优化燃料
+这意味着 Ring 不能再用“编译器更快”作为充分差异。TS7 的优势是：
 
-**实验赌注**：Refinement types（Z3 集成编译器，类型层值级谓词）。成了在第三支柱上再加一层（refinement proof → 消除运行时检查，消灭 `unsafe`），不成前三支柱自洽
+- 训练数据、npm、编辑器与 agent 工具几乎无迁移成本；
+- 反馈时延已经低到足以支撑快速 agent loop；
+- 类型系统虽不追踪完整副作用，但能满足大量 Web/CLI/服务端任务。
 
-**已领先的维度**：
-- 类型系统理论深度（完整 effect + row poly，所有竞品都没有）
-- 自举（MoonBit 用 OCaml，Zero 用 C，Rue 用 Rust——只有 Ring-lang 吃自己狗粮）
-- 人效比（7 天 1 人 vs MoonBit 3 年数十人）
+Ring 的可证伪反论必须交给 B-111：在同模型、同任务、同预算下，行为签名是否减少总 token、修复轮数和隐藏测试失败，而不是比较宣传语。
 
-**落后但可追的维度**：
-- LSP（等 Phase C 层 1+2 稳定后启动）
-- 包管理（可延后）
-- 公众可见度（Zero 同龄但 1.5k stars，需要公开发布）
+### 5.2 Python + Astral/Codex：采用阻力最低
 
-**不应追的维度**：
-- 包生态——需要用户基数
-- MoonBit 的 3 年工程打磨——时间不可压缩
+Python 的核心优势不是静态保证，而是：
 
-### 里程碑（2026-06-12 更新；当前状态以 CLAUDE.md 路线图为准）
+- 模型训练覆盖广、库生态大、生成成功先验高；
+- Ruff、uv、ty 等工具持续压低 lint、环境与类型反馈成本；
+- OpenAI 2026-03-19 宣布与 Astral 签署收购协议，并明确工具与 Codex 的协同方向。
 
-| 里程碑 | 状态 | 备注 |
-|--------|------|------|
-| Phase 3（语法修订 + 多错误恢复） | ✅ 完成 | 1 天 |
-| 自举（TS → Ring） | ✅ 完成 | ~9 小时 |
-| Phase B（mut\<S\> + 模块完善） | ✅ 完成 | 2 天 |
-| Phase C 层 1+2（effect alias / supertrait / mut\<T\> / default handler / delegate / 关联类型 / Iterator） | ✅ 完成 | — |
-| LLVM 基础后端（前端自举打通、自编译字节级一致） | ✅ 完成 | 2026-06-01 |
-| Perceus RC（L1 引擎 + total drop pass + 静态 leak verifier） | ✅ 完成 | B-104 全交付（2026-06-13） |
-| Native 自举三门（B-089） | ✅ 完成 | Level 1 三门全绿（2026-06-16） |
-| Refinement types | 实验赌注 | Z3 集成路径未验证（B-001） |
+截至本报告日期，OpenAI 和 Astral 官方页面仍使用“拟收购/已签协议/将加入”措辞，本文不把交易写成已完成。
 
-### "死亡螺旋"风险
+Ring 面对 Python 时应强调“失真必须响”的默认保证和可枚举行为契约，而不是只强调语法简短；Python 在简短与生态上几乎不可正面击败。
 
-新语言训练数据少 → LLM 写得差 → 没人用 → 训练数据更少。
+### 5.3 Rust：安全基线，也是 Verus 的生态地基
 
-Ring-lang 的独特缓解：**模块签名自描述**。Effect 系统让模块的完整行为契约压缩在签名中，LLM 只需签名即可正确使用 API——不依赖训练数据。
+Rust 已把 ownership、unsafe 隔离、native 性能和成熟工具链变成用户基线。Verus 进一步证明：在 Rust 语义与生态上叠加规范和 SMT，可以覆盖高保证系统。
+
+对 Ring 的约束：
+
+- “Rust 的安全性 + Python 的体验”只能作为目标简写，正式材料必须列出已经保证、正在收口和明确不保证的边界；
+- Ring 的零 lifetime 标注与 RC 路线是易用性差异，不自动等于更强安全；
+- agent 对 Rust 的训练覆盖和工具支持会持续削弱“新语言更适合 agent”的先验，B-111 必须覆盖 onboarding 成本。
+
+---
+
+## 6. 最接近的产品与叙事竞品
+
+### 6.1 MoonBit：最接近的应用语言产品
+
+MoonBit 当前比 Ring 成熟得多：多后端、包管理、LSP、文档与专用 agent 已形成产品面。v0.10.4 的关键状态：
+
+- native backend 已扩展到 x86-64 Linux 与 Windows nightly；Apple Silicon debug 默认 native，release 仍可走 C `-O2`；
+- native LSP 默认启用，async 与 Wasm async 持续迭代；
+- 通过显式 `extend Type with Trait` 收紧隐式方法附着，体现其对可重构性的重视；
+- 1.0 目标为 2026 Q3，但官方保留依据测试结果调整的空间。
+
+#### `moon prove` 的真实能力与边界
+
+`moon prove` 不是一句 roadmap：
+
+- `.mbt` 中写可执行代码与 contract，`.mbtp` 中写 predicate、model 和 lemma；
+- 支持 `proof_require`、`proof_ensure`、`proof_assert`、循环 invariant、termination decrease、pure/axiomatized 标记；
+- proof-enabled package 降到 Why3，再调用 Z3、cvc5 或 Alt-Ergo；
+- 官方仍明确标为 experimental；
+- 当前整数验证模型是无界数学整数，**不模拟运行时机器整数溢出**；
+- 局部 mutation 与 escaping `FixedArray` 等仍有限制，验证代码更偏函数式；
+- `proof_axiomatized` 等入口进入信任边界。
+
+这使 MoonBit 同时成为产品与 verification-adjacent 竞品。Ring 不能再声称 refinement 在理论整合上天然胜出；B-001 必须通过更清晰的机器整数语义、可判定性和默认低负担证明其取舍。
+
+#### 与 Ring 的关键差异
+
+| 维度 | MoonBit | Ring |
+|---|---|---|
+| 普通函数 effect | 局部函数倾向显式 effect 声明；错误/async 有专门机制 | `io/fail/mut` 默认推断并进入签名 |
+| Handler | 非 application-facing 核心卖点 | tail-resumptive + abort 已发货 |
+| 资源 | 多后端与 runtime 路线并行 | Perceus RC + RIIR，确定性资源语义是公理 |
+| 验证 | 独立 experimental `moon prove` lane | bounded refinement 规划中，尚未发货 |
+| Agent | MoonBit Pilot + 完整工具链 | 编译器诊断/签名路线，B-111 尚待实证 |
+
+结论：**工程与采用威胁高，effect 机制不是同一路线，验证叙事已正面相遇。**
+
+### 6.2 Zero：semantic graph 是另一种 agent-first 赌注
+
+Zero 的核心不是“更强类型”，而是把 semantic graph 作为程序数据库：
+
+- `.0` 文本是面向人的 projection，语义图才是编译器/工具的稳定对象；
+- agent 用 `zero query` 获取结构，用 `zero patch` 提交 checked edits；
+- graph hash 让过期 patch fail closed；
+- v0.3.4 已把 graph patching 推为主要 agent 编辑循环；
+- `World` 是显式 capability，不是 Ring 式 effect inference；
+- native/LLVM 仍有实验性部分，项目整体也明确处于早期阶段。
+
+Zero 约 5.2k stars，首发传播证明 agent-first 叙事有强需求；但 6 月底后公开提交节奏较首发期放缓，不能把早期指数增长外推。
+
+对 Ring 的启发不是复制 graph-native 存储，而是：
+
+- 给 agent 稳定 identity、结构化 query、可验证 patch 与 stale guard；
+- 明确文本签名路线何时比语义图足够，何时需要更强结构化接口；
+- 把 agent protocol 作为可测试产品面，而非诊断 JSON 的附属品。
+
+### 6.3 Mojo：资源与叙事强，主战场不同
+
+Mojo 最新稳定通道为 1.0 Beta 2，Modular 主仓约 26.6k stars。已发货/公开方向包括：
+
+- Pythonic 表面、typed errors、linear types、compile-time reflection；
+- CPU/GPU/AI kernel 与模型服务的深度整合；
+- 官方 agent skills 与“更早编译期反馈降低 agent 成本”的叙事。
+
+Mojo 编译器本身的开放范围仍需区分于 Modular 主仓中的开源组件。它没有把通用 algebraic effects/handlers 作为应用语言核心。因此对 Ring 是**资源与心智竞争**，不是 effect 机制的直接替代。
+
+---
+
+## 7. Effect 与语义程序表示赛道
+
+### 7.1 Koka：最接近的理论与实现来源
+
+Koka v3.2.3，2026-07-28 仍有维护提交。它已经证明：
+
+- polymorphic type/effect inference 与 algebraic handlers 可工程实现；
+- evidence passing 可把 handlers 降为高效直接代码；
+- Perceus 可把精确 RC 与 reuse analysis 结合；
+- C backend 能承载这些语义。
+
+Koka 是研究语言，生态、async library、包管理与 production support 不是其强项。它对 Ring 的意义是“核心算法并非空白创新”，也是 correctness 风险提醒：近期仍出现 Perceus 相关 UAF 修复，静态资源 pass 必须有 verifier 和回归门。
+
+Ring 的差异在 application-facing 语法、有限 handler 语义、`mut` 可见性、自举、agent 诊断与产品目标，而不在“拥有 effects/Perceus”本身。
+
+### 7.2 Flix：被旧报告低估的直接机制近邻
+
+Flix v0.75.1，项目保持活跃。其 effect system 已覆盖：
+
+- effect polymorphism、subeffecting、effect exclusion；
+- primitive/algebraic/heap effects 与 handlers；
+- purity reflection 和 associated effects；
+- 用 purity 信息驱动自动并行化、dead-code elimination 与 inlining。
+
+Flix 官方还直接讨论并实验 LLM 对新语言和 effect 代码的影响。这意味着“effect 签名帮助 LLM”并非 Ring 独占的话语空间，Ring 必须更快产出可复现实验和 application-native 体验。
+
+Flix 偏函数式/JVM 与研究型生态，市场替代威胁有限；机制与 AI 论证威胁为中高。
+
+### 7.3 Effekt：活跃的 capability/effect 实验场
+
+Effekt v0.74.0 于 2026-07-27 发布，近期版本密集。核心包括：
+
+- algebraic effects/handlers；
+- contextual effect polymorphism；
+- capability 与 resource 表达；
+- JS 等后端及持续推进的 C FFI。
+
+Effekt 是研究语言，但其活跃度说明 handler/capability 设计仍在快速迭代。Ring 应持续把 handler 子集的取舍写清：当前只做 tail-resumptive + abort，full AE 不在计划中；“完整代数效果”已不再是准确措辞。
+
+### 7.4 Unison：effects + semantic codebase 的最强先例
+
+Unison 已发布 1.0，当前 1.3.0；官方 1.0 数据显示已有数千项目作者和十万级发布定义/下载。它把：
+
+- algebraic effects（abilities）与 handlers；
+- 内容寻址的 codebase；
+- 基于 identity 的 rename/refactor；
+- 分布式计算模型；
+- MCP/agent 工具
+
+放在同一产品中。
+
+Unison 的函数式、分布式与 codebase-as-database 产品模型和 Ring 不同，但它反驳了“effect + 语义程序库 + agent 工具无人组合”的说法。Ring 的区别应落在普通文件/Git 兼容、应用语言手感、effect inference、native 与确定性资源语义。
+
+---
+
+## 8. Verus：形式化验证与 AI proof 的首要参照
+
+### 8.1 它是什么，不是什么
+
+Verus 是在 Rust 子集上增加规范与证明的验证工具链，不是面向一般应用开发的新语言。它处于活跃开发期，README 仍明确提示缺失/损坏特性和不完整文档；同时维持每周滚动发布，并已用于多个真实系统研究。
+
+它对 Ring 的竞争主要发生在“安全/正确性到底能保证到哪一层”的叙事，而不是语法、包生态或普通应用开发。
+
+### 8.2 管线与架构
+
+Verus 的核心管线为：
+
+```text
+Rust source
+  → rustc HIR
+  → VIR-AST
+  → VIR-SST
+  → AIR
+  → SMT-LIB
+  → Z3（cvc5 实验性）
+  → 验证通过
+  → 擦除 spec/proof/ghost
+  → 正常 rustc MIR/LLVM 编译 exec 代码
+```
+
+代码按 `spec`、`proof`、`exec` 分层。验证 IR 与执行 codegen 解耦、ghost 擦除、proof 不进入产物，这些是 B-001 可以直接借鉴的架构原则。
+
+### 8.3 保证、成本与 TCB
+
+Verus 可以验证内存安全和功能正确性，但保证相对于用户规范与信任边界成立：
+
+- `assume`、`external_body`、`external_fn_specification`、`external` 等会引入假设；
+- TCB 包含顶层规范、Verus verifier、SMT solver 与 Rust 编译器；
+- SMT 推理一般不可判定，工程上依赖 trigger、invariant、分解和 resource limit；
+- Verus 不把“只经 Rust typecheck”视为足够：其 raw pointer/权限代码必须实际完成验证。
+
+SOSP 论文的 5 个系统案例合计约 6.1K 行实现代码和 31K 行证明代码，说明它能处理真实低层系统，也说明完整证明仍有显著规格/lemma 成本。论文报告的速度优势是相对其他验证系统，不等于普通编程零成本。
+
+### 8.4 权限模型对 Ring 的启发
+
+Verus `vstd::raw_ptr` 用 `PointsTo`、`PointsToRaw`、`Dealloc` 等 ghost permissions 描述地址、provenance、metadata、初始化状态与释放权。这比“裸指针在 unsafe 块里所以没问题”强得多。
+
+对 Ring 的可用映射：
+
+- 当前 `unsafe` effect + `Ptr<T>` 保留显式 discharge 和 `ring audit unsafe` 审计面；
+- RIIR 稳定后，可研究**可选**的 pointer permission verifier，把常见 raw pointer 义务静态化；
+- 该方向尚未确认优先级，本轮不擅自创建 backlog item；
+- 即使未来实现，也应是局部 verification lane，不把所有普通 Ring 代码变成 Verus 风格 proof engineering。
+
+### 8.5 VerusBelt：soundness 证据也有边界
+
+PLDI 2026 VerusBelt 给出了 Verus 重要子集的首个语义 soundness 证明，覆盖 proof-oriented types、lifetime/borrow/concurrency 等关键机制。其边界同样重要：
+
+- 证明针对形式化模型中的重要子集，不是对整个 Verus 实现二进制的验证；
+- 部分常用库按 axiomatized 方式建模；
+- 编译器、solver 与规范仍属于整体信任链。
+
+对 Ring 的教训是：文档应同时公布“证明了什么”和“没有证明什么”，不要把 verifier 通过压缩成无条件“安全”。
+
+---
+
+## 9. AI 证明生态：证明编写正在被自动化，信任边界没有消失
+
+Verus 周围已形成连续的 AI proof synthesis/repair 研究线：
+
+| 项目 | 时间/发表 | 方向 |
+|---|---|---|
+| RAG-Verus | 2025-02 | 用检索增强生成 Verus proof |
+| AlphaVerus | ICML 2025 | 生成并迭代形式化证明 |
+| AutoVerus | OOPSLA 2025 | 自动补全/修复 Verus annotations |
+| VeriStruct | 2025-10 | 利用结构化验证信息 |
+| VeruSAGE | 2025-12 | agentic proof 工程 |
+| KVerus | 2026-05 | Verus 证明生成/知识利用 |
+| ExVerus | ICML 2026 | 扩展 proof synthesis |
+| Propose/Solve/Verify | ICML 2026 | 生成—求解—验证闭环 |
+
+共同信号：
+
+- LLM/agent 正在降低 lemma、invariant 和 proof repair 的人工成本；
+- verifier 是强反馈 oracle，可把生成错误变成机器可判定的迭代信号；
+- 但 agent 不能替代正确 specification、TCB 审计、solver 可重复性和整数/内存模型；
+- “能自动证明”会提高用户对新语言保证的期待，也会降低证明语法负担这一传统反对理由。
+
+Ring 的合理响应是双层：
+
+1. 默认层继续以可判定的类型/effect/资源检查承担大部分代码；
+2. 对钱、长度、索引、协议状态等高价值局部性质提供 bounded refinement，并让 agent 消费结构化 proof failure。
+
+不要把完整 Verus 式功能正确性证明塞进 B-001；也不要假设 AI 会自动解决不良规范或 SMT 不稳定性。
+
+---
+
+## 10. Agent 构建与小语言基准
+
+### 10.1 Rue：撤回“停滞”判断
+
+Rue 是 Steve Klabnik 主导、Claude 深度协作的实验性系统语言。2026-07-28 仍有提交，官方状态包括：
+
+- 779/779 个规范规则可追踪；
+- 官网 2026-07-22 快照记录 1,950 个 spec test cases；
+- x86-64 与 arm64/macOS 支持；
+- affine ownership/borrowing/destructors、自研多层 IR、直接 native codegen；
+- fuzz、sanitizer、benchmark 与规范追踪基础设施。
+
+Rue 不追求与 Ring 相同的 HM/effect 应用语言路线，但它表明“一人 + agent”可以在数月内建立非常系统的编译器质量工程。Ring 的人效优势不能继续引用 2026-03 的静态快照，应该比较：
+
+- spec-to-test 可追踪率；
+- sanitizer/fuzz 覆盖；
+- bootstrap/后端 parity；
+- 活跃缺陷关闭速度；
+- 可复现发布，而非总代码行或短期 commit 数。
+
+### 10.2 Mog：规格压缩仍有启发，动量低
+
+Mog 是小型、可嵌入、面向 agent 的静态语言：
+
+- 完整规范约 3,200 tokens；
+- safe Rust compiler/runtime 规模小；
+- host capability、安全嵌入与 native codegen；
+- 2026-03-09 后未见新提交，当前产品威胁低。
+
+其启发仍有效：Ring primer 应把**稳定核心语言 + 高频 std 签名**控制在可预测上下文预算内，并由 B-111 实测 onboarding token 成本。
+
+### 10.3 外围 agent DSL
+
+Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestration、自然语言动作或“AI 唯一作者”，和 Ring 的 native application language 不同。它们可作为叙事雷达，不应与能编译、运行、自举的语言放在同一成熟度表中。
+
+---
+
+## 11. Ring 的真实位置
+
+### 11.1 已有能力
+
+- 自举编译器，Ring 源码贯穿主编译管线；
+- HM 推断、trait、row-polymorphic effect 基础；
+- `io` / `fail` / `mut` 可见，tail-resumptive + abort handler；
+- Perceus L0/L1 RC 与 post-RC `LEAK/UAF/BALANCE` verifier；
+- native 双后端过渡：C 后端 Phase 1 已覆盖单文件/project/self-host，Phase 2 parity 认证中；LLVM 仍是 anchor/oracle；
+- `unsafe` effect、`Ptr<T>` 与显式 discharge/audit 面；
+- 结构化/LLM 诊断基础。
+
+### 11.2 尚未兑现，不能写成现状
+
+- async effect 设计已有，但 native 实现未发货；
+- full algebraic effects/multi-shot continuation 明确不做；
+- refinement types 未实现，参数位 `where` 目前仍是 parse error；
+- C 后端尚未完成 parity gate，LLVM 尚未退役；
+- RIIR 标准库迁移尚未完成；
+- LSP 暂不可用；
+- B-111 尚无一轮公开、可复现的 Ring vs TS7 数据；
+- “Rust 级安全”“LLM 更容易写对”“语义驱动性能领先”仍需分项证据，不是现成事实。
+
+### 11.3 更新后的三支柱
+
+1. **推断默认行为契约**：普通代码尽量不写类型/effect/ownership 注解，但编译器产生稳定、可读、可机器消费的签名；
+2. **确定性资源与失真可见**：RC/Drop/unsafe discharge/审计面把不可自动保证的部分显式列出；
+3. **可验证的 agent 闭环**：诊断、语义 query、受检 patch、隐藏测试与 bounded proof 共同缩短生成—验证循环。
+
+“语义驱动性能”仍是长期收益，但在 C 后端迁移和 RIIR 未完成前，不应与已发货支柱并列宣传为已证明优势。
+
+### 11.4 可对外使用的一句话
+
+> **Ring 是面向人和 coding agent 的 native 应用语言：像脚本语言一样少写标注，但让编译器推断行为契约、管理确定性资源，并把无法证明的边界明确暴露出来。**
+
+若需要更技术化的版本：
+
+> **Ring 把 HM 类型/effect inference、Perceus RC 和结构化 agent feedback 组合成默认应用开发路径；bounded refinement 是其可选增强，而不是普通代码的证明税。**
+
+---
+
+## 12. 行动建议与既有工作项映射
+
+### P0：先完成当前可信执行链
+
+- 继续 B-163 Phase 2 parity 认证；没有跨后端/固定点证据前，不用竞品叙事打断迁移；
+- RIIR 与 runtime 收口后再扩大 safety/performance 宣称；
+- 保留 LLVM oracle 直到既定 gate 闭合，不为“native 已成入场券”跳过验证。
+
+### P1：B-111 产出可复现的 Ring vs TS7 证据
+
+本轮已将以下要求写回 B-111：
+
+- TS 对照固定为正式 TypeScript 7 native compiler，并记录版本、`strict` 配置与兼容路径；
+- 同模型/version、同 system prompt、同重试与 token 预算；
+- 增加 signature-only/API-use 子集，直接检验行为签名信息密度；
+- 保存完整 prompt、compiler feedback、patch、token、时间与结果；
+- 预注册指标和失败分类，允许结论为“无显著优势”；
+- 单独报告 onboarding/primer 成本，防止把训练语料差异隐藏在结果中。
+
+### P2：B-001 保持 bounded、deterministic、honest
+
+本轮已将以下要求写回 B-001：
+
+- 独立 verification IR；proof/ghost 信息不污染 runtime codegen；
+- 明确数学整数与机器整数/溢出语义；
+- 显式 assumption/trust ledger；
+- deterministic resource budget 和可复现 proof artifact；
+- solver 缺失、unknown、超预算或模型不支持时，不得静默视为证明成功；
+- 运行时兜底只用于语言规范明确允许的 predicate，并在产物/诊断中可见。
+
+### 候选但未立项
+
+- `Ptr<T>` 的 `PointsTo`/`Dealloc` 风格可选权限验证；
+- agent semantic query / checked patch / stale guard；
+- 公开的 trust/assumption audit 命令；
+- Flix 风格 purity-driven optimization 的可证基准。
+
+这些方向需要用户确认优先级、复杂度、dispatch 与验收后才能进入 backlog；本轮只保留研究结论。
+
+---
+
+## 13. 复查节奏与触发条件
+
+常规保鲜期：**6 周**。下次定期复查建议不晚于 2026-09-08。
+
+出现以下任一事件时提前复查：
+
+- MoonBit 1.0/RC 发布，或 `moon prove` 去掉 experimental；
+- Zero 发稳定 release、公开采用数据，或 graph-native 工作流发生重大改变；
+- TypeScript 7.1 恢复 programmatic API，主流 framework 完成迁移；
+- Verus/AI proof 出现公开生产级采用或显著降低 proof/implementation ratio；
+- Flix/Effekt/Unison 发布直接面向 coding agent 的 effect benchmark；
+- Ring B-111 首轮数据或 B-001 design probe 产出，足以反向修改本文结论。
+
+每轮复查必须同时更新日期、版本、保证层、行动映射；不再在顶部追加互相矛盾的“增量节”。
+
+---
+
+## 14. 主要一手来源
+
+### 主流替代
+
+- TypeScript：[Announcing TypeScript 7.0](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
+- OpenAI：[OpenAI to acquire Astral](https://openai.com/index/openai-to-acquire-astral/)
+- Astral：[About Astral](https://astral.sh/about)
+- Rust：[The Rust Programming Language](https://doc.rust-lang.org/book/)
+
+### 直接与相邻语言
+
+- MoonBit：[v0.10.4 release](https://www.moonbitlang.com/updates/2026/07/13/moonbit-0-10-4-release)、[v0.10.0 release](https://www.moonbitlang.com/updates/2026/06/08/moonbit-0-10-0-release)、[Formal Verification](https://docs.moonbitlang.com/en/latest/language/verification.html)
+- Zero：[vercel-labs/zerolang](https://github.com/vercel-labs/zerolang)、[releases](https://github.com/vercel-labs/zerolang/releases)
+- Mojo：[Mojo releases](https://mojolang.org/releases/)、[Modular 26.4 / Mojo Beta 2](https://www.modular.com/blog/modular-26-4-sota-moe-serving-model-bringup-via-agent-skills-mojo-beta-2-and-more)
+- Rue：[rue-lang.dev](https://rue-lang.dev/)、[rue-language/rue](https://github.com/rue-language/rue)
+- Mog：[moglang.org](https://moglang.org/)、[voltropy/mog](https://github.com/voltropy/mog)
+
+### Effect / semantic code
+
+- Koka：[documentation](https://koka-lang.github.io/koka/doc/index.html)、[koka-lang/koka](https://github.com/koka-lang/koka)
+- Flix：[The Flix Effect System](https://doc.flix.dev/effect-system.html)、[releases](https://github.com/flix/flix/releases)、[Will LLMs Help or Hurt New Programming Languages?](https://blog.flix.dev/blog/will-llms-help-or-hurt-new-programming-languages/)
+- Effekt：[documentation](https://effekt-lang.org/docs)、[releases](https://github.com/effekt-lang/effekt/releases)
+- Unison：[website](https://www.unison-lang.org/)、[abilities](https://www.unison-lang.org/docs/fundamentals/abilities/)、[releases](https://github.com/unisonweb/unison/releases)
+
+### Verus 与 AI proof
+
+- Verus：[repository](https://github.com/verus-lang/verus)、[code architecture](https://github.com/verus-lang/verus/blob/main/source/CODE.md)
+- Verus guide：[Trusted Computing Base](https://verus-lang.github.io/verus/guide/tcb.html)、[SMT failures](https://verus-lang.github.io/verus/guide/smt_failures.html)、[memory safety](https://verus-lang.github.io/verus/guide/memory-safety.html)
+- Verus std：[raw pointer permissions](https://verus-lang.github.io/verus/verusdoc/vstd/raw_ptr/index.html)
+- 论文：[Verus: Verifying Rust Programs using Linear Ghost Types (SOSP)](https://www.andrew.cmu.edu/user/bparno/papers/verus-sys.pdf)、[VerusBelt (PLDI 2026)](https://iris-project.org/pdfs/2026-pldi-verusbelt.pdf)
+- 研究索引：[Verus publications and projects](https://verus-lang.github.io/verus/publications-and-projects/)
