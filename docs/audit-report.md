@@ -224,18 +224,6 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 发现者：B-163 Phase 2 P2.2 对抗 review
 
-### #258 infer_handle 的 tail-resumptive arm effect/结果类型契约仍缺失 [critical] [judgment] [doing]
-
-audit #251 已补齐 abort arm 的 result/effect 契约；`infer_handle` 的 tail-resumptive 分支仍只保留 HIR body，没有把 `hbr.effects` 合入整个 `handle` 的 effect row，也没有把 arm body 类型与 op return type 统一。结果是非 abort handler arm 可以在未声明 `io` 的纯函数内调用 `print`，也可以给声明返回 `Int` 的 op 写返回 `Str` 的 arm，checker 都报告 `OK`；前者绕过 effect capability，后者进入 codegen 后是潜在静默 wrong-code。
-
-**证据**（2026-07-27 root 最小 probe）：`effect Probe { fn value() -> Int }` 的 `Probe.value() => { print("side"); 1 }` 放在无 effect 标注函数中通过 check；`Probe.value() => "wrong"` 同样通过，且 `HExpr::HandleExpr.ty` 仍直接取 body type。源码锚点为 `compiler/infer.ring::infer_handle`：`hbr` 后只写 `hhandlers`，最终 effects 只由 `body_r.effects` 过滤得到。
-
-**修复方向**：tail-resumptive arm body 与对应 op return type 统一（`Never` 按既有 bottom 规则兼容）；先从 body effects 中移除本 handle 消除的 effect，再把所有 tail-resumptive arm 自身的 effects 合回外层 effect row。新增返回类型负例、arm `io` 签名负例、arm 同 effect 向外传播和双后端正例；不得回退 #251 已闭合的 abort/re-raise 语义。
-
-**2026-07-28 用户决策——先 C 后 A**：本项采用 C 收口现有双后端语义。closure 继续使用创建处词法捕获的 custom-effect evidence；handler 只消除 body row 中显式存在的同名 custom label，未知 open tail 必须原样向外传播。删除 WIP 中把真 open tail 当成 exact tail 消除的实验，并把外部创建 callback 使用 outer evidence/向外传播设为正例。调用点动态 evidence 的最终 A 语义独立归 B-167，只在 B-163 完成 LLVM 退役且 C bootstrap/CI 稳定后实施。
-
-发现者：B-163 Phase 2 P2.2 abort 语义实现前核对
-
 ### #217 Perceus 未对 block-expr / IIFE 临时值插入 HIR 层 drop [low] [judgment] [open]
 
 block 表达式作为 if/match 条件（`if { let v = 5; v > 3 } { ... }`）和 IIFE（`(fn(x) { x * x })(5)`）产出的 owned 临时值在 HIR 层无显式 drop。codegen 层正确处理（unbox 后丢弃 / 调用后释放闭包），运行时无泄漏，但 verify_rc 静态检查报 `leak-temp`。

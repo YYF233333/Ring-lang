@@ -53,7 +53,7 @@ pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
             for stmt in stmts {
                 let sr = infer_stmt(ctx, stmt, subst)
                 subst = sr.subst
-                let me = merge_effects(ctx.env, effects, sr.effects, subst)
+                let me = merge_effects(ctx.sink, ctx.env, effects, sr.effects, subst, span)
                 effects = me.0
                 subst = me.1
                 hstmts.push(sr.hstmt)
@@ -66,7 +66,7 @@ pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
                 some(t) => {
                     let tr = infer_expr(ctx, t, subst)
                     subst = tr.subst
-                    let me = merge_effects(ctx.env, effects, tr.effects, subst)
+                    let me = merge_effects(ctx.sink, ctx.env, effects, tr.effects, subst, span)
                     effects = me.0
                     subst = me.1
                     tail_hexpr = some(tr.hexpr)
@@ -200,7 +200,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                 DiagnosticNote { message: "assigned value has type '${type_to_string(apply_subst(value_r.subst, hexpr_type(value_r.hexpr)))}'", span: some(hexpr_span(value_r.hexpr)) }
             ]
             let mut s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(target_r.hexpr), hexpr_type(value_r.hexpr), value_r.subst, span, assign_notes)
-            let me = merge_effects(ctx.env, target_r.effects, value_r.effects, s)
+            let me = merge_effects(ctx.sink, ctx.env, target_r.effects, value_r.effects, s, span)
             s = me.1
             let mut effects = me.0
             // B-056: Inject mut<T> effect when assigning to a captured outer mutable variable
@@ -212,7 +212,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                                 if ctx.lambda_depth > def_depth {
                                     let var_type = apply_subst(s, get_hexpr_root_type(target_r.hexpr))
                                     let mut_eff = Effect::MutEffect { state_type: var_type }
-                                    let me2 = merge_effects(ctx.env, effects, effect_row([mut_eff]), s)
+                                    let me2 = merge_effects(ctx.sink, ctx.env, effects, effect_row([mut_eff]), s, span)
                                     effects = me2.0
                                     s = me2.1
                                 }
@@ -283,7 +283,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             match body_result {
                 some(body_r) => {
                     s = body_r.subst
-                    let me = merge_effects(ctx.env, cond_r.effects, body_r.effects, s)
+                    let me = merge_effects(ctx.sink, ctx.env, cond_r.effects, body_r.effects, s, span)
                     StmtResult {
                         hstmt: HStmt::While { condition: cond_r.hexpr, body: body_r.hexpr, span: span },
                         subst: me.1,
@@ -502,7 +502,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             match body_result {
                 some(body_r) => {
                     s = body_r.subst
-                    let me = merge_effects(ctx.env, iter_r.effects, body_r.effects, s)
+                    let me = merge_effects(ctx.sink, ctx.env, iter_r.effects, body_r.effects, s, span)
                     StmtResult {
                         hstmt: HStmt::ForIn {
                             binding: binding, binding_span: binding_span,
@@ -629,7 +629,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             match then_result {
                 some(then_r) => {
                     s = then_r.subst
-                    let mut combined = merge_effects(ctx.env, expr_r.effects, then_r.effects, s)
+                    let mut combined = merge_effects(ctx.sink, ctx.env, expr_r.effects, then_r.effects, s, span)
                     let mut combined_effects = combined.0
                     s = combined.1
 
@@ -643,7 +643,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                                 some(else_r) => {
                                     s = else_r.subst
                                     else_hblock = some(else_r.hexpr)
-                                    let me2 = merge_effects(ctx.env, combined_effects, else_r.effects, s)
+                                    let me2 = merge_effects(ctx.sink, ctx.env, combined_effects, else_r.effects, s, span)
                                     combined_effects = me2.0
                                     s = me2.1
                                 },
@@ -739,7 +739,7 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
                 let r = infer_expr(ctx, el, s)
                 s = r.subst
                 helements.push(r.hexpr)
-                let me = merge_effects(ctx.env, combined_effects, r.effects, s)
+                let me = merge_effects(ctx.sink, ctx.env, combined_effects, r.effects, s, span)
                 combined_effects = me.0
                 s = me.1
             }
@@ -756,7 +756,7 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
             let mut s = unify_at(ctx.sink, ctx.env, hexpr_type(start_r.hexpr), INT, start_r.subst, span)
             let end_r = infer_expr(ctx, end, s)
             s = unify_at(ctx.sink, ctx.env, hexpr_type(end_r.hexpr), INT, end_r.subst, span)
-            let me = merge_effects(ctx.env, start_r.effects, end_r.effects, s)
+            let me = merge_effects(ctx.sink, ctx.env, start_r.effects, end_r.effects, s, span)
             let mut range_effects = me.0
             s = me.1
             let range_type = Type::EnumType { name: BUILTIN_RANGE, type_params: [INT] }
@@ -847,7 +847,7 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
 
     let idx_r = infer_expr(ctx, index, s)
     s = idx_r.subst
-    let me = merge_effects(ctx.env, combined_effects, idx_r.effects, s)
+    let me = merge_effects(ctx.sink, ctx.env, combined_effects, idx_r.effects, s, span)
     combined_effects = me.0
     s = me.1
 
@@ -924,7 +924,7 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
 
             match apply_subst(s, hexpr_type(callee)) {
                 Type::FnType { effects: fn_effects, .. } => {
-                    let me2 = merge_effects(ctx.env, combined_effects, fn_effects, s)
+                    let me2 = merge_effects(ctx.sink, ctx.env, combined_effects, fn_effects, s, span)
                     combined_effects = me2.0
                     s = me2.1
                 },
@@ -1005,7 +1005,7 @@ fn infer_bin_op(mut ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
         }
     }
 
-    let me = merge_effects(ctx.env, lr.effects, rr.effects, s)
+    let me = merge_effects(ctx.sink, ctx.env, lr.effects, rr.effects, s, span)
     let mut effects = me.0
     s = me.1
     InferResult {
@@ -1093,7 +1093,7 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
             _ => infer_expr(ctx, arg, s)
         }
         s = ar.subst
-        let me = merge_effects(ctx.env, effects, ar.effects, s)
+        let me = merge_effects(ctx.sink, ctx.env, effects, ar.effects, s, span)
         effects = me.0
         s = me.1
         hargs.push(ar.hexpr)
@@ -1152,7 +1152,7 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
 
     match resolved_callee_type {
         Type::FnType { params: callee_params, effects: fn_effects, .. } => {
-            let me = merge_effects(ctx.env, effects, fn_effects, s)
+            let me = merge_effects(ctx.sink, ctx.env, effects, fn_effects, s, span)
             effects = me.0
             s = me.1
             // Cancel mut<T> effects for arguments that are local variables
@@ -1277,7 +1277,7 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
             some(did) => {
                 if ctx.env.scope.mut_param_defs.contains(did) {
                     let mut_eff = Effect::MutEffect { state_type: recv_type }
-                    let me = merge_effects(ctx.env, effects, effect_row([mut_eff]), s)
+                    let me = merge_effects(ctx.sink, ctx.env, effects, effect_row([mut_eff]), s, span)
                     effects = me.0
                     s = me.1
                 }
@@ -1412,7 +1412,7 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
             _ => infer_expr(ctx, arg, s)
         }
         s = ar.subst
-        let me = merge_effects(ctx.env, effects, ar.effects, s)
+        let me = merge_effects(ctx.sink, ctx.env, effects, ar.effects, s, span)
         effects = me.0
         s = me.1
         hargs.push(ar.hexpr)
@@ -1454,7 +1454,7 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
                         span, DiagnosticContext::TypeMismatch { expected: "${expected_args.to_str()} args", actual: "${hargs.len().to_str()} args", expression: none })
                 }
                 result_type = apply_subst(s, mt_ret)
-                let me = merge_effects(ctx.env, effects, mt_effects, s)
+                let me = merge_effects(ctx.sink, ctx.env, effects, mt_effects, s, span)
                 effects = me.0
                 s = me.1
                 // Cancel mut<T> effects for method arguments that are local variables
@@ -1582,7 +1582,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     for arg in args {
         let ar = infer_expr(ctx, arg, s)
         s = ar.subst
-        let me = merge_effects(ctx.env, effects, ar.effects, s)
+        let me = merge_effects(ctx.sink, ctx.env, effects, ar.effects, s, span)
         effects = me.0
         s = me.1
         hargs.push(ar.hexpr)
@@ -1606,7 +1606,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         none => {}
     }
 
-    let me = merge_effects(ctx.env, effects, effect_row([eff]), s)
+    let me = merge_effects(ctx.sink, ctx.env, effects, effect_row([eff]), s, span)
     effects = me.0
     s = me.1
 
@@ -1849,7 +1849,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         some(sp) => {
             let sr = infer_expr(ctx, sp, s)
             s = sr.subst
-            let me = merge_effects(ctx.env, effects, sr.effects, s)
+            let me = merge_effects(ctx.sink, ctx.env, effects, sr.effects, s, span)
             effects = me.0
             s = me.1
             let spread_type = Type::StructType { name: struct_def.name, type_params: type_param_types }
@@ -1862,7 +1862,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     for field in fields {
         let fr = infer_expr(ctx, field.value, s)
         s = fr.subst
-        let me = merge_effects(ctx.env, effects, fr.effects, s)
+        let me = merge_effects(ctx.sink, ctx.env, effects, fr.effects, s, span)
         effects = me.0
         s = me.1
         let def_field = struct_def.fields.find(fn(f) { f.name == field.name })
@@ -1931,7 +1931,7 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
         some(sp) => {
             let sr = infer_expr(ctx, sp, s)
             s = sr.subst
-            let me = merge_effects(ctx.env, effects, sr.effects, s)
+            let me = merge_effects(ctx.sink, ctx.env, effects, sr.effects, s, span)
             effects = me.0
             s = me.1
             let spread_enum_type = Type::EnumType { name: enum_name, type_params: type_param_types }
@@ -1944,7 +1944,7 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
     for field in fields {
         let fr = infer_expr(ctx, field.value, s)
         s = fr.subst
-        let me = merge_effects(ctx.env, effects, fr.effects, s)
+        let me = merge_effects(ctx.sink, ctx.env, effects, fr.effects, s, span)
         effects = me.0
         s = me.1
         let field_idx = field_names.index_of(field.name)
@@ -2013,7 +2013,7 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
                     let gr = infer_expr(ctx, g, s)
                     s = gr.subst
                     s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL, s, arm.span)
-                    let me = merge_effects(ctx.env, effects, gr.effects, s)
+                    let me = merge_effects(ctx.sink, ctx.env, effects, gr.effects, s, arm.span)
                     effects = me.0
                     s = me.1
                     guard_hexpr = some(gr.hexpr)
@@ -2023,7 +2023,7 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
 
             let body_r = infer_expr(ctx, arm.body, s)
             s = body_r.subst
-            let me = merge_effects(ctx.env, effects, body_r.effects, s)
+            let me = merge_effects(ctx.sink, ctx.env, effects, body_r.effects, s, arm.span)
             effects = me.0
             s = me.1
             // #180: skip arm-vs-result unification when the arm body is Never
@@ -2094,7 +2094,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
 
     let then_r = infer_block(ctx, then_branch, some(s))
     s = then_r.subst
-    let me = merge_effects(ctx.env, effects, then_r.effects, s)
+    let me = merge_effects(ctx.sink, ctx.env, effects, then_r.effects, s, span)
     effects = me.0
     s = me.1
 
@@ -2106,7 +2106,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
             Expr::Block { .. } => {
                 let else_r = infer_block(ctx, eb, some(s))
                 s = else_r.subst
-                let me2 = merge_effects(ctx.env, effects, else_r.effects, s)
+                let me2 = merge_effects(ctx.sink, ctx.env, effects, else_r.effects, s, span)
                 effects = me2.0
                 s = me2.1
                 let if_notes: List<DiagnosticNote> = [
@@ -2120,7 +2120,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
             Expr::IfExpr { condition: ec, then_branch: etb, else_branch: eeb, span: espan } => {
                 let else_if_r = infer_if(ctx, ec, etb, eeb, espan, s)
                 s = else_if_r.subst
-                let me2 = merge_effects(ctx.env, effects, else_if_r.effects, s)
+                let me2 = merge_effects(ctx.sink, ctx.env, effects, else_if_r.effects, s, span)
                 effects = me2.0
                 s = me2.1
                 let elif_notes: List<DiagnosticNote> = [
@@ -2177,7 +2177,7 @@ fn infer_string_interp(mut ctx: InferCtx, parts: List<StringInterpPart>, span: S
             StringInterpPart::ExprPart(expr) => {
                 let r = infer_expr(ctx, expr, s)
                 s = r.subst
-                let me = merge_effects(ctx.env, effects, r.effects, s)
+                let me = merge_effects(ctx.sink, ctx.env, effects, r.effects, s, span)
                 effects = me.0
                 s = me.1
                 // #184: check that interpolated expression type is Str/Int/Float/Bool
@@ -2260,7 +2260,7 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
                     let gr = infer_expr(ctx, g, s)
                     s = gr.subst
                     s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL, s, arm.span)
-                    let me = merge_effects(ctx.env, effects, gr.effects, s)
+                    let me = merge_effects(ctx.sink, ctx.env, effects, gr.effects, s, arm.span)
                     effects = me.0
                     s = me.1
                     guard_hexpr = some(gr.hexpr)
@@ -2270,7 +2270,7 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
 
             let body_r = infer_expr(ctx, arm.body, s)
             s = body_r.subst
-            let me = merge_effects(ctx.env, effects, body_r.effects, s)
+            let me = merge_effects(ctx.sink, ctx.env, effects, body_r.effects, s, arm.span)
             effects = me.0
             s = me.1
             s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
@@ -2333,11 +2333,18 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
     let mut hhandlers: List<HEffectHandler> = []
     let mut handled_effects: Set<Str> = set_new()
-    // Abort arms run after the current handler has been deactivated. Their
-    // effects therefore escape unchanged and must be merged only AFTER the
-    // handled body row has had this handle's effects removed. Tail-resumptive
-    // arm effects intentionally remain out of scope here (audit #258).
+    // Tail-resumptive arm closures capture the OUTER evidence for
+    // their handled effect, while abort arms run after the current handler has
+    // been deactivated. Both kinds of arm effects therefore escape unchanged
+    // and must be merged only AFTER the handled body row has had this handle's
+    // effects removed. Keep the rows separate so #251's abort-result contract
+    // remains visibly isolated from the tail-resumptive result contract below.
+    let mut tail_arm_effect_rows: List<EffectRow> = []
     let mut abort_arm_effect_rows: List<EffectRow> = []
+    // One runtime evidence value backs every operation arm for a canonical
+    // effect in this handle. Share its type arguments even when the body is
+    // pure or contains only an unknown open tail.
+    let mut handler_inst_type_args_by_effect: Map<Str, List<Type>> = map_new()
 
     for handler in handlers {
         ctx.env.push_scope()
@@ -2381,13 +2388,70 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                 body_fail_types_extracted = true
             }
 
-            // Instantiate effect type params with fresh variables for handler
+            // Instantiate effect type params once per canonical effect for this
+            // handle. Every operation arm rebuilds its declaration-variable map
+            // from the shared instance.
             let mut handler_inst_map: Map<Int, Type> = map_new()
+            let mut handler_inst_type_args: List<Type> = []
             match effect_def {
                 some(ed) => {
+                    match handler_inst_type_args_by_effect.get(canonical_effect_name) {
+                        some(shared_type_args) => {
+                            handler_inst_type_args = shared_type_args
+                        },
+                        none => {
+                            for _tpv in ed.type_param_vars {
+                                handler_inst_type_args.push(ctx.env.fresh_var())
+                            }
+                            handler_inst_type_args_by_effect.insert(
+                                canonical_effect_name, handler_inst_type_args
+                            )
+                        }
+                    }
+                    let mut shared_type_arg_index = 0
                     for tpv in ed.type_param_vars {
-                        let fresh = ctx.env.fresh_var()
-                        handler_inst_map.insert(tpv, fresh)
+                        match handler_inst_type_args.get(shared_type_arg_index) {
+                            some(shared_type_arg) => {
+                                handler_inst_map.insert(tpv, shared_type_arg)
+                            },
+                            none => {}
+                        }
+                        shared_type_arg_index = shared_type_arg_index + 1
+                    }
+                },
+                none => {}
+            }
+
+            // The operation signature used by the arm must be the instance
+            // performed by the handled body, not an unrelated fresh instance.
+            // Body-row merging already unifies repeated labels of the same
+            // canonical custom effect; connect every matching concrete label
+            // to this arm's instantiation before binding its params/result.
+            match effect_def {
+                some(ed) => {
+                    let resolved_body_effects_for_handler = apply_subst_row(s, effects)
+                    for body_effect in resolved_body_effects_for_handler.effects {
+                        match body_effect {
+                            Effect::CustomEffect { name, type_args } => {
+                                if name == canonical_effect_name {
+                                    let mut type_arg_index = 0
+                                    for handler_type_arg in handler_inst_type_args {
+                                        match type_args.get(type_arg_index) {
+                                            some(body_type_arg) => {
+                                                s = unify_at(
+                                                    ctx.sink, ctx.env,
+                                                    handler_type_arg, body_type_arg,
+                                                    s, handler.span
+                                                )
+                                            },
+                                            none => {}
+                                        }
+                                        type_arg_index = type_arg_index + 1
+                                    }
+                                }
+                            },
+                            _ => {}
+                        }
                     }
                 },
                 none => {}
@@ -2535,6 +2599,52 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                         s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(hbr.hexpr), result_type, s, handler.span, handle_notes)
                     }
                 }
+            } else {
+                tail_arm_effect_rows.push(hbr.effects)
+
+                // A tail-resumptive arm is the implementation of this effect
+                // operation: its body value is returned directly as the resume
+                // value. Resolve bottom before ordinary unification so a Never
+                // arm cannot bind a still-fresh shared operation type variable.
+                // Either concrete-vs-Never direction remains valid.
+                match op_def {
+                    some(od) => {
+                        let op_return_type = apply_subst_map(handler_inst_map, od.return_type)
+                        let resolved_op_return = apply_subst(s, op_return_type)
+                        let resolved_arm = apply_subst(s, hexpr_type(hbr.hexpr))
+                        let op_return_is_never = match resolved_op_return {
+                            Type::NeverType => true,
+                            _ => false
+                        }
+                        let arm_is_never = match resolved_arm {
+                            Type::NeverType => true,
+                            _ => false
+                        }
+                        let effect_display = nominal_display_name(canonical_effect_name)
+                        let tail_arm_notes: List<DiagnosticNote> = [
+                            DiagnosticNote {
+                                message: "tail-resumptive handler arm result must match effect operation return type",
+                                span: some(handler.span)
+                            },
+                            DiagnosticNote {
+                                message: "effect operation '${effect_display}.${handler.op_name}' returns '${type_to_string(resolved_op_return)}'",
+                                span: some(handler.span)
+                            },
+                            DiagnosticNote {
+                                message: "handler arm has type '${type_to_string(resolved_arm)}'",
+                                span: some(hexpr_span(hbr.hexpr))
+                            }
+                        ]
+                        if !op_return_is_never && !arm_is_never {
+                            s = unify_at_noted(
+                                ctx.sink, ctx.env,
+                                hexpr_type(hbr.hexpr), op_return_type,
+                                s, handler.span, tail_arm_notes
+                            )
+                        }
+                    },
+                    none => {}
+                }
             }
             hhandlers.push(HEffectHandler {
                 effect_name: canonical_effect_name, op_name: handler.op_name,
@@ -2567,11 +2677,20 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     }
     effects = EffectRow { effects: filtered_effects, tail: resolved_effects.tail }
 
+    // #258: merge explicit tail-arm rows only after filtering the handled
+    // body's row. In particular, do not re-filter a same-effect re-perform:
+    // explicit arms capture outer evidence, so that operation propagates.
+    for arm_effects in tail_arm_effect_rows {
+        let me = merge_effects(ctx.sink, ctx.env, effects, arm_effects, s, span)
+        effects = me.0
+        s = me.1
+    }
+
     // #251: the abort arm executes outside the current handler. Merge its row
     // verbatim after filtering the body row so io/custom effects and a re-raised
     // fail escape to the enclosing signature/handler instead of being swallowed.
     for arm_effects in abort_arm_effect_rows {
-        let me = merge_effects(ctx.env, effects, arm_effects, s)
+        let me = merge_effects(ctx.sink, ctx.env, effects, arm_effects, s, span)
         effects = me.0
         s = me.1
     }
@@ -2694,7 +2813,7 @@ fn infer_list_literal(mut ctx: InferCtx, elements: List<Expr>, span: Span, subst
         s = unify_at(ctx.sink, ctx.env, apply_subst(s, hexpr_type(r.hexpr)), apply_subst(s, elem_type), s, span)
         elem_type = apply_subst(s, elem_type)
         helements.push(r.hexpr)
-        let me = merge_effects(ctx.env, combined_effects, r.effects, s)
+        let me = merge_effects(ctx.sink, ctx.env, combined_effects, r.effects, s, span)
         combined_effects = me.0
         s = me.1
     }

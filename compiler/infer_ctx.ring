@@ -375,32 +375,62 @@ pub fn type_error_with_notes(mut sink: CollectingSink, code: Str, message: Str, 
 // Unification / effect helpers
 // ============================================================
 
-pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: UnionFind) -> (EffectRow, UnionFind) {
+pub fn merge_effects(
+    sink: CollectingSink, env: TypeEnv,
+    a: EffectRow, b: EffectRow, s: UnionFind, span: Span
+) -> (EffectRow, UnionFind) {
     // Apply substitution to resolve already-bound tail variables before merging
     let resolved_a = apply_subst_row(s, a)
     let resolved_b = apply_subst_row(s, b)
-    let m = row_merge(resolved_a, resolved_b)
     let mut result_s = s
 
-    // Unify type params for same-kind effects between a and b.
-    // Catch unification errors: if params can't unify (e.g. mut<Int> vs mut<Str>),
-    // keep the substitution unchanged — distinct effects stay separate.
-    for eff_b in resolved_b.effects {
-        for eff_a in resolved_a.effects {
-            if effects_match_kind(eff_a, eff_b) {
-                result_s = (unify_effect_params(eff_a, eff_b, result_s, env)) catch { _ => result_s }
-                break
+    // Every explicit label of one kind denotes the same evidence value, even
+    // when duplicate labels already occur inside one input row. Concatenating
+    // A then B and visiting each unordered occurrence pair once covers A
+    // internally, B internally, and A x B without duplicate pair checks.
+    // Unbound row tails are deliberately absent and remain unconstrained.
+    let mut explicit_effects: List<Effect> = []
+    for eff_a in resolved_a.effects { explicit_effects.push(eff_a) }
+    for eff_b in resolved_b.effects { explicit_effects.push(eff_b) }
+    let mut left_index = 0
+    while left_index < explicit_effects.len() {
+        let mut right_index = left_index + 1
+        while right_index < explicit_effects.len() {
+            match (explicit_effects.get(left_index), explicit_effects.get(right_index)) {
+                (some(eff_left), some(eff_right)) => {
+                    if effects_match_kind(eff_left, eff_right) {
+                        result_s = unify_effect_params(eff_left, eff_right, result_s, env) catch {
+                            e => {
+                                let code = if e.is_occurs_check { E0302 } else { E0301 }
+                                let _ = type_error(sink, code, e.message, span, DiagnosticContext::TypeMismatch {
+                                    expected: type_to_string(Type::EffectRowType { effects: [eff_left], tail: none }),
+                                    actual: type_to_string(Type::EffectRowType { effects: [eff_right], tail: none }),
+                                    expression: none
+                                })
+                                result_s
+                            }
+                        }
+                    }
+                },
+                _ => {}
             }
+            right_index = right_index + 1
         }
+        left_index = left_index + 1
     }
+
+    // Only deduplicate labels after all explicit parameter contracts have been
+    // checked. In particular, do not let name-based row merging hide conflicts.
+    let m = row_merge(resolved_a, resolved_b)
 
     match m.tails_to_unify {
         some(pair) => {
             let (ta, tb) = pair
-            result_s = unify(
+            result_s = unify_at(
+                sink, env,
                 Type::TypeVar { id: ta, name: none },
                 Type::TypeVar { id: tb, name: none },
-                result_s, env
+                result_s, span
             )
         },
         none => {}
