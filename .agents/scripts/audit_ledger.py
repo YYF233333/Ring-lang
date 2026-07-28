@@ -48,6 +48,18 @@ UUID = re.compile(
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 )
 RANDOM_HEX = re.compile(r"(?:^|[._:/-])[0-9a-f]{16,}(?:$|[._:/-])")
+INCREMENTAL_TRIGGER_SUFFIX = re.compile(
+    r"(?:^|[._:/-])"
+    r"(?:(?:round|run|retry|attempt|counter)[._:/-]?)?\d+$"
+)
+EVIDENCE_COMMIT = re.compile(
+    r"evidence:commit:(?P<commit_sha>[0-9a-f]{40}|[0-9a-f]{64})"
+)
+DURABLE_REF_PREFIXES = (
+    "refs/heads",
+    "refs/remotes",
+    "refs/tags",
+)
 
 
 class AuditLedgerError(RuntimeError):
@@ -70,6 +82,20 @@ class AlreadyRecorded(AuditLedgerError):
         self.record = record
 
 
+@dataclass(frozen=True)
+class EvidenceEvent:
+    commit_sha: str
+
+
+def parse_evidence_event(trigger_id: str) -> EvidenceEvent | None:
+    """Parse the closed evidence:<kind>:<durable-id> namespace."""
+
+    match = EVIDENCE_COMMIT.fullmatch(trigger_id)
+    if match is None:
+        return None
+    return EvidenceEvent(commit_sha=match.group("commit_sha"))
+
+
 def normalize_trigger_id(raw: str) -> str:
     """Normalize a stable trigger/event id and reject common bypass ids."""
 
@@ -79,10 +105,23 @@ def normalize_trigger_id(raw: str) -> str:
             "trigger id must be 2-128 lowercase-safe characters and start "
             "with a letter"
         )
+    if value.startswith("evidence:"):
+        if parse_evidence_event(value) is None:
+            raise InvalidLedgerInput(
+                "evidence trigger must match "
+                "evidence:commit:<full-sha>; external findings/issues must "
+                "first become a durable evidence commit"
+            )
+        return value
     if ISO_DATE.search(value) or UUID.search(value) or RANDOM_HEX.search(value):
         raise InvalidLedgerInput(
             "trigger id must be stable; dates, UUIDs, and random hex ids "
             "cannot bypass Audit debounce"
+        )
+    if INCREMENTAL_TRIGGER_SUFFIX.search(value):
+        raise InvalidLedgerInput(
+            "trigger id must be stable; round/run/retry/attempt/counter "
+            "suffixes cannot bypass Audit debounce"
         )
     return value
 
@@ -166,6 +205,23 @@ def empty_document(source_sha: str) -> dict[str, Any]:
     }
 
 
+def _stored_audit_key(
+    raw_trigger_id: str,
+    raw_source_sha: str,
+    raw_lenses: Sequence[str],
+) -> AuditKey:
+    """Load a prior schema-v1 key without applying newer admission rules."""
+
+    trigger_id = raw_trigger_id.strip().lower()
+    if not TOKEN.fullmatch(trigger_id):
+        raise InvalidLedgerInput("stored trigger id is not canonical")
+    return AuditKey(
+        trigger_id=trigger_id,
+        source_sha=normalize_source_sha(raw_source_sha),
+        lenses=normalize_lenses(raw_lenses),
+    )
+
+
 def validate_document(
     document: Any, expected_source_sha: str
 ) -> dict[str, Any]:
@@ -195,7 +251,7 @@ def validate_document(
         ):
             raise CorruptLedger(f"record {index} has invalid lenses")
         try:
-            key = AuditKey.create(
+            key = _stored_audit_key(
                 str(record.get("trigger_id", "")),
                 str(record.get("source_sha", "")),
                 raw_lenses,
@@ -255,6 +311,28 @@ def find_record(
     return None
 
 
+def check_start_gate(
+    document: dict[str, Any],
+    key: AuditKey,
+) -> dict[str, Any] | None:
+    """Return an exact record or reject an unanchored same-scope restart."""
+
+    canonical = validate_document(document, key.source_sha)
+    same_scope = False
+    for record in canonical["records"]:
+        if record["canonical_key"] == key.canonical:
+            return record
+        if tuple(record["lenses"]) == key.lenses:
+            same_scope = True
+    if same_scope and parse_evidence_event(key.trigger_id) is None:
+        raise InvalidLedgerInput(
+            "same source SHA and lens set already has an Audit record; "
+            "a different trigger must use an anchored "
+            "evidence:<kind>:<durable-id> event"
+        )
+    return None
+
+
 def record_outcome(
     document: dict[str, Any],
     key: AuditKey,
@@ -264,7 +342,7 @@ def record_outcome(
     """Pure state transition: add one outcome or reject a duplicate key."""
 
     canonical = validate_document(document, key.source_sha)
-    existing = find_record(canonical, key)
+    existing = check_start_gate(canonical, key)
     if existing is not None:
         raise AlreadyRecorded(existing)
     if outcome not in OUTCOMES:
@@ -362,6 +440,56 @@ class GitAuditLedger:
             )
         return canonical
 
+    def _validate_evidence_anchor(self, key: AuditKey) -> None:
+        event = parse_evidence_event(key.trigger_id)
+        if event is None:
+            return
+        anchor_sha = self.resolve_source_sha(event.commit_sha)
+        if anchor_sha == key.source_sha:
+            raise InvalidLedgerInput(
+                "evidence commit must differ from the audited source SHA"
+            )
+        ancestry = self._git(
+            (
+                "merge-base",
+                "--is-ancestor",
+                key.source_sha,
+                anchor_sha,
+            ),
+            check=False,
+        )
+        if ancestry.returncode == 1:
+            raise InvalidLedgerInput(
+                "evidence commit must descend from the audited source SHA"
+            )
+        if ancestry.returncode != 0:
+            detail = ancestry.stderr.strip() or ancestry.stdout.strip()
+            raise AuditLedgerError(
+                "git merge-base --is-ancestor failed "
+                f"({ancestry.returncode}): {detail}"
+            )
+        reachable = self._git(
+            (
+                "for-each-ref",
+                "--format=%(refname)",
+                f"--contains={anchor_sha}",
+                *DURABLE_REF_PREFIXES,
+            )
+        )
+        durable_refs = tuple(
+            ref
+            for ref in reachable.stdout.splitlines()
+            if ref.startswith(
+                tuple(f"{prefix}/" for prefix in DURABLE_REF_PREFIXES)
+            )
+        )
+        if not durable_refs:
+            raise InvalidLedgerInput(
+                "evidence commit must be reachable from refs/heads/*, "
+                "refs/remotes/*, or refs/tags/*; refs/notes/*, reflogs, "
+                "and dangling object-only commits are not durable anchors"
+            )
+
     def _read_document(self, source_sha: str) -> dict[str, Any]:
         source_sha = self.resolve_source_sha(source_sha)
         listed = self._git(
@@ -390,10 +518,18 @@ class GitAuditLedger:
         source_sha = self.resolve_source_sha(key.source_sha)
         if source_sha != key.source_sha:
             raise InvalidLedgerInput("Audit key source SHA is not canonical")
+        self._validate_evidence_anchor(key)
         return find_record(self._read_document(source_sha), key)
 
+    def check_start(self, key: AuditKey) -> dict[str, Any] | None:
+        source_sha = self.resolve_source_sha(key.source_sha)
+        if source_sha != key.source_sha:
+            raise InvalidLedgerInput("Audit key source SHA is not canonical")
+        self._validate_evidence_anchor(key)
+        return check_start_gate(self._read_document(source_sha), key)
+
     def can_start(self, key: AuditKey) -> bool:
-        return self.query(key) is None
+        return self.check_start(key) is None
 
     def record(
         self,
@@ -402,6 +538,7 @@ class GitAuditLedger:
         summary: str | None = None,
     ) -> dict[str, Any]:
         source_sha = self.resolve_source_sha(key.source_sha)
+        self._validate_evidence_anchor(key)
         document = self._read_document(source_sha)
         updated, record = record_outcome(
             document,
@@ -436,6 +573,20 @@ def _pure_state_self_test() -> None:
         sorted(AUDIT_LENSES)
     ):
         raise AssertionError("the six-lens closed set was not accepted")
+    for stable in (
+        "user:full-audit",
+        "risk:runtime-abi-change",
+        "queue-empty-maintenance",
+    ):
+        if normalize_trigger_id(stable) != stable:
+            raise AssertionError(f"stable first-round trigger changed: {stable}")
+    evidence_trigger = f"evidence:commit:{'b' * 40}"
+    if normalize_trigger_id(evidence_trigger) != evidence_trigger:
+        raise AssertionError("commit evidence trigger changed")
+    evidence_event = parse_evidence_event(evidence_trigger)
+    if evidence_event is None or evidence_event.commit_sha != "b" * 40:
+        raise AssertionError("commit evidence trigger did not parse")
+
     key = AuditKey.create(
         "risk:runtime-abi-change",
         source,
@@ -458,13 +609,57 @@ def _pure_state_self_test() -> None:
     else:
         raise AssertionError("duplicate canonical key was accepted")
 
-    variants = (
-        AuditKey.create(key.trigger_id, "b" * 40, key.lenses),
-        AuditKey.create(key.trigger_id, source, (*key.lenses, "oracle-blind")),
-        AuditKey.create("risk:next-event", source, key.lenses),
+    for unanchored in ("risk:next-event", "risk:post-fix-batch"):
+        candidate = AuditKey.create(unanchored, source, key.lenses)
+        try:
+            check_start_gate(updated, candidate)
+        except InvalidLedgerInput:
+            pass
+        else:
+            raise AssertionError(
+                f"same-scope unanchored event was accepted: {unanchored}"
+            )
+
+    anchored = AuditKey.create(evidence_trigger, source, key.lenses)
+    if check_start_gate(updated, anchored) is not None:
+        raise AssertionError("new anchored evidence event was blocked")
+    with_anchor, _ = record_outcome(updated, anchored, "findings")
+    if check_start_gate(with_anchor, anchored) is None:
+        raise AssertionError("exact anchored event was not durable")
+
+    new_source = AuditKey.create(key.trigger_id, "b" * 40, key.lenses)
+    if check_start_gate(empty_document(new_source.source_sha), new_source):
+        raise AssertionError("ordinary trigger on new source SHA was blocked")
+    new_lens = AuditKey.create(
+        key.trigger_id,
+        source,
+        (*key.lenses, "oracle-blind"),
     )
-    if any(candidate.canonical == key.canonical for candidate in variants):
-        raise AssertionError("new SHA/lens/event did not change canonical key")
+    if check_start_gate(updated, new_lens):
+        raise AssertionError("ordinary trigger on changed lens set was blocked")
+
+    legacy_key = AuditKey(
+        trigger_id="audit:round-2",
+        source_sha=source,
+        lenses=("rc-memory",),
+    )
+    legacy_document = {
+        "records": [
+            {
+                "canonical_key": legacy_key.canonical,
+                "key_digest": legacy_key.digest,
+                "lenses": list(legacy_key.lenses),
+                "outcome": "no-findings",
+                "source_sha": source,
+                "trigger_id": legacy_key.trigger_id,
+            }
+        ],
+        "source_sha": source,
+        "version": LEDGER_VERSION,
+    }
+    if not validate_document(legacy_document, source)["records"]:
+        raise AssertionError("schema-v1 counter record lost compatibility")
+
     for invalid_lens in (
         "rc-memory.2026-07-29",
         "rc-memory.1",
@@ -489,12 +684,76 @@ def _pure_state_self_test() -> None:
         "0123456789abcdef0123456789abcdef",
         "audit:deadbeefdeadbeefdeadbeef",
         "audit.deadbeefdeadbeefdeadbeef",
+        "audit:round-2",
+        "audit:counter-2",
+        "audit:2",
+        "queue-empty-round-99",
+        "audit:run-3",
+        "audit:retry-4",
+        "audit:attempt-5",
     ):
         try:
             normalize_trigger_id(unstable)
         except InvalidLedgerInput:
             continue
         raise AssertionError(f"unstable trigger id was accepted: {unstable}")
+    for invalid_evidence in (
+        "evidence:finding:7",
+        "evidence:issue:7",
+        "evidence:pr:19",
+        "evidence:backlog:b-166",
+        "evidence:decision:d-004",
+        f"evidence:artifact:{'f' * 64}",
+        "evidence:finding:0",
+        "evidence:issue:x",
+        "evidence:ticket:7",
+        "evidence:backlog:166",
+        "evidence:decision:d-12",
+        "evidence:commit:deadbeef",
+        "evidence:artifact:deadbeef",
+        "evidence:finding:7:extra",
+    ):
+        try:
+            normalize_trigger_id(invalid_evidence)
+        except InvalidLedgerInput:
+            continue
+        raise AssertionError(
+            f"malformed evidence trigger was accepted: {invalid_evidence}"
+        )
+
+
+def _run_helper_cli(
+    repository: Path,
+    command: str,
+    trigger_id: str,
+    source_sha: str,
+    lenses: Sequence[str],
+    *,
+    outcome: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    arguments = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--repo",
+        str(repository),
+        command,
+        "--trigger-id",
+        trigger_id,
+        "--source-sha",
+        source_sha,
+    ]
+    for lens in lenses:
+        arguments.extend(("--lens", lens))
+    if outcome is not None:
+        arguments.extend(("--outcome", outcome))
+    return subprocess.run(
+        arguments,
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+    )
 
 
 def _git_end_to_end_self_test() -> None:
@@ -552,11 +811,179 @@ def _git_end_to_end_self_test() -> None:
 
         _run_git(
             repository,
-            ("commit", "--allow-empty", "-m", "source-two", "--quiet"),
+            (
+                "commit",
+                "--allow-empty",
+                "-m",
+                "durable-evidence",
+                "--quiet",
+            ),
         )
-        source_two = _run_git(
+        evidence_commit = _run_git(
             repository, ("rev-parse", "HEAD")
         ).stdout.strip()
+        evidence_tree = _run_git(
+            repository, ("rev-parse", f"{evidence_commit}^{{tree}}")
+        ).stdout.strip()
+        unrelated_commit = _run_git(
+            repository,
+            ("commit-tree", evidence_tree, "-m", "unrelated-evidence"),
+        ).stdout.strip()
+        unreferenced_descendant = _run_git(
+            repository,
+            (
+                "commit-tree",
+                evidence_tree,
+                "-p",
+                source_one,
+                "-m",
+                "object-only-evidence",
+            ),
+        ).stdout.strip()
+
+        exact_check = _run_helper_cli(
+            repository,
+            "check",
+            key.trigger_id,
+            source_one,
+            key.lenses,
+        )
+        if exact_check.returncode != ALREADY_RECORDED_EXIT:
+            raise AssertionError(
+                f"exact key check did not exit 3: {exact_check.returncode}"
+            )
+        for counter_trigger in (
+            "audit:round-2",
+            "audit:counter-2",
+            "audit:2",
+            "queue-empty-round-99",
+        ):
+            rejected = _run_helper_cli(
+                repository,
+                "check",
+                counter_trigger,
+                source_one,
+                key.lenses,
+            )
+            if rejected.returncode != INVALID_INPUT_EXIT:
+                raise AssertionError(
+                    f"CLI accepted counter trigger {counter_trigger!r}: "
+                    f"exit {rejected.returncode}"
+                )
+        for invalid_evidence in (
+            "evidence:finding:7",
+            f"evidence:artifact:{'f' * 64}",
+            "evidence:ticket:7",
+            "evidence:backlog:166",
+            "evidence:commit:deadbeef",
+        ):
+            rejected = _run_helper_cli(
+                repository,
+                "check",
+                invalid_evidence,
+                source_one,
+                key.lenses,
+            )
+            if rejected.returncode != INVALID_INPUT_EXIT:
+                raise AssertionError(
+                    f"CLI accepted evidence trigger {invalid_evidence!r}: "
+                    f"exit {rejected.returncode}"
+                )
+        for label, invalid_anchor in (
+            ("nonexistent", "c" * 40),
+            ("same-source", source_one),
+            ("unrelated", unrelated_commit),
+            ("object-only", unreferenced_descendant),
+        ):
+            rejected = _run_helper_cli(
+                repository,
+                "check",
+                f"evidence:commit:{invalid_anchor}",
+                source_one,
+                key.lenses,
+            )
+            if rejected.returncode != INVALID_INPUT_EXIT:
+                raise AssertionError(
+                    f"CLI accepted {label} evidence commit: "
+                    f"exit {rejected.returncode}"
+                )
+        unanchored_check = _run_helper_cli(
+            repository,
+            "check",
+            "risk:next-event",
+            source_one,
+            key.lenses,
+        )
+        if unanchored_check.returncode != INVALID_INPUT_EXIT:
+            raise AssertionError(
+                "same-scope unanchored check did not exit 2"
+            )
+        unanchored_record = _run_helper_cli(
+            repository,
+            "record",
+            "risk:post-fix-batch",
+            source_one,
+            key.lenses,
+            outcome="findings",
+        )
+        if unanchored_record.returncode != INVALID_INPUT_EXIT:
+            raise AssertionError(
+                "same-scope unanchored record did not exit 2"
+            )
+
+        anchored = AuditKey.create(
+            f"evidence:commit:{evidence_commit}",
+            source_one,
+            key.lenses,
+        )
+        anchored_check = _run_helper_cli(
+            repository,
+            "check",
+            anchored.trigger_id,
+            source_one,
+            anchored.lenses,
+        )
+        if anchored_check.returncode != 0:
+            raise AssertionError(
+                f"anchored evidence check failed: {anchored_check.returncode}"
+            )
+        anchored_record = _run_helper_cli(
+            repository,
+            "record",
+            anchored.trigger_id,
+            source_one,
+            anchored.lenses,
+            outcome="findings",
+        )
+        if anchored_record.returncode != 0:
+            raise AssertionError(
+                f"anchored evidence record failed: "
+                f"{anchored_record.returncode}"
+            )
+        after_anchor = GitAuditLedger(repository)
+        persisted_anchor = after_anchor.query(anchored)
+        if (
+            persisted_anchor is None
+            or persisted_anchor["outcome"] != "findings"
+        ):
+            raise AssertionError("anchored evidence event was not durable")
+        duplicate_anchor = _run_helper_cli(
+            repository,
+            "record",
+            anchored.trigger_id,
+            source_one,
+            anchored.lenses,
+            outcome="no-findings",
+        )
+        if duplicate_anchor.returncode != ALREADY_RECORDED_EXIT:
+            raise AssertionError("duplicate evidence anchor did not exit 3")
+        head_after_gate = _run_git(
+            repository, ("rev-parse", "HEAD")
+        ).stdout.strip()
+        if head_after_gate != evidence_commit:
+            raise AssertionError("Audit gate/anchor operations changed HEAD")
+
+        source_two = evidence_commit
         new_source = AuditKey.create(
             key.trigger_id,
             source_two,
@@ -567,15 +994,9 @@ def _git_end_to_end_self_test() -> None:
             source_one,
             (*key.lenses, "runtime-abi"),
         )
-        new_event = AuditKey.create(
-            "risk:post-fix-batch",
-            source_one,
-            key.lenses,
-        )
         for label, candidate in (
             ("source SHA", new_source),
             ("lens set", new_lens),
-            ("trigger/event", new_event),
         ):
             if not restarted_session.can_start(candidate):
                 raise AssertionError(f"new {label} was incorrectly blocked")
@@ -585,32 +1006,18 @@ def _git_end_to_end_self_test() -> None:
         if recorded_lens is None:
             raise AssertionError("changed canonical lens set did not reopen")
 
-        helper = Path(__file__).resolve()
         for invalid_lens in (
             "rc-memory.2026-07-29",
             "rc-memory.1",
             "made-up",
             "made-up-lens",
         ):
-            rejected = subprocess.run(
-                [
-                    sys.executable,
-                    str(helper),
-                    "--repo",
-                    str(repository),
-                    "check",
-                    "--trigger-id",
-                    key.trigger_id,
-                    "--source-sha",
-                    source_one,
-                    "--lens",
-                    invalid_lens,
-                ],
-                check=False,
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                text=True,
+            rejected = _run_helper_cli(
+                repository,
+                "check",
+                key.trigger_id,
+                source_one,
+                (invalid_lens,),
             )
             if rejected.returncode != INVALID_INPUT_EXIT:
                 raise AssertionError(
@@ -619,12 +1026,13 @@ def _git_end_to_end_self_test() -> None:
                     f"stderr={rejected.stderr!r}"
                 )
 
-        restarted_session.record(new_event, "findings")
-        recorded_event = restarted_session.query(new_event)
-        if recorded_event is None or recorded_event["outcome"] != "findings":
-            raise AssertionError("findings outcome was not durable")
         if restarted_session.query(key) is None:
             raise AssertionError("adding another record erased the first key")
+        final_head = _run_git(
+            repository, ("rev-parse", "HEAD")
+        ).stdout.strip()
+        if final_head != source_two:
+            raise AssertionError("new-source/lens operations changed HEAD")
 
 
 def self_test_errors() -> list[str]:
@@ -727,7 +1135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         if arguments.command == "check":
-            record = ledger.query(key)
+            record = ledger.check_start(key)
             if record is not None:
                 _print_json(
                     {

@@ -78,12 +78,24 @@ STEWARD_BEHAVIOR_CONTRACTS = (
             ("waiting-feedback",),
             ("不是全局阻塞",),
             ("必须立即补位",),
+            ("达到 clean checkpoint commit",),
+            ("测试状态与必要 handoff 已持久化后",),
+            ("可以释放 worktree",),
+            ("保留 branch/commit",),
+            ("未达到时保留 worktree 或先 checkpoint",),
             ("只有全部",),
         ),
         (
             "waiting-feedback 后结束当前阻塞链",
             "停止全局工作，等待用户",
             "单个 item 阻塞时停止",
+        ),
+        (
+            "waiting-feedback",
+            "达到 clean checkpoint commit",
+            "测试状态与必要 handoff 已持久化后",
+            "可以释放 worktree",
+            "保留 branch/commit",
         ),
     ),
     TextContract(
@@ -352,6 +364,31 @@ AUDIT_LEDGER_CONTRACT = TextContract(
         ("未知 lens",),
         ("exit 2",),
         ("专项豁免子类放入 stable trigger/event id",),
+        ("first-round trigger",),
+        ("audit:round-2",),
+        ("audit:2",),
+        ("evidence:commit:<full-sha>",),
+        ("真实 commit",),
+        ("不同于 audited source SHA",),
+        ("audited source 是 evidence commit 的 ancestor",),
+        ("refs/heads/*",),
+        ("refs/remotes/*",),
+        ("refs/tags/*",),
+        ("reachable durable ref",),
+        ("refs/notes/*",),
+        ("reflog",),
+        ("object-only",),
+        ("dangling commit",),
+        ("外部 finding / issue",),
+        ("durable evidence commit",),
+        ("相同 audited source SHA + normalized lens set",),
+        ("任一 record",),
+        ("不同 trigger",),
+        ("只有合法 anchored evidence event",),
+        ("risk:next-event",),
+        ("risk:post-fix-batch",),
+        ("新的 audited source SHA",),
+        ("真正不同的 normalized lens set",),
         ("Session 恢复",),
         ("query",),
         ("Round 开始",),
@@ -376,6 +413,7 @@ AUDIT_LEDGER_CONTRACT = TextContract(
         "允许任意 lens",
         "专项豁免新增 lens",
         "动态 lens 形成新 key",
+        "stable trigger/event 才形成新 key",
     ),
 )
 
@@ -385,6 +423,20 @@ AUDIT_LEDGER_HELPER_CONTRACT = TextContract(
         ('NOTE_REF = "refs/notes/ring-steward-audit-ledger"',),
         ("INVALID_INPUT_EXIT = 2",),
         ("AUDIT_LENSES = frozenset",),
+        ("INCREMENTAL_TRIGGER_SUFFIX = re.compile",),
+        ("EVIDENCE_COMMIT = re.compile",),
+        ("DURABLE_REF_PREFIXES = (",),
+        ('"refs/heads"',),
+        ('"refs/remotes"',),
+        ('"refs/tags"',),
+        ("class EvidenceEvent",),
+        ("def parse_evidence_event",),
+        ("evidence:commit:<full-sha>",),
+        ("if INCREMENTAL_TRIGGER_SUFFIX.search(value)",),
+        ("audit:round-2",),
+        ("audit:counter-2",),
+        ("audit:2",),
+        ("queue-empty-round-99",),
         ('"rc-memory"',),
         ('"type-soundness"',),
         ('"backend-parity"',),
@@ -400,11 +452,37 @@ AUDIT_LEDGER_HELPER_CONTRACT = TextContract(
         ('"made-up-lens"',),
         ("the six-lens closed set was not accepted",),
         ("changed canonical lens set did not reopen",),
+        ("def _stored_audit_key",),
+        ("schema-v1 counter record lost compatibility",),
+        ("def check_start_gate",),
+        ("if same_scope and parse_evidence_event(key.trigger_id) is None",),
+        ("def _validate_evidence_anchor",),
+        ("anchor_sha = self.resolve_source_sha(event.commit_sha)",),
+        ("if anchor_sha == key.source_sha",),
+        ('"merge-base"',),
+        ('"--is-ancestor"',),
+        ("if ancestry.returncode == 1",),
+        ('"for-each-ref"',),
+        ('"--format=%(refname)"',),
+        ('f"--contains={anchor_sha}"',),
+        ("if not durable_refs",),
+        ("refs/notes/*, reflogs",),
+        ("unreferenced_descendant",),
+        ('("object-only", unreferenced_descendant)',),
+        ('("nonexistent", "c" * 40)',),
+        ('("same-source", source_one)',),
+        ('("unrelated", unrelated_commit)',),
+        ("CLI accepted {label} evidence commit",),
+        ("same-scope unanchored check did not exit 2",),
+        ("same-scope unanchored record did not exit 2",),
+        ("anchored evidence event was not durable",),
+        ("duplicate evidence anchor did not exit 3",),
         ("def record_outcome",),
         ("class GitAuditLedger",),
         ('"findings"',),
         ('"no-findings"',),
         ("ALREADY_RECORDED_EXIT",),
+        ("record = ledger.check_start(key)",),
         ("def self_test_errors",),
     ),
     (),
@@ -945,27 +1023,64 @@ def malformed_frontmatter_e2e_errors() -> list[str]:
         return validator.errors
 
 
-def open_lens_helper_fixture_errors() -> list[str]:
-    """Prove the validator rejects a helper that accepts arbitrary lenses."""
+def relaxed_helper_fixture_errors(
+    guard: str,
+    replacement: str,
+) -> list[str]:
+    """Apply one broken helper mutation and run its text contract."""
 
     helper = ROOT / ".agents/scripts/audit_ledger.py"
     try:
         text = helper.read_text(encoding="utf-8")
     except OSError as error:
         return [f".agents/scripts/audit_ledger.py: {error}"]
-    relaxed = text.replace(
+    relaxed = text.replace(guard, replacement, 1)
+    if relaxed == text:
+        return [f"helper fixture setup could not find guard: {guard!r}"]
+    return check_text_contract(relaxed, AUDIT_LEDGER_HELPER_CONTRACT)
+
+
+def open_lens_helper_fixture_errors() -> list[str]:
+    return relaxed_helper_fixture_errors(
         "if lens not in AUDIT_LENSES:",
         "if False:  # accepts arbitrary lens",
-        1,
     )
-    if relaxed == text:
-        return ["open-lens fixture setup could not find enforcement guard"]
-    return check_text_contract(relaxed, AUDIT_LEDGER_HELPER_CONTRACT)
+
+
+def counter_trigger_helper_fixture_errors() -> list[str]:
+    return relaxed_helper_fixture_errors(
+        "if INCREMENTAL_TRIGGER_SUFFIX.search(value):",
+        "if False:  # accepts incremental trigger suffix",
+    )
+
+
+def same_scope_helper_fixture_errors() -> list[str]:
+    return relaxed_helper_fixture_errors(
+        "if same_scope and parse_evidence_event(key.trigger_id) is None:",
+        "if False:  # accepts unanchored same-scope restart",
+    )
+
+
+def evidence_anchor_helper_fixture_errors() -> list[str]:
+    return relaxed_helper_fixture_errors(
+        "anchor_sha = self.resolve_source_sha(event.commit_sha)",
+        "anchor_sha = event.commit_sha  # skips durable Git resolution",
+    )
+
+
+def durable_ref_helper_fixture_errors() -> list[str]:
+    return relaxed_helper_fixture_errors(
+        "if not durable_refs:",
+        "if False:  # accepts dangling object-only evidence",
+    )
 
 
 GOOD_STEWARD_FIXTURE = """
 持续推进 implement、maintain、review、refactor、Argument 和 Audit。
 单个 item 的 waiting-feedback 不是全局阻塞，必须立即补位。
+waiting-feedback item 达到 clean checkpoint commit，且测试状态与必要 handoff 已持久化后，
+可以释放 worktree，
+但必须保留 branch/commit；未达到时保留 worktree 或先 checkpoint。
 只有全部有价值工作耗尽或全局阻塞时才停止。
 保持低噪声 check-in：待拍板、已完成结果、仓库健康、下一步。
 默认不报告 subagent 等待、命令进度、原始日志或逐文件实现流水。
@@ -1100,6 +1215,34 @@ def run_self_tests() -> list[str]:
             "if lens not in AUDIT_LENSES",
         )
     )
+    failures.extend(
+        deterministic_failure(
+            "incremental trigger helper fixture",
+            counter_trigger_helper_fixture_errors,
+            "if INCREMENTAL_TRIGGER_SUFFIX.search(value)",
+        )
+    )
+    failures.extend(
+        deterministic_failure(
+            "same-scope evidence helper fixture",
+            same_scope_helper_fixture_errors,
+            "if same_scope and parse_evidence_event(key.trigger_id) is None",
+        )
+    )
+    failures.extend(
+        deterministic_failure(
+            "evidence commit resolution helper fixture",
+            evidence_anchor_helper_fixture_errors,
+            "anchor_sha = self.resolve_source_sha(event.commit_sha)",
+        )
+    )
+    failures.extend(
+        deterministic_failure(
+            "evidence durable-ref helper fixture",
+            durable_ref_helper_fixture_errors,
+            "if not durable_refs",
+        )
+    )
 
     failures.extend(
         deterministic_failure(
@@ -1119,6 +1262,21 @@ def run_self_tests() -> list[str]:
             "waiting-feedback backfill fixture",
             lambda: check_text_contract(
                 bad_waiting, STEWARD_BEHAVIOR_CONTRACTS[0]
+            ),
+            "waiting-feedback backfill",
+        )
+    )
+    bad_waiting_handoff = GOOD_STEWARD_FIXTURE.replace(
+        "waiting-feedback item 达到 clean checkpoint commit，且测试状态与必要 handoff 已持久化后，\n"
+        "可以释放 worktree，\n"
+        "但必须保留 branch/commit；未达到时保留 worktree 或先 checkpoint。",
+        "waiting-feedback item 一律立即释放 worktree。",
+    )
+    failures.extend(
+        deterministic_failure(
+            "waiting-feedback handoff fixture",
+            lambda: check_text_contract(
+                bad_waiting_handoff, STEWARD_BEHAVIOR_CONTRACTS[0]
             ),
             "waiting-feedback backfill",
         )
@@ -1323,7 +1481,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             "workflow validator self-test passed: "
-            "14 legacy/broken fixtures rejected deterministically; "
+            "19 legacy/broken fixtures rejected deterministically; "
             "2 durable-ledger regressions passed"
         )
         return 0
@@ -1351,7 +1509,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{backlog_count} active backlog items, "
         f"{audit_count} active audit items, "
         "2 steward adapters, 4 Codex roles, direct YOLO profile, "
-        "14 negative fixtures, 2 durable-ledger regressions"
+        "19 negative fixtures, 2 durable-ledger regressions"
     )
     return 0
 

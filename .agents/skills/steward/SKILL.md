@@ -12,6 +12,7 @@ description: Act as the continuous Ring-lang Repository Steward. Use for “执�
 - 只要存在可执行的 backlog、audit finding、维护、review、bounded refactor、Argument 或风险 Audit，就持续推进。
 - 单个 item 需要用户保留决定时，保存可恢复状态、将该 item 转为 `waiting-feedback`、写短决策包，然后立即补位其他独立工作。
 - 单个 item 的 `waiting-feedback` 不是全局阻塞，必须立即补位；其他可执行工作不得被它冻结。
+- `waiting-feedback` item 达到 clean checkpoint commit，且测试状态与必要 handoff 已持久化后，可以释放 worktree，但必须保留 branch/commit；未达到时保留 worktree 或先 checkpoint。
 - 不以一个 wave 完成、某个 agent 返回、长测试仍在运行或单个 blocker 为停止点。
 - 只有全部有价值工作耗尽、所有剩余工作都依赖用户保留决定/新外部授权、存在全局技术阻塞，或达到明确安全/资源硬限制时才停止。
 - 不为保持忙碌而制造没有证据锚点的重构或审计。
@@ -88,8 +89,10 @@ Audit 子流程只审不修；finding 落表后返回 Steward 循环，由新的
 
 Lens 是六项闭集：`rc-memory`、`type-soundness`、`backend-parity`、`runtime-abi`、`design-drift`、`oracle-blind`；排序、去重后进入 key。动态 lens、日期 lens、序号后缀或未知 lens 必须由 helper 拒绝并 exit 2。专项豁免子类放入 stable trigger/event id，lens 仍限上述六项。
 
+普通 first-round trigger 必须稳定；`round`、`run`、`retry`、`attempt`、`counter` 或裸数字递增 suffix（如 `audit:round-2`、`audit:2`）一律 exit 2。可重开的 anchored evidence event 只允许 `evidence:commit:<full-sha>`。Helper 必须用 Git 验证 full SHA 是真实 commit、不同于 audited source SHA，且 audited source 是 evidence commit 的 ancestor；evidence commit 还必须由至少一个 `refs/heads/*`、`refs/remotes/*` 或 `refs/tags/*` reachable durable ref 包含。`refs/notes/*`、reflog 和纯 object-only 均排除，dangling commit 必须拒绝并 exit 2。外部 finding / issue 必须先落成基于 audited source 的 durable evidence commit，再使用该 commit SHA。
+
 1. Session 恢复时对拟恢复的 Audit key 执行 `query`。
-2. Round 开始前执行 `check`；同一 canonical key 已记录时 helper 返回 `skip-recorded`/exit 3，必须跳过并返回维护/队列扫描。
+2. Round 开始前执行 `check`；同一 canonical key 已记录时 helper 返回 `skip-recorded`/exit 3。相同 audited source SHA + normalized lens set 已有任一 record 时，不同 trigger 只有合法 anchored evidence event 才能开始；普通 `risk:next-event` / `risk:post-fix-batch` exit 2。新的 audited source SHA 或真正不同的 normalized lens set 仍可使用普通 stable trigger。
 3. Round 结束时，无论结果是 findings 还是 no-findings，都执行 `record --outcome findings|no-findings`；record 成功前 round 未闭环。
 
 ```powershell
@@ -98,7 +101,7 @@ python .agents/scripts/audit_ledger.py --repo <repo> check --trigger-id <stable-
 python .agents/scripts/audit_ledger.py --repo <repo> record --trigger-id <stable-id> --source-sha <sha> --lens <lens> --outcome <findings-or-no-findings>
 ```
 
-禁止用当前日期或随机 id 制造新 trigger 绕过防抖。Ledger note commit 不算 source snapshot 变化；只有新的 audited source SHA、normalized lens set 或 stable trigger/event 才形成新 key。Ledger 是 repo-local 治理状态，不写 Steward Inbox，也不进入用户过程摘要。
+禁止用当前日期、随机 id 或递增 counter 制造新 trigger 绕过防抖。Ledger note commit 不算 source snapshot 变化；同 scope 只能由合法 anchored evidence event 形成新 key。Ledger 是 repo-local 治理状态，不写 Steward Inbox，也不进入用户过程摘要。
 
 ## Steward Inbox
 

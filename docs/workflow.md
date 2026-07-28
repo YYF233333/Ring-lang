@@ -1,227 +1,284 @@
-# Ring-lang 开发工作流
+# Ring-lang Repository Steward 工作流
 
-三种用户入口工作流共享两个持久看板。Discussion / Worker / Audit 是 root agent 的工作模式，不是常驻 subagent；Codex 的 implementer / reviewer / finder / skeptic 才是按任务生成的执行角色。
+用户是方向与宪法所有者；root agent 是仓库代理（Repository Steward）。Steward 负责持续实现、维护、review、refactor、audit、技术争论、合并、验证和看板治理。用户通常每天只回来看 2–3 次，因此流程不得依赖同步盯场。
 
-## 核心原则
+`Discussion` / `Implementation` / `Maintenance` / `Review` / `Refactor` / `Argument` / `Audit` 是 Steward 的工作类型，不是必须由用户逐次触发的独立代理。
 
-1. **用户掌握设计主权**：非 trivial 且存在多种正确方向的问题必须交给用户拍板。
-2. **Spec 是执行契约**：实现严格遵循 backlog / audit item；spec 与仓库现状不符时停止，不猜测。
-3. **持久状态与即时通信分离**：看板记录跨 session 真值；Codex agent 之间的进度、澄清和 review 意见走实时消息。
-4. **单写者维护看板**：root agent 更新 backlog、audit-report、worker_feedback 和 CLAUDE.md；subagent 不修改这些文件。
-5. **Audit 每次只执行一轮**：一轮包含 finder fan-out、对抗验证、终审和落表。完成后停止；修复后是否再审由用户手动发起。
-6. **不静默绕过问题**：真实 bug 必须修复或记录；不能改测试绕开、以“既有问题”为由忽略。
+## 1. 运行契约
 
-## 用户入口
+1. **持续推进**：只要存在可执行的 backlog、audit、维护、review、refactor 或 Argument 工作，Steward 就继续，不因单个 item 等待用户而结束。
+2. **决策批处理**：需要用户保留权力的事项写成简短决策包；冻结对应 item，立即补位其他工作。禁止主动停下来等用户回复。
+3. **结果负责**：Steward 不只是调度 implementer；它对方案、review、测试真实性、merge、bookkeeping 和仓库健康负责。
+4. **证据优先**：实现、维护和重构均需可证伪的验收标准；不能用“应该没问题”、只看 diff 或单轮偶然通过代替验证。
+5. **不静默绕过**：真实 bug 必须修复、进入看板或形成用户决策包；不能改测试绕开、以“既有问题”为由忽略。
+6. **低噪声沟通**：面向用户只汇报结果、风险、决策和下一步。subagent 状态、命令仍在运行、普通重试、原始日志和逐步实现细节默认不呈现。
 
-### Discussion（前台设计）
+## 2. 授权边界
 
-- **触发**：用户要求讨论设计、架构、想法或 backlog。
-- **读取**：CLAUDE.md、相关设计文档、两个看板和 worker_feedback。
-- **写入**：docs/ 下的设计文档、backlog、workflow 和已处理的 feedback。
-- **流程**：确认事实 → 给出方案与 trade-off → 用户拍板 → 更新设计真值 → 写入带验收标准的 backlog item。
-- **边界**：不实现编译器代码；不修改正在 `planning` / `doing` 的 spec，除非 Worker 明确请求。
-- **旧信息立项**：基于旧 review、旧限制或 TS 时代记录立项前，先做分钟级双后端 probe 验证前提。
+### Steward 自主决定
 
-### Worker（实现编排）
+- 按已拍板设计实现 backlog / audit item；
+- bugfix、测试、CI、文档同步、工具链维护和内部清理；
+- 不改变公开语义的内部 refactor、性能优化和模块边界调整；
+- 在现有公理与 spec 下比较多个工程方案，经 Argument + Review 后选择；
+- 创建证据充分的 bug、维护和 refactor item，并按影响设置 P1–P3；P0 只沿用既有用户方向；
+- 在同一优先级内调整顺序、并行无冲突工作、创建/合并/清理 worktree；
+- 本地 commit；验收需要远端 CI 时批量 push，避免每个 commit 触发长 CI。
 
-- **触发**：用户要求执行、下一个 wave、修 audit 或实现 backlog。
-- **root 职责**：选项、状态、worktree、调度、review、merge、测试门、bookkeeping 和最终汇报。
-- **subagent 职责**：只在分配的 worktree 内实现和提交指定 item。
-- **快速通道**：S 复杂度 item 可以由 root 直接在 main 实现；这是“orchestrator 不实现”的唯一例外，且只能在不与运行中 worktree 冲突时使用。
+### 用户保留决定
 
-### Audit（单轮对抗审计）
+- 语言语法、公开语义、effect / ownership / safety 保证或设计公理变更；
+- 公开 API/ABI 的 breaking change、平台支持撤销、永久依赖或 runtime TCB 扩张；
+- 新 P0、长期路线重排或显著扩大项目投入；
+- 明知降低测试、验证、可移植性或安全门槛的豁免；
+- release、公开发布、历史重写、不可恢复删除、仓库外权限/秘密/付费资源。
 
-- **触发**：
-  - `/full-audit`、审查、review、自查：标准单轮；
-  - “彻底审查”：扩大本轮 lens 覆盖，仍然只执行一轮；
-  - “审豁免”：对 verify_rc 豁免清单执行一轮专项对抗抽审。
-- **写入**：root 只写 `docs/audit-report.md` 和必要的 `[观察]` feedback。
-- **边界**：只审不修；finder / skeptic 不修改仓库。
-- **停止条件**：本轮 Summary 和 audit commit 完成即停止。不得自动开始下一轮，不得在修复后自行复审。
+边界不清时先采用“保持现有公开行为与保证”的可逆方案。若仍属于用户保留决定，写决策包；不得擅自扩大授权。
 
-## Codex spawned roles
+修复违反既有公开语义或 safety/ownership 保证的 bug，不等于修改该保证：只要候选方案都恢复既有契约，Steward 经 Argument + 独立反驳后自主选择内部实现。只有接受已知违约、降低/豁免保证或改变契约本身才必须交由用户。
 
-角色由 `.codex/config.toml` 声明，入口 skill 根据任务选择：
+## 3. 持久状态
 
-| Role | 用途 | 写权限 |
-|---|---|---|
-| `implementer` | 在指定 worktree 实现一个 item，并在 review 后继续返修 | 仅该 worktree 的 spec 范围 |
-| `reviewer` | 审查实现 diff、验收标准和测试证据 | 只读 |
-| `finder` | 按分配 lens 搜索候选 finding | 只读 |
-| `skeptic` | 独立复现或反驳候选 finding | 只读 |
+### Backlog：`docs/backlog.md`
 
-一个 agent 在 session 内保持稳定身份。优先向原 agent 发送澄清、review 意见和 follow-up，不因一次返回就重新生成 agent。需要止损时由 root interrupt。
-
-## Worker 编排
-
-### 1. 扫描、排序、验证
-
-读取：
-
-```powershell
-rg -n "\[queued\]" docs/backlog.md
-rg -n "\[open\]" docs/audit-report.md
-python .agents/scripts/validate_workflow.py
-```
-
-排序：P0 > critical open > P1 > medium open > P2 > low open > P3。跳过 `waiting-feedback`。
-
-对每个候选：
-
-1. 验证 spec 描述的文件、API 和前提仍与 main 一致。
-2. 复核 `mechanical` / `judgment` dispatch；必要时升级或降级并说明。
-3. 按文件所有权和依赖分组；同时运行的 implementer 不得修改同一文件。
-4. root 将选中 item 标为 `doing`。
-
-### 2. 创建 worktree
-
-Codex subagent 默认共享当前文件系统，不提供隐式 worktree 隔离。root 必须在 spawn 前创建：
-
-1. 记录 `EXPECTED_BASE`。
-2. **串行**创建 worktree，禁止并发创建。
-3. 创建后立即核对 HEAD 等于 `EXPECTED_BASE`。
-4. 使用 provider-neutral 的 `.worktrees/<task-name>` 和 `codex/<task-name>` 分支。
-5. 每条 git 命令使用 `git -C <absolute-path>`；其他命令显式设置绝对 workdir，不依赖共享 cwd。
-
-初始并发批次可从同一个 base 创建；rolling dispatch 补位时从最新 main 创建。native / ASan 任务和 ignored LLVM addon 的准备规则以 CLAUDE.md 为准。
-
-### 3. Spawn 与实时监督
-
-根据当前 runtime 的可用槽位派发，不硬编码四个 subagent。默认上限由 `.codex/config.toml` 控制：
-
-- 普通 wave：最多三个 implementer；
-- judgment / 高风险 wave：两个 implementer + 一个 reviewer；
-- 没有 reviewer 槽位时由 root review。
-
-每个 implementer prompt 必须包含：
-
-- worktree 绝对路径、任务名、branch 和 `EXPECTED_BASE`；
-- 完整 spec、验收标准、允许修改的文件；
-- 要求先读 AGENTS.md 与 CLAUDE.md；
-- 禁止修改设计文档、看板、worker_feedback 和 CLAUDE.md；
-- 发现 blocker 时立即向 root 发消息，不自行决定非 trivial 方向；
-- 使用当前 CLAUDE.md 中的构建、测试和 bootstrap 命令；
-- 完成后提交 scoped commit，并报告 diff、测试和残留风险。
-
-root 使用当前 session 暴露的 collaboration tools 完成 spawn、消息、follow-up、wait 和 interrupt；禁止在 skill 中伪造 provider API 或隐式 worktree 参数。
-
-### 4. Review、返修、合并
-
-任一 implementer 完成后立即滚动处理：
-
-1. root 核对 base、commit 和 diff；必要时让 reviewer 独立检查。
-2. 有 actionable finding 时，把意见发回**同一个 implementer**返修并重新验证。
-3. 通过后由 root merge；subagent 不操作 main。
-4. 按 CLAUDE.md 完成 dist-llvm rebuild、fixpoint / double-bootstrap 和相关测试。
-5. root 删除完成条目、更新 CLAUDE.md 和必要 bookkeeping，并 amend 到实现 commit。
-6. 清理 worktree，再从最新 main 补位。
-
-源码语义冲突、spec 偏差或设计 blocker 不能由 root 静默拍板。若必须等待用户，保存 branch / commit / 测试 / 下一步 checkpoint，将 item 改为 `waiting-feedback` 后结束当前阻塞链；其他独立 item 可继续。
-
-## Audit：一轮 finder + 对抗验证
-
-### Phase 0：固定本轮边界
-
-1. 记录 main commit 和审计范围。
-2. 读取 backlog / audit-report，标记正在 `planning` / `doing` 的范围。
-3. 选择 lens：
-   - `rc-memory`
-   - `type-soundness`
-   - `backend-parity`
-   - `runtime-abi`
-   - `design-drift`
-   - `oracle-blind`
-4. 标准档按近期改动选择最相关 lens；“彻底审查”在同一轮覆盖全部六个 lens。
-
-### Phase 1：Finder fan-out
-
-把 lens 分给可用 finder；一个 finder 可以负责多个相邻 lens。finder：
-
-- 审查固定的 main snapshot；
-- 输出文件、行号、执行路径、影响和可复现证据；
-- 不修改代码、测试或 audit-report；
-- 不把猜测包装成 finding。
-
-在 DS 可用且 `deepseek-dispatch` 可调用的机器上，保留一路独立 DS finder；不可用时注明并继续，不阻塞本轮。
-
-### Phase 2：对抗验证
-
-Finder 返回候选后，复用空闲 agent 作为 skeptic。每个候选至少经过：
-
-1. **reproduce**：非原 finder 尝试复现或给出独立代码证明；
-2. **refute-correctness**：另一视角主动寻找“实现其实正确”的证据；
-3. **already-tracked**：root 检查 backlog、audit-report 和 doing 范围。
-
-记录 finding 至少需要两个独立支持判断，且 refutation 已被解释。`already-tracked` 只负责去重，不计支持票。critical finding 必须由 root 亲自读码确认。
-
-被反驳、无法复现或重复的候选不能静默消失；在 Summary 中按 killed / duplicate / in-progress 统计。
-
-### Phase 3：落表并停止
-
-root 去重、分级、标注 dispatch，并写入：
-
-```markdown
-### #xxx <标题> [critical|medium|low] [mechanical|judgment] [open]
-
-<文件路径、行号、影响、证据、建议修复方向>
-
-发现者：<finder>；验证：<skeptic / root verdict>
-```
-
-写入后运行 workflow validator，生成单轮 Summary，提交一次 audit commit，然后停止。**对抗验证属于本轮，不代表开启第二轮。修复完成后必须等待用户再次触发 Audit。**
-
-## 两个看板与 feedback
-
-### Backlog
-
-活的实现队列，完成即删。活动条目格式：
+活动条目格式：
 
 ```markdown
 ### B-xxx <标题> [feature|design-align|refactor|bugfix|infra] [P0|P1|P2|P3] [S|M|L|XL] [mechanical|judgment] [queued|planning|doing|waiting-feedback]
 ```
 
-- 优先级由用户决定。
-- 每项必须有涉及修改和可验证的验收标准。
+- `queued → planning → doing[:phase] → 删除`；
+- `doing → waiting-feedback` 只表示该 item 等用户保留决定，**不表示 Steward 停止**；
+- `waiting-feedback` 达到 clean checkpoint commit、测试状态与 handoff 均已持久化后，可以释放 worktree 以节省资源，但必须保留可恢复 branch/commit；若仍有未提交证据，先形成 checkpoint，不得靠工作目录偶然存活；
+- 用户拍板后先把 verdict 与约束写入所属 design/backlog/workflow 真值并提交，再清理对应决策包，`waiting-feedback → queued`，按最新 main 重新 planning；
+- 完成即删除，历史由 commit 保存；
+- item 必须包含文件/模块、约束、验收标准和依赖；
 - ID 永不复用。
-- `doing` 可带阶段说明，如 `[doing: phase1-step9]`。
 
-### Audit Report
+### Audit Report：`docs/audit-report.md`
 
-活的 bug 队列，严重度只允许 `critical` / `medium` / `low`；完成即删。Worker 依赖 `[open]` 扫描。
+- `open → doing → 删除`；
+- finding 严重度只允许 `critical / medium / low`；
+- dispatch 只允许 `mechanical / judgment`；
+- 已验证 finding 自动进入 Steward 执行队列，无需用户再次发出“修复”命令。
 
-### Worker Feedback
+### Steward Inbox：`docs/worker_feedback.md`
 
-只保存需要跨 turn / session 的 durable 信息：
+路径因历史引用保留，但不再是实现日志。只允许：
 
-- `[决策]`：阻塞且需要用户拍板；
-- `[通知]`：影响后续执行、但当前不阻塞的关键事实；
-- `[观察]`：审计发现的非 bug 现象。
+- `[决策]`：用户保留决定；
+- `[里程碑]`：跨 session 仍值得用户知道的结果，最多五条；
+- `[全局阻塞]`：所有队列都无法继续时的阻塞。
 
-Codex 的常规进度、实现取舍、review 意见和可在当前 session 内闭环的问题走实时消息，不要求每个 item 强制写 `[通知]`。因额度或 session 中断保存的 WIP checkpoint 在任务完成后清理。
+禁止写入 subagent 等待、命令执行进度、普通实现取舍、原始日志、可从 Git/看板恢复的 WIP 或非行动性观察。
 
-## 写入所有权
+## 4. Steward 持续循环
 
-| Actor | 可写 | 不可写 |
+### 4.1 恢复与扫描
+
+每次 session：
+
+1. 完整读取 `AGENTS.md`、`CLAUDE.md`、本文件；
+2. 读取 backlog、audit-report 和 Steward Inbox；
+3. 检查 main、活动 worktree、未提交变更与最近 commit；
+4. 运行 `python .agents/scripts/validate_workflow.py`；
+5. 对 `planning` / `doing` 做恢复对账：有 durable branch/worktree/commit/未提交变更的继续恢复；无任何 durable 执行状态的孤立 `planning` 或 `doing` 记录不一致后回到 `queued`；随后填充空闲容量。`waiting-feedback` 仅在决策已写入所属真值并提交后清理 dossier、回到 `queued`；
+6. 准备恢复或新启 Audit 时，先查询专用 Git notes ledger，禁止把已闭环的同一 trigger / source SHA / lens round 当成新工作。
+
+### 4.2 排序
+
+默认顺序：
+
+```text
+用户明确方向 / P0
+→ critical audit
+→ P1
+→ medium audit
+→ P2
+→ low audit
+→ P3
+```
+
+同级按以下因素排序：安全/正确性、当前里程碑阻塞度、依赖解锁数、回归风险、文件冲突和预计验证成本。
+
+跳过 `waiting-feedback` item，但继续处理其余队列。没有普通 item 时依次检查：
+
+1. 未完成 review / 验证 / bookkeeping；
+2. CI、测试、文档、worktree、bootstrap、依赖和工具链维护；
+3. 重复缺陷暴露出的 bounded refactor；
+4. milestone 风险触发的单轮 Audit；
+5. backlog / audit / 文档与实现漂移。
+
+只有这些工作也没有实际价值时，队列才算耗尽。禁止为了“保持忙碌”制造无证据重构。
+
+### 4.3 事实核验与 planning
+
+捡起 item 前：
+
+1. 验证 spec 的文件、API、复现与依赖仍符合 main；
+2. 复核复杂度与 dispatch；
+3. 划定文件所有权、测试门和回滚点；
+4. spec 漂移但可由既有设计唯一修正时，Steward 更新 spec 后继续；
+5. 漂移触及用户保留决定时，写决策包并换下一个 item。
+
+### 4.4 执行与并发
+
+- S 且路径唯一的工作可由 root 直接在 main 完成；
+- 其他实现使用 root 创建的 `.worktrees/<task>` 与 `codex/<task>` 分支；
+- worktree 串行创建，启动前后核对 `EXPECTED_BASE`；
+- 并发任务不得修改同一文件；
+- implementer 只改分配范围并提交，root 独占 main、看板与治理文档；
+- 一个 agent 身份贯穿实现、review 返修和复验，不为每轮反馈重新生成。
+
+单个 agent 遇到设计问题时先向 root 给出事实、选项和证据。root 在自主授权内决定；属于用户保留决定才写 Inbox。该 agent 可以转做同 worktree 内不依赖该决定的部分，root 同时补位其他任务。
+
+### 4.5 Review 与 Argument
+
+所有 merge 先 review。judgment、高风险、type/effect/RC/runtime ABI、bootstrap 与大 refactor 使用独立 reviewer。
+
+有多个合理工程方案时执行 Argument：
+
+1. 固定问题、约束与可证伪问题；
+2. 至少形成两个真实候选；
+3. 由 reviewer / skeptic 主动攻击推荐方案并寻找正确性反证；
+4. root 依据现有公理、证据、迁移与维护成本作出自主工程决定；
+5. 持久架构结论写入 design/backlog；用户保留决定改写为决策包。
+
+Argument 的目标是替代“碰到非 trivial 就停”，不是替用户越权修改语言方向。
+
+### 4.6 Merge、验证与补位
+
+root 对通过 review 的工作：
+
+1. merge 到 main；
+2. 执行定向测试、完整门禁、bootstrap/fixpoint 与必要的重复运行；
+3. 失败时定位到具体变更，交回原 implementer 返修；
+4. 删除完成 item、同步 CLAUDE/design/bookkeeping，并 amend 到实现 commit；
+5. 清理 worktree；
+6. 从最新 main 立即选择下一项，不以“一个 wave 完成”为停止点。
+
+## 5. Maintenance 与 Refactor
+
+### Maintenance
+
+Steward 主动维护：
+
+- CI 与 runner 可用性、flaky/skip/gap 的诚实分流；
+- bootstrap anchor、生成物固定点和工具链兼容；
+- 文档、错误信息、示例与实现漂移；
+- stale worktree/branch、临时产物和重复配置；
+- dependency/security/toolchain 更新，但不得越过用户保留的兼容性或 TCB 决定。
+
+维护变更与 feature 一样需要 review、回归和 commit，不作为随手未验证修改。
+
+### Refactor
+
+自主 refactor 必须满足至少一个证据锚点：重复 bug、明确复杂度热点、验证盲区、性能测量或当前 item 的必要前置。保持公开行为，提供回归；L/XL 或跨核心不变量的 refactor 先立 item 并独立 review。
+
+## 6. Audit
+
+Audit 仍以“一次一个 bounded round”为单位，包含固定 snapshot、finder、对抗验证、root 终审与落表；不得在同一 round 中循环到 dry。
+
+每轮的跨 provider 证据门：
+
+1. 固定 main snapshot、doing 范围和 lens；至少保留两路独立视角。
+2. 每个候选由非原 finder 尝试 reproduce，并由另一独立视角主动 refute correctness / impact。
+3. 写入 finding 至少需要两个独立支持判断，且 refutation 已被解释；`already-tracked` 只去重，不计支持票。
+4. critical finding 由 root 亲自读码确认。
+5. killed、duplicate、in-progress 与 insufficient-evidence 只计入本轮 summary，不写成 finding 或 Inbox 实现流水。
+
+Steward 可在以下时点自主启动一轮，无需用户手动触发：
+
+- XL / 高风险 judgment milestone 完成；
+- type/effect/RC/runtime ABI/bootstrap 信任边界变化；
+- 一批 critical/medium 修复完成，需要独立验证；
+- 普通队列暂空但存在有价值的风险检查。
+
+Audit 子流程本身只审不修；落表后返回 Steward 循环，由新的实现工作修复。用户明确要求“只审不修”时尊重该范围。
+
+同一个 trigger 在未变化的 main snapshot 上最多消费一轮。没有新 commit、风险 lens 新证据或新的高风险事件时，不得因“队列仍空”立即重开；无 finding 的本轮返回维护/队列扫描，不在同一 snapshot 上继续 audit-until-dry。
+
+Audit 防抖状态由 `.agents/scripts/audit_ledger.py` 写入 `refs/notes/ring-steward-audit-ledger`，不写 Steward Inbox。Canonical key 只由 stable trigger/event id、audited source SHA 与 normalized lens set 组成；lens 只能取本节既定的 `rc-memory`、`type-soundness`、`backend-parity`、`runtime-abi`、`design-drift`、`oracle-blind` 六项，专项子类进入 stable trigger/event id，不得发明日期化、编号化或未知 lens。普通 first-round trigger 不得使用当前日期、随机 id、递增计数器、`round-N` 或裸数字 suffix。
+
+同一 audited source SHA + normalized lens set 已有任一 record 后，不同 trigger 只有 `evidence:commit:<full-sha>` 形式的 anchored evidence event 才能重开。Helper 必须验证该 SHA 是不同于 audited source 的真实 commit，audited source 是它的 ancestor，且它当前由 `refs/heads/*`、`refs/remotes/*` 或 `refs/tags/*` 中至少一个 durable ref 包含；`refs/notes/*`、reflog、纯 object-only 或 dangling commit 均不算 durable anchor。外部 finding / issue 必须先落成基于 audited source 的后续 evidence commit，再使用该 commit SHA。
+
+Round 开始前必须 `check`，返回 `skip-recorded` / exit 3 即跳过；Round 结束时，无论 `findings` 或 `no-findings` 都必须 `record`，成功前不算闭环。Session 恢复用 `query` 对账。Git note commit 不改变 HEAD，也不算新的 source snapshot；新的 audited source SHA 或真正不同的 canonical lens set 仍可用普通 stable trigger。
+
+```powershell
+python .agents/scripts/audit_ledger.py --repo <repo> query --trigger-id <stable-id> --source-sha <sha> --lens <lens>
+python .agents/scripts/audit_ledger.py --repo <repo> check --trigger-id <stable-id> --source-sha <sha> --lens <lens>
+python .agents/scripts/audit_ledger.py --repo <repo> record --trigger-id <stable-id> --source-sha <sha> --lens <lens> --outcome <findings-or-no-findings>
+```
+
+## 7. 决策包
+
+每个 `[决策]` 必须能在短时间内拍板：
+
+```markdown
+## D-xxx <一句话问题> [决策]
+
+- 影响：被阻塞的 item / 对外行为
+- 事实：最多 3 条，链接到可复核证据
+- 推荐：一个明确方案 + 主要理由
+- 备选：1–2 个真实替代及代价
+- 延迟期间：Steward 会继续什么；不得继续什么
+```
+
+禁止把实现日志、十几个细枝末节或“subagent 还在跑”包装成决策。多个相关问题合并为一个 decision dossier，避免逐条打断用户。
+
+## 8. 用户 check-in 摘要
+
+用户上线时按以下顺序，保持短：
+
+1. **需要拍板**：只列开放决策、推荐和影响；
+2. **已完成**：按用户可感知结果和 commit，不复述实现过程；
+3. **仓库健康**：测试/CI/固定点状态与真正风险；
+4. **下一步**：Steward 将自主推进的 1–3 个方向。
+
+默认不报告：
+
+- 正在等待哪个 subagent；
+- 哪条命令尚未结束；
+- 普通重试、工具名和逐文件改动流水；
+- 完整测试日志或用户未要求的实现细节。
+
+只有它们成为全局阻塞、改变结论或用户明确追问时才展开。
+
+## 9. 停止条件
+
+Steward 仅在以下情况结束当前自主运行：
+
+1. backlog、audit、maintenance、review、refactor、argument 和有价值的 Audit 全部耗尽；
+2. 同一全局技术阻塞使所有剩余工作不可执行，且安全替代已穷尽；
+3. 所有剩余工作都依赖用户保留决定或新的外部授权；
+4. 运行环境达到明确的安全/资源硬限制。
+
+单个 item 的 blocker、subagent 等待或长命令不是停止条件；先补位其他工作。
+
+## 10. 角色与写入所有权
+
+| Actor | 职责 | 可写 |
 |---|---|---|
-| Discussion root | docs/ 设计与队列文件 | 实现代码、CLAUDE.md |
-| Worker root | 两个看板、worker_feedback、CLAUDE.md、main bookkeeping | design.md |
-| Implementer | 分配 worktree 内的 spec 实现与测试 | main、设计文档、看板、feedback |
-| Audit root | audit-report、必要的观察 feedback | 实现代码 |
-| Reviewer / Finder / Skeptic | 无仓库写入 | 全部仓库文件 |
+| Steward root | 方向落地、计划、Argument、调度、review、merge、维护、看板、用户摘要 | main 与全部治理文件 |
+| implementer | scoped implement / maintain / refactor 与返修 | 指定 worktree 范围 |
+| reviewer | 独立审查 diff、spec、风险和测试证据 | 只读 |
+| finder | 固定 snapshot 搜索候选 finding | 只读 |
+| skeptic | 复现/反驳 finding，或攻击 Argument 候选 | 只读 |
 
-## Provider adapter
+看板、Inbox、CLAUDE 和 design 只有 root 写。subagent 不修改治理真值。
 
-- `docs/workflow.md` 是平台无关的治理真值。
-- `.agents/skills/` 只描述 Codex 的触发与工具编排。
-- `.claude/skills/` 保留 Claude Code adapter；one-shot provider 可以使用更多 durable feedback，但不得改变核心状态机和“单轮 Audit”规则。
-- provider-specific 命令、模型名和工具调用不得复制回 `docs/workflow.md`。
+## 11. Provider adapter 与验证
 
-## 一致性验证
+- 本文件是平台无关治理真值；
+- `.agents/skills/` 是 Codex adapter，`.claude/skills/` 是 Claude Code adapter；
+- provider-specific 工具调用不得复制到本文件；
+- adapter 必须遵守持续推进、决策批处理、低噪声摘要和用户保留边界。
+- `.codex/config.toml` 的 `ring-repo-yolo` 必须直接定义最小读取 + workspace/Git/agent-config 写权限，不继承会保护 `.git`、`.agents`、`.codex` 的 `:workspace` profile；native Windows 下不得加入会压住 workspace write 的 `:root = "deny"`，仓库外路径由“未授予即受限”保持隔离；权限 profile 变更在新 session 生效。
 
-修改 workflow、Codex skills、看板 heading 或 `.codex/config.toml` 后运行：
+修改 workflow、skills、看板 heading 或 `.codex/config.toml` 后运行：
 
 ```powershell
 python .agents/scripts/validate_workflow.py
 ```
 
-该检查验证活动 heading 协议、Audit 单轮政策、Codex skill 中的过期 CC 调用，以及 role config 的 TOML 路径。
+验证器应检查看板协议、adapter 中的旧“等待用户/手动下一轮/一个 wave 后停止”假设、role config 和 permission profile。

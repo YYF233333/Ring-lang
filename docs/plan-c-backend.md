@@ -215,5 +215,5 @@ LLVM 的 optimizer + backend 在 LLVM-C 路线下**本来就在信任基内**（
 | Phase 0 发现活 bug 而非纯污染 | 方向 C 审计并入执行；C 后端仍推进（消灭 marshalling 层），通用 RC 排序 bug 单独修 |
 | 移植期双后端行为差异难仲裁 | 以语义测试预期为准（golden .expected 是规约）；两后端都错的场景补 E2E |
 | 自编译耗时回退 | 实测回填；内循环 -O1 / 提前拆分作为 tuning 上报 |
-| fail/abort 机制在 C 映射不顺 | worker 先读现实现，遇设计分歧走 waiting-feedback，不自行发明 |
+| fail/abort 机制在 C 映射不顺 | Steward 先核实现并做 Argument/probe；保持现有契约的内部 lowering / function-pointer / 后端共同 ABI 取舍自主决定，只有改变公开 failure 语义、breaking public API/ABI 或 runtime TCB 时才将该 item 转 waiting-feedback，同时继续其他队列 |
 | B-152 RIIR 剩余阶段（P4 Set / P1s2 Str / P5）与本计划撞车 | 建议 B-152 剩余暂停，B-163 完成后在 C 后端上继续（RIIR 纯 Ring 代码天然跨后端，损失小） |

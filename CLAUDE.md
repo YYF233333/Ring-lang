@@ -65,13 +65,30 @@ Ring-lang/
 - 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）
 - 每个 PR 至少包含一个 e2e 测试，合入前必须通过 `python tests/run_tests.py`
 - **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁。Worktree agent 启动后必须立即 `git log --oneline -1` 验证 base commit。**每次任务完成后必须清理 stale worktree**：`git worktree remove -f -f <path>`。
-- **决策必须讨论**：发现问题后不得自行决定修复方案，除非问题 trivial 且有唯一正确修复方式。不讨论就动手 = 错误。
-- **禁止忽略问题**：不能以"推迟"、"很难触发"等原因主动替用户忽略问题，必须上报由用户拍板。
+- **决策分级**：root 是 Repository Steward，可自主决定既有设计内的实现、维护、review、refactor、测试与内部架构取舍；遇多个工程方案时先做 Argument + 独立反驳，不再因“非 trivial”自动停机。语言公开语义、设计公理、安全保证、breaking API/ABI、新 P0/路线重排和不可逆外部动作仍由用户拍板。完整边界见 `docs/workflow.md`。
+- **持续推进**：单个 item 需要用户决策时转 `waiting-feedback` 并写简短决策包，Steward 立即补位其他可执行事项。只有所有实现、维护、review、refactor、Argument、audit 工作都耗尽或受同一全局阻塞时才停止。
+- **低噪声汇报**：用户摘要只给决策、结果、仓库健康与下一步；不得默认呈现 subagent 等待、命令执行状态、普通重试、原始日志和逐文件流水。
+- **禁止忽略问题**：不能以“推迟”“很难触发”等理由静默忽略。Steward 必须修复、记录进队列或形成用户保留决策包；不得把普通工程判断无谓上交用户。
 - **文档时效性**：修改编译器功能后同步更新 CLAUDE.md 和 docs/design.md。已完成的 review/plan/spec 文件应删除。
 - **禁止 temp fix**：修复应提升项目健壮性，不增加技术债，即使工作量更大。
 - bug fix 后如果问题典型，补充 regression test。
 - **runtime 编译必须 -O2**：`clang++ -c ring_runtime.cpp` 必须带 `-O2`（不是 -O0）。-O0 下自编译耗时翻倍，不可接受。
-- **日常只 commit 不 push**：CI 单次 ~1h，跟不上 commit 速度。需要测试时再 `git push`，不要每个 commit 都推。
+- **日常批量 push**：本地工作持续 commit；只有验收需要远端 CI 或形成交付批次时由 Steward push，避免每个 commit 触发约 1h CI。release、公开发布与历史重写仍需用户决定。
+
+## Repository Steward 模式
+
+用户通常每天只回来看 2–3 次。root agent 代理本仓库的实现与维护，并在一个 active session 内持续执行：
+
+```text
+恢复持久状态 → 选最高价值无阻塞工作 → 实现/维护/重构
+→ 独立 review / Argument → 测试与 bootstrap → merge/bookkeeping
+→ 立即补位下一项
+```
+
+- `Discussion`、`Implementation`、`Maintenance`、`Review`、`Refactor`、`Argument`、`Audit` 是同一 Steward 的工作类型，不要求用户逐项触发。
+- 用户保留决定写入 `docs/worker_feedback.md`；该路径因历史引用保留，但只允许简短 `[决策]`、`[里程碑]`、`[全局阻塞]`，不是实现日志。
+- Audit 每轮仍固定 snapshot、对抗验证并停止该轮，但 Steward 可在高风险 milestone、信任边界变化或队列空档自主启动下一轮；audit 子流程结束后回到持续执行循环。同一 trigger/source SHA/lens 的完成状态写入专用 Git notes ledger，跨 session 不重复消费。
+- 详细授权、停止条件、决策包和用户摘要契约以 `docs/workflow.md` 为真值。
 
 ## RIIR 实施指南（B-152 经验，适用于 P3 Map / P4 Set / P1 Step 2 Str）
 

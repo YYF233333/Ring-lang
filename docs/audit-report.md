@@ -2,7 +2,7 @@
 
 > 活的 bug 看板。修复后删除条目，只在 git commit message 留记录。
 > 条目格式：`### #xxx <标题> [严重度] [dispatch] [状态]`
-> dispatch 标记：`mechanical`（DS 可执行）/ `judgment`（Claude 执行）
+> dispatch 标记：`mechanical`（路径唯一，可直接执行）/ `judgment`（需要跨模块推理、Argument 或独立 review）
 > 状态流转：`open` → `doing` → 删除
 > 工作流规范见 `docs/workflow.md`
 
@@ -175,7 +175,7 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 
 **修复方向**（解法唯一）：emit 失败分支加 `exit_process(1)`，对齐 C 后端先例。同函数 verify 失败（L1746，注释明示 attempting emit anyway）与 pass 失败（L1753）是故意继续的既有行为，**保持不动**。注：本条属 codegen_llvm，若不修将随 B-163 Phase 2 LLVM 后端退役消亡；但 Phase 1 期间 LLVM 仍是主力构建路径 + 差分 oracle，1 行修复值得做。
 
-> **2026-07-11 扩注（#245 worker [观察] 分诊）——verify 失败 fail-stop 拍板点**：invalid IR（duplicate switch case）下 "attempting emit anyway" 实测会**挂死 ring.exe 进程**（滞留占文件锁），违背「失真必须响」。建议 verify 失败直接 fail-stop（exit 非零）而非继续 emit——**但被 #247 gate**：现存在合法程序触发 verification failed 的既有噪声（行为正确的假阳性），先修 #247 才能启用 fail-stop，否则合法程序编译失败。执行序：#247 根因修复 → verify fail-stop（届时本条 emit/verify 两处一并收口）。方向待用户确认。
+> **2026-07-11 扩注（#245 worker [观察] 分诊）——verify 失败 fail-stop**：invalid IR（duplicate switch case）下 "attempting emit anyway" 实测会**挂死 ring.exe 进程**（滞留占文件锁），违背「失真必须响」。建议 verify 失败直接 fail-stop（exit 非零）而非继续 emit——**但被 #247 gate**：现存在合法程序触发 verification failed 的既有噪声（行为正确的假阳性），先修 #247 才能启用 fail-stop，否则合法程序编译失败。执行序：#247 根因修复 → Steward 通过 Argument/定向回归启用 verify fail-stop（届时本条 emit/verify 两处一并收口）。这是恢复既有诊断保证的内部工程决定；只有接受继续 emit 或降低“失真必须响”门槛才需用户 waiver。
 
 发现者：Phase 0 worker（feedback 分诊）
 
