@@ -6,7 +6,8 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL,
     make_option_type, make_map_type}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
-    EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef, ImplEntry, mono, add_impl}
+    EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef,
+    ImplEntry, ImplDictBound, mono, add_impl}
 use hir::{variant_ctor_name}
 
 // ============================================================
@@ -364,6 +365,7 @@ fn register_eq_trait(mut env: TypeEnv) {
             trait_name: "Eq",
             target_type_name: prim,
             type_params: [],
+            dict_bounds: [],
             method_names: ["eq", "ne"],
             assoc_types: map_new()
         })
@@ -401,6 +403,7 @@ fn register_option_eq(mut env: TypeEnv) {
         trait_name: "Eq",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
+        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Eq" }],
         method_names: ["eq", "ne"],
         assoc_types: map_new()
     })
@@ -433,6 +436,7 @@ fn register_clone_trait(mut env: TypeEnv) {
             trait_name: "Clone",
             target_type_name: prim,
             type_params: [],
+            dict_bounds: [],
             method_names: ["clone"],
             assoc_types: map_new()
         })
@@ -444,6 +448,7 @@ fn register_clone_trait(mut env: TypeEnv) {
             trait_name: "Clone",
             target_type_name: coll,
             type_params: [],
+            dict_bounds: [],
             method_names: ["clone"],
             assoc_types: map_new()
         })
@@ -496,6 +501,7 @@ fn register_option_clone(mut env: TypeEnv) {
         trait_name: "Clone",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
+        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Clone" }],
         method_names: ["clone"],
         assoc_types: map_new()
     })
@@ -527,6 +533,7 @@ fn register_ord_trait(mut env: TypeEnv) {
             trait_name: "Ord",
             target_type_name: prim,
             type_params: [],
+            dict_bounds: [],
             method_names: ["cmp"],
             assoc_types: map_new()
         })
@@ -560,6 +567,7 @@ fn register_debug_trait(mut env: TypeEnv) {
             trait_name: "Debug",
             target_type_name: prim,
             type_params: [],
+            dict_bounds: [],
             method_names: ["debug"],
             assoc_types: map_new()
         })
@@ -581,6 +589,7 @@ fn register_debug_trait(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_LIST,
         type_params: ["T"],
+        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Debug" }],
         method_names: ["debug"],
         assoc_types: map_new()
     })
@@ -603,6 +612,7 @@ fn register_debug_trait(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_MAP,
         type_params: ["K", "V"],
+        dict_bounds: [],
         method_names: ["debug"],
         assoc_types: map_new()
     })
@@ -623,6 +633,7 @@ fn register_debug_trait(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_SET,
         type_params: ["T"],
+        dict_bounds: [],
         method_names: ["debug"],
         assoc_types: map_new()
     })
@@ -650,6 +661,7 @@ fn register_option_debug(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
+        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Debug" }],
         method_names: ["debug"],
         assoc_types: map_new()
     })
@@ -681,6 +693,7 @@ fn register_hash_trait(mut env: TypeEnv) {
             trait_name: "Hash",
             target_type_name: prim,
             type_params: [],
+            dict_bounds: [],
             method_names: ["hash"],
             assoc_types: map_new()
         })
@@ -892,7 +905,10 @@ fn register_set_hof(mut env: TypeEnv) {
     methods.insert("filter", TypeScheme {
         ty: Type::FnType { params: [make_set_struct(t), cb], return_type: make_set_struct(t), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: [],
+        bounds: [
+            SchemeBound { type_var: t_id, trait_name: "Hash", assoc_constraints: [] },
+            SchemeBound { type_var: t_id, trait_name: "Eq", assoc_constraints: [] }
+        ],
         def_id: none
     })
 

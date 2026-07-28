@@ -2,10 +2,11 @@ use types::{Type, EffectRow}
 use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp,
-    DerivedImpl, DerivedField, DerivedVariant, FieldAction, TypeKind,
+    DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef, TypeKind,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
     default_method_self_name,
-    hexpr_type, hexpr_effects, type_contains_extern_handle}
+    hexpr_type, hexpr_effects, type_contains_extern_handle,
+    DERIVED_HASH_SEED}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
@@ -14,7 +15,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     LLVM_REAL_OEQ, LLVM_REAL_OGT, LLVM_REAL_OLT}
 use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_const_body,
     box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name,
-    discard}
+    resolve_dict_ref, discard}
 use effect_analysis::{extract_effect_names}
 
 // Collect all transitive supertraits for a given trait. Local copy to avoid
@@ -1030,6 +1031,7 @@ pub fn emit_derived_impls_llvm(mut ctx: LlvmCtx, derived_impls: List<DerivedImpl
             "Clone" => emit_derived_clone_llvm(ctx, di),
             "Debug" => emit_derived_debug_llvm(ctx, di),
             "Ord" => emit_derived_ord_llvm(ctx, di),
+            "Hash" => emit_derived_hash_llvm(ctx, di),
             _ => {},
         }
     }
@@ -1049,6 +1051,7 @@ pub fn emit_derived_impls_llvm(mut ctx: LlvmCtx, derived_impls: List<DerivedImpl
 fn option_some_variant(dict_name: Str) -> DerivedVariant {
     DerivedVariant {
         name: "some",
+        discriminator: 0,
         fields: [DerivedField {
             name: "_0",
             positional_index: some(0),
@@ -1059,7 +1062,7 @@ fn option_some_variant(dict_name: Str) -> DerivedVariant {
 }
 
 fn option_none_variant() -> DerivedVariant {
-    DerivedVariant { name: "none", fields: [], has_named_fields: false }
+    DerivedVariant { name: "none", discriminator: 1, fields: [], has_named_fields: false }
 }
 
 pub fn emit_builtin_derived_impls(mut ctx: LlvmCtx) {
@@ -1662,7 +1665,7 @@ fn emit_float_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValu
 }
 
 // Dict-dispatched eq: resolve the dict, call its eq closure.
-fn emit_dict_eq_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dict_name: Str, extra_dicts: List<Str>) -> LLVMValueRef {
+fn emit_dict_eq_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dict_name: Str, extra_dicts: List<DictRef>) -> LLVMValueRef {
     // Resolve the dict by name — try dict_globals first (emit_trait_dict registered
     // its getter there), otherwise fall back to get_or_create_static_dict_getter.
     let dict_ptr = resolve_dict_for_derived(ctx, dict_name)
@@ -1684,12 +1687,15 @@ fn emit_dict_eq_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dic
     // Build argument list: env, lhs, rhs, then resolved extra dicts
     let mut call_args: List<LLVMValueRef> = [env_ptr, lhs, rhs]
     let mut call_param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type]
-    for ed in extra_dicts {
-        call_args.push(resolve_dict_for_derived(ctx, ed))
+    let (extra_values, owned_extra_dicts) =
+        resolve_derived_extra_dicts(ctx, extra_dicts)
+    for ed in extra_values {
+        call_args.push(ed)
         call_param_types.push(ctx.ptr_type)
     }
     let call_fn_ty = LLVMFunctionType(ctx.ptr_type, call_param_types, 0)
     let result = LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "deq"))
+    drop_derived_extra_dicts(ctx, owned_extra_dicts)
 
     // Unbox the Bool result to i1
     let raw = unbox_int(ctx, result)
@@ -1780,37 +1786,41 @@ fn setup_derived_dict_params(mut ctx: LlvmCtx, fn_val: LLVMValueRef, dict_params
 
 // Resolve a dict by name for derived impls.
 fn resolve_dict_for_derived(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
-    // Check if this is a type-param dict passed as a function parameter
-    // (e.g. "__ring_A_Eq" for a generic struct's derived Eq).
-    match ctx.named_values.get(name) {
-        some(alloca) => { return LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "dp")) },
-        none => {},
-    }
+    resolve_dict_ref(ctx, DictRef::Simple(name))
+}
 
-    let init_fn_name = "ring_dict_init_${name}"
-    match ctx.functions.get(init_fn_name) {
-        some(init_fn) => {
-            let init_fn_ty = match ctx.fn_types.get(init_fn_name) {
-                some(t) => t,
-                none => LLVMFunctionType(ctx.ptr_type, [], 0),
-            }
-            LLVMBuildCall2(ctx.builder, init_fn_ty, init_fn, [], fresh_name(ctx, "dict"))
-        },
-        none => {
-            match ctx.dict_globals.get(name) {
-                some(getter_fn) => {
-                    let ft = LLVMFunctionType(ctx.ptr_type, [], 0)
-                    LLVMBuildCall2(ctx.builder, ft, getter_fn, [], fresh_name(ctx, "dict"))
-                },
-                none => {
-                    // Build a runtime request for the dict (builtin fallback).
-                    let name_str = gen_str_lit_simple(ctx, name)
-                    let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
-                    let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
-                    LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
-                },
-            }
-        },
+fn resolve_derived_extra_dicts(
+    mut ctx: LlvmCtx,
+    refs: List<DictRef>
+) -> (List<LLVMValueRef>, List<LLVMValueRef>) {
+    let mut values: List<LLVMValueRef> = []
+    let mut owned: List<LLVMValueRef> = []
+    for dr in refs {
+        match dr {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
+                })
+                values.push(value)
+                owned.push(value)
+            },
+            DictRef::Simple(name) =>
+                values.push(resolve_dict_ref(ctx, DictRef::Simple(name))),
+            DictRef::Static(name) =>
+                values.push(resolve_dict_ref(ctx, DictRef::Static(name))),
+        }
+    }
+    (values, owned)
+}
+
+fn drop_derived_extra_dicts(mut ctx: LlvmCtx, owned: List<LLVMValueRef>) {
+    if owned.len() == 0 { return }
+    let drop_fn = get_or_declare_runtime_fn(
+        ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    for value in owned {
+        discard(LLVMBuildCall2(
+            ctx.builder, drop_ty, drop_fn, [value], ""))
     }
 }
 
@@ -1831,6 +1841,217 @@ fn gen_str_lit_simple(mut ctx: LlvmCtx, s: Str) -> LLVMValueRef {
     let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
     let c_str = build_global_cstring_decl(ctx, s)
     LLVMBuildCall2(ctx.builder, str_ty, str_fn, [c_str], fresh_name(ctx, "sl"))
+}
+
+// ── Hash ─────────────────────────────────────────────────────
+
+fn emit_derived_hash_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
+    let type_name = di.type_name
+    match di.type_kind {
+        TypeKind::StructKind => match di.struct_fields {
+            some(fields) => {
+                emit_struct_hash_fn(ctx, type_name, fields, di.bounds)
+            },
+            none => {},
+        },
+        TypeKind::EnumKind => match di.enum_variants {
+            some(variants) => {
+                emit_enum_hash_fn(ctx, type_name, variants, di.bounds)
+            },
+            none => {},
+        },
+    }
+}
+
+fn emit_hash_combine_llvm(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    let combine_fn = get_or_declare_runtime_fn(
+        ctx, "ring_hash_combine",
+        [ctx.i64_type, ctx.i64_type], ctx.i64_type)
+    let combine_ty = get_rt_fn_type(ctx, "ring_hash_combine")
+    LLVMBuildCall2(
+        ctx.builder, combine_ty, combine_fn, [lhs, rhs],
+        fresh_name(ctx, "hcombine"))
+}
+
+// Return an unboxed deterministic hash.  Valid Hash derives contain only
+// Call/Tuple actions; fallback actions map to zero and never inspect addresses.
+fn emit_field_hash_raw_llvm(mut ctx: LlvmCtx, value: LLVMValueRef, action: FieldAction) -> LLVMValueRef {
+    match action {
+        FieldAction::Call { dict_name, extra_dicts } => {
+            let boxed = emit_dict_hash_call(ctx, value, dict_name, extra_dicts)
+            unbox_int(ctx, boxed)
+        },
+        FieldAction::Tuple { element_actions } => {
+            let get_fn = get_or_declare_runtime_fn(
+                ctx, "ring_list_get",
+                [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+            let get_ty = get_rt_fn_type(ctx, "ring_list_get")
+            let mut acc = LLVMConstInt(ctx.i64_type, DERIVED_HASH_SEED, 0)
+            for i in 0..element_actions.len() {
+                let index = LLVMConstInt(ctx.i64_type, i, 0)
+                let elem = LLVMBuildCall2(
+                    ctx.builder, get_ty, get_fn, [value, index],
+                    fresh_name(ctx, "helem"))
+                let elem_hash = emit_field_hash_raw_llvm(
+                    ctx, elem, element_actions[i])
+                acc = emit_hash_combine_llvm(ctx, acc, elem_hash)
+            }
+            acc
+        },
+        FieldAction::Identity => LLVMConstInt(ctx.i64_type, 0, 0),
+        FieldAction::FloatIdentity => LLVMConstInt(ctx.i64_type, 0, 0),
+        FieldAction::BoolIdentity => LLVMConstInt(ctx.i64_type, 0, 0),
+        FieldAction::FnLiteral => LLVMConstInt(ctx.i64_type, 0, 0),
+    }
+}
+
+fn emit_dict_hash_call(
+    mut ctx: LlvmCtx,
+    value: LLVMValueRef,
+    dict_name: Str,
+    extra_dicts: List<DictRef>
+) -> LLVMValueRef {
+    let dict_ptr = resolve_dict_for_derived(ctx, dict_name)
+    // Hash dict layout: { i64 count, ptr hash_closure }.
+    let dict_struct_ty = LLVMStructTypeInContext(
+        ctx.context, [ctx.i64_type, ctx.ptr_type], 0)
+    let slot_ptr = LLVMBuildStructGEP2(
+        ctx.builder, dict_struct_ty, dict_ptr, 1, fresh_name(ctx, "hslot"))
+    let hash_closure = LLVMBuildLoad2(
+        ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "hclosure"))
+
+    let closure_ty = LLVMStructTypeInContext(
+        ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let fn_ptr_slot = LLVMBuildStructGEP2(
+        ctx.builder, closure_ty, hash_closure, 0, fresh_name(ctx, "hfps"))
+    let fn_ptr = LLVMBuildLoad2(
+        ctx.builder, ctx.ptr_type, fn_ptr_slot, fresh_name(ctx, "hfp"))
+    let env_slot = LLVMBuildStructGEP2(
+        ctx.builder, closure_ty, hash_closure, 1, fresh_name(ctx, "heps"))
+    let env_ptr = LLVMBuildLoad2(
+        ctx.builder, ctx.ptr_type, env_slot, fresh_name(ctx, "henv"))
+
+    let mut call_args: List<LLVMValueRef> = [env_ptr, value]
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
+    let (extra_values, owned_extra_dicts) =
+        resolve_derived_extra_dicts(ctx, extra_dicts)
+    for extra_dict in extra_values {
+        call_args.push(extra_dict)
+        param_types.push(ctx.ptr_type)
+    }
+    let call_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
+    let result = LLVMBuildCall2(
+        ctx.builder, call_ty, fn_ptr, call_args, fresh_name(ctx, "dhash"))
+    drop_derived_extra_dicts(ctx, owned_extra_dicts)
+    result
+}
+
+fn emit_struct_hash_fn(
+    mut ctx: LlvmCtx,
+    type_name: Str,
+    fields: List<DerivedField>,
+    bounds: List<TraitBound>
+) {
+    let scaffold_result = begin_derived_fn(
+        ctx, type_name, "hash", "Hash", false, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    // The direct method now exists, so its dictionary can safely capture it.
+    // Emitting the getter before field code is essential for self-recursive
+    // Hash: resolve_dict_for_derived must not freeze a builtin fallback.
+    emit_derived_trait_dict(ctx, type_name, "Hash")
+    let mut acc = LLVMConstInt(ctx.i64_type, DERIVED_HASH_SEED, 0)
+    match ctx.struct_types.get(type_name) {
+        some(struct_info) => {
+            for field in fields {
+                let field_idx = find_field_index(
+                    struct_info.field_names, field.name)
+                if field_idx >= 0 {
+                    let field_ptr = LLVMBuildStructGEP2(
+                        ctx.builder, struct_info.llvm_type, scaffold.self_val,
+                        field_idx, fresh_name(ctx, "hfieldp"))
+                    let field_value = LLVMBuildLoad2(
+                        ctx.builder, ctx.ptr_type, field_ptr,
+                        fresh_name(ctx, "hfield"))
+                    let field_hash = emit_field_hash_raw_llvm(
+                        ctx, field_value, field.action)
+                    acc = emit_hash_combine_llvm(ctx, acc, field_hash)
+                }
+            }
+        },
+        none => {},
+    }
+    LLVMBuildRet(ctx.builder, box_int(ctx, acc))
+    end_derived_fn(ctx, scaffold)
+}
+
+fn emit_enum_hash_fn(
+    mut ctx: LlvmCtx,
+    type_name: Str,
+    variants: List<DerivedVariant>,
+    bounds: List<TraitBound>
+) {
+    let scaffold_result = begin_derived_fn(
+        ctx, type_name, "hash", "Hash", false, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    emit_derived_trait_dict(ctx, type_name, "Hash")
+    let fn_val = scaffold.fn_val
+    let enum_info_opt = ctx.enum_types.get(type_name)
+    if enum_info_opt.is_none() {
+        LLVMBuildRet(
+            ctx.builder,
+            box_int(ctx, LLVMConstInt(ctx.i64_type, DERIVED_HASH_SEED, 0)))
+        end_derived_fn(ctx, scaffold)
+        return
+    }
+    let enum_info = enum_info_opt.unwrap()
+    let tag = load_enum_tag(ctx, scaffold.self_val)
+    let default_bb = LLVMAppendBasicBlockInContext(
+        ctx.context, fn_val, "hash.default")
+    let switch_val = LLVMBuildSwitch(
+        ctx.builder, tag, default_bb, variants.len())
+
+    let mut vi = 0
+    for variant in variants {
+        let runtime_tag = match enum_info.variants.get(variant.name) {
+            some(vinfo) => vinfo.tag,
+            none => vi,
+        }
+        vi = vi + 1
+        let case_bb = LLVMAppendBasicBlockInContext(
+            ctx.context, fn_val, "hash.v.${variant.name}")
+        LLVMAddCase(
+            switch_val,
+            LLVMConstInt(ctx.i64_type, runtime_tag, 0),
+            case_bb)
+        LLVMPositionBuilderAtEnd(ctx.builder, case_bb)
+
+        let seed = LLVMConstInt(ctx.i64_type, DERIVED_HASH_SEED, 0)
+        let discriminator = LLVMConstInt(
+            ctx.i64_type, variant.discriminator, 0)
+        let mut acc = emit_hash_combine_llvm(ctx, seed, discriminator)
+        let mut fi = 0
+        for field in variant.fields {
+            let field_ptr = LLVMBuildStructGEP2(
+                ctx.builder, enum_info.llvm_type, scaffold.self_val,
+                fi + 1, fresh_name(ctx, "hfieldp"))
+            let field_value = LLVMBuildLoad2(
+                ctx.builder, ctx.ptr_type, field_ptr,
+                fresh_name(ctx, "hfield"))
+            let field_hash = emit_field_hash_raw_llvm(
+                ctx, field_value, field.action)
+            acc = emit_hash_combine_llvm(ctx, acc, field_hash)
+            fi = fi + 1
+        }
+        LLVMBuildRet(ctx.builder, box_int(ctx, acc))
+    }
+
+    LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+    LLVMBuildRet(
+        ctx.builder,
+        box_int(ctx, LLVMConstInt(ctx.i64_type, DERIVED_HASH_SEED, 0)))
+    end_derived_fn(ctx, scaffold)
 }
 
 // ── Clone ────────────────────────────────────────────────────
@@ -2200,7 +2421,7 @@ fn emit_identity_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> 
 }
 
 // Dict-dispatched cmp: resolve the dict, call its cmp closure.
-fn emit_dict_cmp_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dict_name: Str, extra_dicts: List<Str>) -> LLVMValueRef {
+fn emit_dict_cmp_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dict_name: Str, extra_dicts: List<DictRef>) -> LLVMValueRef {
     let dict_ptr = resolve_dict_for_derived(ctx, dict_name)
 
     // Load cmp closure from dict slot 0 (Ord dict has only one method: cmp).
@@ -2220,12 +2441,17 @@ fn emit_dict_cmp_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, di
     // Build argument list: env, lhs, rhs, then resolved extra dicts
     let mut call_args: List<LLVMValueRef> = [env_ptr, lhs, rhs]
     let mut call_param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type]
-    for ed in extra_dicts {
-        call_args.push(resolve_dict_for_derived(ctx, ed))
+    let (extra_values, owned_extra_dicts) =
+        resolve_derived_extra_dicts(ctx, extra_dicts)
+    for ed in extra_values {
+        call_args.push(ed)
         call_param_types.push(ctx.ptr_type)
     }
     let call_fn_ty = LLVMFunctionType(ctx.ptr_type, call_param_types, 0)
-    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "dcmp"))
+    let result = LLVMBuildCall2(
+        ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "dcmp"))
+    drop_derived_extra_dicts(ctx, owned_extra_dicts)
+    result
 }
 
 // Tuple cmp: compare each element using ring_list_get, short-circuit on non-zero.
@@ -2657,7 +2883,7 @@ fn emit_identity_to_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueR
 }
 
 // Call a type's Debug dict to get its debug string.
-fn emit_dict_debug_call(mut ctx: LlvmCtx, val: LLVMValueRef, dict_name: Str, extra_dicts: List<Str>) -> LLVMValueRef {
+fn emit_dict_debug_call(mut ctx: LlvmCtx, val: LLVMValueRef, dict_name: Str, extra_dicts: List<DictRef>) -> LLVMValueRef {
     let dict_ptr = resolve_dict_for_derived(ctx, dict_name)
 
     // Debug dict layout: { i64 count, ptr debug_closure }.
@@ -2678,12 +2904,17 @@ fn emit_dict_debug_call(mut ctx: LlvmCtx, val: LLVMValueRef, dict_name: Str, ext
     // Build argument list: env, val, then resolved extra dicts
     let mut call_args: List<LLVMValueRef> = [env_ptr, val]
     let mut call_param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
-    for ed in extra_dicts {
-        call_args.push(resolve_dict_for_derived(ctx, ed))
+    let (extra_values, owned_extra_dicts) =
+        resolve_derived_extra_dicts(ctx, extra_dicts)
+    for ed in extra_values {
+        call_args.push(ed)
         call_param_types.push(ctx.ptr_type)
     }
     let call_fn_ty = LLVMFunctionType(ctx.ptr_type, call_param_types, 0)
-    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "dbr"))
+    let result = LLVMBuildCall2(
+        ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "dbr"))
+    drop_derived_extra_dicts(ctx, owned_extra_dicts)
+    result
 }
 
 // Build "(v0, v1, ...)" debug string for tuple fields.

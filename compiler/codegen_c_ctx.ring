@@ -739,6 +739,7 @@ fn rt_sig(name: Str) -> Str? {
     if name == "ring_unbox_float" { return some("p>d") }
     if name == "ring_box_bool" { return some("i>p") }
     if name == "ring_unbox_bool" { return some("p>i") }
+    if name == "ring_hash_combine" { return some("ii>i") }
     // Str
     if name == "ring_str_from_cstr" { return some("c>p") }
     if name == "ring_str_len" { return some("p>i") }
@@ -820,44 +821,6 @@ fn rt_sig(name: Str) -> Str? {
     if name == "ring_list_extend" { return some("pp>p") }
     // B-152 P3 closure: Map operations are Ring functions/methods.  Only the
     // low-level slot/buffer/hash bridges remain runtime symbols.
-    // Set
-    if name == "ring_set_new" { return some(">p") }
-    if name == "ring_set_add" { return some("pp>p") }
-    if name == "ring_set_has" { return some("pp>i") }
-    if name == "ring_set_delete" { return some("pp>p") }
-    if name == "ring_set_to_list" { return some("p>p") }
-    if name == "ring_set_len" { return some("p>i") }
-    if name == "ring_set_is_empty" { return some("p>i") }
-    if name == "ring_set_from_list" { return some("p>p") }
-    if name == "ring_set_for_each" { return some("pp>p") }
-    if name == "ring_set_fold" { return some("ppp>p") }
-    if name == "ring_set_filter" { return some("pp>p") }
-    if name == "ring_set_any" { return some("pp>i") }
-    if name == "ring_set_all" { return some("pp>i") }
-    if name == "ring_set_union" { return some("pp>p") }
-    if name == "ring_set_intersect" { return some("pp>p") }
-    if name == "ring_set_difference" { return some("pp>p") }
-    if name == "ring_set_clear" { return some("p>p") }
-    if name == "ring_set_clone" { return some("p>p") }
-    // Set<Int>
-    if name == "ring_set_int_new" { return some(">p") }
-    if name == "ring_set_int_add" { return some("pp>p") }
-    if name == "ring_set_int_has" { return some("pp>i") }
-    if name == "ring_set_int_delete" { return some("pp>p") }
-    if name == "ring_set_int_to_list" { return some("p>p") }
-    if name == "ring_set_int_len" { return some("p>i") }
-    if name == "ring_set_int_is_empty" { return some("p>i") }
-    if name == "ring_set_int_from_list" { return some("p>p") }
-    if name == "ring_set_int_for_each" { return some("pp>p") }
-    if name == "ring_set_int_clone" { return some("p>p") }
-    if name == "ring_set_int_union" { return some("pp>p") }
-    if name == "ring_set_int_intersect" { return some("pp>p") }
-    if name == "ring_set_int_difference" { return some("pp>p") }
-    if name == "ring_set_int_clear" { return some("p>p") }
-    if name == "ring_set_int_fold" { return some("ppp>p") }
-    if name == "ring_set_int_filter" { return some("pp>p") }
-    if name == "ring_set_int_any" { return some("pp>i") }
-    if name == "ring_set_int_all" { return some("pp>i") }
     // Catch / raise (setjmp-based; used from step 6 on, listed for parity)
     if name == "ring_catch_push" { return some(">p") }
     if name == "ring_catch_get_buf" { return some("p>p") }

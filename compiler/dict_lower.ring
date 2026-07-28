@@ -28,19 +28,23 @@
 //      D2 verifier accounts it like any owned local (no exemption class).
 //
 // NOT rewritten (documented residuals):
-//   * Ident.dict_closure_dicts (List<Str> names) and derive FieldAction
-//     extra_dicts (List<Str>) — name-based references; the LLVM resolver's
-//     name chain returns memoised singletons for static names, params resolve
-//     from scope.  No per-use construction remains after D4's LLVM side.
+//   * Ident.dict_closure_dicts (List<Str> names) — name-based references; the
+//     resolver's name chain returns memoised singletons for static names,
+//     params resolve from scope.
 //   * BinOp dispatch extra_dicts with a DYNAMIC inner stay Wrapped: codegen
 //     ignores extra_dicts in Eq/Ord dispatch (pre-existing functional gap,
 //     reported — nothing is constructed, so nothing leaks).
+//
+// Derived FieldAction extra_dicts are lowered with the static-only rule:
+// all-static wrappers become module singletons; dynamic wrappers remain
+// first-class DictRefs and are constructed/dropped inside synthetic methods.
 
 use ast::{Span}
 use types::{Type, EffectRow, EMPTY_ROW}
 use hir::{HProgram, HDecl, HStmt, HExpr, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, HEffectOp, HTraitMethod, DictRef, TraitDispatch,
-    HDictDef, dict_instance_name, hexpr_type, hexpr_effects, hexpr_span}
+    HDictDef, DerivedImpl, DerivedField, DerivedVariant, FieldAction,
+    dict_instance_name, hexpr_type, hexpr_effects, hexpr_span}
 
 pub fn lower_dicts(program: HProgram) -> HProgram {
     let mut defs: List<HDictDef> = []
@@ -52,13 +56,86 @@ pub fn lower_dicts(program: HProgram) -> HProgram {
     for d in program.decls {
         new_decls.push(dl_decl(d, defs, seen, counter))
     }
+    let mut new_derived_impls: List<DerivedImpl> = []
+    for di in program.derived_impls {
+        new_derived_impls.push(dl_derived_impl(di, defs, seen))
+    }
     HProgram {
         decls: new_decls,
-        derived_impls: program.derived_impls,
+        derived_impls: new_derived_impls,
         boxed_vars: program.boxed_vars,
         static_dicts: defs,
         extern_type_names: program.extern_type_names,
         drop_types: program.drop_types
+    }
+}
+
+fn dl_derived_action(action: FieldAction, mut defs: List<HDictDef>,
+                     mut seen: Set<Str>) -> FieldAction {
+    match action {
+        FieldAction::Call { dict_name, extra_dicts } => {
+            let mut lowered: List<DictRef> = []
+            for dr in extra_dicts {
+                lowered.push(dl_ref_static_only(dr, defs, seen))
+            }
+            FieldAction::Call { dict_name: dict_name, extra_dicts: lowered }
+        },
+        FieldAction::Tuple { element_actions } => {
+            let mut lowered: List<FieldAction> = []
+            for elem in element_actions {
+                lowered.push(dl_derived_action(elem, defs, seen))
+            }
+            FieldAction::Tuple { element_actions: lowered }
+        },
+        FieldAction::Identity => FieldAction::Identity,
+        FieldAction::FloatIdentity => FieldAction::FloatIdentity,
+        FieldAction::BoolIdentity => FieldAction::BoolIdentity,
+        FieldAction::FnLiteral => FieldAction::FnLiteral,
+    }
+}
+
+fn dl_derived_fields(fields: List<DerivedField>, mut defs: List<HDictDef>,
+                     mut seen: Set<Str>) -> List<DerivedField> {
+    let mut lowered: List<DerivedField> = []
+    for field in fields {
+        lowered.push(DerivedField {
+            name: field.name,
+            positional_index: field.positional_index,
+            action: dl_derived_action(field.action, defs, seen)
+        })
+    }
+    lowered
+}
+
+fn dl_derived_impl(di: DerivedImpl, mut defs: List<HDictDef>,
+                   mut seen: Set<Str>) -> DerivedImpl {
+    let struct_fields = match di.struct_fields {
+        some(fields) => some(dl_derived_fields(fields, defs, seen)),
+        none => none,
+    }
+    let enum_variants = match di.enum_variants {
+        some(variants) => {
+            let mut lowered: List<DerivedVariant> = []
+            for variant in variants {
+                lowered.push(DerivedVariant {
+                    name: variant.name,
+                    discriminator: variant.discriminator,
+                    fields: dl_derived_fields(variant.fields, defs, seen),
+                    has_named_fields: variant.has_named_fields
+                })
+            }
+            some(lowered)
+        },
+        none => none,
+    }
+    DerivedImpl {
+        type_name: di.type_name,
+        trait_name: di.trait_name,
+        type_params: di.type_params,
+        bounds: di.bounds,
+        type_kind: di.type_kind,
+        struct_fields: struct_fields,
+        enum_variants: enum_variants
     }
 }
 

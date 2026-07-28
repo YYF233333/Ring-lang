@@ -9,7 +9,8 @@ use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name
 use diagnostics::{DiagnosticContext, DiagnosticNote, Diagnostic, CollectingSink, Severity, Suggestion, make_diag, make_diagnostic}
 use codes::{E0201, E0204, E0301, E0302, E0407, E0503, E0511, E0512, E0513, E0705, E0707}
 use union_find::{UnionFind, new_union_find, uf_find}
-use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
+use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono,
+    apply_subst, apply_subst_row, apply_subst_map, find_impl, lookup_variant}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 
 // ============================================================
@@ -771,6 +772,100 @@ fn collect_effect_var_mappings(scheme_row: EffectRow, inst_row: EffectRow, type_
     }
 }
 
+fn resolve_fn_bound_dict_ref(
+    current_fn_bounds: List<FnBoundsEntry>,
+    id: Int, s: UnionFind, trait_name: Str
+) -> DictRef? {
+    let matching = current_fn_bounds.find(fn(fb) {
+        if fb.trait_name != trait_name { false } else {
+            let resolved_fb = apply_subst(s, Type::TypeVar {
+                id: fb.type_param_var_id,
+                name: none
+            })
+            let resolved_match = match resolved_fb {
+                Type::TypeVar { id: resolved_id, .. } => resolved_id == id,
+                _ => false
+            }
+            fb.type_param_var_id == id ||
+                uf_find(s, fb.type_param_var_id) == id ||
+                resolved_match
+        }
+    })
+    match matching {
+        some(fb) => some(DictRef::Simple(
+            trait_bound_param_name(fb.type_param_name, fb.trait_name))),
+        none => none
+    }
+}
+
+fn resolve_named_impl_dict_ref(
+    env: TypeEnv, current_fn_bounds: List<FnBoundsEntry>,
+    name: Str, type_params: List<Type>, s: UnionFind, trait_name: Str
+) -> DictRef? {
+    match find_impl(env.trait_reg, name, trait_name) {
+        none => none,
+        some(impl_entry) => {
+            let dict_name = trait_dict_name(name, trait_name)
+            if impl_entry.dict_bounds.len() == 0 {
+                return some(DictRef::Static(dict_name))
+            }
+
+            let mut inner_dicts: List<DictRef> = []
+            for impl_bound in impl_entry.dict_bounds {
+                match type_params.get(impl_bound.type_param_index) {
+                    none => { return none },
+                    some(type_arg) => {
+                        match resolve_dict_ref_for_type(
+                            env, current_fn_bounds, type_arg, s,
+                            impl_bound.trait_name
+                        ) {
+                            some(inner_dict) => inner_dicts.push(inner_dict),
+                            none => { return none }
+                        }
+                    }
+                }
+            }
+            some(DictRef::Wrapped {
+                dict: dict_name,
+                trait_name: trait_name,
+                inner_dicts: inner_dicts
+            })
+        }
+    }
+}
+
+// Resolve exactly the runtime evidence declared by an impl.  Failure is
+// propagated to the caller so diagnostics can be emitted at the use site;
+// this function never fabricates a base or "__unknown" dictionary.
+pub fn resolve_dict_ref_for_type(
+    env: TypeEnv, current_fn_bounds: List<FnBoundsEntry>,
+    t: Type, s: UnionFind, trait_name: Str
+) -> DictRef? {
+    let concrete = apply_subst(s, t)
+    match concrete {
+        Type::TypeVar { id, .. } =>
+            resolve_fn_bound_dict_ref(current_fn_bounds, id, s, trait_name),
+        Type::StructType { name, type_params, .. } =>
+            resolve_named_impl_dict_ref(
+                env, current_fn_bounds, name, type_params, s, trait_name),
+        Type::EnumType { name, type_params, .. } =>
+            resolve_named_impl_dict_ref(
+                env, current_fn_bounds, name, type_params, s, trait_name),
+        _ => {
+            match type_to_builtin_name(concrete) {
+                some(builtin_name) => {
+                    match find_impl(env.trait_reg, builtin_name, trait_name) {
+                        some(_) => some(DictRef::Static(
+                            trait_dict_name(builtin_name, trait_name))),
+                        none => none
+                    }
+                },
+                none => none
+            }
+        }
+    }
+}
+
 pub fn resolve_dicts_from_scheme(
     sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
@@ -784,69 +879,29 @@ pub fn resolve_dicts_from_scheme(
         match var_map.get(bound.type_var) {
             some(fresh_var) => {
                 let concrete = apply_subst(s, fresh_var)
-                match concrete {
-                    Type::StructType { name, type_params, .. } => {
-                        if has_impl(env.trait_reg, name, bound.trait_name) {
-                            if type_params.len() > 0 {
-                                let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span)
-                                resolved_dicts.push(DictRef::Wrapped {
-                                    dict: trait_dict_name(name, bound.trait_name),
-                                    trait_name: bound.trait_name,
-                                    inner_dicts: inner
-                                })
-                            } else {
-                                resolved_dicts.push(DictRef::Static(trait_dict_name(name, bound.trait_name)))
+                match resolve_dict_ref_for_type(
+                    env, current_fn_bounds, concrete, s, bound.trait_name
+                ) {
+                    some(dict_ref) => {
+                        resolved_dicts.push(dict_ref)
+                        found = true
+                        // Associated constraints remain checked against the
+                        // selected named impl after dictionary resolution.
+                        match concrete {
+                            Type::StructType { name, .. } =>
+                                check_assoc_constraints(
+                                    sink, env, bound, name, var_map, s, span),
+                            Type::EnumType { name, .. } =>
+                                check_assoc_constraints(
+                                    sink, env, bound, name, var_map, s, span),
+                            _ => match type_to_builtin_name(concrete) {
+                                some(name) => check_assoc_constraints(
+                                    sink, env, bound, name, var_map, s, span),
+                                none => {}
                             }
-                            found = true
-                            // Validate associated type constraints
-                            check_assoc_constraints(sink, env, bound, name, var_map, s, span)
                         }
                     },
-                    Type::EnumType { name, type_params, .. } => {
-                        if has_impl(env.trait_reg, name, bound.trait_name) {
-                            if type_params.len() > 0 {
-                                let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span)
-                                resolved_dicts.push(DictRef::Wrapped {
-                                    dict: trait_dict_name(name, bound.trait_name),
-                                    trait_name: bound.trait_name,
-                                    inner_dicts: inner
-                                })
-                            } else {
-                                resolved_dicts.push(DictRef::Static(trait_dict_name(name, bound.trait_name)))
-                            }
-                            found = true
-                            // Validate associated type constraints
-                            check_assoc_constraints(sink, env, bound, name, var_map, s, span)
-                        }
-                    },
-                    Type::TypeVar { id, .. } => {
-                        let matching = current_fn_bounds.find(fn(fb) {
-                            let resolved_fb = apply_subst(s, Type::TypeVar { id: fb.type_param_var_id, name: none })
-                            let resolved_match = match resolved_fb { Type::TypeVar { id: rid, .. } => rid == id, _ => false }
-                            (fb.type_param_var_id == id || uf_find(s, fb.type_param_var_id) == id || resolved_match) && fb.trait_name == bound.trait_name
-                        })
-                        match matching {
-                            some(fb) => {
-                                resolved_dicts.push(DictRef::Simple(trait_bound_param_name(fb.type_param_name, fb.trait_name)))
-                                found = true
-                            },
-                            none => {}
-                        }
-                    },
-                    _ => {}
-                }
-                if !found {
-                    match type_to_builtin_name(concrete) {
-                        some(prim_name) => {
-                            if has_impl(env.trait_reg, prim_name, bound.trait_name) {
-                                resolved_dicts.push(DictRef::Static(trait_dict_name(prim_name, bound.trait_name)))
-                                found = true
-                                // Validate associated type constraints
-                                check_assoc_constraints(sink, env, bound, prim_name, var_map, s, span)
-                            }
-                        },
-                        none => {}
-                    }
+                    none => {}
                 }
             },
             none => {}
@@ -855,7 +910,9 @@ pub fn resolve_dicts_from_scheme(
             let trait_display = nominal_display_name(bound.trait_name)
             let _ = type_error(sink, E0503,
                 "Type does not satisfy trait bound '${trait_display}'",
-                span, DiagnosticContext::TraitError { detail: "type does not satisfy '${trait_display}'" })
+                span, DiagnosticContext::TraitError {
+                    detail: "type does not satisfy '${trait_display}'"
+                })
         }
     }
     resolved_dicts
@@ -907,92 +964,6 @@ fn check_assoc_constraints(
             }
         },
         none => {}
-    }
-}
-
-fn resolve_inner_dicts_from_type_params(
-    sink: CollectingSink, env: TypeEnv,
-    current_fn_bounds: List<FnBoundsEntry>,
-    type_params: List<Type>,
-    s: UnionFind,
-    trait_name: Str, span: Span
-) -> List<DictRef> {
-    let mut result: List<DictRef> = []
-    for param in type_params {
-        let concrete = apply_subst(s, param)
-        result.push(resolve_concrete_type_to_dict_ref(sink, env, current_fn_bounds, concrete, s, trait_name, span))
-    }
-    result
-}
-
-fn resolve_concrete_type_to_dict_ref(
-    sink: CollectingSink, env: TypeEnv,
-    current_fn_bounds: List<FnBoundsEntry>,
-    t: Type,
-    s: UnionFind,
-    trait_name: Str, span: Span
-) -> DictRef {
-    match type_to_builtin_name(t) {
-        some(builtin_name) => match t {
-            Type::StructType { .. } => {},
-            Type::EnumType { .. } => {},
-            _ => { return DictRef::Static(trait_dict_name(builtin_name, trait_name)) }
-        },
-        none => {}
-    }
-    match t {
-        Type::TypeVar { id, .. } => {
-            let bound = current_fn_bounds.find(fn(fb) {
-                fb.type_param_var_id == id && fb.trait_name == trait_name
-            })
-            match bound {
-                some(b) => DictRef::Simple(trait_bound_param_name(b.type_param_name, trait_name)),
-                none => DictRef::Static(trait_dict_name("__unknown", trait_name))
-            }
-        },
-        Type::StructType { name, type_params, .. } => {
-            if has_impl(env.trait_reg, name, trait_name) {
-                if type_params.len() > 0 {
-                    let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span)
-                    DictRef::Wrapped {
-                        dict: trait_dict_name(name, trait_name),
-                        trait_name: trait_name,
-                        inner_dicts: inner
-                    }
-                } else {
-                    DictRef::Static(trait_dict_name(name, trait_name))
-                }
-            } else {
-                let type_display = nominal_display_name(name)
-                let trait_display = nominal_display_name(trait_name)
-                let _ = type_error(sink, E0503,
-                    "Type '${type_display}' does not implement trait '${trait_display}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
-                DictRef::Static(trait_dict_name(name, trait_name))
-            }
-        },
-        Type::EnumType { name, type_params, .. } => {
-            if has_impl(env.trait_reg, name, trait_name) {
-                if type_params.len() > 0 {
-                    let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span)
-                    DictRef::Wrapped {
-                        dict: trait_dict_name(name, trait_name),
-                        trait_name: trait_name,
-                        inner_dicts: inner
-                    }
-                } else {
-                    DictRef::Static(trait_dict_name(name, trait_name))
-                }
-            } else {
-                let type_display = nominal_display_name(name)
-                let trait_display = nominal_display_name(trait_name)
-                let _ = type_error(sink, E0503,
-                    "Type '${type_display}' does not implement trait '${trait_display}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
-                DictRef::Static(trait_dict_name(name, trait_name))
-            }
-        },
-        _ => DictRef::Static(trait_dict_name("__unknown", trait_name))
     }
 }
 

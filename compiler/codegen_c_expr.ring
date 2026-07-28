@@ -65,17 +65,6 @@ fn is_unit_type(ty: Type) -> Bool {
     match ty { Type::UnitType => true, _ => false }
 }
 
-fn is_int_set(ty: Type) -> Bool {
-    match ty {
-        Type::StructType { name, type_params } =>
-            name == "Set" && type_params.len() == 1 && match type_params[0] {
-                Type::IntType => true,
-                _ => false,
-            },
-        _ => false,
-    }
-}
-
 // B-134 port: structural validation for builtin collection dispatch.
 fn is_builtin_collection(ty: Type) -> Bool {
     match ty {
@@ -766,8 +755,8 @@ pub fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
     match dr {
         DictRef::Simple(n) => {
             // Scope reference: dict param / dict_lower local.  Unknown names
-            // (dict_closure_dicts / derive extra_dicts strings) fall through
-            // to the static singleton chain (LLVM parity).
+            // (`dict_closure_dicts` names and derived Simple refs) fall
+            // through to the static singleton chain (LLVM parity).
             match ctx.named_values.get(n) {
                 some(cv) => cv,
                 none => resolve_c_static_dict(ctx, n),
@@ -775,8 +764,8 @@ pub fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
         },
         DictRef::Static(n) => resolve_c_static_dict(ctx, n),
         DictRef::Wrapped { dict, trait_name, inner_dicts } => {
-            // Post-dict_lower this survives only in BinOp dispatch
-            // extra_dicts resolution (B-121 gap 1 path).
+            // Post-dict_lower this survives in BinOp dispatch and dynamic
+            // derived FieldAction evidence.
             build_c_wrapped_dict(ctx, dict, trait_name, inner_dicts)
         },
     }
@@ -872,8 +861,24 @@ pub fn build_c_wrapped_dict(mut ctx: CCtx, dict_name: Str, trait_name: Str, inne
 pub fn build_c_wrapped_dict_typed(mut ctx: CCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>, dict_tid: Int) -> Str {
     // Resolve the inner dicts at this site.
     let mut inner_vals: List<Str> = []
+    // A surviving Wrapped child is freshly owned.  The parent wrapper envs
+    // take their own refs below, so release these construction temporaries
+    // once every method slot has captured them.
+    let mut owned_inner_vals: List<Str> = []
     for d in inner_dicts {
-        inner_vals.push(c_resolve_dict_ref(ctx, d))
+        match d {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
+                })
+                inner_vals.push(value)
+                owned_inner_vals.push(value)
+            },
+            DictRef::Simple(name) =>
+                inner_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(name))),
+            DictRef::Static(name) =>
+                inner_vals.push(c_resolve_dict_ref(ctx, DictRef::Static(name))),
+        }
     }
 
     let target_type = c_wrapped_dict_target_type(dict_name, trait_name)
@@ -935,6 +940,11 @@ pub fn build_c_wrapped_dict_typed(mut ctx: CCtx, dict_name: Str, trait_name: Str
             },
             none => {},
         }
+    }
+
+    for owned in owned_inner_vals {
+        rt_use(ctx, "ring_drop", 1)
+        c_emit(ctx, "ring_drop(${owned});")
     }
 
     dict
@@ -2208,14 +2218,7 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
                     none => {},
                 }
             }
-            let final_name = if call_name == "set_new" && is_int_set(result_ty) {
-                "set_int_new"
-            } else if call_name == "set_from" && is_int_set(result_ty) {
-                "set_int_from"
-            } else {
-                call_name
-            }
-            gen_c_direct_call(ctx, final_name, arg_vals, dict_vals)
+            gen_c_direct_call(ctx, call_name, arg_vals, dict_vals)
         },
         HExpr::FieldAccess { receiver, field, .. } => {
             let recv_val = gen_c_expr(ctx, receiver)
@@ -2250,7 +2253,6 @@ fn extern_fn_to_runtime_c(name: Str) -> Str? {
     if name == "eprintln" { return some("ring_eprintln") }
     if name == "exit" || name == "exit_process" { return some("ring_exit") }
     if name == "argv" { return some("ring_args") }
-    if name == "set_new" { return some("ring_set_new") }
     if name == "read_file" { return some("ring_read_file") }
     if name == "write_file" { return some("ring_write_file") }
     if name == "file_exists" { return some("ring_file_exists") }
@@ -2263,10 +2265,7 @@ fn extern_fn_to_runtime_c(name: Str) -> Str? {
     if name == "cwd" { return some("ring_cwd") }
     if name == "parse_int" { return some("ring_parse_int") }
     if name == "parse_float" { return some("ring_parse_float") }
-    if name == "set_from" { return some("ring_set_from_list") }
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
-    if name == "set_int_new" { return some("ring_set_int_new") }
-    if name == "set_int_from" { return some("ring_set_int_from_list") }
     if name == "Cell" { return some("ring_Cell_new") }
     // B-125: Ptr<T> builtins
     if name == "alloc" { return some("ring_raw_alloc") }
@@ -2397,17 +2396,7 @@ fn rt_method_returns_i64_c(name: Str) -> Bool {
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_has" { return true }
-    if name == "ring_set_len" { return true }
     if name == "ring_sb_len" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_int_len" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2418,19 +2407,11 @@ fn rt_method_returns_bool_c(name: Str) -> Bool {
     if name == "ring_str_eq" { return true }
     if name == "ring_str_lt" { return true }
     if name == "ring_list_is_empty" { return true }
-    if name == "ring_set_has" { return true }
     if name == "ring_list_any" { return true }
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2491,26 +2472,7 @@ fn method_to_runtime_c(type_name: Str, method: Str) -> Str? {
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
     // B-152 P2: List methods are pure Ring — no entries (fall through to
     // the Ring-compiled impl methods).
-    // B-152 P3 closure: Map methods are pure Ring impl methods.
-    // Set methods
-    if type_name == "Set" && method == "add" { return some("ring_set_add") }
-    if type_name == "Set" && method == "insert" { return some("ring_set_add") }
-    if type_name == "Set" && method == "has" { return some("ring_set_has") }
-    if type_name == "Set" && method == "contains" { return some("ring_set_has") }
-    if type_name == "Set" && method == "to_list" { return some("ring_set_to_list") }
-    if type_name == "Set" && method == "len" { return some("ring_set_len") }
-    if type_name == "Set" && method == "is_empty" { return some("ring_set_is_empty") }
-    if type_name == "Set" && method == "from_list" { return some("ring_set_from_list") }
-    if type_name == "Set" && method == "for_each" { return some("ring_set_for_each") }
-    if type_name == "Set" && method == "remove" { return some("ring_set_delete") }
-    if type_name == "Set" && method == "clear" { return some("ring_set_clear") }
-    if type_name == "Set" && method == "union" { return some("ring_set_union") }
-    if type_name == "Set" && method == "intersect" { return some("ring_set_intersect") }
-    if type_name == "Set" && method == "difference" { return some("ring_set_difference") }
-    if type_name == "Set" && method == "fold" { return some("ring_set_fold") }
-    if type_name == "Set" && method == "filter" { return some("ring_set_filter") }
-    if type_name == "Set" && method == "any" { return some("ring_set_any") }
-    if type_name == "Set" && method == "all" { return some("ring_set_all") }
+    // B-152 P3/P4: Map and Set methods are pure Ring impl methods.
     // Option methods
     if type_name == "Option" && method == "unwrap_or" { return some("ring_Option_unwrap_or") }
     if type_name == "Option" && method == "unwrap" { return some("ring_Option_unwrap") }
@@ -2596,38 +2558,13 @@ fn gen_c_method_call(mut ctx: CCtx, recv: Str, recv_type: Type, method: Str, arg
 
     // B-134: only dispatch to runtime builtins for structurally-valid
     // builtin collections.
-    let rt_method = if (type_name == "List" || type_name == "Map" || type_name == "Set") && !is_builtin_collection(recv_type) {
+    let rt_method = if (type_name == "List" || type_name == "Map") && !is_builtin_collection(recv_type) {
         none
     } else {
         method_to_runtime_c(type_name, method)
     }
     match rt_method {
-        some(base_rt_name) => {
-            // Int-keyed Set dispatch (B-152 P3: Map is unified, Set is not yet).
-            let rt_name = if is_int_set(recv_type) {
-                match method {
-                    "add" => "ring_set_int_add",
-                    "insert" => "ring_set_int_add",
-                    "has" => "ring_set_int_has",
-                    "contains" => "ring_set_int_has",
-                    "to_list" => "ring_set_int_to_list",
-                    "len" => "ring_set_int_len",
-                    "from_list" => "ring_set_int_from_list",
-                    "for_each" => "ring_set_int_for_each",
-                    "remove" => "ring_set_int_delete",
-                    "clear" => "ring_set_int_clear",
-                    "clone" => "ring_set_int_clone",
-                    "is_empty" => "ring_set_int_is_empty",
-                    "union" => "ring_set_int_union",
-                    "intersect" => "ring_set_int_intersect",
-                    "difference" => "ring_set_int_difference",
-                    "fold" => "ring_set_int_fold",
-                    "filter" => "ring_set_int_filter",
-                    "any" => "ring_set_int_any",
-                    "all" => "ring_set_int_all",
-                    _ => base_rt_name,
-                }
-            } else { base_rt_name }
+        some(rt_name) => {
 
             let mut call_args: List<Str> = []
             // Receiver (unboxed for Int/Float/Bool to_str).
@@ -4226,16 +4163,11 @@ fn emit_c_for_list(mut ctx: CCtx, binding: Str, destructure: List<HForInDestruct
     let lv = match hexpr_type(iterable) {
         Type::StructType { name, type_params } => {
             if name == "Set" && type_params.len() == 1 {
-                let is_int_elem = match type_params[0] {
-                    Type::IntType => true,
-                    _ => false,
-                }
-                let conv_name = if is_int_elem { "ring_set_int_to_list" } else { "ring_set_to_list" }
-                rt_use(ctx, conv_name, 1)
                 collection_converted = true
-                let t = fresh_tmp(ctx)
-                c_emit(ctx, "${t} = ${conv_name}(${raw});")
-                t
+                gen_c_method_call(
+                    ctx, raw,
+                    Type::StructType { name: name, type_params: type_params },
+                    "to_list", [], [])
             } else if name == "Map" && type_params.len() == 2 {
                 collection_converted = true
                 gen_c_method_call(

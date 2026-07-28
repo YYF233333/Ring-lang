@@ -109,9 +109,10 @@ pub struct HParam {
 //                   dict (base dict + inner dicts).  dict_lower rewrites every
 //                   use site: all-static → Static(instance); any dynamic inner
 //                   → a local `let __ring_dictlocal_N = HExpr::DictConstruct`
-//                   + Simple(local).  After dict_lower, Wrapped survives ONLY
-//                   in BinOp eq/ord_dispatch extra_dicts (legacy; codegen
-//                   ignores extra_dicts — pre-existing gap).
+//                   + Simple(local).  After dict_lower, Wrapped survives in
+//                   BinOp eq/ord_dispatch extra_dicts and in dynamic derived
+//                   FieldAction evidence, whose synthetic methods construct
+//                   and reclaim the wrapper directly.
 pub enum DictRef {
     Simple(Str),
     Wrapped { dict: Str, trait_name: Str, inner_dicts: List<DictRef> },
@@ -322,10 +323,16 @@ pub enum HDecl {
 }
 
 pub enum FieldAction {
+    // Eq/Clone/Ord/Debug may use primitive identity actions.  Hash derivation
+    // intentionally uses Call/Tuple only so every leaf is backed by Hash
+    // evidence and no backend can fall back to an address-derived value.
     Identity,
     FloatIdentity,
     BoolIdentity,
-    Call { dict_name: Str, extra_dicts: List<Str> },
+    // The callee's base dict stays name-addressed; each trailing type-param
+    // evidence value is a full DictRef so nested parameterized fields retain
+    // every wrapper layer until dict_lower/codegen.
+    Call { dict_name: Str, extra_dicts: List<DictRef> },
     Tuple { element_actions: List<FieldAction> },
     FnLiteral
 }
@@ -338,11 +345,20 @@ pub struct DerivedField {
 
 pub struct DerivedVariant {
     pub name: Str,
+    // Stable declaration-order discriminator mixed into derived Hash before
+    // payload fields.  This is a front-end contract, not a backend type/name
+    // hash or allocation-dependent value.
+    pub discriminator: Int,
     pub fields: List<DerivedField>,
     pub has_named_fields: Bool
 }
 
 pub enum TypeKind { StructKind, EnumKind }
+
+// Shared initial state for C/LLVM structural Hash emission.  Kept within the
+// signed 63-bit Ring Int range so boxing/unboxing is identical in both
+// backends.
+pub const DERIVED_HASH_SEED: Int = 1469598103934665603
 
 pub struct DerivedImpl {
     pub type_name: Str,

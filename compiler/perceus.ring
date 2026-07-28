@@ -1302,8 +1302,8 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //                              is_owner_bearing's IndexExpr/FieldAccess arms, NOT
 //                              by a field name here).
 //   RECEIVER-RETURNING MUTATORS (B-103 Wave A → B-104 D1 rule ② re-mechanised):
-//   each returns its RECEIVER (arg 0) verbatim — `return list;` / `return map;`
-//   / `return set;` / `return sb;` — no dup.  Ring-level type is Unit, but at
+//   each returns its RECEIVER (arg 0) verbatim — `return list;` / `return sb;`
+//   — no dup.  Pure Ring Map/Set mutators also return Unit.  At
 //   the LLVM ABI the result IS the live container, so a `let x = xs.push(v)`
 //   binding scope-end-dropped would free the caller's container → UAF.
 //   B-103 guarded this by LISTING the 9 field names below in this predicate
@@ -1311,7 +1311,7 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   a listed name but returning a real fresh value got Clone-wrapped (leak),
 //   and a fn-tail mutator result's Clone dup-pinned the receiver.  D1 rule ②
 //   (2026-06-11 user decision) replaces the name grain with the TYPE-level
-//   Unit rule: every one of these calls is Unit-typed (all 13 std declarations
+//   Unit rule: every one of these calls is Unit-typed (all relevant std declarations
 //   verified `-> Unit`: List.push/extend/clear/set, Map.insert/remove/clear,
 //   Set.insert/remove/clear, SB.add/line/add_int), and Unit-typed values are
 //   excluded from Clone (rc_escape), Drop/owned (is_droppable_init) and
@@ -1328,13 +1328,12 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   Unit-typed values instead of the receiver-return ABI accident.
 //     .push    ring_list_push                  → `return list;`
 //     .set     ring_list_set                   → `return list;`
-//     .insert  Map.insert → Unit (the pure Ring method mutates the receiver)
-//              (Set.insert → ring_set_add / ring_set_int_add → `return set;`)
-//     .remove  Map.remove → Unit; ring_set_delete / ring_set_int_delete
-//              return the set receiver
-//     .add     ring_set_add / ring_set_int_add / ring_sb_add → `return set/sb;`
-//     .clear   ring_list_clear / Map.clear / ring_set_clear /
-//              ring_set_int_clear → Unit or receiver per the type-level rule
+//     .insert  Map.insert / Set.insert → Unit (pure Ring methods mutate their
+//              Map-backed receiver)
+//     .remove  Map.remove / Set.remove → Unit (pure Ring)
+//     .add     ring_sb_add                     → `return sb;`
+//     .clear   ring_list_clear / Map.clear / Set.clear → Unit or receiver per
+//              the type-level rule
 //     .extend  ring_list_extend                → `return list;` (the OTHER list's
 //              elements are dup'd inside the runtime — B-102 layer 5)
 //     .line / .add_int  ring_sb_line / ring_sb_add_int → `return sb;`
@@ -1362,12 +1361,10 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //     OWNERSHIP TRANSFERRED out of the vector — vec erases its ref, no dup
 //     needed), ring_Option_map (wraps the closure's owned result).
 //   Container builders: ring_list_new / pure Ring map_new / set_new /
-//     set_int_new / sb_new / ring_args / pure Ring Map keys/values/entries
-//     (ring_slot_read duplicates elements) / ring_set_to_list / set_int_to_list
-//     (fresh strs/boxes) / ring_set_from_list / set_int_from_list (inline-value
-//     copies) / ring_set_union / intersect / difference (+ _int variants; inline
-//     values, no RC sharing) / ring_set_clone / set_int_clone (inline values) /
-//     ring_list_clone / pure Ring map_clone (dup elements/values — B-103 /
+//     sb_new / ring_args / pure Ring Map keys/values/entries
+//     (ring_slot_read duplicates elements) / pure Ring Set to_list/from_list /
+//     union/intersect/difference/clone (implemented through Map/List ownership
+//     paths) / ring_list_clone / pure Ring map_clone (dup elements/values — B-103 /
 //     #135) / ring_list_map (owns closure results) / ring_list_filter / concat /
 //     slice / reverse / sort / sort_default / flat_map / pure Ring map_from
 //     (dup shared elements/values — B-103 Wave A: these copied
@@ -1393,12 +1390,12 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   an "unbox call" — unboxing is emitted inside arith/compare/cond lowering),
 //   ring_str_len / eq / lt / contains / starts_with / ends_with / is_empty,
 //   ring_list_len / contains / index_of / is_empty / any / all,
-//   ring_set_has / len, ring_set_int_has / len, ring_sb_len,
-//   ring_Option_is_some / is_none.  Map scalar results are pure Ring calls.
+//   ring_sb_len, ring_Option_is_some / is_none.  Map/Set scalar results are
+//   pure Ring calls.
 //
 // ── NULL / NEVER returners (RC-inert: ring_drop(null) is a no-op) ─────────────
 //   null:  ring_print / eprintln / write_file / delete_file / assert /
-//          ring_list_for_each / set_for_each / set_int_for_each.
+//          ring_list_for_each.  Set.for_each is pure Ring.
 //   never: ring_panic / exit / match_fail / ring_raise / __ring_raise_fail
 //          (longjmp/exit).
 //   void:  ring_dup / drop / register_drop / register_never_drop / runtime_init /
@@ -2549,8 +2546,8 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
 // ============================================================
 //
 // Returns the arg indices (0-based) whose call boundary takes ownership.
-// Pure Ring List/Map methods borrow their parameters; Set/StringBuilder copy
-// their inputs.  The remaining sinks are exact raw-storage boundaries:
+// Pure Ring List/Map/Set methods borrow their parameters; StringBuilder copies
+// its inputs.  The remaining sinks are exact raw-storage boundaries:
 // ring_slot_write, Cell.set, and Ptr.write.  Anything else is a borrow.
 // (pub: shared with verify_rc.ring — the verifier must agree on which call args
 // are ownership sinks, or it would mis-report escapes/leaks.)

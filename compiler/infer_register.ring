@@ -3,7 +3,8 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember, UseDecl}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
-    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
+    TraitDef, TraitMethodDef, ImplEntry, ImplDictBound, TypeAliasDef, FnBound, SigDef,
+    EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
 use hir::{compare_by_first, module_item_identity, variant_ctor_name}
@@ -788,6 +789,56 @@ fn insert_inline_display_aliases(
     }
 }
 
+struct NormalizedImplBounds {
+    scheme_bounds: List<SchemeBound>,
+    dict_bounds: List<ImplDictBound>
+}
+
+// Keep method-scheme evidence and ImplEntry's runtime dictionary requirements
+// in one canonical order.  This intentionally preserves the existing behavior
+// that does not yet carry TypeBound type_args or assoc_constraints.
+fn normalize_impl_bounds(
+    ctx: InferCtx, type_params: List<TypeParam>, impl_tv_ids: List<Int>
+) -> NormalizedImplBounds {
+    let mut scheme_bounds: List<SchemeBound> = []
+    let mut dict_bounds: List<ImplDictBound> = []
+    let mut tp_idx = 0
+    for tp in type_params {
+        for b in tp.bounds {
+            if tp_idx < impl_tv_ids.len() {
+                let tv_id = impl_tv_ids.get(tp_idx).unwrap()
+                let bound_trait = resolve_trait_identity(ctx, b.trait_name)
+                scheme_bounds.push(SchemeBound {
+                    type_var: tv_id,
+                    trait_name: bound_trait,
+                    assoc_constraints: []
+                })
+                dict_bounds.push(ImplDictBound {
+                    type_param_index: tp_idx,
+                    trait_name: bound_trait
+                })
+                let supers = collect_all_supertraits(ctx, bound_trait)
+                for st_name in supers {
+                    scheme_bounds.push(SchemeBound {
+                        type_var: tv_id,
+                        trait_name: st_name,
+                        assoc_constraints: []
+                    })
+                    dict_bounds.push(ImplDictBound {
+                        type_param_index: tp_idx,
+                        trait_name: st_name
+                    })
+                }
+            }
+        }
+        tp_idx = tp_idx + 1
+    }
+    NormalizedImplBounds {
+        scheme_bounds: scheme_bounds,
+        dict_bounds: dict_bounds
+    }
+}
+
 fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
     match decl {
         Decl::Impl { target_type, type_params, methods, span, .. } => {
@@ -806,22 +857,7 @@ fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
                     ctx.type_param_scope.insert(tp.name, tv)
                 }
 
-                let mut impl_scheme_bounds: List<SchemeBound> = []
-                let mut tp_idx = 0
-                for tp in type_params {
-                    for b in tp.bounds {
-                        if tp_idx < impl_tv_ids.len() {
-                            let tv_id = impl_tv_ids.get(tp_idx).unwrap()
-                            let bound_trait = resolve_trait_identity(ctx, b.trait_name)
-                            impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: bound_trait, assoc_constraints: [] })
-                            let supers = collect_all_supertraits(ctx, bound_trait)
-                            for st_name in supers {
-                                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name, assoc_constraints: [] })
-                            }
-                        }
-                    }
-                    tp_idx = tp_idx + 1
-                }
+                let impl_bounds = normalize_impl_bounds(ctx, type_params, impl_tv_ids)
 
                 let canonical_target = resolve_nominal_identity(ctx, target_type)
                 let mut impl_methods_map = match ctx.env.trait_reg.impl_methods.get(canonical_target) {
@@ -837,7 +873,9 @@ fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
                     match m {
                         Decl::Delegate { field, trait_names, span: dspan } => {
                             register_delegate(ctx, impl_methods_map, impl_tv_ids, canonical_target,
-                                field, trait_names, dspan, impl_scheme_bounds, saved, type_params)
+                                field, trait_names, dspan,
+                                impl_bounds.scheme_bounds, impl_bounds.dict_bounds,
+                                saved, type_params)
                         },
                         _ => {}
                     }
@@ -1246,23 +1284,7 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
         ctx.type_param_scope.insert(tp.name, tv)
     }
 
-    let mut impl_scheme_bounds: List<SchemeBound> = []
-    let mut tp_idx = 0
-    for tp in type_params {
-        for b in tp.bounds {
-            if tp_idx < impl_tv_ids.len() {
-                let tv_id = impl_tv_ids.get(tp_idx).unwrap()
-                let canonical_bound = resolve_trait_identity(ctx, b.trait_name)
-                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: canonical_bound, assoc_constraints: [] })
-                // Expand supertrait bounds
-                let supers = collect_all_supertraits(ctx, canonical_bound)
-                for st_name in supers {
-                    impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name, assoc_constraints: [] })
-                }
-            }
-        }
-        tp_idx = tp_idx + 1
-    }
+    let impl_bounds = normalize_impl_bounds(ctx, type_params, impl_tv_ids)
 
     // Collect associated type assignments from impl
     let mut assoc_type_map: Map<Str, Type> = map_new()
@@ -1302,9 +1324,9 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
     for method in methods {
         match method {
             Decl::Fn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params, false),
+                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_bounds.scheme_bounds, saved, type_params, false),
             Decl::ExternFn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params, true),
+                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_bounds.scheme_bounds, saved, type_params, true),
             Decl::Delegate { .. } => {},  // Deferred to register_phase3_delegate (needs complete struct fields)
             Decl::AssocType { .. } => {},  // Already handled above
             _ => {}
@@ -1419,6 +1441,7 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                     add_impl(ctx.env.trait_reg, ImplEntry {
                         trait_name: tname, target_type_name: target_type,
                         type_params: tp_names, method_names: method_names,
+                        dict_bounds: impl_bounds.dict_bounds,
                         assoc_types: map_clone(assoc_type_map)
                     })
                 },
@@ -1542,8 +1565,8 @@ fn register_impl_method(
 fn register_delegate(
     mut ctx: InferCtx, mut methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, field: Str, trait_names: List<Str>, span: Span,
-    impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>,
-    impl_type_params: List<TypeParam>
+    impl_scheme_bounds: List<SchemeBound>, impl_dict_bounds: List<ImplDictBound>,
+    outer_saved: Map<Str, Type>, impl_type_params: List<TypeParam>
 ) {
     // 1. Validate field exists on target struct
     let target_display = nominal_display_name(target_type)
@@ -1582,7 +1605,8 @@ fn register_delegate(
                         none => {},
                         some(ftn) => {
                             register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type,
-                                field, trait_names, span, impl_scheme_bounds, impl_type_params, ftn, ft)
+                                field, trait_names, span, impl_scheme_bounds, impl_dict_bounds,
+                                impl_type_params, ftn, ft)
                         }
                     }
                 }
@@ -1594,8 +1618,8 @@ fn register_delegate(
 fn register_delegate_traits(
     mut ctx: InferCtx, mut methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, field: Str, trait_names: List<Str>, span: Span,
-    impl_scheme_bounds: List<SchemeBound>, impl_type_params: List<TypeParam>,
-    field_type_name: Str, ft: Type
+    impl_scheme_bounds: List<SchemeBound>, impl_dict_bounds: List<ImplDictBound>,
+    impl_type_params: List<TypeParam>, field_type_name: Str, ft: Type
 ) {
     for tname in trait_names {
         let canonical_trait = resolve_trait_identity(ctx, tname)
@@ -1656,6 +1680,7 @@ fn register_delegate_traits(
                                 add_impl(ctx.env.trait_reg, ImplEntry {
                                     trait_name: reg_tname, target_type_name: target_type,
                                     type_params: tp_names, method_names: method_names,
+                                    dict_bounds: impl_dict_bounds,
                                     assoc_types: map_clone(field_assoc_types)
                                 })
 

@@ -70,20 +70,8 @@ LLVM_BACKEND_GAPS = {
 }
 
 SHARED_POSITIVE_GAPS = {
-    "tests/cases/api_clone.ring": (
-        "both backends access-violate in the shared clone/runtime path "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
     "tests/cases/iterator.ring": (
         "both backends access-violate in the shared iterator/runtime path "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
-    "tests/cases/set_struct_eq.ring": (
-        "both backends access-violate in structural Set equality "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
-    "tests/cases/set_ops_deep_eq.ring": (
-        "both backends access-violate in deep Set operations "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
     "tests/cases/tuple_eq.ring": (

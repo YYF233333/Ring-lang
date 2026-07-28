@@ -13,7 +13,7 @@ use env::{TypeEnv, TypeScheme,
     apply_subst, has_impl, lookup_variant}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry,
     type_error, unify_at, build_scheme_var_map, resolve_relative_qualifier,
-    variant_ctor_origin}
+    resolve_dict_ref_for_type, variant_ctor_origin}
 
 
 pub struct MethodLookupResult {
@@ -473,6 +473,17 @@ pub fn is_tuple_type(t: Type) -> Bool {
     match t { Type::TupleType { .. } => true, _ => false }
 }
 
+fn dispatch_from_dict_ref(dict_ref: DictRef) -> TraitDispatch {
+    match dict_ref {
+        DictRef::Static(dict) =>
+            TraitDispatch::Direct { dict: dict, extra_dicts: [] },
+        DictRef::Wrapped { dict, inner_dicts, .. } =>
+            TraitDispatch::Direct { dict: dict, extra_dicts: inner_dicts },
+        DictRef::Simple(param) =>
+            TraitDispatch::Dict { param: param }
+    }
+}
+
 pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_code: Str, subst: UnionFind, span: Span, op: Str, is_builtin: Bool) -> TraitDispatch {
     if is_builtin { return TraitDispatch::Builtin }
     let trait_display = nominal_display_name(trait_name)
@@ -508,20 +519,28 @@ pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, er
                 span, DiagnosticContext::TraitError { detail: "type does not implement ${trait_display}" })
             TraitDispatch::Builtin
         },
-        Type::StructType { name, type_params, .. } => {
-            if has_impl(ctx.env.trait_reg, name, trait_name) {
-                let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
-                return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
+        Type::StructType { .. } => {
+            match resolve_dict_ref_for_type(
+                ctx.env, ctx.current_fn_bounds, resolved, subst, trait_name
+            ) {
+                some(dict_ref) => {
+                    return dispatch_from_dict_ref(dict_ref)
+                },
+                none => {}
             }
             let _ = type_error(ctx.sink, error_code,
                 "Type '${type_to_string(resolved)}' does not implement ${trait_display}, cannot use '${op}'",
                 span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_display}" })
             TraitDispatch::Builtin
         },
-        Type::EnumType { name, type_params, .. } => {
-            if has_impl(ctx.env.trait_reg, name, trait_name) {
-                let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
-                return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
+        Type::EnumType { .. } => {
+            match resolve_dict_ref_for_type(
+                ctx.env, ctx.current_fn_bounds, resolved, subst, trait_name
+            ) {
+                some(dict_ref) => {
+                    return dispatch_from_dict_ref(dict_ref)
+                },
+                none => {}
             }
             let _ = type_error(ctx.sink, error_code,
                 "Type '${type_to_string(resolved)}' does not implement ${trait_display}, cannot use '${op}'",
@@ -534,77 +553,6 @@ pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, er
                 span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_display}" })
             TraitDispatch::Builtin
         }
-    }
-}
-
-pub fn resolve_trait_extra_dicts(ctx: InferCtx, type_args: List<Type>, subst: UnionFind, trait_name: Str) -> List<DictRef>? {
-    if type_args.len() == 0 { return none }
-    let mut dicts: List<DictRef> = []
-    for arg in type_args {
-        let resolved = apply_subst(subst, arg)
-        let dict = resolve_type_to_dict_ref(ctx, resolved, subst, trait_name)
-        match dict {
-            some(d) => dicts.push(d),
-            none => { return none }
-        }
-    }
-    some(dicts)
-}
-
-pub fn resolve_type_to_dict_ref(ctx: InferCtx, t: Type, subst: UnionFind, trait_name: Str) -> DictRef? {
-    match type_to_builtin_name(t) {
-        some(builtin_name) => match t {
-            Type::StructType { .. } => {},
-            Type::EnumType { .. } => {},
-            _ => { return some(DictRef::Static(trait_dict_name(builtin_name, trait_name))) }
-        },
-        none => {}
-    }
-    match t {
-        Type::TypeVar { id, .. } => {
-            let bound = ctx.current_fn_bounds.find(fn(fb) {
-                fb.type_param_var_id == id && fb.trait_name == trait_name
-            })
-            match bound {
-                some(b) => some(DictRef::Simple(trait_bound_param_name(b.type_param_name, trait_name))),
-                none => none
-            }
-        },
-        Type::StructType { name, type_params, .. } => {
-            if has_impl(ctx.env.trait_reg, name, trait_name) {
-                if type_params.len() > 0 {
-                    let inner = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
-                    match inner {
-                        some(inner_dicts) => some(DictRef::Wrapped {
-                            dict: trait_dict_name(name, trait_name),
-                            trait_name: trait_name,
-                            inner_dicts: inner_dicts
-                        }),
-                        none => some(DictRef::Static(trait_dict_name(name, trait_name)))
-                    }
-                } else {
-                    some(DictRef::Static(trait_dict_name(name, trait_name)))
-                }
-            } else { none }
-        },
-        Type::EnumType { name, type_params, .. } => {
-            if has_impl(ctx.env.trait_reg, name, trait_name) {
-                if type_params.len() > 0 {
-                    let inner = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
-                    match inner {
-                        some(inner_dicts) => some(DictRef::Wrapped {
-                            dict: trait_dict_name(name, trait_name),
-                            trait_name: trait_name,
-                            inner_dicts: inner_dicts
-                        }),
-                        none => some(DictRef::Static(trait_dict_name(name, trait_name)))
-                    }
-                } else {
-                    some(DictRef::Static(trait_dict_name(name, trait_name)))
-                }
-            } else { none }
-        },
-        _ => none
     }
 }
 

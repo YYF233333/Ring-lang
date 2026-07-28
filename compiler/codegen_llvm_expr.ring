@@ -100,22 +100,11 @@ extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -
 extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
 
 // ============================================================
-// Type-aware map/set dispatch helpers
+// Type-aware collection dispatch helpers
 // ============================================================
 
 // B-152 P3: is_int_keyed_map removed — Map is now a unified Ring struct with
 // Hash + Eq trait bounds; no dual dispatch needed.
-
-fn is_int_set(ty: Type) -> Bool {
-    match ty {
-        Type::StructType { name, type_params } =>
-            name == "Set" && type_params.len() == 1 && match type_params[0] {
-                Type::IntType => true,
-                _ => false,
-            },
-        _ => false,
-    }
-}
 
 // B-134: Validate that a StructType claiming to be List/Map/Set has the correct
 // structural signature (type_params count). Returns false for user
@@ -1275,13 +1264,7 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
                     none => {},
                 }
             }
-            // B-152 P3: Map int-keyed dispatch removed — Map is now a unified Ring struct.
-            let final_name = if call_name == "set_new" && is_int_set(result_ty) {
-                "set_int_new"
-            } else { if call_name == "set_from" && is_int_set(result_ty) {
-                "set_int_from"
-            } else { call_name } }
-            gen_direct_call(ctx, final_name, arg_vals, dict_vals)
+            gen_direct_call(ctx, call_name, arg_vals, dict_vals)
         },
         HExpr::FieldAccess { receiver, field, .. } => {
             // Method call: receiver.method(args)
@@ -1317,13 +1300,13 @@ fn resolve_dict_refs(mut ctx: LlvmCtx, dicts: List<DictRef>) -> List<LLVMValueRe
     result
 }
 
-fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
+pub fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
     match dr {
         DictRef::Simple(name) => {
             // A scope reference: dict parameter (__ring_T_Eq) or dict_lower's
             // local dict binding (__ring_dictlocal_N).  Name-based legacy
-            // callers (dict_closure_dicts / derive extra_dicts strings) also
-            // funnel here, so unknown names fall through to the static chain.
+            // callers (`dict_closure_dicts` names and derived Simple refs)
+            // also funnel here, so unknown names fall through to static.
             match ctx.named_values.get(name) {
                 some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "dict")),
                 none => resolve_static_dict_by_name(ctx, name),
@@ -1335,8 +1318,8 @@ fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
             // #B-087 gap 2: a wrapped dict for a parameterized type whose trait impl
             // needs the inner type-param dicts bound. Build a real wrapper dict (see
             // build_wrapped_dict). Previously returned null → dispatch crash.
-            // Post-dict_lower this survives only in BinOp dispatch extra_dicts
-            // (which the LLVM Eq/Ord dispatch ignores — pre-existing gap).
+            // Post-dict_lower this survives in BinOp dispatch extra_dicts and
+            // dynamic derived FieldAction evidence.
             build_wrapped_dict(ctx, dict, trait_name, inner_dicts)
         },
     }
@@ -1603,8 +1586,24 @@ fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_d
 fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>, dict_tid: Int) -> LLVMValueRef {
     // Resolve the inner dicts at this site.
     let mut inner_vals: List<LLVMValueRef> = []
+    // A surviving Wrapped child is freshly owned.  Parent method envs dup
+    // every inner below; release the construction temporaries after all
+    // slots have captured them.
+    let mut owned_inner_vals: List<LLVMValueRef> = []
     for d in inner_dicts {
-        inner_vals.push(resolve_dict_ref(ctx, d))
+        match d {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
+                })
+                inner_vals.push(value)
+                owned_inner_vals.push(value)
+            },
+            DictRef::Simple(name) =>
+                inner_vals.push(resolve_dict_ref(ctx, DictRef::Simple(name))),
+            DictRef::Static(name) =>
+                inner_vals.push(resolve_dict_ref(ctx, DictRef::Static(name))),
+        }
     }
 
     // Recover the target type name from the dict name "__<Type>_<Trait>".
@@ -1711,6 +1710,12 @@ fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, i
             },
             none => {},
         }
+    }
+
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    for owned in owned_inner_vals {
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [owned], ""))
     }
 
     dict_ptr
@@ -2454,7 +2459,6 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "eprintln" { return some("ring_eprintln") }
     if name == "exit" || name == "exit_process" { return some("ring_exit") }
     if name == "argv" { return some("ring_args") }
-    if name == "set_new" { return some("ring_set_new") }
     if name == "read_file" { return some("ring_read_file") }
     if name == "write_file" { return some("ring_write_file") }
     if name == "file_exists" { return some("ring_file_exists") }
@@ -2467,12 +2471,9 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "cwd" { return some("ring_cwd") }
     if name == "parse_int" { return some("ring_parse_int") }
     if name == "parse_float" { return some("ring_parse_float") }
-    if name == "set_from" { return some("ring_set_from_list") }
     // B-152 P2: list_new removed — list() is now a Ring function.
     // gen_list_lit still calls ring_list_new directly via get_or_declare_runtime_fn.
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
-    if name == "set_int_new" { return some("ring_set_int_new") }
-    if name == "set_int_from" { return some("ring_set_int_from_list") }
     if name == "Cell" { return some("ring_Cell_new") }
     // B-125: Ptr<T> builtins
     if name == "alloc" { return some("ring_raw_alloc") }
@@ -2510,17 +2511,7 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_has" { return true }
-    if name == "ring_set_len" { return true }
     if name == "ring_sb_len" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_int_len" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2532,19 +2523,11 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     if name == "ring_str_eq" { return true }
     if name == "ring_str_lt" { return true }
     if name == "ring_list_is_empty" { return true }
-    if name == "ring_set_has" { return true }
     if name == "ring_list_any" { return true }
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2668,39 +2651,13 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
     // B-134: Only dispatch to runtime builtins if the collection type has the
     // correct structural signature (prevents user structs named List/Map/Set
     // from being misrouted to C runtime functions).
-    let rt_method = if (type_name == "List" || type_name == "Map" || type_name == "Set") && !is_builtin_collection(recv_type) {
+    let rt_method = if (type_name == "List" || type_name == "Map") && !is_builtin_collection(recv_type) {
         none
     } else {
         method_to_runtime(type_name, method)
     }
     match rt_method {
-        some(base_rt_name) => {
-            // B-152 P3: int-keyed Map dispatch removed — Map is now a unified Ring struct.
-            // Dispatch to int-keyed variants for Set only.
-            let rt_name = if is_int_set(recv_type) {
-                match method {
-                    "add" => "ring_set_int_add",
-                    "insert" => "ring_set_int_add",
-                    "has" => "ring_set_int_has",
-                    "contains" => "ring_set_int_has",
-                    "to_list" => "ring_set_int_to_list",
-                    "len" => "ring_set_int_len",
-                    "from_list" => "ring_set_int_from_list",
-                    "for_each" => "ring_set_int_for_each",
-                    "remove" => "ring_set_int_delete",
-                    "clear" => "ring_set_int_clear",
-                    "clone" => "ring_set_int_clone",
-                    "is_empty" => "ring_set_int_is_empty",
-                    "union" => "ring_set_int_union",
-                    "intersect" => "ring_set_int_intersect",
-                    "difference" => "ring_set_int_difference",
-                    "fold" => "ring_set_int_fold",
-                    "filter" => "ring_set_int_filter",
-                    "any" => "ring_set_int_any",
-                    "all" => "ring_set_int_all",
-                    _ => base_rt_name,
-                }
-            } else { base_rt_name }
+        some(rt_name) => {
             // Build call args with proper unboxing
             let mut call_args: List<LLVMValueRef> = []
 
@@ -2847,26 +2804,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
     // B-152 P2: List methods are now pure Ring — no method_to_runtime entries.
     // All List method calls fall through to the Ring-compiled impl methods.
-    // B-152 P3 closure: Map methods are pure Ring impl methods.
-    // Set methods
-    if type_name == "Set" && method == "add" { return some("ring_set_add") }
-    if type_name == "Set" && method == "insert" { return some("ring_set_add") }
-    if type_name == "Set" && method == "has" { return some("ring_set_has") }
-    if type_name == "Set" && method == "contains" { return some("ring_set_has") }
-    if type_name == "Set" && method == "to_list" { return some("ring_set_to_list") }
-    if type_name == "Set" && method == "len" { return some("ring_set_len") }
-    if type_name == "Set" && method == "is_empty" { return some("ring_set_is_empty") }
-    if type_name == "Set" && method == "from_list" { return some("ring_set_from_list") }
-    if type_name == "Set" && method == "for_each" { return some("ring_set_for_each") }
-    if type_name == "Set" && method == "remove" { return some("ring_set_delete") }
-    if type_name == "Set" && method == "clear" { return some("ring_set_clear") }
-    if type_name == "Set" && method == "union" { return some("ring_set_union") }
-    if type_name == "Set" && method == "intersect" { return some("ring_set_intersect") }
-    if type_name == "Set" && method == "difference" { return some("ring_set_difference") }
-    if type_name == "Set" && method == "fold" { return some("ring_set_fold") }
-    if type_name == "Set" && method == "filter" { return some("ring_set_filter") }
-    if type_name == "Set" && method == "any" { return some("ring_set_any") }
-    if type_name == "Set" && method == "all" { return some("ring_set_all") }
+    // B-152 P3/P4: Map and Set methods are pure Ring impl methods.
     // Option methods
     if type_name == "Option" && method == "unwrap_or" { return some("ring_Option_unwrap_or") }
     if type_name == "Option" && method == "unwrap" { return some("ring_Option_unwrap") }

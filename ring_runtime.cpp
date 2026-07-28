@@ -14,7 +14,6 @@
 #include <stdexcept>
 #include <vector>
 #include <unordered_map>
-#include <unordered_set>
 #include <algorithm>
 
 #include <cctype>
@@ -39,8 +38,7 @@
 //   List         = RingList*        (Ring struct: {buf, len_tagged, cap_tagged})
 //   Map          = RingMapStruct*    (pure-Ring: {meta, keys, values, len, cap})
 //   MapInt       = no distinct ABI type (Map<Int, V> uses the same RingMapStruct)
-//   Set          = std::unordered_set<std::string>*
-//   SetInt       = std::unordered_set<int64_t>*
+//   Set          = pure-Ring struct { entries: Map<T, Unit> }
 //   StringBuilder = std::string*
 //
 // Object layout (after ring_alloc):
@@ -95,12 +93,10 @@ static inline const char* ring_memmem(const char* hay, size_t hlen,
 #define RING_TYPEID_STR       3
 #define RING_TYPEID_LIST      4
 #define RING_TYPEID_MAP       5
-#define RING_TYPEID_SET       6
 #define RING_TYPEID_CLOSURE   7
 #define RING_TYPEID_OPTION    8
 #define RING_TYPEID_UNIT      9
 #define RING_TYPEID_TUPLE    10
-#define RING_TYPEID_SET_INT  12
 #define RING_TYPEID_SB       13   // StringBuilder (same underlying type as Str)
 #define RING_TYPEID_CELL     14   // boxed mut-cell: { void* value } — write-through closure capture (B-091)
 #define RING_TYPEID_CLOSURE_ENV 15 // closure env struct: { int64 count, void* cap0, ... } — owned-capture drop (B-084)
@@ -600,11 +596,9 @@ static void drop_cell(void* data) {
     if (value) ring_drop(value);
 }
 
-// Forward-declared; defined after container typedefs are available.
+// Forward-declared; defined after container layouts are available.
 static void drop_list(void* data);
 static void drop_map(void* data);
-static void drop_set(void* data);
-static void drop_set_int(void* data);
 static void drop_closure(void* data);
 static void drop_closure_env(void* data);
 static void drop_option(void* data);
@@ -659,12 +653,10 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     drop_table[RING_TYPEID_STR]     = drop_str;
     drop_table[RING_TYPEID_LIST]    = drop_list;
     drop_table[RING_TYPEID_MAP]     = drop_map;
-    drop_table[RING_TYPEID_SET]     = drop_set;
     drop_table[RING_TYPEID_CLOSURE] = drop_closure;
     drop_table[RING_TYPEID_OPTION]  = drop_option;
     drop_table[RING_TYPEID_UNIT]    = drop_unit;
     drop_table[RING_TYPEID_TUPLE]   = drop_tuple;
-    drop_table[RING_TYPEID_SET_INT] = drop_set_int;
     drop_table[RING_TYPEID_SB]      = drop_sb;
     drop_table[RING_TYPEID_CELL]    = drop_cell;
     drop_table[RING_TYPEID_CLOSURE_ENV] = drop_closure_env;
@@ -1540,352 +1532,6 @@ struct RingMapStruct {
 };
 
 // ============================================================================
-// Set (~8)
-// ============================================================================
-
-typedef std::unordered_set<std::string> RingSet;
-typedef std::unordered_set<int64_t> RingSetInt;
-
-extern "C" void* ring_set_new() {
-    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
-    new (data) RingSet();
-    return data;
-}
-
-extern "C" void* ring_set_add(void* set, void* elem) {
-    RingStr* e = as_str(elem);
-    ((RingSet*)set)->insert(std::string(e->buf, (size_t)e->len));
-    return set;
-}
-
-extern "C" int64_t ring_set_has(void* set, void* elem) {
-    RingStr* e = as_str(elem);
-    return ((RingSet*)set)->count(std::string(e->buf, (size_t)e->len)) > 0 ? 1 : 0;
-}
-
-extern "C" void* ring_set_delete(void* set, void* elem) {
-    RingStr* e = as_str(elem);
-    ((RingSet*)set)->erase(std::string(e->buf, (size_t)e->len));
-    return set;
-}
-
-extern "C" void* ring_set_to_list(void* set) {
-    RingSet* s = (RingSet*)set;
-    void* ldata = make_ring_list((int64_t)s->size());
-    for (auto& elem : *s) {
-        ring_list_push_raw(ldata, make_ring_str(elem.c_str(), (int64_t)elem.size()));
-    }
-    return ldata;
-}
-
-extern "C" int64_t ring_set_len(void* set) {
-    return (int64_t)((RingSet*)set)->size();
-}
-
-extern "C" int64_t ring_set_is_empty(void* set) {
-    return ((RingSet*)set)->empty() ? 1 : 0;
-}
-
-extern "C" void* ring_set_from_list(void* list) {
-    RingList* l = as_list(list);
-    int64_t ln = list_len(l);
-    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
-    auto* result = new (data) RingSet();
-    for (int64_t i = 0; i < ln; i++) {
-        RingStr* e = as_str(l->buf[i]);
-        result->insert(std::string(e->buf, (size_t)e->len));
-    }
-    return data;
-}
-
-extern "C" void* ring_set_for_each(void* set, void* closure) {
-    RingSet* s = (RingSet*)set;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
-        fn(cls->env_ptr, sd);
-        ring_drop(sd);  // #152 ③: drop synthesized STR elem after closure returns
-    }
-    return nullptr;
-}
-
-// fold: left fold over Set entries. Closure is binary: fn(env, acc, elem) -> acc.
-// Elem is a synthesized Str (alloc + drop per iteration, see ring_set_for_each).
-extern "C" void* ring_set_fold(void* set, void* init, void* closure) {
-    RingSet* s = (RingSet*)set;
-    if (s->empty()) {
-        ring_dup(init);
-        return init;
-    }
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    void* acc = init;
-    size_t i = 0;
-    for (auto& elem : *s) {
-        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
-        void* old_acc = acc;
-        acc = fn(cls->env_ptr, old_acc, sd);
-        ring_drop(sd);  // #152 ③: drop synthesized STR elem
-        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
-        i++;
-    }
-    return acc;
-}
-
-// filter: returns a new Set containing only elements where predicate returns true.
-// Closure is unary: fn(env, elem) -> Bool.
-extern "C" void* ring_set_filter(void* set, void* closure) {
-    RingSet* s = (RingSet*)set;
-    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
-    auto* result = new (data) RingSet();
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
-        void* r = fn(cls->env_ptr, sd);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(sd);  // #152 ③: drop synthesized STR elem
-        if (match) {
-            result->insert(elem);
-        }
-    }
-    return data;
-}
-
-// any: returns true if any element satisfies the predicate.
-// Closure is unary: fn(env, elem) -> Bool.
-extern "C" int64_t ring_set_any(void* set, void* closure) {
-    RingSet* s = (RingSet*)set;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
-        void* r = fn(cls->env_ptr, sd);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(sd);  // #152 ③: drop synthesized STR elem
-        if (match) return 1;
-    }
-    return 0;
-}
-
-// all: returns true if all elements satisfy the predicate.
-// Closure is unary: fn(env, elem) -> Bool.
-extern "C" int64_t ring_set_all(void* set, void* closure) {
-    RingSet* s = (RingSet*)set;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* sd = make_ring_str(elem.c_str(), (int64_t)elem.size());
-        void* r = fn(cls->env_ptr, sd);
-        int match = ring_unbox_int(r) == 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(sd);  // #152 ③: drop synthesized STR elem
-        if (match) return 0;
-    }
-    return 1;
-}
-
-// ============================================================================
-// Set<Int> — int64_t-element set
-// ============================================================================
-
-extern "C" void* ring_set_int_new() {
-    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
-    new (data) RingSetInt();
-    return data;
-}
-
-extern "C" void* ring_set_int_add(void* set, void* elem) {
-    int64_t k = ring_unbox_int(elem);
-    ((RingSetInt*)set)->insert(k);
-    return set;
-}
-
-extern "C" int64_t ring_set_int_has(void* set, void* elem) {
-    int64_t k = ring_unbox_int(elem);
-    return ((RingSetInt*)set)->count(k) > 0 ? 1 : 0;
-}
-
-extern "C" void* ring_set_int_delete(void* set, void* elem) {
-    int64_t k = ring_unbox_int(elem);
-    ((RingSetInt*)set)->erase(k);
-    return set;
-}
-
-extern "C" void* ring_set_int_to_list(void* set) {
-    RingSetInt* s = (RingSetInt*)set;
-    void* ldata = make_ring_list((int64_t)s->size());
-    for (auto& elem : *s) {
-        ring_list_push_raw(ldata, ring_box_int(elem));
-    }
-    return ldata;
-}
-
-extern "C" int64_t ring_set_int_len(void* set) {
-    return (int64_t)((RingSetInt*)set)->size();
-}
-
-extern "C" int64_t ring_set_int_is_empty(void* set) {
-    return ((RingSetInt*)set)->empty() ? 1 : 0;
-}
-
-extern "C" void* ring_set_int_from_list(void* list) {
-    RingList* l = as_list(list);
-    int64_t ln = list_len(l);
-    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
-    auto* result = new (data) RingSetInt();
-    for (int64_t i = 0; i < ln; i++) {
-        int64_t k = ring_unbox_int(l->buf[i]);
-        result->insert(k);
-    }
-    return data;
-}
-
-extern "C" void* ring_set_int_for_each(void* set, void* closure) {
-    RingSetInt* s = (RingSetInt*)set;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* eb = ring_box_int(elem);
-        fn(cls->env_ptr, eb);
-        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
-    }
-    return nullptr;
-}
-
-// fold: left fold over Set<Int> entries. Closure is binary: fn(env, acc, elem) -> acc.
-// Elem is boxed as Int (alloc + drop per iteration, see ring_set_int_for_each).
-extern "C" void* ring_set_int_fold(void* set, void* init, void* closure) {
-    RingSetInt* s = (RingSetInt*)set;
-    if (s->empty()) {
-        ring_dup(init);
-        return init;
-    }
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
-    void* acc = init;
-    size_t i = 0;
-    for (auto& elem : *s) {
-        void* eb = ring_box_int(elem);
-        void* old_acc = acc;
-        acc = fn(cls->env_ptr, old_acc, eb);
-        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
-        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
-        i++;
-    }
-    return acc;
-}
-
-// filter: returns a new Set<Int> containing only elements where predicate returns true.
-// Closure is unary: fn(env, elem) -> Bool.
-extern "C" void* ring_set_int_filter(void* set, void* closure) {
-    RingSetInt* s = (RingSetInt*)set;
-    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
-    auto* result = new (data) RingSetInt();
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* eb = ring_box_int(elem);
-        void* r = fn(cls->env_ptr, eb);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
-        if (match) {
-            result->insert(elem);
-        }
-    }
-    return data;
-}
-
-// any: returns true if any element satisfies the predicate.
-// Closure is unary: fn(env, elem) -> Bool.
-extern "C" int64_t ring_set_int_any(void* set, void* closure) {
-    RingSetInt* s = (RingSetInt*)set;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* eb = ring_box_int(elem);
-        void* r = fn(cls->env_ptr, eb);
-        int match = ring_unbox_int(r) != 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
-        if (match) return 1;
-    }
-    return 0;
-}
-
-// all: returns true if all elements satisfy the predicate.
-// Closure is unary: fn(env, elem) -> Bool.
-extern "C" int64_t ring_set_int_all(void* set, void* closure) {
-    RingSetInt* s = (RingSetInt*)set;
-    RingClosure* cls = (RingClosure*)closure;
-    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
-    for (auto& elem : *s) {
-        void* eb = ring_box_int(elem);
-        void* r = fn(cls->env_ptr, eb);
-        int match = ring_unbox_int(r) == 0;
-        ring_drop(r);   // #152 ①: drop predicate Bool box
-        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
-        if (match) return 0;
-    }
-    return 1;
-}
-
-extern "C" void* ring_set_int_clone(void* set) {
-    RingSetInt* s = (RingSetInt*)set;
-    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
-    new (data) RingSetInt(*s);
-    return data;
-}
-
-extern "C" void* ring_set_int_union(void* a, void* b) {
-    RingSetInt* sa = (RingSetInt*)a;
-    RingSetInt* sb = (RingSetInt*)b;
-    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
-    auto* result = new (data) RingSetInt(*sa);
-    for (auto& elem : *sb) {
-        result->insert(elem);
-    }
-    return data;
-}
-
-extern "C" void* ring_set_int_intersect(void* a, void* b) {
-    RingSetInt* sa = (RingSetInt*)a;
-    RingSetInt* sb = (RingSetInt*)b;
-    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
-    auto* result = new (data) RingSetInt();
-    for (auto& elem : *sa) {
-        if (sb->count(elem) > 0) {
-            result->insert(elem);
-        }
-    }
-    return data;
-}
-
-extern "C" void* ring_set_int_difference(void* a, void* b) {
-    RingSetInt* sa = (RingSetInt*)a;
-    RingSetInt* sb = (RingSetInt*)b;
-    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
-    auto* result = new (data) RingSetInt();
-    for (auto& elem : *sa) {
-        if (sb->count(elem) == 0) {
-            result->insert(elem);
-        }
-    }
-    return data;
-}
-
-extern "C" void* ring_set_int_clear(void* set) {
-    // B-104 D1 rule ④ audit — nothing to drop: Set<Int> elements are value-
-    // inlined int64 (see ring_set_clear), no RC account.
-    ((RingSetInt*)set)->clear();
-    return set;
-}
-
-// ============================================================================
 // IO / FS / Process (~8)
 // ============================================================================
 
@@ -2360,15 +2006,6 @@ extern "C" void* ring_list_clone_rt(void* list) {
     return data;
 }
 
-extern "C" void* ring_set_clone(void* set) {
-    RingSet* s = (RingSet*)set;
-    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
-    new (data) RingSet(*s);
-    return data;
-}
-
-// ring_set_from_list already defined above
-
 // ============================================================================
 // String operations (additional)
 // ============================================================================
@@ -2631,47 +2268,6 @@ extern "C" void* ring_parse_float(void* s) {
 }
 
 // ============================================================================
-// Set operations (additional)
-// ============================================================================
-
-extern "C" void* ring_set_union(void* a, void* b) {
-    RingSet* sa = (RingSet*)a;
-    RingSet* sb = (RingSet*)b;
-    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
-    auto* result = new (data) RingSet(*sa);
-    for (auto& elem : *sb) {
-        result->insert(elem);
-    }
-    return data;
-}
-
-extern "C" void* ring_set_intersect(void* a, void* b) {
-    RingSet* sa = (RingSet*)a;
-    RingSet* sb = (RingSet*)b;
-    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
-    auto* result = new (data) RingSet();
-    for (auto& elem : *sa) {
-        if (sb->count(elem) > 0) {
-            result->insert(elem);
-        }
-    }
-    return data;
-}
-
-extern "C" void* ring_set_difference(void* a, void* b) {
-    RingSet* sa = (RingSet*)a;
-    RingSet* sb = (RingSet*)b;
-    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
-    auto* result = new (data) RingSet();
-    for (auto& elem : *sa) {
-        if (sb->count(elem) == 0) {
-            result->insert(elem);
-        }
-    }
-    return data;
-}
-
-// ============================================================================
 // List operations (additional)
 // ============================================================================
 
@@ -2708,19 +2304,6 @@ extern "C" void* ring_list_extend(void* list, void* other) {
         ring_list_push_raw(list, lb->buf[i]);
     }
     return list;
-}
-
-// ============================================================================
-// Set operations (additional clear/remove)
-// ============================================================================
-
-extern "C" void* ring_set_clear(void* set) {
-    // B-104 D1 rule ④ audit — nothing to drop: Set<Str> elements are VALUE-
-    // INLINED std::string copies (ring_set_add copies the CONTENT; no RC pointer
-    // is ever stored — same conclusion as ring_set_clone, #135), so clear() owes
-    // no RC account; ~unordered_set semantics handle the inline strings.
-    ((RingSet*)set)->clear();
-    return set;
 }
 
 // ============================================================================
@@ -2898,6 +2481,15 @@ static void* ring_make_debug_dict(void* debugfn) {
 // Each closure takes (env, val) where val is a boxed Ring value, returns a boxed Int.
 // ============================================================================
 
+extern "C" int64_t ring_hash_combine(int64_t h1, int64_t h2) {
+    // Deterministic, order-sensitive FNV combine.  Unsigned arithmetic makes
+    // overflow defined; the public Ring Int result is boxed by generated code.
+    uint64_t h = (uint64_t)h1;
+    h ^= (uint64_t)h2;
+    h *= 1099511628211ULL;
+    return (int64_t)h;
+}
+
 static void* ring_cl_hash_int(void* /*env*/, void* val) {
     uint64_t x = (uint64_t)ring_unbox_int(val);
     // multiply-xorshift mixing (splitmix64 finalizer)
@@ -2959,16 +2551,6 @@ static void drop_map(void* data) {
         }
     }
     if (cap > 0) { free(meta); free(m->keys); free(m->values); }
-}
-
-static void drop_set(void* data) {
-    // Set<Str> — std::unordered_set<std::string>, elements are value types.
-    // Destructor auto-releases, no recursive ring_drop needed.
-    ((RingSet*)data)->~unordered_set();
-}
-
-static void drop_set_int(void* data) {
-    ((RingSetInt*)data)->~unordered_set();
 }
 
 static void drop_closure(void* data) {

@@ -100,10 +100,19 @@ pub struct TraitDef {
     pub assoc_types: List<AssocTypeDef>
 }
 
+// Ordered impl predicates that require runtime dictionary evidence.
+// This is not a complete impl predicate: current impl registration does not
+// carry TypeBound type_args or assoc_constraints here.
+pub struct ImplDictBound {
+    pub type_param_index: Int,
+    pub trait_name: Str
+}
+
 pub struct ImplEntry {
     pub trait_name: Str,
     pub target_type_name: Str,
     pub type_params: List<Str>,
+    pub dict_bounds: List<ImplDictBound>,
     pub method_names: List<Str>,
     pub assoc_types: Map<Str, Type>
 }

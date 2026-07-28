@@ -118,6 +118,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_unbox_float", [ptr], dbl)
     get_or_declare_runtime_fn(ctx, "ring_box_bool", [i64], ptr)
     get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_hash_combine", [i64, i64], i64)
 
     // Str
     get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ptr], ptr)
@@ -192,41 +193,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_find", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_flat_map", [ptr, ptr], ptr)
 
-    // Set
-    get_or_declare_runtime_fn(ctx, "ring_set_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_add", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_has", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_delete", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_to_list", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_len", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_is_empty", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_from_list", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_for_each", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_fold", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_filter", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_any", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_all", [ptr, ptr], i64)
-
-    // Set<Int>
-    get_or_declare_runtime_fn(ctx, "ring_set_int_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_add", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_has", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_delete", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_to_list", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_len", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_is_empty", [ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_from_list", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_for_each", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_clone", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_union", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_intersect", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_difference", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_clear", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_fold", [ptr, ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_filter", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_any", [ptr, ptr], i64)
-    get_or_declare_runtime_fn(ctx, "ring_set_int_all", [ptr, ptr], i64)
-
     // Catch / raise (setjmp/longjmp based)
     get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ptr)
     get_or_declare_runtime_fn(ctx, "ring_catch_get_buf", [ptr], ptr)
@@ -249,9 +215,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_path_dirname", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_path_basename", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_path_extname", [ptr], ptr)
-
-    // Collection clone/from (B-152 P2/P3: List/Map are Ring functions)
-    get_or_declare_runtime_fn(ctx, "ring_set_clone", [ptr], ptr)
 
     // Parse
     get_or_declare_runtime_fn(ctx, "ring_parse_int", [ptr], ptr)
@@ -276,12 +239,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     // StringBuilder (additional)
     get_or_declare_runtime_fn(ctx, "ring_sb_line", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_sb_add_int", [ptr, i64], ptr)
-
-    // Set (additional)
-    get_or_declare_runtime_fn(ctx, "ring_set_union", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_intersect", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_difference", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_set_clear", [ptr], ptr)
 
     // List (additional)
     get_or_declare_runtime_fn(ctx, "ring_list_shift", [ptr], ptr)
