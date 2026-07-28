@@ -489,6 +489,15 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 - RIIR 与 runtime 收口后再扩大 safety/performance 宣称；
 - 保留 LLVM oracle 直到既定 gate 闭合，不为“native 已成入场券”跳过验证。
 
+### P0：B-163 后先确定 C-native failure/control ABI
+
+本轮讨论已立 B-168，并把它排在 B-163 与 B-167 之间：
+
+- 用同一组最小程序中立比较 cleanup stack + `setjmp`/`longjmp` 与显式 failure-status/continuation lowering，不因 Rust/LLVM 的既有路线预选答案；
+- 以多帧 Drop、部分初始化、nested catch、re-raise、B-165 局部写入可见性和 `verify_rc` 可审计性作为正确性门，而非只比正常路径吞吐；
+- 同时测量 TCB、Windows/Linux C11 可移植性、生成物尺寸、self-compile 成本，以及与 B-167 closure/evidence ABI 的耦合；
+- 用户依据可复核 dossier 拍板后，统一重写 B-002 Phase 2、处置 B-165，再执行 B-167，避免为三项分别制造控制流补丁。
+
 ### P1：B-111 产出可复现的 Ring vs TS7 证据
 
 本轮已将以下要求写回 B-111：

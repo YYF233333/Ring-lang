@@ -348,7 +348,7 @@ trait Drop {
 - `drop(x)` 提前释放，`leak(x)` 显式逃逸
 - 共享 Drop 类型 → `Rc<T>`（非 Drop 包装，§7.7）
 - 复合类型含 Drop 字段 → 自动 derive Drop
-- abort-unwind：LLVM invoke/landingpad（同 Rust），全路径 RAII
+- abort-unwind：语义目标是 fail/abort 穿越任意调用帧时逐帧执行 Drop、全路径 RAII；C-native 实现模型由 B-168 在 cleanup stack + `setjmp`/`longjmp` 与显式 failure-status/continuation lowering 之间实测拍板
 
 **不引入 `defer` 关键字**——RAII 覆盖了资源清理的所有场景。`Drop::drop` 禁止 `fail` effect，避免"清理时抛异常"问题。
 
@@ -1558,7 +1558,7 @@ impl Drop for FileHandle {
 - Drop 类型不可 Clone（`impl Drop` 禁止 `impl Clone`——资源不可复制）
 - Drop 顺序对齐 Rust：同 scope 逆序 / struct 字段声明序 / 容器元素序
 - `drop(x)` 提前释放
-- abort 路径（fail/catch）的 drop-aware unwind 保证全路径 RAII
+- abort 路径（fail/catch）的 drop-aware unwind 保证全路径 RAII；当前 C 后端尚未兑现，B-168 先确定可审计、可移植的控制流模型，再由 B-002 Phase 2 实现
 
 ### 7.7 `Rc<T>` 与 Clone
 
@@ -2248,6 +2248,7 @@ HIR（完整 type + effect + linearity 信息）
 | 多行字符串 | `"..."` 允许跨行，空白原样保留 | 减少字符串拼接需求 |
 | Raw string | `r"..."` 和 `r#"..."#`，无转义无插值 | 正则表达式/codegen 场景减少转义噪音 |
 | Effect 派发 hybrid（2026-06-03）| fail/abort → handler stack + setjmp（ambient）；tail-resumptive → evidence 值线程化（lexical）。两类绑定语义不同，同构 JS oracle | evidence 保留优化器可见性 + async 线程迁移安全 |
+| C-native abort/unwind 选型（2026-07-29） | **先证据、后拍板**：B-163 后先执行 B-168 P0/M 探针，中立比较编译器生成 cleanup stack + `setjmp`/`longjmp` 与显式 failure-status/continuation lowering；平台私有 unwind、C++ exception、重新依赖 LLVM 不进入候选。B-168 结论是 B-002 Phase 2、B-165 与 B-167 的共同前置 | LLVM `invoke`/`landingpad` 路径随后端退役失效；B-165 已实锤 longjmp 局部可见性缺口，B-167 又会改 closure/evidence ABI。先固定 failure/control ABI，避免三次补丁化重写并保留 C11 可移植与 RC 可审计性 |
 | effectful function value evidence 路线（2026-07-28，audit #258） | **先 C 后 A**：双后端阶段保留创建处词法 evidence，handler 只消除显式 label、绝不吞掉未知 open tail；LLVM 退役且 C bootstrap/CI 稳定后由 B-167 切到调用点动态 evidence ABI | C 先闭合 checker soundness 且避免同时改两套 closure ABI；代价是外部 callback 暂不能被内层 handler 动态截获。A 是最终高阶组合语义，C → A 明确按 breaking change 管理 |
 | abort handler arm 语义（2026-07-27，audit #251） | 捕获 `fail.raise(payload)` 后先退出当前 catch/evidence 作用域，再将 payload 绑定到 op 参数并恰好执行一次 arm body；arm body 结果即整个 `handle` 结果，无 resume。静态上 arm 结果类型必须与 handle body 结果统一，arm 自身 effects 合回外层；运行时 arm 内 re-raise 传播给外层 handler，普通 effect 与词法捕获照常生效 | 源码中的 handler body 必须有语义；否决把 checker 限制为恒等 body 的贫化方案。先退出当前 handler 可避免 re-raise 自捕获，并使 arm 的 effect 解析遵循外层词法环境 |
 | 类型系统代价分配 | 复杂度由 LLM 承担（编译器错误循环），收益由用户享受（零 runtime surprise） | LLM 不是人、编译器搏斗十轮也无所谓 |

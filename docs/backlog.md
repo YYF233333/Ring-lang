@@ -10,11 +10,13 @@
 ## 层 3 排序（2026-06-27 Discussion 重定，JS 退役完成后启动）
 
 > **2026-07-10 插队更新**：**B-163 C 后端迁移 (XL) 插队为 P0**（B-155 泥潭止损，Discussion 拍板，计划见 `docs/plan-c-backend.md`）。B-152 RIIR 剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。下面原排序在 B-163 之后恢复。
+>
+> **2026-07-29 B-163 后续更新**：B-163 完成后先执行 **B-168 C-native abort/unwind 实现模型探针 (P0/M)**，由用户依据实测 dossier 拍板，再启动 B-167。原因：B-002 Phase 2 原 LLVM `invoke`/`landingpad` 路径随 LLVM 后端退役失效；B-165 已证明现行 `setjmp`/`longjmp` 有 C 局部变量可见性缺口；B-167 又将改动 effectful function value ABI。先固定 failure/control ABI，避免 B-165、B-167、B-002 各自补丁化并重复改 ABI。audit #255/#256 等不触碰同一控制流/RC 文件的独立修复可并行。
 
-B-151 CI → B-125 unsafe/Ptr<T> (XL) → B-002p1 精简 Drop (L) → B-152 RIIR std (XL) → B-002p2 unwind 补全 (L)；后续 B-110 别名追踪 → B-068 用户面。async 线（B-116 probe → B-007）和类型系统线（B-001 Refinement 需 B-070）在 RIIR 之后。M 项当 XL 间换气穿插；P3 研究最后。
+B-151 CI → B-125 unsafe/Ptr<T> (XL) → B-002p1 精简 Drop (L) → B-163 C 后端迁移 (XL) → B-168 abort/unwind probe (M) → B-167 动态 evidence ABI (L) → B-152 RIIR std (XL) → 按 B-168 决策重写并执行 B-002p2 unwind 补全 (L)；后续 B-110 别名追踪 → B-068 用户面。B-111 可在 C ABI 稳定后执行；async 线（B-116 probe → B-007）和类型系统线（B-001 Refinement 需 B-070）在 RIIR 之后。M 项当 XL 间换气穿插；P3 研究最后。
 
 > **战略**：unsafe + Ptr<T> → 精简 Drop → RIIR 标准库，让 Ring 拥有自己的底层，消除 C++ STL 依赖。
-> B-002 拆两阶段：Phase 1 精简版（scope-end Drop，够 RIIR 用）先行；Phase 2 unwind（invoke/landingpad）RIIR 之后补。
+> B-002 拆两阶段：Phase 1 精简版（scope-end Drop，够 RIIR 用）先行；Phase 2 的 C-native unwind 模型由 B-168 实测拍板，RIIR 之后补。
 > B-111 LLM eval harness 在开发进入正轨后再排。
 > B-068 用户面在 B-110 落地后再立项——模型见 design.md §7.2-7.8。
 
@@ -51,7 +53,7 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 
 > 2026-06-24 重新设计（Discussion，资源管理模型重构）。2026-06-27 拆两阶段（Discussion，路线图重定）。**真值源 = design.md §7.6（2026-06-24 版）**。Perceus 分层 L2——在 L0/L1 RC 核心之上实现用户 `impl Drop` + 全路径 RAII。
 
-**拆分决策（2026-06-27）**：Phase 1 精简版（scope-end Drop + move checker，够 RIIR 用）先行，不含 unwind；Phase 2 补 invoke/landingpad unwind，B-152 RIIR 之后。**升级条件**：如果实现过程中 setjmp/longjmp 路径出 bug，Phase 2 立即上调优先级先做。
+**拆分决策（2026-06-27；2026-07-29 修订）**：Phase 1 精简版（scope-end Drop + move checker，够 RIIR 用）先行，不含 unwind；Phase 2 在 B-152 RIIR 之后补全。原 `invoke`/`landingpad` 路径已随 C-only 方向失效；B-165 触发了升级条件，因此先以 P0 B-168 确定 C-native 模型，再重写 Phase 2 实现 spec。
 
 **Drop trait**：
 
@@ -88,18 +90,21 @@ trait Drop {
 - Drop 类型 auto-move：`let g = f`（Drop）→ 后续使用 f 编译错误
 - 全部 E2E + llvm_diff 通过；自举一致
 
-#### Phase 2: Unwind 补全 [P2] [L] [deferred: B-152]
+#### Phase 2: Unwind 补全 [P2] [L] [deferred: B-152+B-168]
+
+> **2026-07-29 设计失效标记**：原 LLVM `invoke`/`landingpad` 实现路径随 B-163 退役，不再是可执行 spec。B-168 必须先在 C11 约束下比较「编译器生成 cleanup stack + `setjmp`/`longjmp`」与「显式 failure-status/continuation lowering」，由用户拍板后才能把本阶段推进到 planning/doing；`Weak<T>` 子项不受选型影响。
 
 **涉及修改**：
-5. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
+5. **abort-unwind（重头）**：按 B-168 最终决策实现 C-native failure/control ABI，使 `fail.raise` 穿越任意调用帧时逐帧执行已初始化 owned 值的 Drop glue；不得重新引入 LLVM、平台私有 unwind 或 C++ exception 作为语义地基
 6. **`Weak<T>`（子项）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
-7. **try/catch codegen 改用栈分配 catch frame**：当前 codegen（`codegen_llvm_expr.ring`）使用 `ring_catch_push`/`ring_catch_pop`（每次 try/catch 堆分配+释放 RingCatchFrame）；`ring_runtime.cpp` 已有 `ring_try`（栈分配 RingCatchFrame，零堆开销）但未被使用。unwind 重写时一并切换到栈分配方案（2026-06-27 审计观察 #1 并入）。**2026-06-29 尝试记录**：alloca `[512 x i8]` + `ring_catch_init/restore` 方案代码实现完整（5 文件 +77 -34），但 v2 ring.exe 连 `check` 都 crash（0xC0000005），加 `LLVMSetAlignment(frame, 16)` 后更严重。revert 后 v2 正常——确认是改动 bug 非基座问题。crash 在 codegen 函数执行时而非生成代码运行时，需更深入 debug（可能是 alloca 动态大小 / extern fn 调用约定 / HandleCleanup 结构变更的交互问题）
+7. **try/catch 与可见性**：catch frame、局部变量写入可见性、nested catch、re-raise 与 handler 退出顺序统一服从 B-168 的控制流模型；不得把 B-165 单独以 `volatile` 或无证据的全量装箱掩盖
 
 **Phase 2 验收标准**：
-- abort 路径（fail.raise 穿越含 Drop 局部的函数）→ 所有 Drop 正确执行（invoke/landingpad）
+- abort 路径（fail.raise 穿越一个或多个含 Drop 局部的函数）→ 每个已初始化 owned 值恰好 Drop 一次，正常返回/early return 行为不回归
 - `Rc<T>` 共享 Drop 类型 → 最后一个 Rc 消亡时 Drop 触发
-- try/catch 不再堆分配 CatchFrame
-- 全部 E2E + llvm_diff 通过；自举一致
+- B-165 的正常路径、捕获路径、nested catch 与 re-raise 写入可见性都有确定语义和正式回归
+- cleanup/failure edge 在 HIR、post-RC 或生成 C 的至少一个稳定层次可机器审计，RC verifier 能覆盖 abort 路径而非只看成功返回
+- 完整 C E2E/golden、RC/ASan、自编译与 `dist-c` 文本固定点通过；主干不重新引入 LLVM
 
 - **后续**：B-110（非 Drop 类型别名追踪）在 B-002 Phase 2 之后落地
 
@@ -385,9 +390,45 @@ fn test_fetch() {
 - 现有 std/ + compiler/ extern fn 全部通过（迁移后）
 - 自举一致
 
-### B-167 effectful function value 调用点动态 evidence ABI [refactor] [P0] [L] [judgment] [queued] [after: B-163]
+### B-168 C-native abort/unwind 实现模型探针 [design-align] [P0] [M] [judgment] [queued] [after: B-163]
 
-> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。本项是最终 A 语义，必须等 B-163 完成 LLVM 后端退役、`dist-c/` 成为唯一 bootstrap 锚且 CI 恢复稳定后再启动；不为即将退役的 LLVM 后端实现第二套新 ABI。
+> 2026-07-29 Discussion 用户拍板 P0/M、保持两候选中立实测。B-163 删除 LLVM 后，B-002 Phase 2 原定的 `invoke`/`landingpad` 路径失效；现行 `setjmp`/`longjmp` 又已由 B-165 证明存在跨 catch 局部写入不可见问题。B-167 随后还会改变 effectful function value evidence ABI，因此必须先确定共同的 C-native failure/control ABI，避免三项工作重复改写控制流、closure prototype 与 RC 证据面。
+
+**目标**：以最小但真实的垂直切片比较两种可移植 C11 实现模型，不在立项时预选赢家：
+
+1. **编译器生成 cleanup stack + `setjmp`/`longjmp`**：raise 沿显式 cleanup record 逐帧执行 Drop，再跳转到 catch；核实 frame 生命周期、部分初始化、局部写入可见性与 callback/FFI 边界。
+2. **显式 failure-status/continuation lowering**：仅对可能 fail 的函数增加显式失败返回/continuation 路径，逐调用点传播并在边上执行 Drop；纯函数 ABI 不承担额外参数。核实跨模块/间接调用/effect row 单态化如何稳定标注 fail-capable prototype。
+
+平台私有 unwind、SEH-only、C++ exception 或重新依赖 LLVM 均不进入候选集：它们扩大 TCB、破坏 C11 可移植性，也与 B-163 的后端收口目标相反。
+
+**必须回答的问题**：
+
+1. 正常返回、early return、单帧/多帧 raise、部分初始化、nested catch/handle、handler evidence 失活、re-raise 下，每个 owned 值能否恰好消费一次。
+2. B-165 是被模型结构性消除，还是仍需精确 boxed-vars；禁止以 `volatile` 或全量装箱回避 C 标准语义。
+3. B-167 的动态 evidence 如何穿过 direct call、closure、跨模块、泛型 HOF、递归/互递归，而不制造第二套不兼容 function-pointer ABI。
+4. cleanup/failure edge 能否在 HIR、post-RC 或生成 C 的稳定层次由 `verify_rc` 机器审计。
+5. `main`、未捕获 fail/panic、extern C、Ring→C callback→Ring 重入各自的 ABI 与退出语义。
+6. 同一生成 C 是否在 Windows Clang、Linux Clang/GCC 的 C11 模式成立；平台差异必须被隔离在最小 runtime 边界。
+
+**探针范围 / 文件所有权**：
+
+- 共享层：`compiler/hir.ring`、`compiler/perceus.ring`、`compiler/verify_rc.ring`
+- C lowering：`compiler/codegen_c.ring`、`compiler/codegen_c_expr.ring`、`compiler/codegen_c_runtime.ring`（以 B-163 完成后的实际文件为准）
+- runtime：`ring_runtime.cpp` 或 B-163/RIIR 后承接该边界的 C runtime 文件
+- 证据：`tests/cases/` 的最小程序、Python runner 与生成 C/汇编/对象尺寸记录
+- 两候选原型必须位于隔离 worktree/实验分支；**不得把任一候选的行为改动并入 main**
+
+**验收标准**：
+
+- 两候选运行同一组最小程序，覆盖上述六类问题；生成 C 与 failure/cleanup trace 一并归档。候选若不可行，必须给出最小复现、编译器诊断/崩溃或 C 标准约束等可复核证据。
+- 固定源码 commit、编译器版本、target 与 flags，测量正常/失败微基准、生成 C/对象尺寸，以及一次编译器 self-compile 的 build time、run time 与 peak memory；性能只作决策输入，不替代正确性。
+- 形成 TCB、跨平台性、B-165 处置、B-167 ABI、Perceus/`verify_rc` 可审计性和迁移复杂度矩阵，明确推荐、否决理由与仍未知项。
+- dossier 完成后转 `waiting-feedback` 由用户拍板；root 随决策重写 B-002 Phase 2，并把 B-165 标为结构性关闭/验证项或精确实现项，再细化 B-167 的共享 ABI。探针条目随后按工作流删除。
+- main 分支行为零变化；`python .agents/scripts/validate_workflow.py` 通过。
+
+### B-167 effectful function value 调用点动态 evidence ABI [refactor] [P0] [L] [judgment] [queued] [after: B-168]
+
+> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。本项是最终 A 语义，必须等 B-163 完成 LLVM 后端退役、`dist-c/` 成为唯一 bootstrap 锚且 CI 恢复稳定后再启动；不为即将退役的 LLVM 后端实现第二套新 ABI。**2026-07-29 前置更新**：B-168 必须先拍板 C-native failure/control ABI，本项随后复用其 function-pointer、failure edge 与 RC evidence 契约，不得另造平行 ABI。
 
 **目标语义**：effectful function value 在调用点接收当前 effect evidence。外部创建的 callback 传入 `with_mock_clock` / `with_mock_fs` / `capture_logs` 等高阶 handler 后，其 effect 由调用点内层 handler 截获，而不是继续使用 callback 创建处的旧 evidence。静态 effect row 仍是 capability 真值；调用点只传递签名要求的 evidence，未知 open tail 必须逐项转发，不能被机械消除。
 
@@ -1045,13 +1086,13 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-### B-165 跨 catch（setjmp/longjmp）边界的 `let mut` 写入丢失 [bugfix] [P1] [M] [judgment] [queued] [after: B-163p1]
+### B-165 跨 catch（setjmp/longjmp）边界的 `let mut` 写入丢失 [bugfix] [P1] [M] [judgment] [queued] [after: B-168]
 
-> 2026-07-12 立项（B-163 step 6 worker 实测发现，用户拍板方案 b：立案修复，不文档化）。排序在 B-163 Phase 1 收尾后。
+> 2026-07-12 立项（B-163 step 6 worker 实测发现，用户拍板方案 b：立案修复，不文档化）。**2026-07-29 前置更新**：暂停单独实现，先由 B-168 确定 C-native failure/control ABI；若显式 failure-status 模型结构性保留普通 C 控制流，本项改为验证后关闭，若 cleanup stack + `setjmp`/`longjmp` 胜出，再执行下面的精确 boxed-vars 方案。
 
 **现象**：`let mut progress = 0; let r = { progress = 1; raise_x() } catch { _ => progress + 100 }` —— catch arm 与后续代码读到 `progress = 0`（写入丢失）。LLVM 与 C 后端 -O2 下行为一致。**gen_try_catch 的 B-089 G-b 注释宣称的「body 内 let mut 赋值对外可见」不成立**：跨 setjmp 修改的非 volatile 局部变量 = C 标准 indeterminate，LLVM IR 层同样被 mem2reg/DSE 优化掉。golden 零覆盖（有则早红）。
 
-**修复方向（拍板）**：**复用 B-091 boxed_vars 装箱机制，不用 volatile**——在共享层（checker/HIR）识别「catch body 内被写、body 外可见」的 mut 变量，并入 `program.boxed_vars` 集合 → 两后端现有堆 cell 读写路径自动生效（closure 写穿透捕获同款），堆内容天然不怕 longjmp。预期 codegen 两侧零改动或极小改动。性能面窄（仅跨 catch 边界被写的 mut 变量装箱）。
+**条件修复方向（原拍板，等待 B-168 复核）**：若最终模型仍使用 `setjmp`/`longjmp`，复用 B-091 boxed_vars 装箱机制，不用 `volatile`——在共享层（checker/HIR）识别「catch body 内被写、body 外可见」的 mut 变量，并入 `program.boxed_vars` 集合，复用现有堆 cell 读写路径。若 B-168 选显式 failure-status lowering，则不得为已不存在的 longjmp 边界保留装箱成本，只保留同一回归证明写入可见。
 
 **验收标准**：
 - 上述场景双后端输出 `101 1`（写入可见）且 diff = 0
