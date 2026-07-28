@@ -1,201 +1,80 @@
 ---
 name: full-audit
-description: Use when user requests a full codebase review, code audit, cross-validation review, or says "审查", "review", "自查". Runs Claude + DS parallel audit, triages findings, writes to audit-report.md. Audit-only — fixes go to Worker via backlog/audit-report. Also supports exemption-list adversarial spot-check mode ("审豁免").
+description: Run one repository-wide bounded adversarial audit round. Use only for global/全面/彻底 codebase “审查”, “review” or “全局自查”, “交叉验证”, `/full-audit`, exemption-list audit, or a Repository Steward risk-triggered Audit; ordinary PR/commit/diff review belongs to steward.
 ---
 
-# Audit Agent
+# Full Audit
 
-全代码库审计。审查当前 main 上的代码，发现 bug 和问题，写入 `docs/audit-report.md`。只审查，不修复。
+每次调用只执行一个固定 snapshot 的 bounded round：finder → 对抗验证 → root 终审 → 落表。不得在同一 round 中循环到 dry 或开启第二轮；完成后返回 Repository Steward。
 
-**工作流规范见 `docs/workflow.md`**
+Steward 可在高风险 milestone、信任边界变化、修复批次后或队列空档自主触发未来的新 round，无需用户手动发令。每个新 round 仍必须独立、有限。开始前完整读取 `AGENTS.md`、`CLAUDE.md`、`docs/workflow.md`、backlog、audit-report 和 Steward Inbox。
 
-## Trigger
+同一 trigger + 未变 snapshot 最多一轮。没有新 commit、新 lens 证据或新的风险事件时，不得仅因队列仍空就立即重开；无 finding 的 round 返回维护/队列扫描，否则属于形式 bounded、实质 loop-until-dry。
 
-- User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/full-audit` → **标准审计**
-- User says "审豁免", "豁免抽审", or `/full-audit exemptions` → **豁免清单对抗抽审**专项模式（见下）
+## 边界
 
-## 写入范围
+- 普通 PR、commit 或 scoped diff review 属于 Steward 的 reviewer 流程，不触发 full-audit；单说“审查/review”只有在上下文指向仓库级审计时才走本 skill；
+- finder / skeptic 只读；
+- root 的 worktree 写入只限 `docs/audit-report.md` 和必要的用户保留决策包；另由共享 helper 写专用 Git notes ledger；
+- Audit 子流程不修代码，探针只放临时目录；
+- finding 落表后返回 Steward，由新的执行任务接管；
+- 用户明确要求“只审不修”时，完成本 round 即结束该用户范围。
 
-- **Bug / 问题** → `docs/audit-report.md`
-- **观察 / 非 bug 现象** → `docs/worker_feedback.md`（`[观察]` 类型条目）
+## Durable Audit ledger
 
-**不触碰**：编译器代码、测试、CLAUDE.md、design.md
+所有 provider 共用 `.agents/scripts/audit_ledger.py` 和专用 `refs/notes/ring-steward-audit-ledger`。Canonical key 只能由 stable trigger/event id + audited source SHA + normalized lens set 组成。
 
-## Race Condition 处理
+Lens 是六项闭集：`rc-memory`、`type-soundness`、`backend-parity`、`runtime-abi`、`design-drift`、`oracle-blind`；排序、去重后进入 key。动态 lens、日期 lens、序号后缀或未知 lens 必须由 helper 拒绝并 exit 2。专项豁免子类放入 stable trigger/event id，lens 仍限上述六项。
 
-仓库中**可能有 Worker agent 在 worktree 中并行工作**。注意：
+1. Session 恢复时对拟恢复的 Audit key 执行 `query`。
+2. Round 开始前执行 `check`；同一 canonical key 已记录时 helper 返回 `skip-recorded`/exit 3，必须跳过并返回维护/队列扫描。
+3. Round 结束时，无论结果是 findings 还是 no-findings，都执行 `record --outcome findings|no-findings`；record 成功前 round 未闭环。
 
-- Worker 可能正在修改编译器代码并尚未 merge
-- 编译或测试失败可能是瞬态（Worker 的 worktree merge 过程中）→ **重试一次再判断**
-- 跳过 `tests/.tmp_*` 等临时目录
-- 如果发现的问题与 backlog 中 `planning`/`doing` 状态的 item 重合，标注"可能正在修复中"
-- 读 `docs/backlog.md` 了解当前 Worker 正在做什么，避免重复报告
-
-## Workflow
-
-### Phase 1: Parallel Audit
-
-**必须派发两个独立 agent 并行审计——这是不可跳过的步骤。**
-
-交叉验证是本审计流程的核心价值：不同模型的知识盲区不同，Claude 擅长类型系统和语义正确性，DS 擅长边界条件和模式匹配遗漏。单模型审计会有系统性盲点，双模型交叉才能覆盖。历史数据表明 DS 独立发现了约 30% 的 critical bug（如 #71、#75、#76）是 Claude 未发现的。
-
-**禁止省略 DS agent。** 即使时间紧张、即使觉得"这次改动很小不需要"、即使 DS 上次没发现什么——都必须派发。审计的价值在于独立视角，不在于每次都有发现。
-
-**DS Agent 条款**：**必须**并行派发一路 DS 独立审计。通过 opencode serve HTTP API 调用（`opencode run` 需要 TTY，在 Claude Code sandbox 中会卡死）。DS CLI 不可达时不阻塞审计，由多 Claude agent 的视角多样性部分替代；不得以此为由在 DS 可用的机器上省略 DS。
-
-Dispatch two independent review agents simultaneously:
-
-1. **Claude Agent** (subagent_type: general-purpose, model: opus):
-   - Read all compiler source files
-   - Check for bugs, type unsoundness, edge cases
-   - Verify behavior matches CLAUDE.md and docs/design.md descriptions
-   - Test least-surprise principle: would a user be confused by any behavior?
-   - Write e2e test cases for suspicious code paths and run them
-
-2. **DS Agent** (via opencode serve HTTP API, **必须派发**):
-   - Independent read-only audit
-   - Focus on: missed error handling, unsafe patterns, design-implementation gaps
-   - Compare implementation against design.md specification
-   - DS 视角独特：更关注具体执行路径、边界条件、模式遗漏，与 Claude 的类型/语义视角互补
-   - **调用方式**：`opencode run` 需要 TTY，在 CC sandbox 中 exit 255。必须用 `opencode serve` headless HTTP API。详见 `C:\code\SKILL.md`（deepseek-dispatch skill）。
-   - 派发流程：
-     ```powershell
-     # 1. 启动 server（session 级，只启动一次）
-     opencode serve --port 14096 --pure  # run_in_background: true
-     
-     # 2. 创建 session
-     $session = Invoke-RestMethod -Uri "http://localhost:14096/session" -Method Post `
-         -ContentType "application/json" -Body '{"title":"audit"}'
-     $sid = $session.id
-     
-     # 3. 发送审计 prompt（run_in_background: true，DS 可能需要 10-20 分钟）
-     $body = @{ parts = @(@{ type = "text"; text = "<audit prompt>" })
-                model = @{ providerID = "deepseek"; modelID = "deepseek-v4-pro" }
-     } | ConvertTo-Json -Depth 5
-     $result = Invoke-RestMethod -Uri "http://localhost:14096/session/$sid/message" `
-         -Method Post -ContentType "application/json" -Body $body -TimeoutSec 600
-     $result | ConvertTo-Json -Depth 10 | Out-File -Encoding utf8 "ds-audit.json"
-     ```
-
-Both agents output structured findings (严重度只允许 `critical` / `medium` / `low`):
-```
-## [severity: critical|medium|low]
-### Title
-- **File**: path:line
-- **Description**: what's wrong
-- **Evidence**: code snippet or test that demonstrates
-- **Fix**: proposed solution (if trivial) or "needs discussion"
+```powershell
+python .agents/scripts/audit_ledger.py --repo <repo> query --trigger-id <stable-id> --source-sha <sha> --lens <lens>
+python .agents/scripts/audit_ledger.py --repo <repo> check --trigger-id <stable-id> --source-sha <sha> --lens <lens>
+python .agents/scripts/audit_ledger.py --repo <repo> record --trigger-id <stable-id> --source-sha <sha> --lens <lens> --outcome <findings-or-no-findings>
 ```
 
-### Phase 2: Triage & Merge
+禁止用当前日期或随机 id 制造新 trigger 绕过防抖。Ledger note commit 不算 source snapshot 变化；只有新的 audited source SHA、normalized lens set 或 stable trigger/event 才形成新 key。Ledger 是 repo-local 治理状态，不写 Steward Inbox，也不进入用户过程摘要。
 
-1. **Deduplicate**: same finding from multiple agents → one entry
-2. **Verify critical findings**: for Critical severity, read code yourself to confirm
-3. **Check backlog overlap**: if finding matches a `planning`/`doing` item → skip or note "in progress"
-4. **Classify** (严重度 + dispatch):
+## 固定本 round
 
-| Category | 严重度标记 | 写入位置 |
-|----------|-----------|---------|
-| **Critical** (confirmed bug, 运行时错误/类型不安全) | `[critical]` | audit-report.md |
-| **Medium** (definite issue, 非致命但影响正确性/健壮性) | `[medium]` | audit-report.md |
-| **Low** (low impact, 代码质量/可维护性/潜在问题) | `[low]` | audit-report.md |
-| **Observation** (不算 bug 但值得注意的现象) | — | worker_feedback.md |
-| **False positive** | — | 丢弃并说明原因 |
+1. 记录 main commit；所有角色审查同一 snapshot。
+2. 读取 backlog、audit-report 和 Inbox，标记 `planning` / `doing` 范围。
+3. 运行 workflow validator。
+4. 按风险选择 rc-memory、type-soundness、backend-parity、runtime-abi、design-drift、oracle-blind lens；“彻底审查”只扩大本 round 覆盖，不增加 round。
 
-**严重度只允许三级**：`critical` / `medium` / `low`。不使用 Important/Minor/Style 等其他词汇。
+## Finder 与对抗验证
 
-5. **标注 dispatch**（每个写入 audit-report 的条目必须标注）：
-   - `mechanical`：修复方向唯一确定，spec 能完整描述"改哪里、怎么改"。典型：补递归遍历、加 null check、提取重复代码、补 match 分支。
-   - `judgment`：修复涉及设计选择、架构权衡、effect system 推理。典型：重构大文件结构、改变 dispatch 策略、修复 effect 传播。
-   - 判断依据：如果给一个不了解项目全局的开发者只看修复描述就能正确实现 → `mechanical`；需要理解项目约定或在多种方案中选择 → `judgment`。
+按当前可用槽位派至少两路独立视角；一个 finder 可负责相邻 lens。跨 provider finder 可用时保留不同 provider 的证据路线；不可达时记录证据缺口，但不得把同一视角重复计票。输出必须包含文件、行号、执行路径、影响和可复核证据，不确定项标为 hypothesis。
 
-### Phase 3: Update audit-report.md
+每个候选至少执行：
 
-`docs/audit-report.md` 是**活的 bug 看板**——做完即删。
+1. 非原 finder reproduce 或给出独立代码证明；
+2. 另一独立视角主动 refute correctness、可达性或影响；
+3. root 检查 backlog、audit-report 和 doing 范围去重。
 
-**格式规则（CRITICAL——Worker 依赖 `grep "\[open\]"` 扫描条目，格式不对 = Worker 看不见）**：
+落表 finding 至少两个独立支持判断，且 refutation 已被解释；`already-tracked` 只做去重，不计支持票；critical 由 root 亲自读码。killed、duplicate、in-progress 或 insufficient-evidence 只进入本 round Summary，不包装成用户实现流水或新 finding。
 
-每个条目**必须**是 heading 格式：
-```markdown
-### #xxx <标题> [严重度] [dispatch] [open]
+## 分级与落表
 
-<问题描述，含文件路径、行号、影响、建议修复方向>
-
-发现者：<agent 名>
-```
-
-- **`[open]` 标记不可省略**——没有 `[open]` 的条目 Worker 扫描不到
-- **严重度只能是 `critical` / `medium` / `low`**
-- **dispatch 只能是 `mechanical` / `judgment`**——Worker 据此决定执行者（DS 或 Claude）
-  - `mechanical`：修复方向唯一确定，不需要设计判断（如补递归遍历、提取公共 pattern、加 validation check）
-  - `judgment`：涉及设计选择、架构决策、effect system 推理、或多种可行方案需选择
-- **禁止使用表格格式**——必须用 `###` heading
-
-**追加规则**：
-- 新发现追加到对应分类 section 末尾
-- 编号从现有最大编号 +1 继续
-- 每个发现标注发现者（如 `Opus`、`DS`、`Opus+DS`）
-
-**清理规则**：
-- 检查现有 `[open]` 状态的 item 是否已被修复（grep 代码确认）
-- 已修复的：**直接删除整个 heading + body**（不是标删除线）
-- 在 commit message 中记录删除了哪些已修复的 item
-
-**格式验证（写入后自检）**：
-```bash
-# 写入完成后执行，确认所有新条目都能被 Worker 扫描到
-grep -n "\[open\]" docs/audit-report.md
-```
-如果新写入的条目不在输出中，说明格式错误，必须立即修正。
-
-### Phase 3.5: Write Observations to Feedback
-
-不算 bug 但值得注意的现象写入 `docs/worker_feedback.md`：
-- 代码异味（不违反规范但不符合直觉）
-- 设计-实现微妙不一致（不影响正确性但可能误导读者）
-- 潜在改进方向（不是当前阶段的优先事项但值得记录）
-- 令人困惑的行为（用户可能被绊倒但编译器行为"技术上正确"）
-
-格式：
+严重度只允许 `critical|medium|low`，dispatch 只允许 `mechanical|judgment`。root 使用活动 heading 协议写入 `docs/audit-report.md`，运行 validator，并生成一个 audit commit：
 
 ```markdown
-## Audit 观察报告（日期）
+### #xxx <标题> [critical|medium|low] [mechanical|judgment] [open]
 
-### N. [观察] 标题
+<问题、文件与行号、影响、证据、建议修复方向>
 
-**现状**：描述观察到的现象
-**为什么值得注意**：为什么不是 bug 但值得关注
+发现者：<finder>；验证：<reproduce / refute / root verdict>
 ```
 
-### Phase 4: Summary
+## verify_rc 豁免专项
 
-```
-## Audit Summary
-- 新发现: N 项（X critical, Y medium, Z low）
-- 观察: O 项（写入 worker_feedback.md）
-- 清理已修复: M 项删除
-- 当前 open 总数: K 项
-- 需要关注的 critical: (列出)
-- audit-report.md 已更新
-- 格式验证: grep "\[open\]" 命中 K 项 ✓
-```
+“审豁免”仍是一个 bounded round。先核对 `compiler/verify_rc.ring` 头注和运行尾随 boundary note，再分派 skeptic 尝试构造 UAF/无界泄漏反例，或攻击安全论证中未被 invariant/测试钉住的前提。反例成立按正常 finding 落表；论证成立只记录检查路径，不自动扩大到下一批。
 
-## 专项模式：豁免清单对抗抽审
+## Round Summary
 
-**对象**：`compiler/verify_rc.ring` 头注的豁免清单（leak-direction 豁免类 + codegen 级边界 + abort 路径 + 规则级不入账）。D2 verifier 上线即抓出 3 个真实潜伏漏洞——豁免类里「保守正确」的论证同样可能有洞。
+只报告固定 commit/lens、新 finding 与最高风险、killed/duplicate/in-progress/insufficient-evidence 计数、仓库健康影响和下一步。不要报告 finder 等待、命令进度、原始日志或实现流水。
 
-**编排**：每个豁免类派一个 skeptic agent，任务二选一交差：
-1. **构造反例**：写出一个属于该豁免类、但实际不安全（UAF 方向）或泄漏无界（非有界常数）的程序形态——给出形态 + 推演的执行路径；
-2. **挑论证的洞**：该类的安全/有界论证依赖的前提里，哪条没有被测试或不变量钉住（指出具体缺失的回归锚点）。
-
-两者都做不到 → verdict = 论证成立（写明检查过哪些路径）。发现 → 按正常流程进 audit-report（UAF 方向标 `[critical]`/`[medium]`，无界泄漏标 `[medium]`）；缺锚点 → `[观察]` 进 worker_feedback。Summary 给逐类 verdict 表。
-
-**注意**：豁免清单是 verify_rc.ring 头注 + 运行尾随 boundary note 两处，先读两处核对类目一致再派发；抽审用例可以写探针程序跑（measurement-only），但不得改编译器代码。
-
-## Rules
-
-- **Never skip a finding silently.** Every item must be either recorded or explicitly marked as false positive.
-- **Never fix in audit session.** Audit = observe + record.
-- **Cross-validate critical findings.** For Critical items, verify code yourself before recording.
-- **Respect Worker state.** Check backlog for `planning`/`doing` items; don't report issues that are being actively worked on.
-- **Clean as you go.** Delete fixed items from the report. The report should only contain open issues.
+本次调用不得修复 finding、再次 fan-out 或开启第二轮；结束后返回 Steward。未来新 round 只能作为新的 bounded 风险任务自主启动。

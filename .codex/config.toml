@@ -16,34 +16,43 @@ default_subagent_reasoning_effort = "max"
 interrupt_message = true
 
 [agents.implementer]
-description = "Implement one scoped Ring-lang backlog or audit item in a root-assigned git worktree; keep the same identity through review and fixes."
+description = "Implement, maintain, or refactor one scoped Ring-lang item in a root-assigned worktree; route blockers to root and keep the same identity through review and fixes."
 config_file = "agents/implementer.toml"
 
 [agents.reviewer]
-description = "Read-only review of a Ring-lang implementation diff against its spec, invariants, and test evidence."
+description = "Read-only review of Ring-lang implementation, maintenance, refactor, risk, or Argument evidence against specs and invariants."
 config_file = "agents/reviewer.toml"
 
 [agents.finder]
-description = "Read-only Ring-lang audit finder assigned one or more explicit lenses on a fixed main snapshot."
+description = "Read-only Ring-lang risk-audit or Argument evidence finder assigned explicit lenses on a fixed main snapshot."
 config_file = "agents/finder.toml"
 
 [agents.skeptic]
-description = "Read-only adversarial verifier that independently reproduces or refutes a proposed Ring-lang audit finding."
+description = "Read-only adversarial verifier for audit findings, risk claims, and Argument candidates."
 config_file = "agents/skeptic.toml"
 
 [permissions.ring-repo-yolo]
-description = "Full autonomy inside Ring-lang with network access; review other filesystem access."
-extends = ":workspace"
+description = "Repository Steward autonomy inside Ring-lang, including Git metadata and network access."
 
+# Native Windows: never add `":root" = "deny"` here; it overrides the
+# workspace writes below and disables repository YOLO. Paths outside the
+# listed rules remain restricted by the permission engine's default behavior.
 [permissions.ring-repo-yolo.filesystem]
-":root" = "deny"
 ":minimal" = "read"
+":tmpdir" = "write"
+":slash_tmp" = "write"
+"~/.config" = "read"
+"~/.gitconfig" = "read"
 
 [permissions.ring-repo-yolo.filesystem.":workspace_roots"]
 "." = "write"
 ".git" = "write"
 ".agents" = "write"
 ".codex" = "write"
+".claude" = "write"
 
 [permissions.ring-repo-yolo.network]
 enabled = true
+
+[permissions.ring-repo-yolo.network.domains]
+"*" = "allow"
