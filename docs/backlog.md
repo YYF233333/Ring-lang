@@ -725,7 +725,7 @@ pub struct Map<K, V> {
 - `for (i, x) in xs.enumerate()` 可用且行为正确
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-107 自动 `derive Hash` + Set P4 性能契约 [feature] [P0] [L] [judgment] [queued]
+### B-107 自动 `derive Hash` + Set P4 性能契约 [feature] [P0] [L] [judgment] [doing]
 
 > 2026-06-07 立项；2026-07-27 B-163 step 9 已关闭 Map runtime/shim 部分。2026-07-27 Discussion 用户拍板将剩余自动 Hash 与 B-152 P4 Set 一并提前，作为 B-163 Phase 2 parity gate；优先级随阻塞中的 B-163 P0 上调。完整 Set 表示/API 规范见 B-152 P4。
 
