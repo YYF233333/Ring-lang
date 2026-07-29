@@ -10,6 +10,16 @@
 
 ## 前端
 
+### #259 inline mod 短类型别名泄漏使顶层显式注解发生 registration/check 身份分裂 [critical] [judgment] [open]
+
+2026-07-29 B-107 HOF 门禁实锤：文件先声明 raw `extern type Item`，后有 inline mod re-export 普通 `origin::Item`，顶层 `keep_raw(value: Item) -> Item` 会先注册为 `(raw Item) -> raw Item`，最终却导出成 `(raw Item) -> origin::Item`。若调用方把 `ring_raw_alloc` 的无 RC header 指针传入该函数，HIR 与公开 scheme 对 nominal identity 的分歧可使 Perceus/codegen 对 raw 指针执行 `ring_dup` / `ring_drop`，存在越界 header 读写和内存破坏风险。
+
+首次污染链：`infer_register.ring::register_fn_common` 在 registration 阶段正确解析 raw/raw；`infer_decl.ring::check_mod_decl` 调用 `resolve_mod_uses` 后不恢复 inline mod 的短类型别名，令 `types.structs["Item"]` 指向普通 nominal；随后 `check_fn_decl` 二次解析显式参数/返回注解为 normal/normal。`rebind_fn_type` 对参数保留 registration skeleton，却直接用 check-time return 生成 `mapped_ret`，于是发布 raw/normal；`exports.ring` 只转发该已污染 scheme，并非首次污染点。
+
+**修复约束**：显式类型注解必须在同一 lexical type context 下绑定一次并保持 exact nominal identity，或让 inline mod 的短类型别名按 lexical scope 恢复。禁止只让 rebind return 保留 registration type：那会掩盖 scheme 分裂，但 HIR 参数、返回与函数体此前已按错误 normal identity 检查。验收至少覆盖 raw extern / 普通 struct 同叶、inline re-export 位于顶层函数前后、直接调用与一等函数值、C/LLVM/diff 以及 raw alloc/dealloc 路径的 RC 文本/运行检查。
+
+发现者：B-107 HOF implementation + independent review
+
 
 ## Runtime
 
