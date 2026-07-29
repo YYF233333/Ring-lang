@@ -802,6 +802,8 @@ pub struct Map<K, V> {
 > - 只按真实 std builtin identity 识别 Set/Map，禁止复制后端按 leaf type name/arity 猜测的逻辑；自定义或 shadow `Set`/`Map` 必须是负面回归，无法确认身份时 fail closed。
 > - 合成调用的 type/effect/dict 信息来自共享契约，并同步 iterable element type 为 List 语义；随后删除 C/LLVM 的重复转换与 drop 分支，防止双转换或双 drop。
 > - 定向门覆盖 Set/Map × normal/`break`/`continue`/`return`、fresh iterable、返回 loop element、Map destructure、nested loops、用户 `Drop`/`Weak` 的 post-break 时序，以及 C/LLVM/diff/RC verifier。
+>
+> **2026-07-29 Repository Steward Argument（HOF exact dependency owner）**：B-107 的 bounded generic function-value 自举暴露出 B-122 provisional precheck 的依赖边只认识 raw direct-call syntax；final HIR/LLVM/runtime 已正确而旧 `W0001` 留在共享 sink，证明问题是实际 resolver 依赖与诊断事务边界，不是 codegen。否决在 `scc.ring` 复制 module use、alias、shadow、pattern rewrite 与 spelling fallback 的方案：连续对抗 review 已证明该副本会持续偏离 checker。选择由真实 `infer_ident` 在完成 env lookup 后，以 lexical DefId → exact origin 和 `ValueBindingKind::DirectCallable` 记录本 program 函数依赖；speculative precheck 的 diagnostics/HIR 必须回滚，scheme 与 exact edge 迭代至显式 fixed point，最终只允许一次 authoritative pass 产出 diagnostics/HIR。single-file phase1/2/3 的普通声明保持原 source order；已有只对尚未处理的 sibling `ModBlock` 做依赖排序的隔离注册逻辑不受影响。禁止用全局 bare alias 重绑或把普通声明提前来补偿信息缺失；若 fixed point 不收敛必须硬失败，不能静默截断。验收必须单独断言 adversarial alias/re-export/default/HOF-value/shadow/pattern fixtures 的 `W0001 = 0`，不能以运行输出正确代替。
 
 **自动派生**：
 1. `compiler/derive.ring`：把 Hash 纳入 Eq/Clone/Ord/Debug 同一 fixpoint 框架；struct 按字段声明序 combine，enum 必须先混入稳定 variant discriminator 再按字段序 combine，generic 字段产生 `T: Hash` bound。
