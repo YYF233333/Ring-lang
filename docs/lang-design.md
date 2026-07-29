@@ -273,7 +273,7 @@ x.push(42)         // α = Int（从 usage 消歧）
 |------|-------|:---:|---------|
 | Refinement Types | C/D | 高（SMT 不可判定） | 具名可判定片段（QF_LIA 类）；超出片段 = 编译错误要求显式 runtime check；**禁止 timeout 语义**（D-5，B-001 spec） |
 | GADTs | D | 中（推断不可判定） | GADT match scrutinee 需要已知类型 |
-| HKT | D | 中（高阶 unification） | 限制为 first-order（`* -> *`） |
+| GAT / 受限 HKT | D | 中（associated projection 归一化 / constructor kind 推断；开放式 HKT 可进一步触发高阶 unification） | B-038 在 GAT associated family 与 rank-1 HKT（首要 kind `Type -> Type`）间做实证选型；两者都不得静默扩成完整 System Fω |
 | Const Generics + Refinement | D | 高（定理证明） | 限制为 Presburger arithmetic（可判定片段） |
 
 **策略：每个高级特性限制在可判定片段内。超出片段 → 编译错误（要求标注或 runtime check），不允许编译器不终止。**
@@ -687,7 +687,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 { ... }
 - [ ] mut 闭包共享 box 的安全性证明（spawn 阻止跨线程共享）
 - [ ] Refinement types 的可判定片段定义
 - [ ] GADTs 的标注要求（哪些位置需要类型签名）
-- [ ] HKT 的 kind 限制规则
+- [ ] B-038：GAT projection 与受限 rank-1 HKT 的 kind/partial-application 可判定边界选型（消费 B-169 effect/type 融洽性结论）
 - [ ] 闭包捕获借用的精确边界 case
 - [ ] `lang.toml` formatter preset 配置格式
 - [ ] 方法名冲突的 qualified call 语法设计

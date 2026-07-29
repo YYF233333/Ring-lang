@@ -11,9 +11,9 @@
 
 > **2026-07-10 插队更新**：**B-163 C 后端迁移 (XL) 插队为 P0**（B-155 泥潭止损，Discussion 拍板，计划见 `docs/plan-c-backend.md`）。B-152 RIIR 剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。下面原排序在 B-163 之后恢复。
 >
-> **2026-07-29 B-163 后续更新**：B-163 完成后先执行 **B-168 C-native abort/unwind 实现模型探针 (P0/M)**，由用户依据实测 dossier 拍板，再启动 B-167。原因：B-002 Phase 2 原 LLVM `invoke`/`landingpad` 路径随 LLVM 后端退役失效；B-165 已证明现行 `setjmp`/`longjmp` 有 C 局部变量可见性缺口；B-167 又将改动 effectful function value ABI。先固定 failure/control ABI，避免 B-165、B-167、B-002 各自补丁化并重复改 ABI。audit #255/#256 等不触碰同一控制流/RC 文件的独立修复可并行。
+> **2026-07-29 B-163 后续更新**：B-163 完成后先执行 **B-168 C-native abort/unwind 实现模型探针 (P0/M)**，由用户依据实测 dossier 拍板；随后执行 **B-169 effect / trait 类型体系融洽性探针 (P1/M)**，再启动 B-167。原因：B-002 Phase 2 原 LLVM `invoke`/`landingpad` 路径随 LLVM 后端退役失效；B-165 已证明现行 `setjmp`/`longjmp` 有 C 局部变量可见性缺口；B-167 又将改动 effectful function value ABI。先固定 failure/control ABI，再在 function-value ABI 定型前决定 trait dictionary 与 effect evidence 的共享边界，避免 B-165、B-167、B-002 各自补丁化，也避免 effect/type 两套隐式证据永久割裂。audit #255/#256 等不触碰同一控制流/RC 文件的独立修复可并行。
 
-B-151 CI → B-125 unsafe/Ptr<T> (XL) → B-002p1 精简 Drop (L) → B-163 C 后端迁移 (XL) → B-168 abort/unwind probe (M) → B-167 动态 evidence ABI (L) → B-152 RIIR std (XL) → 按 B-168 决策重写并执行 B-002p2 unwind 补全 (L)；后续 B-110 别名追踪 → B-068 用户面。B-111 可在 C ABI 稳定后执行；async 线（B-116 probe → B-007）和类型系统线（B-001 Refinement 需 B-070）在 RIIR 之后。M 项当 XL 间换气穿插；P3 研究最后。
+B-151 CI → B-125 unsafe/Ptr<T> (XL) → B-002p1 精简 Drop (L) → B-163 C 后端迁移 (XL) → B-168 abort/unwind probe (M) → B-169 effect/type harmony probe (M) → B-167 动态 evidence ABI (L) → B-152 RIIR std (XL) → 按 B-168 决策重写并执行 B-002p2 unwind 补全 (L)；后续 B-110 别名追踪 → B-068 用户面。B-111 可在 C ABI 稳定后执行；async 线（B-116 probe → B-007）和类型系统线（B-001 Refinement 需 B-070）在 RIIR 之后。B-038 高阶类型选型消费 B-169 结论，仍按 P3 研究排期；其余 M 项当 XL 间换气穿插。
 
 > **战略**：unsafe + Ptr<T> → 精简 Drop → RIIR 标准库，让 Ring 拥有自己的底层，消除 C++ STL 依赖。
 > B-002 拆两阶段：Phase 1 精简版（scope-end Drop，够 RIIR 用）先行；Phase 2 的 C-native unwind 模型由 B-168 实测拍板，RIIR 之后补。
@@ -239,32 +239,40 @@ fn process_all(items: List<dyn Describable>) { ... }
 - **前置依赖**：无硬依赖
 - **优先级**：Phase C 或 D
 
-### B-038 GATs（Generic Associated Types）[feature] [P3] [L] [judgment] [queued]
-关联类型可带自己的泛型参数，本质是 HKT-lite（类型构造器作为关联类型）。
+### B-038 高阶类型抽象选型：GAT vs 受限 rank-1 HKT [design-align] [P3] [M] [judgment] [queued] [after: B-169]
 
-```ring
-trait StreamingIterator {
-    type Item<'a>                    // Rust 风格（带 lifetime）
-    fn next(mut self) -> Item<Self>? // Ring 不需要 lifetime，用 Self 参数化
-}
+> **2026-07-29 Discussion 修订**：此前草案把 GAT 当成已选方案，并以“effect system 覆盖 Monad 主要用例”解释低优先级。现纠正为：GAT 只是 HKT-lite 候选，仓库从未完成 GAT vs HKT 的正式 Argument；effect 可覆盖直接风格的常见 Monad sequencing，但不能在理论上替代所有显式计算载体与高阶类型抽象。B-038 先做选型探针，不在选型前保留任何一方为默认实现方案。
 
-// Ring 版本（无 lifetime，用类型参数替代）：
-trait Lending<T> {
-    type Output<U>                   // 关联类型带泛型参数
-    fn lend(self, x: T) -> Output<T>
-}
+**目标**：比较两种可判定、可推断的最小高阶类型能力，选择符合“类型即模型 / 推断为王 / 编译器必须终止”的公开语义：
 
-// HKT-lite：Functor
-trait Functor {
-    type F<A>                        // F 是类型构造器
-    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>
-}
-```
+1. **GAT / associated type family**：沿用现有 trait + associated type，允许 `type F<A>` / `Self::F<A>`；核实是否需要人为 witness/tag type，以及 projection 归一化、owner 歧义和 dictionary 传播成本。
+2. **受限 rank-1 HKT**：只允许一阶 constructor 参数（首要 kind 为 `Type -> Type`，不引入 higher-rank type quantification 或 kind polymorphism）；核实 `F<A>`、`Result<E, _>`、必要的受限 partial application/type alias，以及 kind inference 与 trait resolution 的终止边界。
 
-- **当前状态**：未实现
-- **前置依赖**：B-004（关联类型）
-- **复杂度**：大（关联类型的泛型化 + kind 检查）
-- **优先级**：Phase D（研究向）。Ring 的 effect system 覆盖了 Monad 主要用例，GATs 紧迫度低
+完整 System Fω、任意 type-level lambda、kind polymorphism 和高阶 unification 不在候选范围；若探针证明最小用例必须依赖其中任一能力，须显式报为超范围，而不是静默扩大语言。
+
+**共同 probe corpus**：
+
+1. lending / streaming iterator：输出类型随调用参数变化；
+2. `Functor.map` 与 `Applicative/Monad.traverse`；
+3. Parser 与 Validation（累积错误 vs 短路错误）；
+4. `Result<E, _>` 的部分应用；
+5. `Compose<F, G>` 或等价的两个 constructor 组合；
+6. B-169 选定的 effect-polymorphic trait 方法与显式计算载体交叉案例。
+
+**评估门**：
+
+- lv0 常见用例零额外标注；失败诊断能在单轮指出缺失 kind、歧义 owner、无法归一化 projection 或不满足的 trait；
+- 类型推断、kind 检查、instance resolution 与 normalization 有具名可判定片段和 fuel/深度边界，不依赖 timeout 语义；
+- 对模块导出、关联类型等式、单态化、mangling、dictionary/effect evidence、HIR 与 C ABI 的影响可枚举；
+- 对每个候选给出至少一个主动反例，不能只比较正向语法长度；
+- 不以“effect 已取代 Monad”否决 HKT，也不以“抽象更统一”豁免 Ring 的推断与诊断公理。
+
+**产出 / 验收标准**：
+
+- 同一 probe corpus 的两候选类型、必要标注、预期诊断和编译器改动矩阵；
+- 明确推荐、否决理由、仍未知项及后续实现复杂度；若结论改变公开类型语法或语义，形成用户决策 dossier；
+- 选型拍板后把 B-038 重写为可执行 implementation spec（或删除并新建实现项），不得把当前探针文本直接当实现规范；
+- 调研本身不改变 main 的公开行为，`python .agents/scripts/validate_workflow.py` 通过。
 
 ### B-149 Display trait + 字符串插值类型约束 [feature] [P2] [M] [judgment] [queued]
 
@@ -392,7 +400,7 @@ fn test_fetch() {
 
 ### B-168 C-native abort/unwind 实现模型探针 [design-align] [P0] [M] [judgment] [queued] [after: B-163]
 
-> 2026-07-29 Discussion 用户拍板 P0/M、保持两候选中立实测。B-163 删除 LLVM 后，B-002 Phase 2 原定的 `invoke`/`landingpad` 路径失效；现行 `setjmp`/`longjmp` 又已由 B-165 证明存在跨 catch 局部写入不可见问题。B-167 随后还会改变 effectful function value evidence ABI，因此必须先确定共同的 C-native failure/control ABI，避免三项工作重复改写控制流、closure prototype 与 RC 证据面。
+> 2026-07-29 Discussion 用户拍板 P0/M、保持两候选中立实测。B-163 删除 LLVM 后，B-002 Phase 2 原定的 `invoke`/`landingpad` 路径失效；现行 `setjmp`/`longjmp` 又已由 B-165 证明存在跨 catch 局部写入不可见问题。B-169/B-167 随后还会决定 effect/type evidence 的共享边界并改变 effectful function value evidence ABI，因此必须先确定共同的 C-native failure/control ABI，避免各项工作重复改写控制流、closure prototype 与 RC 证据面。
 
 **目标**：以最小但真实的垂直切片比较两种可移植 C11 实现模型，不在立项时预选赢家：
 
@@ -423,12 +431,58 @@ fn test_fetch() {
 - 两候选运行同一组最小程序，覆盖上述六类问题；生成 C 与 failure/cleanup trace 一并归档。候选若不可行，必须给出最小复现、编译器诊断/崩溃或 C 标准约束等可复核证据。
 - 固定源码 commit、编译器版本、target 与 flags，测量正常/失败微基准、生成 C/对象尺寸，以及一次编译器 self-compile 的 build time、run time 与 peak memory；性能只作决策输入，不替代正确性。
 - 形成 TCB、跨平台性、B-165 处置、B-167 ABI、Perceus/`verify_rc` 可审计性和迁移复杂度矩阵，明确推荐、否决理由与仍未知项。
-- dossier 完成后转 `waiting-feedback` 由用户拍板；root 随决策重写 B-002 Phase 2，并把 B-165 标为结构性关闭/验证项或精确实现项，再细化 B-167 的共享 ABI。探针条目随后按工作流删除。
+- dossier 完成后转 `waiting-feedback` 由用户拍板；root 随决策重写 B-002 Phase 2，并把 B-165 标为结构性关闭/验证项或精确实现项；随后启动 B-169，以已固定的 failure/control ABI 为输入，再由 B-169 结论细化 B-167 的共享 ABI。探针条目随后按工作流删除。
 - main 分支行为零变化；`python .agents/scripts/validate_workflow.py` 通过。
 
-### B-167 effectful function value 调用点动态 evidence ABI [refactor] [P0] [L] [judgment] [queued] [after: B-168]
+### B-169 Effect system × trait/type system 融洽性探针 [design-align] [P1] [M] [judgment] [queued] [after: B-168] [before: B-167+B-038]
 
-> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。本项是最终 A 语义，必须等 B-163 完成 LLVM 后端退役、`dist-c/` 成为唯一 bootstrap 锚且 CI 恢复稳定后再启动；不为即将退役的 LLVM 后端实现第二套新 ABI。**2026-07-29 前置更新**：B-168 必须先拍板 C-native failure/control ABI，本项随后复用其 function-pointer、failure edge 与 RC evidence 契约，不得另造平行 ABI。
+> **2026-07-29 Discussion 用户决定**：单独立项、择期执行，覆盖内部实现与用户面；目标不是把 trait 与 effect 强行合成一个概念，而是让两套体系在组合处没有语义、推断、诊断或 ABI 接缝。排在 B-168 之后，是为了先固定 failure/control edge；排在 B-167 之前，是为了避免 effectful function value ABI 在未审视 trait dictionary 交互前再次固化。B-167 已拍板的“调用点动态 evidence”目标语义不在本项重开。
+
+**必须保持的语义边界**：
+
+- trait/type-class evidence 回答“某个类型采用哪个实现”，默认要求静态可见、coherent、可终止的 instance resolution；
+- effect handler evidence 回答“当前词法/动态 handler scope 如何解释操作”，允许局部覆盖、effect 消除及受控的 abort/tail-resumptive 控制行为；
+- 可以共享编译器 substrate，但不得因实现统一而把普通 trait 调用误报为 effect、让 `Eq` 等 instance 被 handler 任意改写，或让 handler 退化成全局 instance；
+- effect row 与 trait bound 都是公开能力真值，任何优化或 lowering 不得静默丢失、合并或臆造 evidence。
+
+**内部实现调研**：
+
+1. 固定并比较三种真实候选：①共享 typed evidence substrate、保留两套表面语义；②两套 lowering 独立但以单一 typed interop contract 连接；③以 capability/implicit parameter 统一部分用户面。不得预选赢家，需主动攻击共享过度与分离过度两端。
+2. 核查 `TypeScheme`/trait bounds、effect rows、associated types、default trait methods/default effect ops 在 inference、generalization、SCC rebind、HIR lowering 与 module export 中的约束求解顺序；明确 principal-type、coherence、determinism 与 termination 条件。
+3. 比较 dictionary 与 effect evidence 的 identity、参数排序、direct/indirect call prototype、closure capture、跨模块导出、泛型单态化、递归/互递归转发和默认 evidence 注入；判断哪些元数据必须成为 `hir.ring` 的共享契约，哪些必须保持分域。
+4. 明确 evidence 的 borrow/owned 生命周期及 Perceus/`verify_rc` 可审计边界；结合 B-168 的 normal/failure edge，证明 nested handler、early return、re-raise 与 callback 重入不漏传、不双 drop、不悬垂。
+5. 以 B-167 的外部 callback 调用点动态截获为硬案例，验证 trait-bounded callback 同时携带 dictionary + open effect tail 时不会形成两套不兼容 function-pointer ABI。
+
+**用户面调研**：
+
+1. effectful trait method、effect-polymorphic trait method、带 trait bound 的 effect-polymorphic HOF、handler 内调用 trait method、default trait method 调 custom effect；
+2. associated type 出现在 effect payload/operation return、effect alias 与 trait bound 同时量化、跨模块公开签名与 formatter/LLM 诊断；
+3. handler override 与 trait instance selection 的概念边界：相同拼写、默认实现、局部覆盖、缺 evidence 和歧义时是否“一种事一种写法”；
+4. 显式计算载体（Parser/Validation/Future 等）与 ambient effect 的互操作；把结论输入 B-038，但不预设 GAT 或 HKT；
+5. 对每种候选记录用户必须理解的概念数、常见签名标注量、错误定位轮数与迁移成本，不只比较实现代码量。
+
+**固定 probe matrix**：
+
+- `T: Show` + `fn(T) -> U with ?e` 的 callback 同时转发 dictionary 与 open effect tail；
+- default trait method 执行自定义 effect，default effect op 调用 trait method；
+- associated type 作为 effect op 的参数/返回值，含 owner-qualified 跨模块路径；
+- 外部创建 closure 进入 nested handler，覆盖 direct/indirect、泛型 HOF、递归/互递归与 re-export；
+- handler arm/catch arm 内的 trait dispatch、early return/re-raise 及 RC evidence 生命周期；
+- Parser/Validation/traverse 各一个用户面案例，用于区分 ambient effect 与显式 computation carrier。
+
+**涉及文件 / 模块**：`docs/design.md`、`docs/lang-spec/{type-system,traits,effects}.md`；事实核验读取 `compiler/types.ring`、`infer*.ring`、`hir.ring`、`dict_lower.ring`、`codegen_c*.ring`、`perceus.ring`、`verify_rc.ring` 与相关 `tests/cases/`。实验只允许在隔离 probe 分支产生，不把任一候选实现并入 main。
+
+**产出 / 验收标准**：
+
+- 内部 evidence pipeline 图、用户概念/签名矩阵、三候选的正确性/推断/诊断/ABI/RC/迁移比较，以及每个推荐点至少一个反例；
+- 固定 probe matrix 有当前实现证据与候选预期；无法由现状运行的案例必须给出最小不可表达点，不能以纸面“应当可行”代替；
+- `docs/design.md` 写入明确推荐、保留语义边界、否决理由与未知项，并据此重写 B-167/B-038 的前置契约；
+- 若推荐涉及新的公开语法、instance coherence、handler 选择规则或 breaking ABI，形成用户决策 dossier，不在调研项内擅自实施；
+- 本项只调研，不改变 main 公开行为；`python .agents/scripts/validate_workflow.py` 通过。
+
+### B-167 effectful function value 调用点动态 evidence ABI [refactor] [P0] [L] [judgment] [queued] [after: B-168+B-169]
+
+> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。本项是最终 A 语义，必须等 B-163 完成 LLVM 后端退役、`dist-c/` 成为唯一 bootstrap 锚且 CI 恢复稳定后再启动；不为即将退役的 LLVM 后端实现第二套新 ABI。**2026-07-29 前置更新**：B-168 必须先拍板 C-native failure/control ABI；B-169 随后固定 trait dictionary / effect evidence 的共享边界与用户面不变量。本项必须同时复用两者的 function-pointer、failure edge、typed evidence 与 RC 契约，不得另造平行 ABI。
 
 **目标语义**：effectful function value 在调用点接收当前 effect evidence。外部创建的 callback 传入 `with_mock_clock` / `with_mock_fs` / `capture_logs` 等高阶 handler 后，其 effect 由调用点内层 handler 截获，而不是继续使用 callback 创建处的旧 evidence。静态 effect row 仍是 capability 真值；调用点只传递签名要求的 evidence，未知 open tail 必须逐项转发，不能被机械消除。
 
