@@ -67,6 +67,7 @@ Ring-lang/
 - **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁。Worktree agent 启动后必须立即 `git log --oneline -1` 验证 base commit。**每次任务完成后必须清理 stale worktree**：`git worktree remove -f -f <path>`。
 - **决策分级**：root 是 Repository Steward，可自主决定既有设计内的实现、维护、review、refactor、测试与内部架构取舍；遇多个工程方案时先做 Argument + 独立反驳，不再因“非 trivial”自动停机。语言公开语义、设计公理、安全保证、breaking API/ABI、新 P0/路线重排和不可逆外部动作仍由用户拍板。完整边界见 `docs/workflow.md`。
 - **持续推进**：单个 item 需要用户决策时转 `waiting-feedback` 并写简短决策包，Steward 立即补位其他可执行事项。只有所有实现、维护、review、refactor、Argument、audit 工作都耗尽或受同一全局阻塞时才停止。
+- **方向止损门**：同一修复方向连续两轮独立 review 都冒出新的 correctness blocker，或开始复制 resolver/type/effect/RC 等既有权威子系统时，必须冻结继续补丁与长门禁，按 `docs/workflow.md` §4.5 执行抽象方向审计；不得把不断扩张的反例链误当成“再补一个分支”。
 - **低噪声汇报**：用户摘要只给决策、结果、仓库健康与下一步；不得默认呈现 subagent 等待、命令执行状态、普通重试、原始日志和逐文件流水。
 - **禁止忽略问题**：不能以“推迟”“很难触发”等理由静默忽略。Steward 必须修复、记录进队列或形成用户保留决策包；不得把普通工程判断无谓上交用户。
 - **文档时效性**：修改编译器功能后同步更新 CLAUDE.md 和 docs/design.md。已完成的 review/plan/spec 文件应删除。
