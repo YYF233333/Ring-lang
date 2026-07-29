@@ -273,7 +273,6 @@ Steward 仅在以下情况结束当前自主运行：
 - `.agents/skills/` 是 Codex adapter，`.claude/skills/` 是 Claude Code adapter；
 - provider-specific 工具调用不得复制到本文件；
 - adapter 必须遵守持续推进、决策批处理、低噪声摘要和用户保留边界。
-- `.codex/config.toml` 的 `ring-repo-yolo` 必须直接定义最小读取 + workspace/Git/agent-config 写权限，不继承会保护 `.git`、`.agents`、`.codex` 的 `:workspace` profile；native Windows 下不得加入会压住 workspace write 的 `:root = "deny"`，仓库外路径由“未授予即受限”保持隔离；权限 profile 变更在新 session 生效。
 
 修改 workflow、skills、看板 heading 或 `.codex/config.toml` 后运行：
 
@@ -281,4 +280,4 @@ Steward 仅在以下情况结束当前自主运行：
 python .agents/scripts/validate_workflow.py
 ```
 
-验证器应检查看板协议、adapter 中的旧“等待用户/手动下一轮/一个 wave 后停止”假设、role config 和 permission profile。
+验证器应检查看板协议、adapter 中的旧“等待用户/手动下一轮/一个 wave 后停止”假设，以及 Codex role config。

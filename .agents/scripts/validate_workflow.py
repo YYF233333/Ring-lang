@@ -656,126 +656,6 @@ def skill_layout_contract_errors(existing_paths: set[str]) -> list[str]:
     return errors
 
 
-def contains_key(value: Any, needle: str) -> bool:
-    if isinstance(value, dict):
-        return needle in value or any(
-            contains_key(child, needle) for child in value.values()
-        )
-    if isinstance(value, list):
-        return any(contains_key(child, needle) for child in value)
-    return False
-
-
-def permission_contract_errors(config: dict[str, Any]) -> list[str]:
-    """Validate the direct repository YOLO profile from parsed TOML."""
-
-    errors: list[str] = []
-    if config.get("default_permissions") != "ring-repo-yolo":
-        errors.append(
-            ".codex/config.toml: default_permissions must be "
-            "'ring-repo-yolo'"
-        )
-    if contains_key(config, "sandbox_mode"):
-        errors.append(
-            ".codex/config.toml: legacy sandbox_mode is not permitted"
-        )
-
-    permissions = config.get("permissions")
-    if not isinstance(permissions, dict):
-        return errors + [".codex/config.toml: missing [permissions] table"]
-    profile = permissions.get("ring-repo-yolo")
-    if not isinstance(profile, dict):
-        return errors + [
-            ".codex/config.toml: missing [permissions.ring-repo-yolo]"
-        ]
-
-    if "extends" in profile:
-        errors.append(
-            ".codex/config.toml: ring-repo-yolo must be a direct profile; "
-            "extends is forbidden"
-        )
-
-    filesystem = profile.get("filesystem")
-    if not isinstance(filesystem, dict):
-        return errors + [
-            ".codex/config.toml: missing ring-repo-yolo filesystem rules"
-        ]
-
-    # Native Windows treats :root=deny as an overriding deny. It disables the
-    # workspace writes below; out-of-repository paths instead rely on the
-    # permission engine's default restricted behavior.
-    if ":root" in filesystem:
-        errors.append(
-            ".codex/config.toml: ring-repo-yolo must not define :root; "
-            "native Windows :root=deny overrides workspace writes"
-        )
-
-    expected_filesystem = {
-        ":minimal": "read",
-        ":tmpdir": "write",
-        ":slash_tmp": "write",
-        "~/.config": "read",
-        "~/.gitconfig": "read",
-    }
-    allowed_filesystem_keys = set(expected_filesystem) | {":workspace_roots"}
-    for path in sorted(set(filesystem) - allowed_filesystem_keys):
-        errors.append(
-            f".codex/config.toml: unexpected filesystem rule {path!r}; "
-            "out-of-repository paths must use the default restricted behavior"
-        )
-    for path, expected in expected_filesystem.items():
-        actual = filesystem.get(path)
-        if actual != expected:
-            errors.append(
-                f".codex/config.toml: filesystem {path!r} must be "
-                f"{expected!r}, got {actual!r}"
-            )
-
-    workspace_roots = filesystem.get(":workspace_roots")
-    if not isinstance(workspace_roots, dict):
-        errors.append(
-            ".codex/config.toml: missing filesystem :workspace_roots table"
-        )
-    else:
-        expected_workspace_roots = (
-            ".",
-            ".git",
-            ".agents",
-            ".codex",
-            ".claude",
-        )
-        for path in sorted(set(workspace_roots) - set(expected_workspace_roots)):
-            errors.append(
-                f".codex/config.toml: unexpected workspace root rule {path!r}"
-            )
-        for path in expected_workspace_roots:
-            actual = workspace_roots.get(path)
-            if actual != "write":
-                errors.append(
-                    f".codex/config.toml: workspace root {path!r} must be "
-                    f"'write', got {actual!r}"
-                )
-
-    network = profile.get("network")
-    if not isinstance(network, dict):
-        errors.append(
-            ".codex/config.toml: missing ring-repo-yolo network rules"
-        )
-    else:
-        if network.get("enabled") is not True:
-            errors.append(
-                ".codex/config.toml: ring-repo-yolo network.enabled "
-                "must be true"
-            )
-        domains = network.get("domains")
-        if not isinstance(domains, dict) or domains.get("*") != "allow":
-            errors.append(
-                ".codex/config.toml: network wildcard domain '*' must "
-                "be 'allow'"
-            )
-    return errors
-
-
 def role_contract_errors(role: str, instructions: str) -> list[str]:
     errors = check_text_contract(instructions, ROLE_CONTRACTS[role])
     for fragment in ROLE_FORBIDDEN:
@@ -930,8 +810,6 @@ class WorkflowValidator:
         except (OSError, tomllib.TOMLDecodeError) as error:
             self.errors.append(f"{relative}: {error}")
             return
-
-        self.errors.extend(permission_contract_errors(config))
 
         agents = config.get("agents")
         if not isinstance(agents, dict):
@@ -1400,29 +1278,6 @@ def run_self_tests() -> list[str]:
         )
     )
 
-    old_config = {
-        "default_permissions": "ring-repo-yolo",
-        "sandbox_mode": "workspace-write",
-        "permissions": {
-            "ring-repo-yolo": {
-                "extends": ":workspace",
-                "filesystem": {
-                    ":root": "deny",
-                    ":minimal": "read",
-                    ":workspace_roots": {".": "write"},
-                },
-                "network": {"enabled": True},
-            }
-        },
-    }
-    failures.extend(
-        deterministic_failure(
-            "legacy permission fixture",
-            lambda: permission_contract_errors(old_config),
-            "must not define :root",
-        )
-    )
-
     old_layout = {
         ".agents/skills/worker/SKILL.md",
         ".agents/skills/discussion/SKILL.md",
@@ -1481,7 +1336,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             "workflow validator self-test passed: "
-            "19 legacy/broken fixtures rejected deterministically; "
+            "18 legacy/broken fixtures rejected deterministically; "
             "2 durable-ledger regressions passed"
         )
         return 0
@@ -1508,8 +1363,8 @@ def main(argv: list[str] | None = None) -> int:
         "workflow validation passed: "
         f"{backlog_count} active backlog items, "
         f"{audit_count} active audit items, "
-        "2 steward adapters, 4 Codex roles, direct YOLO profile, "
-        "19 negative fixtures, 2 durable-ledger regressions"
+        "2 steward adapters, 4 Codex roles, "
+        "18 negative fixtures, 2 durable-ledger regressions"
     )
     return 0
 

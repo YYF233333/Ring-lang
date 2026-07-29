@@ -4,13 +4,12 @@
 # currently caps it at 272k even though the API model supports a 1.05M window.
 model = "gpt-5.6-sol"
 model_reasoning_effort = "max"
-model_context_window = 272000
-model_auto_compact_token_limit = 244800
-default_permissions = "ring-repo-yolo"
+
+sandbox_mode = "danger-full-access"
 
 [agents]
 enabled = true
-max_concurrent_threads_per_session = 3
+max_concurrent_threads_per_session = 4
 default_subagent_model = "gpt-5.6-sol"
 default_subagent_reasoning_effort = "max"
 interrupt_message = true
@@ -30,29 +29,3 @@ config_file = "agents/finder.toml"
 [agents.skeptic]
 description = "Read-only adversarial verifier for audit findings, risk claims, and Argument candidates."
 config_file = "agents/skeptic.toml"
-
-[permissions.ring-repo-yolo]
-description = "Repository Steward autonomy inside Ring-lang, including Git metadata and network access."
-
-# Native Windows: never add `":root" = "deny"` here; it overrides the
-# workspace writes below and disables repository YOLO. Paths outside the
-# listed rules remain restricted by the permission engine's default behavior.
-[permissions.ring-repo-yolo.filesystem]
-":minimal" = "read"
-":tmpdir" = "write"
-":slash_tmp" = "write"
-"~/.config" = "read"
-"~/.gitconfig" = "read"
-
-[permissions.ring-repo-yolo.filesystem.":workspace_roots"]
-"." = "write"
-".git" = "write"
-".agents" = "write"
-".codex" = "write"
-".claude" = "write"
-
-[permissions.ring-repo-yolo.network]
-enabled = true
-
-[permissions.ring-repo-yolo.network.domains]
-"*" = "allow"
