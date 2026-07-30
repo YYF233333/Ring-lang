@@ -2791,6 +2791,14 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                             Type::NeverType => true,
                             _ => false
                         }
+                        // #265: a Unit-returning operation's resume value
+                        // carries no information. The arm result is discarded
+                        // exactly like a statement-position value, so it
+                        // imposes no contract on the arm's type.
+                        let op_return_is_unit = match resolved_op_return {
+                            Type::UnitType => true,
+                            _ => false
+                        }
                         let effect_display = nominal_display_name(canonical_effect_name)
                         let tail_arm_notes: List<DiagnosticNote> = [
                             DiagnosticNote {
@@ -2806,7 +2814,7 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                                 span: some(hexpr_span(hbr.hexpr))
                             }
                         ]
-                        if !op_return_is_never && !arm_is_never {
+                        if !op_return_is_never && !arm_is_never && !op_return_is_unit {
                             s = unify_at_noted(
                                 ctx.sink, ctx.env,
                                 hexpr_type(hbr.hexpr), op_return_type,
