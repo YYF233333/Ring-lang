@@ -274,6 +274,14 @@ fn process_all(items: List<dyn Describable>) { ... }
 - 选型拍板后把 B-038 重写为可执行 implementation spec（或删除并新建实现项），不得把当前探针文本直接当实现规范；
 - 调研本身不改变 main 的公开行为，`python .agents/scripts/validate_workflow.py` 通过。
 
+### B-170 bounded generic + 空容器字面量的 bound 求解时序（E0503 误报）[bugfix] [P2] [M] [judgment] [queued]
+
+2026-07-31 B-107 wave 收尾归因立项。`let s: Set<Int> = set_from([])` 报 E0503：`resolve_dicts_from_scheme`（infer_ctx.ring:1306-1356，行号=立项时）对未解 TypeVar 的 trait bound fail-closed，而该求解发生在 let 注解双向传播之前——**带了显式注解也无法单轮修复**，违反公理①「错误单轮可修」。main 既有限制（任意 `fn f<T: Trait>(items: List<T>)` + `f([])` 同报，b973859 给 `set_from` 加 `T: Hash+Eq` 后被 `set_ops.ring` 撞出）。
+
+- **修复方向**（实施时 Argument 二选一）：bound obligation 延迟到 zonk/注解传播后再解；或 let 显式注解先行双向传播再触发 dict 求解。不得对空容器做特殊 case 硬编码。
+- **验收**：`set_ops.ring` pending 解除转绿；`let x: List<T具体> = []` + bounded HOF 正反用例；不回归既有 E0503 真歧义报错（无注解、无任何类型来源时仍应报）。
+- **依赖**：B-107 merge 后（`set_from` 签名与 pending 标记在其分支上）。
+
 ### B-149 Display trait + 字符串插值类型约束 [feature] [P2] [M] [judgment] [queued]
 
 > 2026-06-25 立项（Discussion，#184 审计发现触发）。
