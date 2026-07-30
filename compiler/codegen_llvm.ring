@@ -4,7 +4,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp, DerivedImpl, HStringInterpPart,
     evidence_param_name, effect_name_from_evidence_param,
     trait_dict_name, trait_bound_param_name,
-    compare_by_first, hexpr_type, hexpr_effects}
+    compare_by_first, hexpr_type, hexpr_effects,
+    CHECKER_ONLY_EXTERN_CALLABLES}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -295,6 +296,7 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                     match method {
                         HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, body: mb, .. } => {
                             let mangled = llvm_mangle_method(target_type, mn)
+                            ctx.ring_callable_names.insert(mangled)
                             // #177: use qualified key matching scan_fn_effects
                             let qualified = "${target_type}_${mn}"
                             forward_declare_fn_with_name(ctx, mangled, qualified, mp, me, mtb, some(mb))
@@ -332,8 +334,14 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                 forward_declare_enum_ctors(ctx, name, variants)
             },
             HDecl::Effect { .. } => {},
-            HDecl::ExternFn { name, params, return_type, .. } => {
-                forward_declare_extern_fn(ctx, name, params, return_type)
+            HDecl::ExternFn { name, abi_name, params, return_type, .. } => {
+                let extern_key = match prefix {
+                    some(p) => llvm_mangle_fn_with_prefix(p, name),
+                    none => llvm_mangle_fn(name),
+                }
+                ctx.extern_callable_names.insert(extern_key)
+                ctx.extern_abi_names.insert(extern_key, abi_name)
+                forward_declare_extern_fn(ctx, abi_name, params, return_type)
             },
             HDecl::ModBlock { decls: mod_decls, .. } => {
                 forward_declare_functions_with_prefix(ctx, mod_decls, prefix)
@@ -576,6 +584,7 @@ fn forward_declare_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects
         some(p) => llvm_mangle_fn_with_prefix(p, name),
         none => llvm_mangle_fn(name),
     }
+    ctx.ring_callable_names.insert(mangled)
     forward_declare_fn_with_name(ctx, mangled, name, params, effects, trait_bounds, body)
 }
 
@@ -606,11 +615,9 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
     // Store evidence param names for this function
     ctx.fn_evidence_params.insert(mangled, ev_params)
 
-    // #214: store trait bounds and original param types for dict closure wrapper fallback
+    // Function-value ABI invariant: wrappers require one checker-resolved
+    // DictRef per declared bound.
     ctx.fn_trait_bounds.insert(mangled, trait_bounds)
-    let mut orig_types: List<Type> = []
-    for p in params { orig_types.push(p.ty) }
-    ctx.fn_original_param_types.insert(mangled, orig_types)
 
     // Dedup: skip if already declared (multi-module imports can re-declare).
     // ctx.functions is a pure-Ring Map whose values are raw LLVMValueRef extern
@@ -904,6 +911,10 @@ fn forward_declare_enum_ctors(mut ctx: LlvmCtx, name: Str, variants: List<HEnumV
         let fn_val = LLVMAddFunction(ctx.module, ctor_name, fn_ty)
         ctx.functions.insert(ctor_name, fn_val)
         ctx.fn_types.insert(ctor_name, fn_ty)
+        // Only positional payload variants are first-class function values.
+        if v.field_names.is_none() && v.fields.len() > 0 {
+            ctx.ring_callable_names.insert(ctor_name)
+        }
     }
 }
 
@@ -929,6 +940,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     let some_fn = LLVMAddFunction(ctx.module, "ring_Option_some", some_fn_ty)
     ctx.functions.insert("ring_Option_some", some_fn)
     ctx.fn_types.insert("ring_Option_some", some_fn_ty)
+    ctx.ring_callable_names.insert("ring_Option_some")
 
     // Option_none: () -> ptr
     // B-104 D6 (#153): DECLARATION ONLY — the body lives in ring_runtime.cpp,
@@ -975,6 +987,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     let ok_fn = LLVMAddFunction(ctx.module, "ring_Result_Ok", ok_fn_ty)
     ctx.functions.insert("ring_Result_Ok", ok_fn)
     ctx.fn_types.insert("ring_Result_Ok", ok_fn_ty)
+    ctx.ring_callable_names.insert("ring_Result_Ok")
     let ok_entry = LLVMAppendBasicBlockInContext(ctx.context, ok_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, ok_entry)
     let ok_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [LLVMSizeOf(result_ty), result_typeid], "res")
@@ -988,6 +1001,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     let err_fn = LLVMAddFunction(ctx.module, "ring_Result_Err", err_fn_ty)
     ctx.functions.insert("ring_Result_Err", err_fn)
     ctx.fn_types.insert("ring_Result_Err", err_fn_ty)
+    ctx.ring_callable_names.insert("ring_Result_Err")
     let err_entry = LLVMAppendBasicBlockInContext(ctx.context, err_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, err_entry)
     let err_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [LLVMSizeOf(result_ty), result_typeid], "res")
@@ -1609,6 +1623,14 @@ fn init_llvm_context(module_name: Str) -> LlvmCtx {
     let double_type = LLVMDoubleTypeInContext(context)
 
     // 5. Build LlvmCtx
+    let mut extern_callable_names: Set<Str> = set_new()
+    let mut extern_abi_names: Map<Str, Str> = map_new()
+    // Checker-only builtins have no HDecl to discover in the forward pass.
+    for name in (CHECKER_ONLY_EXTERN_CALLABLES) {
+        let key = llvm_mangle_fn(name)
+        extern_callable_names.insert(key)
+        extern_abi_names.insert(key, name)
+    }
     LlvmCtx {
         context: context,
         module: module,
@@ -1631,7 +1653,6 @@ fn init_llvm_context(module_name: Str) -> LlvmCtx {
         local_fn_effects: map_new(),
         fn_evidence_params: map_new(),
         fn_trait_bounds: map_new(),
-        fn_original_param_types: map_new(),
         dict_globals: map_new(),
         static_dict_defs: map_new(),
         dict_singletons: map_new(),
@@ -1657,6 +1678,9 @@ fn init_llvm_context(module_name: Str) -> LlvmCtx {
         derived_dict_builds: [],
         extern_types: set_new(),
         extern_fn_infos: map_new(),
+        ring_callable_names: set_new(),
+        extern_callable_names: extern_callable_names,
+        extern_abi_names: extern_abi_names,
         handle_cleanup_stack: [],
         test_fns: [],
         test_emit_idx: 0,
@@ -1782,7 +1806,10 @@ pub fn generate_llvm_project(
     output_path: Str, extern_forward_bridges: Map<Str, Str>
 ) -> Unit {
     let mut ctx = init_llvm_context("ring_project")
-    ctx.extern_forward_bridges = extern_forward_bridges
+    for entry in extern_forward_bridges.entries() {
+        let (source, target) = entry
+        ctx.extern_forward_bridges.insert(llvm_mangle_fn(source), llvm_mangle_fn(target))
+    }
 
     // Register built-in types
     register_builtin_enums(ctx)

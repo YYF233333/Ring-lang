@@ -11,7 +11,7 @@
 
 use types::{Type, EffectRow}
 use ast::{Span}
-use hir::{HDictDef, TraitBound, HEffectOp, module_item_identity}
+use hir::{HDictDef, TraitBound, HEffectOp, CHECKER_ONLY_EXTERN_CALLABLES}
 
 // Per-function registration info (forward-declare pass).
 // total_params = ring params + trait-bound dict params + evidence params —
@@ -100,6 +100,18 @@ pub struct CCtx {
     // second definition is a hard clang error, so later bodies are skipped.
     pub emitted_fns: Set<Str>,
     pub extern_types: Set<Str>,
+    // Exact resolved/mangled callable identities, kept separate from
+    // `functions`: that map also contains const getters and backend helpers,
+    // which are not evidence that an HIR value uses the Ring function ABI.
+    pub ring_callable_names: Set<Str>,
+    // Exact resolved/mangled HDecl/builtin identities that use the extern
+    // direct-call ABI. Function-value lowering compares the same canonical
+    // key, so an extern in one module cannot taint an equal leaf elsewhere.
+    pub extern_callable_names: Set<Str>,
+    // Exact extern registry key -> foreign ABI symbol. `HDecl::ExternFn.name`
+    // stays canonical through HIR; only a proven genuine extern call consults
+    // this map and crosses back to the ABI leaf.
+    pub extern_abi_names: Map<Str, Str>,
     pub boxed_vars: Set<Int>,
     pub type_to_typeid: Map<Str, Int>,
     pub next_user_typeid: Int,
@@ -129,12 +141,10 @@ pub struct CCtx {
     pub dict_build_fns: Set<Str>,
     // Dict names whose memoised getter ring_dict_init_<name> was emitted.
     pub dict_getters: Set<Str>,
-    // #214 (fn value with dicts): per-fn trait bounds + original (pre-mono)
-    // param types, keyed by C mangled name — gen_c_dict_closure_wrapper
-    // computes concrete dict names from these when the checker did not
-    // resolve dict_closure_dicts for an identifier position.
+    // Function-value dict ABI invariant: the checker must attach exactly one
+    // DictRef per bound.  Codegen keeps the declared bounds only to reject a
+    // missing/partial closure-evidence list; it never re-resolves types.
     pub fn_trait_bounds: Map<Str, List<TraitBound>>,
-    pub fn_original_param_types: Map<Str, List<Type>>,
     // Module-wide counters for synthesised functions (deterministic order).
     pub lambda_counter: Int,
     pub dictwrap_counter: Int,
@@ -177,12 +187,20 @@ pub struct CCtx {
     // Names declared by the CURRENT module (fns/structs/enums/consts/...) —
     // c_resolve_fn qualifies these with module_prefix.
     pub local_names: Set<Str>,
-    // Same exact raw-ExternFn -> canonical Ring implementation plan consumed
-    // by the LLVM project backend.  Absence deliberately preserves real FFI.
+    // Exact mangled extern declaration key -> exact mangled Ring target key.
+    // Absence deliberately preserves real FFI.
     pub extern_forward_bridges: Map<Str, Str>
 }
 
 pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
+    let mut extern_callable_names: Set<Str> = set_new()
+    let mut extern_abi_names: Map<Str, Str> = map_new()
+    // Checker-only builtins have no HDecl to discover in the forward pass.
+    for name in (CHECKER_ONLY_EXTERN_CALLABLES) {
+        let key = c_mangle_fn(name)
+        extern_callable_names.insert(key)
+        extern_abi_names.insert(key, name)
+    }
     CCtx {
         globals: [],
         fn_protos: [],
@@ -208,6 +226,9 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         cstr_cache: map_new(),
         emitted_fns: set_new(),
         extern_types: set_new(),
+        ring_callable_names: set_new(),
+        extern_callable_names: extern_callable_names,
+        extern_abi_names: extern_abi_names,
         boxed_vars: set_new(),
         type_to_typeid: map_new(),
         next_user_typeid: 64,
@@ -219,7 +240,6 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         dict_build_fns: set_new(),
         dict_getters: set_new(),
         fn_trait_bounds: map_new(),
-        fn_original_param_types: map_new(),
         lambda_counter: 0,
         dictwrap_counter: 0,
         effect_ops: map_new(),
@@ -340,25 +360,37 @@ pub fn c_mangle_fn_with_prefix(prefix: Str, name: Str) -> Str {
 // imports_map first (cross-module references), then prefix-qualify names the
 // current module declares, else bare mangling.
 pub fn c_resolve_fn(ctx: CCtx, name: Str) -> Str {
-    if name.index_of("$$_").is_some() { return c_mangle_fn(name) }
+    let direct_key = c_mangle_fn(name)
+    if name.index_of("$$_").is_some() {
+        // Imported/qualified HIR already carries the declaration module's
+        // canonical identity.  It still needs the exact extern-forward plan;
+        // otherwise only unqualified calls made inside that module bridge.
+        match ctx.extern_forward_bridges.get(direct_key) {
+            some(target) => { return target },
+            none => { return direct_key },
+        }
+    }
     match ctx.imports_map.get(name) {
-        some(qualified) => qualified,
+        some(qualified) => match ctx.extern_forward_bridges.get(qualified) {
+            some(target) => target,
+            none => qualified,
+        },
         none => {
             match ctx.module_prefix {
                 some(prefix) => {
-                    let bridge_key = module_item_identity(prefix, name)
+                    let bridge_key = c_mangle_fn_with_prefix(prefix, name)
                     match ctx.extern_forward_bridges.get(bridge_key) {
-                        some(target) => c_mangle_fn(target),
+                        some(target) => target,
                         none => {
                             if ctx.local_names.contains(name) {
-                                c_mangle_fn_with_prefix(prefix, name)
+                                bridge_key
                             } else {
-                                c_mangle_fn(name)
+                                direct_key
                             }
                         },
                     }
                 },
-                none => c_mangle_fn(name),
+                none => direct_key,
             }
         },
     }

@@ -1,6 +1,17 @@
 use defs
+use defs::{
+    Item as Foreign,
+    ring_raw_alloc as raw_alloc,
+    ring_raw_dealloc as raw_dealloc
+}
+
+struct Item { value: Int }
 
 fn identity(value: facade::PublicCount) -> facade::PublicCount { value }
+
+fn accept_raw(callback: fn(Foreign) -> Foreign, value: Foreign) -> Foreign {
+    callback(value)
+}
 
 fn choice_value(value: facade::Choice) -> Int {
     match value {
@@ -20,4 +31,8 @@ fn main() {
         some(value) => print(value),
         none => print(-1),
     }
+    let raw = raw_alloc(8)
+    let kept = accept_raw(keep_raw, raw)
+    raw_dealloc(kept, 8)
+    print(10)
 }

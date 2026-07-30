@@ -3,7 +3,7 @@ use types::{Type, Effect, EffectRow,
     type_to_string, nominal_display_name, types_equal,
     type_to_builtin_name}
 use ast::{Expr, Pattern, Span, NamedPatternField}
-use hir::{HExpr, HStmt, TraitDispatch, DictRef,
+use hir::{HExpr, HStmt, TraitDispatch, DictRef, ValueBindingKind,
     trait_dict_name, trait_bound_param_name,
     hexpr_type, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
@@ -12,8 +12,9 @@ use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme,
     apply_subst, has_impl, lookup_variant}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry,
-    type_error, unify_at, build_scheme_var_map, resolve_relative_qualifier,
-    resolve_dict_ref_for_type, variant_ctor_origin}
+    type_error, unify_at, resolve_relative_qualifier,
+    resolve_dict_ref_for_type, resolve_dicts_from_scheme, variant_ctor_origin,
+    value_binding_kind}
 
 
 pub struct MethodLookupResult {
@@ -26,6 +27,26 @@ pub struct StmtResult {
     hstmt: HStmt,
     subst: UnionFind,
     effects: EffectRow
+}
+
+pub struct LiveSchemeBinding {
+    binding_key: Str,
+    live_scheme: TypeScheme
+}
+
+pub struct CalleeDefaults {
+    min_arity: Int,
+    values: List<HExpr>
+}
+
+pub struct CalleeMetadata {
+    def_id: Int,
+    binding_key: Str,
+    ultimate_origin: Str,
+    kind: ValueBindingKind,
+    live_scheme: TypeScheme,
+    defaults: CalleeDefaults?,
+    mut_flags: List<Bool>?
 }
 
 
@@ -557,70 +578,223 @@ pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, er
 }
 
 // ============================================================
-// Dict closure resolution for function arguments
+// Final value-position lowering for callable identifiers
 // ============================================================
 
-pub fn resolve_arg_dict_closure(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
-    match harg {
-        HExpr::Ident { name, resolved_name, def_id, ty, effects, span, .. } => {
-            let arg_scheme = ctx.env.lookup(name)
-            match arg_scheme {
-                some(as_) => {
-                    if as_.bounds.len() == 0 { return harg }
-                    let var_map = build_scheme_var_map(as_, ty)
-                    let mut dicts: List<Str> = []
-                    for bound in as_.bounds {
-                        match var_map.get(bound.type_var) {
-                            some(fresh_var) => {
-                                let concrete = apply_subst(s, fresh_var)
-                                resolve_arg_bound_dict(ctx, concrete, bound.trait_name, dicts)
-                            },
-                            none => {}
-                        }
+fn live_scheme_by_def_id(ctx: InferCtx, wanted: Int) -> LiveSchemeBinding? {
+    let mut scope_idx = ctx.env.scope.scopes.len() - 1
+    while scope_idx >= 0 {
+        match ctx.env.scope.scopes.get(scope_idx) {
+            some(scope) => {
+                let entries = scope.variables.entries()
+                for entry in entries {
+                    let (binding_key, candidate) = entry
+                    match candidate.def_id {
+                        some(candidate_id) => {
+                            if candidate_id == wanted {
+                                return some(LiveSchemeBinding {
+                                    binding_key: binding_key,
+                                    live_scheme: candidate
+                                })
+                            }
+                        },
+                        none => {}
                     }
-                    if dicts.len() > 0 {
-                        HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id,
-                            dict_closure_dicts: some(dicts), ty: ty, effects: effects, span: span }
-                    } else { harg }
+                }
+            },
+            none => {}
+        }
+        scope_idx = scope_idx - 1
+    }
+    none
+}
+
+pub fn resolve_callee_metadata(ctx: InferCtx, callee: HExpr) -> CalleeMetadata? {
+    match callee {
+        HExpr::Ident { def_id: some(def_id), .. } => {
+            let kind = value_binding_kind(ctx, some(def_id))
+            match live_scheme_by_def_id(ctx, def_id) {
+                some(binding) => {
+                    let ultimate_origin = match ctx.use_aliases.get(def_id) {
+                        some(origin) => origin,
+                        none => binding.binding_key
+                    }
+
+                    let mut defaults: CalleeDefaults? = none
+                    let mut mut_flags: List<Bool>? = none
+                    match kind {
+                        ValueBindingKind::DirectCallable => {
+                            defaults = match (
+                                ctx.fn_min_arity.get(ultimate_origin),
+                                ctx.fn_defaults.get(ultimate_origin)
+                            ) {
+                                (some(min_arity), some(values)) =>
+                                    some(CalleeDefaults {
+                                        min_arity: min_arity,
+                                        values: values
+                                    }),
+                                _ => none
+                            }
+                            mut_flags = match ctx.fn_mut_params.get(ultimate_origin) {
+                                some(flags) => some(flags),
+                                none => match ctx.fn_mut_params.get(binding.binding_key) {
+                                    some(flags) => some(flags),
+                                    none => none
+                                }
+                            }
+                        },
+                        _ => {}
+                    }
+
+                    some(CalleeMetadata {
+                        def_id: def_id,
+                        binding_key: binding.binding_key,
+                        ultimate_origin: ultimate_origin,
+                        kind: kind,
+                        live_scheme: binding.live_scheme,
+                        defaults: defaults,
+                        mut_flags: mut_flags
+                    })
                 },
-                none => harg
+                none => match kind {
+                    ValueBindingKind::LocalBorrow => none,
+                    ValueBindingKind::DirectCallable |
+                    ValueBindingKind::ExternCallable |
+                    ValueBindingKind::ConstGetter =>
+                        panic("internal error: declaration value DefId has no live scheme")
+                }
             }
         },
-        _ => harg
+        _ => none
     }
 }
 
-pub fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, mut dicts: List<Str>) {
-    match concrete {
-        Type::StructType { name, .. } => {
-            if has_impl(ctx.env.trait_reg, name, trait_name) {
-                dicts.push(trait_dict_name(name, trait_name))
+pub fn is_bounded_direct_callable_ident(ctx: InferCtx, expr: HExpr) -> Bool {
+    match resolve_callee_metadata(ctx, expr) {
+        some(metadata) => {
+            match metadata.kind {
+                ValueBindingKind::DirectCallable | ValueBindingKind::ExternCallable => {
+                    metadata.live_scheme.bounds.len() > 0
+                },
+                _ => false
             }
         },
-        Type::EnumType { name, .. } => {
-            if has_impl(ctx.env.trait_reg, name, trait_name) {
-                dicts.push(trait_dict_name(name, trait_name))
+        _ => false
+    }
+}
+
+pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
+    let metadata = resolve_callee_metadata(ctx, harg)
+    match harg {
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } => {
+            let kind = match metadata {
+                some(m) => m.kind,
+                none => ValueBindingKind::LocalBorrow
             }
-        },
-        Type::TypeVar { id, .. } => {
-            let matching = ctx.current_fn_bounds.find(fn(fb) {
-                fb.type_param_var_id == id && fb.trait_name == trait_name
-            })
-            match matching {
-                some(fb) => dicts.push(trait_bound_param_name(fb.type_param_name, fb.trait_name)),
-                none => {}
-            }
-        },
-        _ => {
-            match type_to_builtin_name(concrete) {
-                some(prim_name) => {
-                    if has_impl(ctx.env.trait_reg, prim_name, trait_name) {
-                        dicts.push(trait_dict_name(prim_name, trait_name))
+
+            // A const identifier denotes a call to its zero-argument getter.
+            // This remains explicit even when the stored value itself is a
+            // function, so an outer source call uses the closure ABI.
+            match kind {
+                ValueBindingKind::ConstGetter => {
+                    let getter_ty = Type::FnType {
+                        params: [], return_type: ty, effects: EMPTY_ROW
+                    }
+                    let getter = HExpr::Ident {
+                        name: name, resolved_name: none, def_id: def_id,
+                        dict_closure_dicts: none, ty: getter_ty,
+                        effects: EMPTY_ROW, span: span
+                    }
+                    return HExpr::Call {
+                        callee: getter, args: [], type_args: [],
+                        resolved_dicts: [], dict_dispatch: none,
+                        ty: ty, effects: effects, span: span
                     }
                 },
-                none => {}
+                _ => {}
             }
-        }
+
+            // Already resolved by an earlier value-position walk.
+            match dict_closure_dicts {
+                some(_) => { return harg },
+                none => {},
+            }
+
+            match ty {
+                Type::FnType { .. } => {},
+                _ => { return harg }
+            }
+
+            match kind {
+                ValueBindingKind::DirectCallable => {
+                    match metadata {
+                        some(m) => {
+                            let as_ = m.live_scheme
+                            if as_.bounds.len() == 0 {
+                                HExpr::Ident {
+                                    name: name, resolved_name: resolved_name,
+                                    def_id: def_id, dict_closure_dicts: some([]),
+                                    ty: ty, effects: effects, span: span
+                                }
+                            } else {
+                                let dicts = resolve_dicts_from_scheme(
+                                    ctx.sink, ctx.env, ctx.current_fn_bounds,
+                                    as_, ty, s, span
+                                )
+                                // Never attach partial evidence.  resolve_dicts_from_scheme
+                                // has already emitted one E0503 for every missing bound.
+                                if dicts.len() == as_.bounds.len() {
+                                    HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id,
+                                        dict_closure_dicts: some(dicts), ty: ty, effects: effects, span: span }
+                                } else { harg }
+                            }
+                        },
+                        none => harg
+                    }
+                },
+                ValueBindingKind::ExternCallable => {
+                    match metadata {
+                        some(m) => {
+                            let as_ = m.live_scheme
+                            let valid = if as_.bounds.len() > 0 {
+                                let validated = resolve_dicts_from_scheme(
+                                    ctx.sink, ctx.env, ctx.current_fn_bounds,
+                                    as_, ty, s, span
+                                )
+                                validated.len() == as_.bounds.len()
+                            } else {
+                                true
+                            }
+                            if valid {
+                                HExpr::Ident {
+                                    name: name, resolved_name: resolved_name,
+                                    def_id: def_id, dict_closure_dicts: some([]),
+                                    ty: ty, effects: effects, span: span
+                                }
+                            } else {
+                                harg
+                            }
+                        },
+                        none => harg
+                    }
+                },
+                ValueBindingKind::ConstGetter => harg,
+                ValueBindingKind::LocalBorrow => {
+                    // Positional variant constructors have their own exact
+                    // DefId provenance and also need a zero-dict direct-ABI
+                    // wrapper when used as values.
+                    match resolved_name {
+                        some(_) => HExpr::Ident {
+                            name: name, resolved_name: resolved_name,
+                            def_id: def_id, dict_closure_dicts: some([]),
+                            ty: ty, effects: effects, span: span
+                        },
+                        none => harg
+                    }
+                }
+            }
+        },
+        _ => harg
     }
 }
 

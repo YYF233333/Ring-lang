@@ -12,6 +12,12 @@ pub use builtin_methods::{CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
     OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS,
     STRINGBUILDER_METHODS}
 
+// Callable values installed directly by builtins.ring rather than parsed from
+// a Decl. Checker provenance and both native backends must consume this one
+// list so a newly added checker-only callable cannot drift across phases.
+pub const CHECKER_ONLY_EXTERN_CALLABLES: List<Str> =
+    ["Cell", "alloc", "dealloc", "ptr_copy", "ptr_from_addr"]
+
 // File-module declaration identity. `$` is not legal in a Ring identifier,
 // while resolver module prefixes use `$` between path segments.  Therefore
 // `$$_` is an unambiguous boundary between a module path and its declaration;
@@ -24,6 +30,17 @@ pub fn module_item_identity(module_prefix: Str, decl_name: Str) -> Str {
 
 pub fn is_module_item_identity(name: Str) -> Bool {
     name.index_of("$$_").is_some()
+}
+
+// Foreign declarations have two independent identities: `HDecl::ExternFn.name`
+// is the exact Ring declaration identity used by lookup/provenance, while the
+// ABI symbol remains the final source leaf. Keeping this split explicit stops
+// equal extern leaves in different modules from contaminating backend lookup.
+pub fn extern_abi_leaf(identity: Str) -> Str {
+    let inline_parts = identity.split("::")
+    let inline_leaf = inline_parts.get(inline_parts.len() - 1).unwrap_or(identity)
+    let file_parts = inline_leaf.split("$$_")
+    file_parts.get(file_parts.len() - 1).unwrap_or(inline_leaf)
 }
 
 // Compiler-synthesised definitions live below an unspellable module prefix.
@@ -76,6 +93,18 @@ pub fn slot_take_identity() -> Str {
 
 pub fn slot_write_identity() -> Str {
     slot_bridge_identity(slot_write_source_name())
+}
+
+// Every parsed top-level prelude extern receives an unspellable semantic
+// identity. This keeps its declaration distinct from a user fn/const with the
+// same leaf in every project module; `HDecl::ExternFn.abi_name` remains raw.
+// Slot bridges retain their specific identities because RC consumes those
+// exact ownership contracts.
+pub fn prelude_extern_identity(source_name: Str) -> Str {
+    if source_name == slot_read_source_name() { return slot_read_identity() }
+    if source_name == slot_take_source_name() { return slot_take_identity() }
+    if source_name == slot_write_source_name() { return slot_write_identity() }
+    compiler_intrinsic_identity("prelude$extern", source_name)
 }
 
 // Convert only a proven prelude slot identity back to its C ABI symbol.
@@ -186,12 +215,24 @@ pub enum HStringInterpPart {
     Expression(HExpr)
 }
 
+// Exact checker provenance for value bindings whose source-level type alone
+// cannot determine how an identifier must be evaluated. LocalBorrow is the
+// fail-closed default when a DefId has no explicit registration provenance.
+pub enum ValueBindingKind {
+    DirectCallable,
+    // Extern/builtin direct ABI accepts no Ring trait-dictionary parameters,
+    // even when its type scheme carries bounds for static checking.
+    ExternCallable,
+    ConstGetter,
+    LocalBorrow
+}
+
 pub enum HExpr {
     IntLit { value: Int, ty: Type, effects: EffectRow, span: Span },
     FloatLit { value: Float, ty: Type, effects: EffectRow, span: Span },
     StrLit { value: Str, ty: Type, effects: EffectRow, span: Span },
     BoolLit { value: Bool, ty: Type, effects: EffectRow, span: Span },
-    Ident { name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<Str>?, ty: Type, effects: EffectRow, span: Span },
+    Ident { name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<DictRef>?, ty: Type, effects: EffectRow, span: Span },
     BinOp { op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?, ty: Type, effects: EffectRow, span: Span },
     UnaryOp { op: UnaryOp, operand: HExpr, ty: Type, effects: EffectRow, span: Span },
     Call { callee: HExpr, args: List<HExpr>, type_args: List<Type>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, ty: Type, effects: EffectRow, span: Span },
@@ -314,7 +355,7 @@ pub enum HDecl {
     Effect { name: Str, type_params: List<TypeParam>, ops: List<HEffectOp>, is_pub: Bool, span: Span },
     Test { description: Str, body: HExpr, span: Span },
     Trait { name: Str, type_params: List<TypeParam>, methods: List<HTraitMethod>, supertraits: List<Str>, assoc_types: List<HAssocType>, is_pub: Bool, span: Span },
-    ExternFn { name: Str, def_id: Int?, type_params: List<TypeParam>, params: List<HParam>, return_type: Type, effects: EffectRow, is_pub: Bool, span: Span },
+    ExternFn { name: Str, abi_name: Str, def_id: Int?, type_params: List<TypeParam>, params: List<HParam>, return_type: Type, effects: EffectRow, is_pub: Bool, span: Span },
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
     TypeAlias { name: Str, ty: Type, is_pub: Bool, span: Span },
     Const { name: Str, def_id: Int?, ty: Type, init: HExpr, is_pub: Bool, span: Span },
@@ -421,6 +462,34 @@ pub fn is_nullary_variant_ctor_ident(expr: HExpr) -> Bool {
             none => false,
         },
         _ => false,
+    }
+}
+
+// An Ident carrying some(dicts) is not a borrow read: codegen allocates a fresh
+// direct-ABI wrapper closure (some([]) is the explicit zero-bound marker).
+// Control-flow wrappers preserve that fact only when every value-producing path
+// yields the same fresh callable. Perceus and verify_rc share this predicate.
+pub fn is_materialized_fn_value(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Ident { dict_closure_dicts, .. } => dict_closure_dicts.is_some(),
+        HExpr::Block { tail, .. } => match tail {
+            some(value) => is_materialized_fn_value(value),
+            none => false
+        },
+        HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
+            some(value) =>
+                is_materialized_fn_value(then_branch) &&
+                is_materialized_fn_value(value),
+            none => false
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut all = arms.len() > 0
+            for arm in arms {
+                if is_materialized_fn_value(arm.body) == false { all = false }
+            }
+            all
+        },
+        _ => false
     }
 }
 

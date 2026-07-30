@@ -3,13 +3,20 @@ use types::{Type, Effect, EffectRow, StructField, RecordField,
 use ast::{Pattern, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HForInDestructure,
-    HLetDestructureBinding, hexpr_type, hexpr_effects, hexpr_span}
+    HLetDestructureBinding, ValueBindingKind,
+    hexpr_type, hexpr_effects, hexpr_span}
 use union_find::{UnionFind}
 use env::{apply_subst, apply_subst_row}
+use infer_ctx::{InferCtx, value_binding_kind}
+use infer_helpers::{resolve_value_ident}
 
 pub struct ZonkCtx {
     pub subst: UnionFind,
-    pub names: Map<Int, Str>
+    pub names: Map<Int, Str>,
+    // Present for checker-owned zonks.  Keeping it optional preserves zonk's
+    // pure type-substitution use sites while allowing fully-unified function
+    // VALUE identifiers to resolve their complete DictRef evidence once.
+    pub dict_resolver: InferCtx?
 }
 
 pub fn zonk_type(ctx: ZonkCtx, t: Type) -> Type {
@@ -185,8 +192,18 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             HExpr::StrLit { value: value, ty: z_ty, effects: z_eff, span: z_span },
         HExpr::BoolLit { value, .. } =>
             HExpr::BoolLit { value: value, ty: z_ty, effects: z_eff, span: z_span },
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, .. } =>
-            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: z_ty, effects: z_eff, span: z_span },
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, .. } => {
+            let ident = HExpr::Ident {
+                name: name, resolved_name: resolved_name, def_id: def_id,
+                dict_closure_dicts: dict_closure_dicts,
+                ty: z_ty, effects: z_eff, span: z_span
+            }
+            match ctx.dict_resolver {
+                some(resolver) => resolve_value_ident(
+                    resolver, ident, ctx.subst),
+                none => ident,
+            }
+        },
         // B-104 D4: synthesised by dict_lower AFTER checking/zonking — never
         // seen here; ty is already concrete (TupleType{[]}).  Pass through.
         HExpr::DictConstruct { base_dict, trait_name, inner, .. } =>
@@ -197,7 +214,10 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             HExpr::UnaryOp { op: op, operand: zonk_expr(ctx, operand), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::Call { callee, args, type_args, resolved_dicts, dict_dispatch, .. } =>
             HExpr::Call {
-                callee: zonk_expr(ctx, callee),
+                // A syntactic Ident callee uses the direct ABI and gets its
+                // evidence from Call.resolved_dicts.  Every other recursive
+                // position is a value position and must form a real closure.
+                callee: zonk_direct_callee(ctx, callee),
                 args: args.map(fn(a) { zonk_expr(ctx, a) }),
                 type_args: type_args.map(fn(t) { zonk_type(ctx, t) }),
                 resolved_dicts: resolved_dicts,
@@ -334,6 +354,32 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
         // B-125: unsafe block — zonk the body
         HExpr::UnsafeBlock { body, .. } =>
             HExpr::UnsafeBlock { body: zonk_expr(ctx, body), ty: z_ty, effects: z_eff, span: z_span },
+    }
+}
+
+fn zonk_direct_callee(ctx: ZonkCtx, callee: HExpr) -> HExpr {
+    match callee {
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, .. } => {
+            let z_ty = zonk_type(ctx, hexpr_type(callee))
+            let z_eff = zonk_row(ctx, hexpr_effects(callee))
+            let z_span = hexpr_span(callee)
+            let ident = HExpr::Ident {
+                name: name, resolved_name: resolved_name, def_id: def_id,
+                dict_closure_dicts: dict_closure_dicts,
+                ty: z_ty, effects: z_eff, span: z_span
+            }
+            match ctx.dict_resolver {
+                some(resolver) => {
+                    match value_binding_kind(resolver, def_id) {
+                        ValueBindingKind::ConstGetter =>
+                            resolve_value_ident(resolver, ident, ctx.subst),
+                        _ => ident
+                    }
+                },
+                none => ident
+            }
+        },
+        _ => zonk_expr(ctx, callee),
     }
 }
 

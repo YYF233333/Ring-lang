@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
-use hir::{HEffectOp, HDictDef, TraitBound, module_item_identity}
+use hir::{HEffectOp, HDictDef, TraitBound}
 
 // Re-declare LLVM opaque types to avoid cross-module ESM import issues.
 // These match the declarations in llvm_ffi.ring and unify to the same types.
@@ -137,11 +137,9 @@ pub struct LlvmCtx {
     pub local_fn_effects: Map<Str, EffectRow>,
     pub fn_evidence_params: Map<Str, List<Str>>,
 
-    // #214: per-function trait bounds and original param types — used by
-    // gen_dict_closure_wrapper to compute concrete dict names when a generic
-    // function is assigned to a variable (dict_closure_dicts is none).
+    // Function-value dict ABI invariant: checker evidence count must equal
+    // this declared bound count.  Codegen never re-resolves types.
     pub fn_trait_bounds: Map<Str, List<TraitBound>>,
-    pub fn_original_param_types: Map<Str, List<Type>>,
 
     // Trait dict globals: maps dict name → LLVMValueRef (global ptr)
     pub dict_globals: Map<Str, LLVMValueRef>,
@@ -170,10 +168,8 @@ pub struct LlvmCtx {
     // Local names: set of names defined in the current module
     pub local_names: Set<Str>,
 
-    // Exact project-internal implementations for raw ExternFn declarations.
-    // Keys are the declaring module's canonical identity (`prefix$$_raw`),
-    // values are canonical public Ring function identities.  Missing entries
-    // remain genuine foreign ABI calls.
+    // Exact mangled extern declaration key -> exact mangled Ring target key.
+    // Missing entries remain genuine foreign ABI calls.
     pub extern_forward_bridges: Map<Str, Str>,
 
     // Counters
@@ -237,6 +233,17 @@ pub struct LlvmCtx {
     // forward_declare_extern_fn in codegen_llvm.ring; consulted by gen_direct_call
     // in codegen_llvm_expr.ring before the panic-stub fallback.
     pub extern_fn_infos: Map<Str, ExternFnInfo>,
+    // Exact resolved/mangled callable identities. `functions` is deliberately
+    // broader (const getters/backend helpers), so it cannot prove that an HIR
+    // value uses the Ring function ABI.
+    pub ring_callable_names: Set<Str>,
+    // Exact resolved/mangled identities using extern direct-call lowering.
+    // This includes runtime externs (which intentionally have no ExternFnInfo)
+    // and checker-only builtins, without cross-module leaf-name fallback.
+    pub extern_callable_names: Set<Str>,
+    // Exact extern registry key -> foreign ABI symbol. Canonical HIR names are
+    // converted back to ABI leaves only after bridge/Ring selection fails.
+    pub extern_abi_names: Map<Str, Str>,
 
     // #173: cleanup stack for handle/try-catch scopes.  Pushed on entry to
     // gen_handle_expr (abort path) / gen_try_catch, popped on exit.
@@ -332,27 +339,39 @@ pub fn llvm_mangle_method(type_name: Str, method_name: Str) -> Str {
 
 // Resolve a function name through module context: check imports_map, then qualify with prefix
 pub fn llvm_resolve_fn(ctx: LlvmCtx, name: Str) -> Str {
-    if name.index_of("$$_").is_some() { return llvm_mangle_fn(name) }
+    let direct_key = llvm_mangle_fn(name)
+    if name.index_of("$$_").is_some() {
+        // Imported/qualified HIR already carries the declaration module's
+        // canonical identity.  It still needs the exact extern-forward plan;
+        // otherwise only unqualified calls made inside that module bridge.
+        match ctx.extern_forward_bridges.get(direct_key) {
+            some(target) => { return target },
+            none => { return direct_key },
+        }
+    }
     // Check imports_map first (cross-module references)
     match ctx.imports_map.get(name) {
-        some(qualified) => qualified,
+        some(qualified) => match ctx.extern_forward_bridges.get(qualified) {
+            some(target) => target,
+            none => qualified,
+        },
         none => {
             // If we have a module prefix and this is a local name, qualify it
             match ctx.module_prefix {
                 some(prefix) => {
-                    let bridge_key = module_item_identity(prefix, name)
+                    let bridge_key = llvm_mangle_fn_with_prefix(prefix, name)
                     match ctx.extern_forward_bridges.get(bridge_key) {
-                        some(target) => llvm_mangle_fn(target),
+                        some(target) => target,
                         none => {
                             if ctx.local_names.contains(name) {
-                                llvm_mangle_fn_with_prefix(prefix, name)
+                                bridge_key
                             } else {
-                                llvm_mangle_fn(name)
+                                direct_key
                             }
                         },
                     }
                 },
-                none => llvm_mangle_fn(name),
+                none => direct_key,
             }
         },
     }

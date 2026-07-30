@@ -24,8 +24,8 @@
 // the whole std prelude to program.decls (checker.ring load_prelude), so
 // prelude bodies flow through this backend from step 1.
 
-use types::{Type, EffectRow, type_to_builtin_name, BUILTIN_RANGE}
-use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
+use types::{Type, EffectRow, EMPTY_ROW, type_to_builtin_name, BUILTIN_RANGE}
+use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
     HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
     TraitDispatch, DictDispatchInfo, effect_op_slot,
@@ -103,8 +103,8 @@ pub fn gen_c_expr(mut ctx: CCtx, expr: HExpr) -> Str {
         },
         HExpr::StrLit { value, .. } => gen_c_str_lit(ctx, value),
         HExpr::BoolLit { value, .. } => if value { "RING_TRUE" } else { "RING_FALSE" },
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, .. } =>
-            gen_c_ident(ctx, name, resolved_name, def_id, dict_closure_dicts, ty),
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, span, .. } =>
+            gen_c_ident(ctx, name, resolved_name, def_id, dict_closure_dicts, ty, span),
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, .. } =>
             gen_c_binop(ctx, op, left, right, eq_dispatch, ord_dispatch, ty),
         HExpr::UnaryOp { op, operand, ty, .. } => gen_c_unaryop(ctx, op, operand, ty),
@@ -222,16 +222,25 @@ fn c_find_function_in_ctx(ctx: CCtx, mangled: Str, name: Str) -> CFnLookup? {
 // Identifiers
 // ============================================================
 
-fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<Str>?, ty: Type) -> Str {
+fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<DictRef>?, ty: Type, span: Span) -> Str {
     // #B-087 gap 1: a polymorphic function used as a first-class value carries
     // dict_closure_dicts (the resolved trait dicts for its bounds).  Build a
     // {thunk, env} closure whose env captures the dicts (+ evidence).
     match dict_closure_dicts {
         some(dicts) => {
-            if dicts.len() > 0 {
-                let lk = match resolved_name { some(rn) => rn, none => name }
+            let lk = match resolved_name { some(rn) => rn, none => name }
+            let callable_key = c_resolve_fn(ctx, lk)
+            // Exact Ring function/ctor (including an extern-forward bridge)
+            // wins over the extern registry. This preserves user shadowing
+            // such as a Ring `fn print`/`fn Cell` and keeps bridge evidence on
+            // the ordinary Ring wrapper path.
+            if ctx.ring_callable_names.contains(callable_key) {
                 return gen_c_dict_closure_wrapper(ctx, lk, name, dicts, ty)
             }
+            if ctx.extern_callable_names.contains(callable_key) {
+                return gen_c_extern_closure_wrapper(ctx, lk, name, dicts, ty, span)
+            }
+            panic("C codegen: function value '${name}' has provenance but no exact Ring or extern target")
         },
         none => {},
     }
@@ -256,14 +265,12 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
             t
         },
         none => {
-            // A module-level FUNCTION used as a value: wrap it into the
-            // uniform {thunk, env} closure pair (LLVM parity — a bare fn
-            // pointer would be mis-called through the closure ABI).  The
-            // zero-dict wrapper also forwards evidence and computes concrete
-            // dicts from the fn's trait bounds when needed (#214).
+            // Module direct-callable values must carry exact checker
+            // provenance, including the explicit empty marker for zero-bound
+            // functions. Never guess from FnType/name at the backend.
             match ty {
                 Type::FnType { .. } => {
-                    return gen_c_dict_closure_wrapper(ctx, lookup_name, name, [], ty)
+                    panic("C codegen: function value '${name}' is missing materialization provenance")
                 },
                 _ => {},
             }
@@ -308,13 +315,76 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
     }
 }
 
+// Extern/builtin function values use a separate uniform-closure thunk.  Their
+// direct ABI is intentionally not the Ring fn(args, dicts, evidence) ABI:
+// runtime externs need exact symbol mapping and scalar print coercion, while
+// LLVM-C externs (in the LLVM backend twin below) need C-ABI marshalling.
+// Build a typed synthetic direct Call in the thunk so the ordinary call
+// lowering remains the single source of truth for all of those conversions.
+fn gen_c_extern_closure_wrapper(
+    mut ctx: CCtx, lookup_name: Str, name: Str,
+    dict_refs: List<DictRef>, ty: Type, span: Span
+) -> Str {
+    if dict_refs.len() != 0 {
+        panic("C codegen: extern closure wrapper for '${name}' received ${dict_refs.len()} dicts")
+    }
+    let (param_types, return_type, fn_effects) = match ty {
+        Type::FnType { params, return_type, effects } => (params, return_type, effects),
+        _ => panic("C codegen: extern closure wrapper for non-function '${name}'"),
+    }
+
+    let wn = ctx.dictwrap_counter
+    ctx.dictwrap_counter = wn + 1
+    let thunk_name = "ring_externwrap_${wn}"
+    let mut sig_parts: List<Str> = ["void* env"]
+    for i in 0..param_types.len() { sig_parts.push("void* p${i}") }
+    let params_str = sig_parts.join(", ")
+    ctx.fn_protos.push("void* ${thunk_name}(${params_str});")
+
+    let saved = c_push_fn(ctx, thunk_name)
+    let mut synthetic_args: List<HExpr> = []
+    let mut i = 0
+    for param_ty in param_types {
+        let param_name = "__ring_extern_arg_${wn}_${i}"
+        ctx.named_values.insert(param_name, "p${i}")
+        synthetic_args.push(HExpr::Ident {
+            name: param_name, resolved_name: none, def_id: none,
+            dict_closure_dicts: none, ty: param_ty,
+            effects: EMPTY_ROW, span: span
+        })
+        i = i + 1
+    }
+    let synthetic_callee = HExpr::Ident {
+        name: name, resolved_name: some(lookup_name), def_id: none,
+        dict_closure_dicts: none, ty: ty, effects: EMPTY_ROW, span: span
+    }
+    let result = gen_c_expr(ctx, HExpr::Call {
+        callee: synthetic_callee, args: synthetic_args, type_args: [],
+        resolved_dicts: [], dict_dispatch: none, ty: return_type,
+        effects: fn_effects, span: span
+    })
+    c_emit(ctx, "return ${result};")
+    c_pop_fn(ctx, thunk_name, params_str, saved)
+
+    // Zero-capture env still carries the count header required by typeid 15.
+    rt_use(ctx, "ring_alloc", 2)
+    let env = fresh_tmp(ctx)
+    c_emit(ctx, "${env} = ring_alloc((int64_t)sizeof(int64_t), 15);")
+    c_emit(ctx, "*(int64_t*)${env} = 0;")
+    let cls = fresh_tmp(ctx)
+    c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")
+    c_emit(ctx, "((void**)${cls})[0] = (void*)${thunk_name};")
+    c_emit(ctx, "((void**)${cls})[1] = ${env};")
+    cls
+}
+
 // #B-087 gap 1 port (gen_dict_closure_wrapper): wrap a direct-ABI function
 // fn(args, dict0..dictM, ev0..evK) into a uniform closure {thunk, env}.
 // The thunk loads the captured dicts/evidence from env and forwards.
 // B-104 D4 RC honesty: env count = dict_count — dict slots are OWNED
 // (ring_dup'd; static singletons are never-drop no-ops), evidence slots are
 // stored AFTER the dicts, OUTSIDE the counted window (handler-scoped, B-096).
-fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> Str {
+fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_refs: List<DictRef>, ty: Type) -> Str {
     // Resolve the real function (step 8: module-aware chain, LLVM parity).
     let mangled = c_resolve_fn(ctx, lookup_name)
     let found = match c_find_function_in_ctx(ctx, mangled, name) {
@@ -330,65 +400,33 @@ fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_n
         _ => 0,
     }
 
-    // Resolve the dicts at this site (current scope).
-    let mut dict_vals: List<Str> = []
-    for dn in dict_names {
-        dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(dn)))
+    let expected_dict_count = match ctx.fn_trait_bounds.get(fn_key) {
+        some(bounds) => bounds.len(),
+        none => 0,
+    }
+    if dict_refs.len() != expected_dict_count {
+        panic("C codegen: dict-closure wrapper for '${name}' expected ${expected_dict_count} checker-resolved dicts, got ${dict_refs.len()}")
     }
 
-    // #214: no dict names provided (checker does not resolve dicts for
-    // identifiers outside call arguments) — compute concrete dict names from
-    // the fn's trait bounds + the instantiated FnType.
-    if dict_vals.len() == 0 {
-        match ctx.fn_trait_bounds.get(fn_key) {
-            some(bounds) => {
-                if bounds.len() > 0 {
-                    let concrete_params = match ty {
-                        Type::FnType { params: fps, .. } => fps,
-                        _ => [],
-                    }
-                    let orig_types = match ctx.fn_original_param_types.get(fn_key) {
-                        some(t) => t,
-                        none => [],
-                    }
-                    let mut subst: Map<Str, Str> = map_new()
-                    let mut idx = 0
-                    for ot in orig_types {
-                        if idx < concrete_params.len() {
-                            match ot {
-                                Type::TypeVar { name: tv_name, .. } => {
-                                    match tv_name {
-                                        some(n) => {
-                                            match concrete_params.get(idx) {
-                                                some(cp) => {
-                                                    match type_to_builtin_name(cp) {
-                                                        some(cn) => { subst.insert(n, cn) },
-                                                        none => {},
-                                                    }
-                                                },
-                                                none => {},
-                                            }
-                                        },
-                                        none => {},
-                                    }
-                                },
-                                _ => {},
-                            }
-                        }
-                        idx = idx + 1
-                    }
-                    for b in bounds {
-                        match subst.get(b.type_param) {
-                            some(concrete_name) => {
-                                let dn = trait_dict_name(concrete_name, b.trait_name)
-                                dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(dn)))
-                            },
-                            none => {},
-                        }
-                    }
-                }
+    // Resolve the checker-selected dicts at this site.  A raw Wrapped value is
+    // defensive only (dict_lower normally makes it an HIR-visible local): it
+    // is freshly owned, so release that construction ref after the env dup.
+    let mut dict_vals: List<Str> = []
+    let mut owned_dict_vals: List<Str> = []
+    for dr in dict_refs {
+        match dr {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name,
+                    inner_dicts: inner_dicts
+                })
+                dict_vals.push(value)
+                owned_dict_vals.push(value)
             },
-            none => {},
+            DictRef::Simple(n) =>
+                dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(n))),
+            DictRef::Static(n) =>
+                dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Static(n))),
         }
     }
 
@@ -439,6 +477,10 @@ fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_n
     for ev in ev_vals {
         c_emit(ctx, "((void**)${env})[${slot_idx + 1}] = ${ev};")
         slot_idx = slot_idx + 1
+    }
+    for owned in owned_dict_vals {
+        rt_use(ctx, "ring_drop", 1)
+        c_emit(ctx, "ring_drop(${owned});")
     }
     let cls = fresh_tmp(ctx)
     c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")
@@ -1150,8 +1192,16 @@ fn collect_c_dictref_names(ctx: CCtx, dr: DictRef, params: List<HParam>, mut cap
 // collect_captures).
 fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures: List<Str>) {
     match expr {
-        HExpr::Ident { name, resolved_name, .. } => {
+        HExpr::Ident { name, resolved_name, dict_closure_dicts, .. } => {
             consider_c_capture_name(ctx, name, resolved_name, params, captures)
+            match dict_closure_dicts {
+                some(dicts) => {
+                    for d in dicts {
+                        collect_c_dictref_names(ctx, d, params, captures)
+                    }
+                },
+                none => {},
+            }
         },
         HExpr::BinOp { left, right, eq_dispatch, ord_dispatch, .. } => {
             collect_c_captures(ctx, left, params, captures)
@@ -2197,8 +2247,25 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
                 some(rn) => rn,
                 none => name,
             }
-            // #132 print parity: coerce scalar args to Str.
-            if call_name == "print" && args.len() == 1 {
+            // #132 print parity applies only to the genuine extern ABI. A
+            // local callable or exact Ring declaration named `print` must win
+            // before this early-return path, just like gen_c_direct_call.
+            let print_key = c_resolve_fn(ctx, call_name)
+            let mut is_extern_print = false
+            if ctx.named_values.contains_key(call_name) == false &&
+               ctx.ring_callable_names.contains(print_key) == false {
+                if call_name == "print" {
+                    is_extern_print = true
+                } else {
+                    match ctx.extern_abi_names.get(print_key) {
+                        some(abi_name) => {
+                            if abi_name == "print" { is_extern_print = true }
+                        },
+                        none => {},
+                    }
+                }
+            }
+            if is_extern_print && args.len() == 1 {
                 match args.get(0) {
                     some(arg0) => {
                         let arg_ty = hexpr_type(arg0)
@@ -2308,7 +2375,43 @@ fn gen_c_runtime_call(mut ctx: CCtx, name: Str, args: List<Str>) -> Str {
     }
 }
 
+// Send a proven extern ABI leaf through the complete legacy direct-call
+// pipeline. Many std extern spellings map implicitly to `ring_<leaf>` rather
+// than appearing in extern_fn_to_runtime_c (notably assert/json_stringify).
+// Only after both known runtime paths miss is the raw foreign symbol valid.
+fn gen_c_extern_abi_call(mut ctx: CCtx, abi_name: Str, arg_vals: List<Str>) -> Str {
+    match extern_fn_to_runtime_c(abi_name) {
+        some(rtn) => { return gen_c_runtime_call(ctx, rtn, arg_vals) },
+        none => {},
+    }
+    let rt_fallback = "ring_${abi_name}"
+    match rt_known_arity(rt_fallback) {
+        some(_) => {
+            if rt_fallback == "ring_assert" {
+                let first = match arg_vals.get(0) {
+                    some(v) => v, none => panic("ring_assert: missing arg 0")
+                }
+                let second = match arg_vals.get(1) {
+                    some(v) => v, none => panic("ring_assert: missing arg 1")
+                }
+                return gen_c_runtime_call(ctx, rt_fallback,
+                    ["RING_COND(${first})", second])
+            }
+            gen_c_runtime_call(ctx, rt_fallback, arg_vals)
+        },
+        none => gen_c_runtime_call(ctx, abi_name, arg_vals),
+    }
+}
+
 fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: List<Str>) -> Str {
+    // LOCAL scope is authoritative before every name-based builtin special.
+    // Otherwise a legal local `ptr_from_addr`/`print`/Cell closure can inherit
+    // backend behavior that belongs to a different exact DefId.
+    match ctx.named_values.get(name) {
+        some(cv) => { return gen_c_closure_call(ctx, cv, arg_vals) },
+        none => {},
+    }
+
     // B-125: ptr_from_addr — pure codegen identity (untag Int → raw address).
     if name == "ptr_from_addr" {
         let a = match arg_vals.get(0) { some(v) => v, none => panic("ptr_from_addr: missing arg") }
@@ -2317,27 +2420,29 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
         return t
     }
 
-    // Known extern fn → runtime mapping.
-    match extern_fn_to_runtime_c(name) {
-        some(rtn) => { return gen_c_runtime_call(ctx, rtn, arg_vals) },
-        none => {},
-    }
+    let resolved_key = c_resolve_fn(ctx, name)
 
-    // LOCAL scope first: a closure/fn-value param or local shadows any
-    // module-level fn of the same name (language scoping; gen_c_ident already
-    // resolves references local-first).  Without this, a prelude HOF body
-    // like List.fold's `f(acc, elem)` binds to a user's global `fn f` —
-    // clang then hard-errors on the arity mismatch (audit #243 fixed the
-    // LLVM backend's inverted order to match).
-    match ctx.named_values.get(name) {
-        some(cv) => { return gen_c_closure_call(ctx, cv, arg_vals) },
-        none => {},
+    // A project extern-forward resolves directly to the exact Ring target and
+    // therefore bypasses ABI lowering. Only a genuine exact extern identity
+    // is converted back to its separately stored foreign leaf.
+    if ctx.ring_callable_names.contains(resolved_key) == false {
+        match ctx.extern_abi_names.get(resolved_key) {
+            some(abi_name) => {
+                return gen_c_extern_abi_call(ctx, abi_name, arg_vals)
+            },
+            none => {},
+        }
+        // Backward-compatible raw builtin path for compiler-synthesised calls
+        // that have no HDecl registration. Exact Ring declarations always win.
+        match extern_fn_to_runtime_c(name) {
+            some(rtn) => { return gen_c_runtime_call(ctx, rtn, arg_vals) },
+            none => {},
+        }
     }
 
     // Ring function lookup (step 8: module-aware resolution, gen_direct_call
     // parity — resolved key first, then bare, then precise cross-module).
-    let mangled = c_resolve_fn(ctx, name)
-    match c_find_function_in_ctx(ctx, mangled, name) {
+    match c_find_function_in_ctx(ctx, resolved_key, name) {
         some(lookup) => {
             let mut call_args: List<Str> = []
             for a in arg_vals { call_args.push(a) }
@@ -2367,9 +2472,8 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
                     gen_c_runtime_call(ctx, rt_fallback, arg_vals)
                 },
                 none => {
-                    // B-152: unknown extern fn — declare with the uniform
-                    // boxed ABI and let the linker resolve.
-                    gen_c_runtime_call(ctx, name, arg_vals)
+                    // B-152: complete extern runtime/FFI fallback.
+                    gen_c_extern_abi_call(ctx, name, arg_vals)
                 },
             }
         },

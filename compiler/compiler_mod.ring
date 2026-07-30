@@ -40,8 +40,8 @@ struct ProjectRingFnCandidate {
 
 struct ProjectExternForward {
     module_key: Str,
-    module_prefix: Str,
-    name: Str,
+    identity: Str,
+    abi_name: Str,
     signature: Str,
     span: Span
 }
@@ -113,14 +113,15 @@ fn collect_project_extern_forwards(
 ) {
     for decl in decls {
         match decl {
-            HDecl::ExternFn { name, type_params, params, return_type, effects, span, .. } => {
-                // Canonical inline externs are ordinary module declarations;
-                // this bridge is only for raw file-level ABI declarations.
-                if !is_module_item_identity(name) {
+            HDecl::ExternFn { name, abi_name, type_params, params, return_type, effects, span, .. } => {
+                // Prelude externs use compiler-intrinsic identities and inline
+                // externs have an additional `::` component. Only this file
+                // module's exact top-level declaration may cycle-break.
+                if name == module_item_identity(module_prefix_, abi_name) {
                     match project_callable_signature(type_params, params, return_type, effects) {
                         some(signature) => out.push(ProjectExternForward {
-                            module_key: module_key_, module_prefix: module_prefix_,
-                            name: name, signature: signature, span: span
+                            module_key: module_key_, identity: name,
+                            abi_name: abi_name, signature: signature, span: span
                         }),
                         none => {}
                     }
@@ -154,7 +155,7 @@ fn report_extern_forward_ambiguity(
     let mut sink = new_collecting_sink()
     sink.report(make_diag(
         E0708, Severity::SevError,
-        "Ambiguous project extern forward '${forward.name}': matching public Ring definitions are ${names.join(", ")}",
+        "Ambiguous project extern forward '${forward.abi_name}': matching public Ring definitions are ${names.join(", ")}",
         forward.span,
         DiagnosticContext::OtherContext { detail: some("extern forward requires one exact project implementation") }
     ))
@@ -195,7 +196,7 @@ fn build_project_extern_forward_bridges(
     for forward in forwards {
         let mut matching: List<ProjectRingFnCandidate> = []
         for candidate in candidates {
-            if candidate.leaf == forward.name &&
+            if candidate.leaf == forward.abi_name &&
                candidate.signature == forward.signature &&
                module_directly_depends_on(graph, candidate.module_key, forward.module_key) {
                 matching.push(candidate)
@@ -204,7 +205,7 @@ fn build_project_extern_forward_bridges(
         if matching.len() == 1 {
             match matching.get(0) {
                 some(candidate) => {
-                    bridges.insert(module_item_identity(forward.module_prefix, forward.name), candidate.identity)
+                    bridges.insert(forward.identity, candidate.identity)
                 },
                 none => {}
             }
@@ -259,7 +260,9 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                 some(mod_) => module_prefix(mod_.path_segments),
                                 none => ""
                             }
-                            let result = check_module(ast, current_prefix, dep_exports, sink)
+                            let result = check_module(
+                                ast, key, current_prefix,
+                                graph.namespace_plan, dep_exports, sink)
                             if sink.has_errors() {
                                 let mod_file = match graph.modules.get(key) { some(m) => m.file_path, none => "" }
                                 if error_format == "llm" {
@@ -286,7 +289,8 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                     some(mod_) => {
                                         let prefix = module_prefix(mod_.path_segments)
                                         let exp = extract_exports(key, prefix, ast, result.program, result.env,
-                                            result.fn_mut_params, dep_exports)
+                                            result.fn_mut_params, result.value_origins,
+                                            result.value_binding_kinds, dep_exports)
                                         module_exports_map.insert(key, exp)
                                     },
                                     none => {},
@@ -321,18 +325,26 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                     (some(hir), some(env)) => {
                         let mut filtered: Set<Str> = set_new()
                         for en in global_externs {
-                            match env.types.structs.get(en) {
-                                some(sdef) => {
-                                    if sdef.is_extern {
-                                        filtered.insert(en)
+                            // The module's own HDecl is exact declaration
+                            // evidence and wins even if a later normal alias
+                            // replaced the same leaf in the mutable registry.
+                            if hir.extern_type_names.contains(en) {
+                                filtered.insert(en)
+                            } else {
+                                // A named import may preserve the extern under
+                                // an alias after a local normal struct replaces
+                                // its raw leaf. Match the definition's exact
+                                // name, rather than only looking up that leaf.
+                                let mut visible_extern = false
+                                for entry in env.types.structs.entries() {
+                                    let (_, sdef) = entry
+                                    if sdef.is_extern && sdef.name == en {
+                                        visible_extern = true
                                     }
-                                },
-                                none => {
-                                    // Name not in this module's type env at all —
-                                    // the module never sees this type, safe to
-                                    // include (won't match any StructType.name).
+                                }
+                                if visible_extern {
                                     filtered.insert(en)
-                                },
+                                }
                             }
                         }
                         module_hirs.insert(key, HProgram {

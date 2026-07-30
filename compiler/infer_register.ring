@@ -1,15 +1,19 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string, effect_to_string, nominal_display_name}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
-    EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember, UseDecl}
+    EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember,
+    UseDecl, UseImport}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, ImplDictBound, TypeAliasDef, FnBound, SigDef,
     EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
-use hir::{compare_by_first, module_item_identity, variant_ctor_name}
+use hir::{compare_by_first, module_item_identity, variant_ctor_name, ValueBindingKind}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type, resolve_effect_expr,
-    record_value_origin, record_variant_ctor_origin, resolve_mod_uses}
+    record_value_origin, record_variant_ctor_origin, record_value_binding_kind,
+    resolve_mod_uses, bind_exact_import_alias,
+    enter_project_root_frame, enter_project_child_frame,
+    refresh_project_namespace_frame, exit_project_namespace_frame}
 use infer_helpers::{is_value_type}
 
 // ============================================================
@@ -178,9 +182,11 @@ pub fn module_prefix_decl_name(module_prefix: Str, decl: Decl) -> Decl {
             Decl::Enum { name: module_item_identity(module_prefix, name), type_params: type_params, variants: variants,
                         is_pub: is_pub, span: span },
         Decl::ExternFn { name, type_params, params, return_type, declared_effects, is_pub, span } =>
-            // ExternFn.name is also its foreign ABI symbol.  Keep that spelling
-            // stable; imported aliases still resolve explicitly to this name.
-            Decl::ExternFn { name: name, type_params: type_params, params: params,
+            // The declaration participates in the same exact module identity
+            // scheme as Ring functions. HIR stores its foreign ABI leaf
+            // separately, so aliases/re-exports never collapse back to `name`.
+            Decl::ExternFn { name: module_item_identity(module_prefix, name),
+                            type_params: type_params, params: params,
                             return_type: return_type, declared_effects: declared_effects,
                             is_pub: is_pub, span: span },
         Decl::Const { name, type_annotation, init, is_pub, span } =>
@@ -229,6 +235,78 @@ fn inline_mod_leaf(name: Str) -> Str {
     let inline_leaf = inline_parts.get(inline_parts.len() - 1).unwrap_or(name)
     let file_parts = inline_leaf.split("$$_")
     file_parts.get(file_parts.len() - 1).unwrap_or(inline_leaf)
+}
+
+struct IndexedDecl {
+    decl_index: Int,
+    decl: Decl
+}
+
+// Project registration walks the exact resolver frame tree once per disjoint
+// declaration phase.  The barriers make every type namespace available before
+// any value signature is registered without retrying or re-registering a decl.
+enum ProjectRegistrationPhase {
+    NominalPhase,
+    TraitPhase,
+    EffectPhase,
+    EffectAliasPhase,
+    ExternTypePhase,
+    TypeAliasSigPhase,
+    ValuePhase,
+}
+
+fn project_decl_matches_phase(
+    decl: Decl, phase: ProjectRegistrationPhase
+) -> Bool {
+    match phase {
+        ProjectRegistrationPhase::NominalPhase => match decl {
+            Decl::Struct { .. } | Decl::Enum { .. } => true,
+            _ => false
+        },
+        ProjectRegistrationPhase::TraitPhase => match decl {
+            Decl::Trait { .. } => true,
+            _ => false
+        },
+        ProjectRegistrationPhase::EffectPhase => match decl {
+            Decl::Effect { .. } => true,
+            _ => false
+        },
+        ProjectRegistrationPhase::EffectAliasPhase => match decl {
+            Decl::EffectAlias { .. } => true,
+            _ => false
+        },
+        ProjectRegistrationPhase::ExternTypePhase => match decl {
+            Decl::ExternType { .. } => true,
+            _ => false
+        },
+        ProjectRegistrationPhase::TypeAliasSigPhase => match decl {
+            // Keep aliases and signatures in one source-ordered frame pass.
+            Decl::TypeAlias { .. } | Decl::Sig { .. } => true,
+            _ => false
+        },
+        ProjectRegistrationPhase::ValuePhase => match decl {
+            Decl::Struct { .. } | Decl::Enum { .. } |
+            Decl::Trait { .. } | Decl::Effect { .. } |
+            Decl::EffectAlias { .. } | Decl::ExternType { .. } |
+            Decl::TypeAlias { .. } | Decl::Sig { .. } |
+            Decl::ModBlock { .. } => false,
+            _ => true
+        }
+    }
+}
+
+fn index_decls(decls: List<Decl>) -> List<IndexedDecl> {
+    let mut indexed: List<IndexedDecl> = []
+    for decl_index in 0..decls.len() {
+        match decls.get(decl_index) {
+            some(decl) => indexed.push(IndexedDecl {
+                decl_index: decl_index,
+                decl: decl
+            }),
+            none => {}
+        }
+    }
+    indexed
 }
 
 // Source order must not decide whether `mod facade { use super::origin... }`
@@ -289,7 +367,70 @@ fn order_inline_mod_blocks(decls: List<Decl>) -> List<Decl> {
     ordered
 }
 
-fn register_mod_block_items(
+// Project registration may reorder sibling modules for dependency readiness,
+// but the resolver-frame adapter must retain each module's original AST site.
+fn order_indexed_inline_mod_blocks(
+    decls: List<IndexedDecl>
+) -> List<IndexedDecl> {
+    let mut pending: List<IndexedDecl> = []
+    let mut sibling_names: Set<Str> = set_new()
+    for item in decls {
+        match item.decl {
+            Decl::ModBlock { name, .. } => {
+                pending.push(item)
+                sibling_names.insert(inline_mod_leaf(name))
+            },
+            _ => {}
+        }
+    }
+
+    let mut ordered: List<IndexedDecl> = []
+    let mut completed: Set<Str> = set_new()
+    while pending.len() > 0 {
+        let mut next: List<IndexedDecl> = []
+        let mut progressed = false
+        for item in pending {
+            let mut ready = true
+            match item.decl {
+                Decl::ModBlock { uses, .. } => {
+                    for use_decl in uses {
+                        let parts = use_decl.path.segments
+                        if parts.len() > 1 &&
+                           parts.get(0).unwrap_or("") == "super" &&
+                           parts.get(1).unwrap_or("") != "super" {
+                            let dep = parts.get(1).unwrap_or("")
+                            if sibling_names.contains(dep) &&
+                               !completed.contains(dep) {
+                                ready = false
+                            }
+                        }
+                    }
+                },
+                _ => {}
+            }
+            if ready {
+                match item.decl {
+                    Decl::ModBlock { name, .. } => {
+                        completed.insert(inline_mod_leaf(name))
+                    },
+                    _ => {}
+                }
+                ordered.push(item)
+                progressed = true
+            } else {
+                next.push(item)
+            }
+        }
+        if !progressed {
+            for item in next { ordered.push(item) }
+            next = []
+        }
+        pending = next
+    }
+    ordered
+}
+
+fn register_mod_block_items_legacy(
     mut ctx: InferCtx, mod_name: Str, mod_uses: List<UseDecl>, mod_decls: List<Decl>,
     deferred_struct_names: List<Str>?, deferred_enum_names: List<Str>?
 ) {
@@ -412,6 +553,85 @@ fn register_mod_block_items(
     let _ = ctx.mod_path_stack.pop()
 }
 
+fn register_project_mod_local_item(
+    mut ctx: InferCtx, mod_name: Str, item: IndexedDecl,
+    deferred_struct_names: List<Str>, deferred_enum_names: List<Str>
+) {
+    match item.decl {
+        // Extern types are foreign ABI identities, not inline-module
+        // nominals.  The project plan owns every visible spelling; retain only
+        // the raw source definition here so frame refresh can install and
+        // later remove the exact leaf/display alias.
+        Decl::ExternType { name, type_params, .. } => {
+            register_project_extern_type(ctx, name, type_params)
+        },
+        Decl::ModBlock { .. } =>
+            panic("unreachable: project ModBlock reached local phase dispatcher"),
+        _ => {
+            let prefixed = prefix_decl_name(mod_name, item.decl)
+            register_phase1(
+                ctx, prefixed, deferred_struct_names, deferred_enum_names)
+        }
+    }
+    refresh_project_namespace_frame(ctx)
+}
+
+// Project inline registration is driven exclusively by the installed plan.
+// The child frame is recovered from its exact parent/decl site, and every
+// phase keeps the original decl_index even when sibling ModBlocks are
+// dependency-reordered. ModBlocks recurse here and never reach the legacy
+// monolithic registration helper.
+fn register_project_mod_block_phase(
+    mut ctx: InferCtx, mod_name: Str, mod_decls: List<Decl>,
+    deferred_struct_names: List<Str>, deferred_enum_names: List<Str>,
+    decl_index: Int, phase: ProjectRegistrationPhase
+) {
+    if !enter_project_child_frame(ctx, decl_index) {
+        panic("unreachable: resolver plan missing inline registration frame")
+    }
+    project_push_mod_path(ctx, mod_name)
+    let indexed = index_decls(mod_decls)
+
+    for item in indexed {
+        if project_decl_matches_phase(item.decl, phase) {
+            register_project_mod_local_item(
+                ctx, mod_name, item,
+                deferred_struct_names, deferred_enum_names)
+        }
+    }
+
+    for item in order_indexed_inline_mod_blocks(indexed) {
+        let canonical_decl = prefix_decl_name(mod_name, item.decl)
+        match canonical_decl {
+            Decl::ModBlock {
+                name: nested_name, decls: nested_decls, ..
+            } => {
+                register_project_mod_block_phase(
+                    ctx, nested_name, nested_decls,
+                    deferred_struct_names, deferred_enum_names,
+                    item.decl_index, phase)
+                refresh_project_namespace_frame(ctx)
+            },
+            _ => panic("unreachable: ordered project child is not a ModBlock")
+        }
+    }
+
+    let _ = ctx.mod_path_stack.pop()
+    let _ = exit_project_namespace_frame(ctx)
+}
+
+fn register_mod_block_items(
+    mut ctx: InferCtx, mod_name: Str, mod_uses: List<UseDecl>,
+    mod_decls: List<Decl>,
+    deferred_struct_names: List<Str>?, deferred_enum_names: List<Str>?
+) {
+    // This entry point is retained only for the single-file legacy pipeline.
+    // Project callers use the phase-aware exact-frame traversal above.
+    register_mod_block_items_legacy(
+        ctx, mod_name, mod_uses, mod_decls,
+        deferred_struct_names, deferred_enum_names)
+}
+
 // Dispatch a single declaration to the appropriate registration function.
 // When deferred lists are provided, operates in phase1 mode; otherwise in register_decl mode.
 fn register_mod_item(
@@ -473,11 +693,9 @@ fn register_phase2_enum(mut ctx: InferCtx, decl: Decl) {
 }
 
 pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
-    ctx.file_extern_values = set_new()
     ctx.file_extern_types = set_new()
     for decl in decls {
         match decl {
-            Decl::ExternFn { name, .. } => { ctx.file_extern_values.insert(name) },
             Decl::ExternType { name, .. } => { ctx.file_extern_types.insert(name) },
             _ => {}
         }
@@ -486,7 +704,9 @@ pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
     let mut deferred_enum_names: List<Str> = []
 
     for decl in decls {
-        let result = some(register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)) catch { _ => none }
+        let result = some(register_phase1(
+            ctx, decl, deferred_struct_names,
+            deferred_enum_names)) catch { _ => none }
     }
 
     for decl in decls {
@@ -505,12 +725,212 @@ pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
 // Register a resolver file-module under canonical declaration identities while
 // retaining source-level short aliases in this module's checker environment.
 // Imported canonical definitions may coexist; aliases are deliberately local.
-pub fn register_module_decls_two_phase(mut ctx: InferCtx, module_prefix: Str, decls: List<Decl>) -> List<Decl> {
-    ctx.file_extern_values = set_new()
+fn register_project_root_local_item(
+    mut ctx: InferCtx, item: IndexedDecl,
+    deferred_struct_names: List<Str>,
+    deferred_enum_names: List<Str>
+) {
+    match item.decl {
+        // module_prefix_decl_name deliberately preserves the raw ABI spelling.
+        // Do not route project externs through the legacy visible registry:
+        // the root frame installs that spelling transactionally.
+        Decl::ExternType { name, type_params, .. } =>
+            register_project_extern_type(ctx, name, type_params),
+        Decl::ModBlock { .. } =>
+            panic("unreachable: project ModBlock reached root local dispatcher"),
+        _ => register_phase1(
+            ctx, item.decl,
+            deferred_struct_names, deferred_enum_names)
+    }
+    refresh_project_namespace_frame(ctx)
+}
+
+fn register_project_root_phase(
+    mut ctx: InferCtx, qualified: List<IndexedDecl>,
+    deferred_struct_names: List<Str>,
+    deferred_enum_names: List<Str>,
+    phase: ProjectRegistrationPhase
+) {
+    for item in qualified {
+        if project_decl_matches_phase(item.decl, phase) {
+            register_project_root_local_item(
+                ctx, item, deferred_struct_names, deferred_enum_names)
+        }
+    }
+    for item in order_indexed_inline_mod_blocks(qualified) {
+        match item.decl {
+            Decl::ModBlock { name, decls, .. } => {
+                register_project_mod_block_phase(
+                    ctx, name, decls,
+                    deferred_struct_names, deferred_enum_names,
+                    item.decl_index, phase)
+                refresh_project_namespace_frame(ctx)
+            },
+            _ => panic("unreachable: ordered project root child is not a ModBlock")
+        }
+    }
+}
+
+fn project_push_mod_path(mut ctx: InferCtx, mod_name: Str) {
+    let segments = mod_name.split("::")
+    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
+    ctx.mod_path_stack.push(simple_name)
+}
+
+fn register_project_phase2_struct(
+    mut ctx: InferCtx, item: IndexedDecl
+) {
+    match item.decl {
+        Decl::ModBlock { name, decls, .. } => {
+            if !enter_project_child_frame(ctx, item.decl_index) {
+                panic("unreachable: resolver plan missing phase2 struct frame")
+            }
+            project_push_mod_path(ctx, name)
+            for child in index_decls(decls) {
+                let qualified_child = IndexedDecl {
+                    decl_index: child.decl_index,
+                    decl: prefix_decl_name(name, child.decl)
+                }
+                register_project_phase2_struct(ctx, qualified_child)
+            }
+            let _ = ctx.mod_path_stack.pop()
+            let _ = exit_project_namespace_frame(ctx)
+        },
+        _ => {
+            register_phase2_struct(ctx, item.decl)
+            refresh_project_namespace_frame(ctx)
+        }
+    }
+}
+
+fn register_project_phase2_enum(
+    mut ctx: InferCtx, item: IndexedDecl
+) {
+    match item.decl {
+        Decl::ModBlock { name, decls, .. } => {
+            if !enter_project_child_frame(ctx, item.decl_index) {
+                panic("unreachable: resolver plan missing phase2 enum frame")
+            }
+            project_push_mod_path(ctx, name)
+            for child in index_decls(decls) {
+                let qualified_child = IndexedDecl {
+                    decl_index: child.decl_index,
+                    decl: prefix_decl_name(name, child.decl)
+                }
+                register_project_phase2_enum(ctx, qualified_child)
+            }
+            let _ = ctx.mod_path_stack.pop()
+            let _ = exit_project_namespace_frame(ctx)
+        },
+        _ => {
+            register_phase2_enum(ctx, item.decl)
+            // Enum completion creates canonical constructor schemes; refresh
+            // the current exact frame before any later signature/delegate pass.
+            refresh_project_namespace_frame(ctx)
+        }
+    }
+}
+
+fn register_project_phase3_delegate(
+    mut ctx: InferCtx, item: IndexedDecl
+) {
+    match item.decl {
+        Decl::ModBlock { name, decls, .. } => {
+            if !enter_project_child_frame(ctx, item.decl_index) {
+                panic("unreachable: resolver plan missing phase3 delegate frame")
+            }
+            project_push_mod_path(ctx, name)
+            for child in index_decls(decls) {
+                let qualified_child = IndexedDecl {
+                    decl_index: child.decl_index,
+                    decl: prefix_decl_name(name, child.decl)
+                }
+                register_project_phase3_delegate(ctx, qualified_child)
+            }
+            let _ = ctx.mod_path_stack.pop()
+            let _ = exit_project_namespace_frame(ctx)
+        },
+        _ => {
+            register_phase3_delegate(ctx, item.decl)
+            refresh_project_namespace_frame(ctx)
+        }
+    }
+}
+
+fn register_project_module_decls_two_phase(
+    mut ctx: InferCtx, module_prefix: Str, decls: List<Decl>
+) -> List<Decl> {
     ctx.file_extern_types = set_new()
     for decl in decls {
         match decl {
-            Decl::ExternFn { name, .. } => { ctx.file_extern_values.insert(name) },
+            Decl::ExternType { name, .. } => {
+                ctx.file_extern_types.insert(name)
+            },
+            _ => {}
+        }
+    }
+
+    let mut qualified: List<IndexedDecl> = []
+    for item in index_decls(decls) {
+        qualified.push(IndexedDecl {
+            decl_index: item.decl_index,
+            decl: module_prefix_decl_name(module_prefix, item.decl)
+        })
+    }
+    if !enter_project_root_frame(ctx) {
+        panic("unreachable: resolver plan missing file root registration frame")
+    }
+
+    let mut deferred_struct_names: List<Str> = []
+    let mut deferred_enum_names: List<Str> = []
+
+    register_project_root_phase(
+        ctx, qualified, deferred_struct_names, deferred_enum_names,
+        ProjectRegistrationPhase::NominalPhase)
+    register_project_root_phase(
+        ctx, qualified, deferred_struct_names, deferred_enum_names,
+        ProjectRegistrationPhase::TraitPhase)
+    register_project_root_phase(
+        ctx, qualified, deferred_struct_names, deferred_enum_names,
+        ProjectRegistrationPhase::EffectPhase)
+    register_project_root_phase(
+        ctx, qualified, deferred_struct_names, deferred_enum_names,
+        ProjectRegistrationPhase::EffectAliasPhase)
+    register_project_root_phase(
+        ctx, qualified, deferred_struct_names, deferred_enum_names,
+        ProjectRegistrationPhase::ExternTypePhase)
+    register_project_root_phase(
+        ctx, qualified, deferred_struct_names, deferred_enum_names,
+        ProjectRegistrationPhase::TypeAliasSigPhase)
+    register_project_root_phase(
+        ctx, qualified, deferred_struct_names, deferred_enum_names,
+        ProjectRegistrationPhase::ValuePhase)
+
+    for item in qualified {
+        register_project_phase2_struct(ctx, item)
+    }
+    for item in qualified {
+        register_project_phase2_enum(ctx, item)
+    }
+    for item in qualified {
+        register_project_phase3_delegate(ctx, item)
+    }
+    refresh_project_namespace_frame(ctx)
+    let _ = exit_project_namespace_frame(ctx)
+
+    let mut result: List<Decl> = []
+    for item in qualified { result.push(item.decl) }
+    result
+}
+
+pub fn register_module_decls_two_phase(mut ctx: InferCtx, module_prefix: Str, decls: List<Decl>) -> List<Decl> {
+    if ctx.project_namespace_file_key.is_some() {
+        return register_project_module_decls_two_phase(
+            ctx, module_prefix, decls)
+    }
+    ctx.file_extern_types = set_new()
+    for decl in decls {
+        match decl {
             Decl::ExternType { name, .. } => { ctx.file_extern_types.insert(name) },
             _ => {}
         }
@@ -629,7 +1049,7 @@ fn insert_file_module_aliases(mut ctx: InferCtx, module_prefix: Str, decls: List
                 }
             },
             Decl::ExternType { name, .. } => {
-                match ctx.env.types.structs.get(name) {
+                match ctx.env.types.extern_structs.get(name) {
                     some(def) => { ctx.env.types.structs.insert(name, def) }, none => {}
                 }
             },
@@ -648,40 +1068,28 @@ fn insert_file_module_aliases(mut ctx: InferCtx, module_prefix: Str, decls: List
             Decl::Fn { name, .. } => {
                 if include_values {
                     let canonical = module_item_identity(module_prefix, name)
-                    match ctx.env.lookup(canonical) {
-                        some(scheme) => {
-                            ctx.env.bind(name, scheme)
-                            record_value_origin(ctx, name, canonical)
-                        }, none => {}
-                    }
-                    match ctx.fn_mut_params.get(canonical) {
-                        some(flags) => { ctx.fn_mut_params.insert(name, flags) }, none => {}
-                    }
+                    let _ = bind_exact_import_alias(
+                        ctx, name, canonical, true)
                 }
             },
             Decl::ExternFn { name, .. } => {
                 if include_values {
-                    match ctx.env.lookup(name) {
-                        some(scheme) => {
-                            ctx.env.bind(name, scheme)
-                        }, none => {}
-                    }
+                    let canonical = module_item_identity(module_prefix, name)
+                    let _ = bind_exact_import_alias(
+                        ctx, name, canonical, true)
                 }
             },
             Decl::Const { name, .. } => {
                 if include_values {
                     let canonical = module_item_identity(module_prefix, name)
-                    match ctx.env.lookup(canonical) {
-                        some(scheme) => {
-                            ctx.env.bind(name, scheme)
-                            record_value_origin(ctx, name, canonical)
-                        }, none => {}
-                    }
+                    let _ = bind_exact_import_alias(
+                        ctx, name, canonical, true)
                 }
             },
-            Decl::ModBlock { name, decls: mod_decls, .. } => {
+            Decl::ModBlock { name, uses, decls: mod_decls, .. } => {
                 let canonical_mod = module_item_identity(module_prefix, name)
-                insert_inline_display_aliases(ctx, name, canonical_mod, mod_decls, include_values)
+                insert_inline_display_aliases(ctx, name, canonical_mod,
+                    uses, mod_decls, include_values)
             },
             _ => {}
         }
@@ -690,8 +1098,41 @@ fn insert_file_module_aliases(mut ctx: InferCtx, module_prefix: Str, decls: List
 
 fn insert_inline_display_aliases(
     mut ctx: InferCtx, display_mod: Str, canonical_mod: Str,
-    decls: List<Decl>, include_values: Bool
+    uses: List<UseDecl>, decls: List<Decl>, include_values: Bool
 ) {
+    // resolve_mod_uses has already materialised every public relative import
+    // under `${canonical_mod}::<local>`. Display aliases consume that exact
+    // key instead of re-resolving the use path or guessing its source leaf.
+    for use_decl in uses {
+        if use_decl.is_pub {
+            match use_decl.imports {
+                UseImport::NamedItems { names } => {
+                    for item in names {
+                        let local = match item.alias {
+                            some(alias) => alias,
+                            none => item.name
+                        }
+                        let _ = bind_exact_import_alias(ctx,
+                            "${display_mod}::${local}",
+                            "${canonical_mod}::${local}", include_values)
+                    }
+                },
+                UseImport::Module => {
+                    let path = use_decl.path.segments
+                    if path.len() > 0 {
+                        let leaf = path.get(path.len() - 1).unwrap_or("")
+                        let local = match use_decl.alias {
+                            some(alias) => alias,
+                            none => leaf
+                        }
+                        let _ = bind_exact_import_alias(ctx,
+                            "${display_mod}::${local}",
+                            "${canonical_mod}::${local}", include_values)
+                    }
+                }
+            }
+        }
+    }
     for decl in decls {
         match decl {
             Decl::Struct { name, .. } => {
@@ -757,32 +1198,29 @@ fn insert_inline_display_aliases(
                 if include_values {
                     let display = "${display_mod}::${name}"
                     let canonical = "${canonical_mod}::${name}"
-                    match ctx.env.lookup(canonical) {
-                        some(scheme) => {
-                            ctx.env.bind(display, scheme)
-                            record_value_origin(ctx, display, canonical)
-                        }, none => {}
-                    }
-                    match ctx.fn_mut_params.get(canonical) {
-                        some(flags) => { ctx.fn_mut_params.insert(display, flags) }, none => {}
-                    }
+                    let _ = bind_exact_import_alias(
+                        ctx, display, canonical, true)
+                }
+            },
+            Decl::ExternFn { name, .. } => {
+                if include_values {
+                    let display = "${display_mod}::${name}"
+                    let canonical = "${canonical_mod}::${name}"
+                    let _ = bind_exact_import_alias(
+                        ctx, display, canonical, true)
                 }
             },
             Decl::Const { name, .. } => {
                 if include_values {
                     let display = "${display_mod}::${name}"
                     let canonical = "${canonical_mod}::${name}"
-                    match ctx.env.lookup(canonical) {
-                        some(scheme) => {
-                            ctx.env.bind(display, scheme)
-                            record_value_origin(ctx, display, canonical)
-                        }, none => {}
-                    }
+                    let _ = bind_exact_import_alias(
+                        ctx, display, canonical, true)
                 }
             },
-            Decl::ModBlock { name, decls: nested, .. } => {
+            Decl::ModBlock { name, uses: nested_uses, decls: nested, .. } => {
                 insert_inline_display_aliases(ctx, "${display_mod}::${name}",
-                    "${canonical_mod}::${name}", nested, include_values)
+                    "${canonical_mod}::${name}", nested_uses, nested, include_values)
             },
             _ => {}
         }
@@ -957,6 +1395,7 @@ fn preregister_enum(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) 
 fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>) {
     match ctx.env.types.enums.get(name) {
         some(def) => {
+            let project_active = ctx.project_namespace_file_key.is_some()
             let saved = map_clone(ctx.type_param_scope)
             let mut tv_types: List<Type> = []
             let mut i = 0
@@ -1003,17 +1442,41 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
             let enum_type = Type::EnumType { name: name, type_params: tv_types }
             let tv_ids = def.type_param_vars
             for variant in def.variants {
-                ctx.env.types.variant_to_enum.insert(variant.name, name)
+                let ctor_payload = variant_ctor_name(name, variant.name)
+                let binding_name = if project_active {
+                    ctor_payload
+                } else {
+                    variant.name
+                }
+                if !project_active {
+                    ctx.env.types.variant_to_enum.insert(variant.name, name)
+                }
                 if variant.field_names.is_some() {
-                    bind_variant_constructor(ctx, variant.name, enum_type, tv_ids)
+                    bind_variant_constructor(ctx, binding_name, enum_type, tv_ids)
                 } else if variant.fields.len() == 0 {
-                    bind_variant_constructor(ctx, variant.name, enum_type, tv_ids)
+                    bind_variant_constructor(ctx, binding_name, enum_type, tv_ids)
                 } else {
                     let fn_type = Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW }
                     if tv_ids.len() > 0 {
-                        ctx.env.bind(variant.name, TypeScheme { ty: fn_type, type_vars: tv_ids, bounds: [], def_id: none })
+                        ctx.env.bind(binding_name, TypeScheme { ty: fn_type, type_vars: tv_ids, bounds: [], def_id: none })
                     } else {
-                        ctx.env.bind_mono(variant.name, fn_type)
+                        ctx.env.bind_mono(binding_name, fn_type)
+                    }
+                }
+                if !project_active {
+                    // The single-file pipeline still binds the historical leaf
+                    // first. Mirror its exact scheme under the canonical
+                    // payload without changing legacy visibility.
+                    match ctx.env.lookup(variant.name) {
+                        some(scheme) => {
+                            ctx.env.bind(ctor_payload, TypeScheme {
+                                ty: scheme.ty,
+                                type_vars: scheme.type_vars,
+                                bounds: scheme.bounds,
+                                def_id: none
+                            })
+                        },
+                        none => {}
                     }
                 }
                 // Bare fieldless variants and positional payload constructors
@@ -1021,8 +1484,12 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                 // canonical constructor symbol. Named-field variants lower via
                 // HExpr::NamedVariantConstruct instead.
                 if variant.field_names.is_none() {
-                    record_variant_ctor_origin(ctx, variant.name,
-                        variant_ctor_name(name, variant.name))
+                    if !project_active {
+                        record_variant_ctor_origin(ctx, variant.name,
+                            ctor_payload)
+                    }
+                    record_variant_ctor_origin(ctx, ctor_payload,
+                        ctor_payload)
                 }
             }
 
@@ -2067,6 +2534,12 @@ fn register_fn_common(
     } else {
         ctx.env.bind_mono(name, fn_type)
     }
+    let callable_kind = if track_fn_bounds {
+        ValueBindingKind::DirectCallable
+    } else {
+        ValueBindingKind::ExternCallable
+    }
+    record_value_binding_kind(ctx, name, callable_kind)
     match ctx.env.lookup(name) {
         some(s) => match s.def_id { some(did) => ctx.env.record_def_span(did, span), none => {} },
         none => {}
@@ -2081,7 +2554,10 @@ fn register_extern_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
     register_fn_common(ctx, name, type_params, params, return_type, declared_effects, span, false, false, false)
 }
 
-fn register_extern_type(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
+fn register_extern_type_common(
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    install_visible_name: Bool
+) {
     let mut tp_names: List<Str> = []
     let saved = map_clone(ctx.type_param_scope)
     let mut tp_vars: List<Int> = []
@@ -2095,7 +2571,21 @@ fn register_extern_type(mut ctx: InferCtx, name: Str, type_params: List<TypePara
     // is_extern: true marks this as an opaque FFI type so trait derivation skips
     // it (B-074). An opaque type has no fields to compare/clone/order/debug, and
     // a derived dict would reference a non-existent runtime constructor.
-    ctx.env.types.structs.insert(name, StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], is_extern: true })
+    let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], is_extern: true }
+    if install_visible_name {
+        ctx.env.types.structs.insert(name, def)
+    }
+    ctx.env.types.extern_structs.insert(name, def)
+}
+
+fn register_project_extern_type(
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
+) {
+    register_extern_type_common(ctx, name, type_params, false)
+}
+
+fn register_extern_type(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
+    register_extern_type_common(ctx, name, type_params, true)
 }
 
 fn register_type_alias(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, type_expr: TypeExpr) {
@@ -2129,6 +2619,7 @@ fn register_const(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span
         some(s) => match s.def_id { some(did) => ctx.env.record_def_span(did, span), none => {} },
         none => {}
     }
+    record_value_binding_kind(ctx, name, ValueBindingKind::ConstGetter)
 }
 
 fn register_sig(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool) {

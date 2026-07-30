@@ -131,7 +131,10 @@ pub fn generate_c_project(
     extern_forward_bridges: Map<Str, Str>
 ) {
     let mut ctx = new_c_ctx(emit_lines)
-    ctx.extern_forward_bridges = extern_forward_bridges
+    for entry in extern_forward_bridges.entries() {
+        let (source, target) = entry
+        ctx.extern_forward_bridges.insert(c_mangle_fn(source), c_mangle_fn(target))
+    }
 
     // Scan pass over ALL modules (generate_llvm_project parity, same union
     // rules).  #134: boxed_vars is deliberately NOT unioned here — def_ids
@@ -400,6 +403,9 @@ fn c_register_builtin_enums(mut ctx: CCtx) {
     ctx.functions.insert("ring_Option_none", CFnInfo { c_name: "ring_Option_none", total_params: 0 })
     ctx.functions.insert("ring_Result_Ok", CFnInfo { c_name: "ring_Result_Ok", total_params: 1 })
     ctx.functions.insert("ring_Result_Err", CFnInfo { c_name: "ring_Result_Err", total_params: 1 })
+    for key in ["ring_Option_some", "ring_Result_Ok", "ring_Result_Err"] {
+        ctx.ring_callable_names.insert(key)
+    }
     let mut ev1: List<Str> = []
     ctx.fn_evidence_params.insert("ring_Option_some", ev1)
     let mut ev2: List<Str> = []
@@ -462,6 +468,7 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     some(p) => c_mangle_fn_with_prefix(p, name),
                     none => c_mangle_fn(name),
                 }
+                ctx.ring_callable_names.insert(mangled)
                 let effect_key = match prefix {
                     some(_) => mangled,
                     none => name,
@@ -473,7 +480,9 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     match m {
                         HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, .. } => {
                             // #177: qualified effect key matching scan_fn_effects_c.
-                            c_declare_fn(ctx, c_mangle_method(target_type, mn), "${target_type}_${mn}", mp, me, mtb)
+                            let method_key = c_mangle_method(target_type, mn)
+                            ctx.ring_callable_names.insert(method_key)
+                            c_declare_fn(ctx, method_key, "${target_type}_${mn}", mp, me, mtb)
                         },
                         _ => {},
                     }
@@ -576,7 +585,17 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                 c_forward_declare_with_prefix(ctx, md, prefix)
             },
             HDecl::Effect { .. } => {},       // ops registry: register_effect_ops_c
-            HDecl::ExternFn { .. } => {},     // declared lazily at call sites
+            HDecl::ExternFn { name, abi_name, .. } => {
+                // C externs remain lazily declared at direct call sites, but
+                // first-class values need an exact declaration identity and a
+                // separate ABI-leaf mapping.
+                let extern_key = match prefix {
+                    some(p) => c_mangle_fn_with_prefix(p, name),
+                    none => c_mangle_fn(name),
+                }
+                ctx.extern_callable_names.insert(extern_key)
+                ctx.extern_abi_names.insert(extern_key, abi_name)
+            },
             HDecl::ExternType { .. } => {},
             HDecl::TypeAlias { .. } => {},
             HDecl::Sig { .. } => {},
@@ -641,6 +660,12 @@ fn c_emit_enum_ctors(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) {
         }
         let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { c_symbol_for_fn_key(key) }
         ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: v.fields.len() })
+        // Only positional payload variants are first-class function values.
+        // Named-field variants lower structurally; fieldless variants are
+        // singleton values rather than fn() constructors.
+        if v.field_names.is_none() && v.fields.len() > 0 {
+            ctx.ring_callable_names.insert(key)
+        }
         let mut no_ev: List<Str> = []
         ctx.fn_evidence_params.insert(key, no_ev)
 
@@ -738,12 +763,9 @@ fn c_declare_fn(mut ctx: CCtx, mangled: Str, effect_key: Str, params: List<HPara
     let total = params.len() + trait_bounds.len() + ev_params.len()
     ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: total })
 
-    // #214 (fn value with dicts): record bounds + original param types so
-    // gen_c_dict_closure_wrapper can compute concrete dict names later.
+    // Function-value ABI invariant: wrappers must receive one checker-resolved
+    // DictRef per declared bound.
     ctx.fn_trait_bounds.insert(mangled, trait_bounds)
-    let mut ptypes: List<Type> = []
-    for p in params { ptypes.push(p.ty) }
-    ctx.fn_original_param_types.insert(mangled, ptypes)
 
     let mut ps: List<Str> = []
     for _p in params { ps.push("void*") }

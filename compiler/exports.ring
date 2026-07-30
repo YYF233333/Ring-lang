@@ -1,7 +1,8 @@
 use types::{Type, EnumVariant, EMPTY_ROW}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
-use hir::{HProgram, HDecl, compare_by_first, variant_ctor_name}
-use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, TypeAliasDef, EffectAliasDef}
+use hir::{HProgram, HDecl, ValueBindingKind, compare_by_first, variant_ctor_name}
+use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry,
+    TypeAliasDef, EffectAliasDef, SigDef, exact_scheme_value_origin}
 use infer_register::{prefix_decl_name, module_prefix_decl_name}
 
 // ============================================================
@@ -13,6 +14,9 @@ pub struct ModuleExports {
     pub module_prefix: Str,
     pub values: Map<Str, TypeScheme>,
     pub value_origins: Map<Str, Str>,
+    // Exact registration kind for public value bindings. Absence is a local
+    // borrow; variant constructors use variant_ctor_origins independently.
+    pub value_binding_kinds: Map<Str, ValueBindingKind>,
     // Export lookup spelling -> canonical variant constructor symbol. This is
     // separate from value_origins because only genuine constructor bindings
     // may influence codegen/ownership classification.
@@ -22,6 +26,7 @@ pub struct ModuleExports {
     pub effects: Map<Str, EffectDef>,
     pub effect_aliases: Map<Str, EffectAliasDef>,
     pub traits: Map<Str, TraitDef>,
+    pub sigs: Map<Str, SigDef>,
     pub trait_impls: List<ImplEntry>,
     pub impl_methods: Map<Str, Map<Str, TypeScheme>>,
     pub inherent_methods: Map<Str, List<Str>>,
@@ -57,6 +62,60 @@ fn identity_leaf(identity: Str) -> Str {
     let inline_leaf = inline_parts.get(inline_parts.len() - 1).unwrap_or(identity)
     let file_parts = inline_leaf.split("$$_")
     file_parts.get(file_parts.len() - 1).unwrap_or(inline_leaf)
+}
+
+// Raw extern identities deliberately omit the file/inline owner. A fallback
+// from an exact canonical source is therefore valid only when the current
+// file's AST proves that the complete `$$_mod::...::item` path ends at an
+// ExternType declaration. Matching the leaf alone would let a prelude extern
+// or an unrelated sibling satisfy a private inline re-export.
+fn decl_path_is_extern_type(
+    decls: List<Decl>, path: List<Str>, path_index: Int
+) -> Bool {
+    if path_index < 0 || path_index >= path.len() { return false }
+    let expected = path.get(path_index).unwrap_or("")
+    let is_leaf = path_index == path.len() - 1
+    for decl in decls {
+        if is_leaf {
+            match decl {
+                Decl::ExternType { name, .. } => {
+                    if name == expected { return true }
+                },
+                _ => {}
+            }
+        } else {
+            match decl {
+                Decl::ModBlock { name, decls: nested, .. } => {
+                    if name == expected &&
+                       decl_path_is_extern_type(
+                           nested, path, path_index + 1) {
+                        return true
+                    }
+                },
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+fn program_declares_exact_extern_source(
+    program: Program, source: Str
+) -> Bool {
+    let identity_parts = source.split("$$_")
+    if identity_parts.len() != 2 { return false }
+    let relative = identity_parts.get(1).unwrap_or("")
+    if relative == "" { return false }
+    let path = relative.split("::")
+    if path.len() == 0 { return false }
+    decl_path_is_extern_type(program.decls, path, 0)
+}
+
+fn declared_value_kind(kinds: Map<Int, ValueBindingKind>, scheme: TypeScheme) -> ValueBindingKind? {
+    match scheme.def_id {
+        some(def_id) => kinds.get(def_id),
+        none => none
+    }
 }
 
 // Impl declarations deliberately retain their source spelling until the
@@ -134,9 +193,13 @@ fn inline_use_source_prefix(mod_identity: Str, use_decl: UseDecl) -> Str? {
 fn copy_inline_export(
     source: Str, local: Str, env: TypeEnv, fn_mut_params_map: Map<Str, List<Bool>>, program: Program,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
+    exact_value_origins: Map<Int, Str>,
+    exact_value_binding_kinds: Map<Int, ValueBindingKind>,
+    mut value_binding_kinds: Map<Str, ValueBindingKind>,
     mut variant_ctor_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>, mut type_aliases: Map<Str, TypeAliasDef>, mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>, mut traits: Map<Str, TraitDef>,
+    mut sigs: Map<Str, SigDef>,
     mut impl_methods: Map<Str, Map<Str, TypeScheme>>,
     mut inherent_methods: Map<Str, List<Str>>, mut struct_field_orders: Map<Str, List<Str>>,
     mut extern_values: Set<Str>, mut mut_methods: Map<Str, Set<Str>>,
@@ -144,8 +207,22 @@ fn copy_inline_export(
 ) {
     match env.lookup(source) {
         some(scheme) => {
+            let exact_origin = exact_scheme_value_origin(
+                exact_value_origins, scheme, source)
             values.insert(local, scheme)
-            value_origins.insert(local, source)
+            value_origins.insert(local, exact_origin)
+            match declared_value_kind(exact_value_binding_kinds, scheme) {
+                some(kind) => {
+                    value_binding_kinds.insert(local, kind)
+                    match kind {
+                        ValueBindingKind::ExternCallable => {
+                            extern_values.insert(local)
+                        },
+                        _ => {}
+                    }
+                },
+                none => {}
+            }
             match scheme.def_id {
                 some(def_id) => match env.types.variant_ctor_origins.get(def_id) {
                     some(origin) => { variant_ctor_origins.insert(local, origin) },
@@ -154,39 +231,17 @@ fn copy_inline_export(
                 none => {}
             }
             match fn_mut_params_map.get(source) {
-                some(flags) => { fn_mut_params.insert(local, flags) }, none => {}
-            }
-        },
-        none => {
-            // File-module ExternFn declarations deliberately retain their raw
-            // foreign ABI name instead of receiving the module$$_ canonical
-            // identity used by Ring functions. Relative inline pub-use paths
-            // are canonical, so fall back to the ABI leaf only when the file
-            // AST proves that leaf is a top-level extern declaration. This
-            // avoids accidentally resolving an unrelated short/import alias.
-            let abi_name = identity_leaf(source)
-            let mut is_file_extern = false
-            for decl in program.decls {
-                match decl {
-                    Decl::ExternFn { name, .. } => {
-                        if name == abi_name { is_file_extern = true }
-                    },
-                    _ => {}
-                }
-            }
-            if is_file_extern {
-                match env.lookup(abi_name) {
-                    some(scheme) => {
-                        values.insert(local, scheme)
-                        value_origins.insert(local, abi_name)
-                        extern_values.insert(local)
-                        match fn_mut_params_map.get(abi_name) {
-                            some(flags) => { fn_mut_params.insert(local, flags) }, none => {}
-                        }
-                    },
+                some(flags) => { fn_mut_params.insert(local, flags) },
+                none => match fn_mut_params_map.get(exact_origin) {
+                    some(flags) => { fn_mut_params.insert(local, flags) },
                     none => {}
                 }
             }
+        },
+        none => {
+            // Every file/inline extern now has a canonical declaration
+            // identity in the environment. A leaf fallback here would allow
+            // an unrelated same-spelled extern to leak across module scopes.
         }
     }
     match env.types.structs.get(source) {
@@ -203,22 +258,12 @@ fn copy_inline_export(
             }
         },
         none => {
-            // File-module extern types retain their raw ABI identity instead
-            // of the canonical module identity used by normal nominals. As
-            // with extern values, require an actual declaration in this file;
-            // a raw prelude extern type is not a `super::` module member.
-            let abi_name = identity_leaf(source)
-            let mut is_file_extern = false
-            for decl in program.decls {
-                match decl {
-                    Decl::ExternType { name, .. } => {
-                        if name == abi_name { is_file_extern = true }
-                    },
-                    _ => {}
-                }
-            }
-            if is_file_extern {
-                match env.types.structs.get(abi_name) {
+            // Extern types retain a raw ABI identity. Permit that lookup only
+            // after the complete canonical source path is proven against this
+            // file's recursive AST; never infer ownership from a unique leaf.
+            if program_declares_exact_extern_source(program, source) {
+                let abi_name = identity_leaf(source)
+                match env.types.extern_structs.get(abi_name) {
                     some(def) => {
                         if def.is_extern { types.insert(local, TypeDef::StructDef_(def)) }
                     },
@@ -275,6 +320,9 @@ fn copy_inline_export(
     match env.trait_reg.traits.get(source) {
         some(def) => { traits.insert(local, def) }, none => {}
     }
+    match env.types.sigs.get(source) {
+        some(def) => { sigs.insert(local, def) }, none => {}
+    }
 }
 
 fn extract_decl_export(
@@ -284,12 +332,16 @@ fn extract_decl_export(
     program: Program,
     mut values: Map<Str, TypeScheme>,
     mut value_origins: Map<Str, Str>,
+    exact_value_origins: Map<Int, Str>,
+    exact_value_binding_kinds: Map<Int, ValueBindingKind>,
+    mut value_binding_kinds: Map<Str, ValueBindingKind>,
     mut variant_ctor_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>,
     mut type_aliases: Map<Str, TypeAliasDef>,
     mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>,
     mut traits: Map<Str, TraitDef>,
+    mut sigs: Map<Str, SigDef>,
     mut impl_methods: Map<Str, Map<Str, TypeScheme>>,
     mut inherent_methods: Map<Str, List<Str>>,
     mut struct_field_orders: Map<Str, List<Str>>,
@@ -306,6 +358,7 @@ fn extract_decl_export(
                     some(scheme) => {
                         values.insert(display, scheme)
                         value_origins.insert(display, name)
+                        value_binding_kinds.insert(display, ValueBindingKind::DirectCallable)
                     },
                     none => {},
                 }
@@ -382,6 +435,15 @@ fn extract_decl_export(
                 }
             }
         },
+        Decl::Sig { name, is_pub, .. } => {
+            if is_pub {
+                let display = export_display_name(name)
+                match env.types.sigs.get(name) {
+                    some(sigdef) => { sigs.insert(display, sigdef) },
+                    none => {},
+                }
+            }
+        },
         Decl::Impl { target_type, trait_name, methods, .. } => {
             let canonical_target = export_nominal_identity(env, target_type)
             match env.trait_reg.impl_methods.get(canonical_target) {
@@ -449,6 +511,7 @@ fn extract_decl_export(
                     some(scheme) => {
                         values.insert(display, scheme)
                         value_origins.insert(display, name)
+                        value_binding_kinds.insert(display, ValueBindingKind::ExternCallable)
                     },
                     none => {},
                 }
@@ -457,8 +520,13 @@ fn extract_decl_export(
         Decl::ExternType { name, is_pub, .. } => {
             if is_pub {
                 let display = export_display_name(name)
-                match env.types.structs.get(name) {
-                    some(sdef) => { types.insert(display, TypeDef::StructDef_(sdef)) },
+                let abi_name = identity_leaf(name)
+                match env.types.extern_structs.get(abi_name) {
+                    some(sdef) => {
+                        if sdef.is_extern {
+                            types.insert(display, TypeDef::StructDef_(sdef))
+                        }
+                    },
                     none => {},
                 }
             }
@@ -479,6 +547,7 @@ fn extract_decl_export(
                     some(scheme) => {
                         values.insert(display, scheme)
                         value_origins.insert(display, name)
+                        value_binding_kinds.insert(display, ValueBindingKind::ConstGetter)
                     },
                     none => {},
                 }
@@ -489,8 +558,10 @@ fn extract_decl_export(
                 for subdecl in mod_decls {
                     let prefixed = prefix_decl_name(mod_name, subdecl)
                     extract_decl_export(prefixed, env, fn_mut_params_map, program,
-                        values, value_origins, variant_ctor_origins,
-                        types, type_aliases, effects, effect_aliases, traits,
+                        values, value_origins, exact_value_origins,
+                        exact_value_binding_kinds, value_binding_kinds,
+                        variant_ctor_origins,
+                        types, type_aliases, effects, effect_aliases, traits, sigs,
                         impl_methods, inherent_methods, struct_field_orders,
                         extern_values, mut_methods, fn_mut_params, false)
                 }
@@ -503,8 +574,10 @@ fn extract_decl_export(
                                 for item in names {
                                     let local_name = match item.alias { some(a) => a, none => item.name }
                                     copy_inline_export(append_identity(source_prefix, item.name), "${facade}::${local_name}",
-                                        env, fn_mut_params_map, program, values, value_origins, variant_ctor_origins,
-                                        types, type_aliases, effects, effect_aliases, traits,
+                                        env, fn_mut_params_map, program, values, value_origins,
+                                        exact_value_origins, exact_value_binding_kinds,
+                                        value_binding_kinds, variant_ctor_origins,
+                                        types, type_aliases, effects, effect_aliases, traits, sigs,
                                         impl_methods, inherent_methods, struct_field_orders, extern_values, mut_methods, fn_mut_params)
                                 }
                             },
@@ -513,8 +586,10 @@ fn extract_decl_export(
                                 let item_name = path.get(path.len() - 1).unwrap_or("")
                                 let local_name = match use_decl.alias { some(a) => a, none => item_name }
                                 copy_inline_export(append_identity(source_prefix, item_name), "${facade}::${local_name}",
-                                    env, fn_mut_params_map, program, values, value_origins, variant_ctor_origins,
-                                    types, type_aliases, effects, effect_aliases, traits,
+                                    env, fn_mut_params_map, program, values, value_origins,
+                                    exact_value_origins, exact_value_binding_kinds,
+                                    value_binding_kinds, variant_ctor_origins,
+                                    types, type_aliases, effects, effect_aliases, traits, sigs,
                                     impl_methods, inherent_methods, struct_field_orders, extern_values, mut_methods, fn_mut_params)
                             }
                         },
@@ -534,9 +609,11 @@ fn extract_decl_export(
 fn copy_exported_name(
     source: ModuleExports, source_name: Str, local_name: Str,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
+    mut value_binding_kinds: Map<Str, ValueBindingKind>,
     mut variant_ctor_origins: Map<Str, Str>,
     mut types: Map<Str, TypeDef>, mut type_aliases: Map<Str, TypeAliasDef>, mut effects: Map<Str, EffectDef>,
     mut effect_aliases: Map<Str, EffectAliasDef>, mut traits: Map<Str, TraitDef>,
+    mut sigs: Map<Str, SigDef>,
     mut struct_field_orders: Map<Str, List<Str>>, mut extern_values: Set<Str>,
     mut fn_mut_params: Map<Str, List<Bool>>,
     mut impl_methods: Map<Str, Map<Str, TypeScheme>>,
@@ -547,6 +624,10 @@ fn copy_exported_name(
             values.insert(local_name, scheme)
             match source.value_origins.get(source_name) {
                 some(origin) => { value_origins.insert(local_name, origin) },
+                none => {}
+            }
+            match source.value_binding_kinds.get(source_name) {
+                some(kind) => { value_binding_kinds.insert(local_name, kind) },
                 none => {}
             }
             match source.variant_ctor_origins.get(source_name) {
@@ -587,6 +668,9 @@ fn copy_exported_name(
     match source.traits.get(source_name) {
         some(def) => { traits.insert(local_name, def) }, none => {}
     }
+    match source.sigs.get(source_name) {
+        some(def) => { sigs.insert(local_name, def) }, none => {}
+    }
     match source.struct_field_orders.get(source_name) {
         some(fields) => { struct_field_orders.insert(local_name, fields) }, none => {}
     }
@@ -603,16 +687,20 @@ pub fn extract_exports(
     hprogram: HProgram,
     env: TypeEnv,
     fn_mut_params_map: Map<Str, List<Bool>>,
+    exact_value_origins: Map<Int, Str>,
+    exact_value_binding_kinds: Map<Int, ValueBindingKind>,
     available_modules: List<ModuleExports>
 ) -> ModuleExports {
     let mut values: Map<Str, TypeScheme> = map_new()
     let mut value_origins: Map<Str, Str> = map_new()
+    let mut value_binding_kinds: Map<Str, ValueBindingKind> = map_new()
     let mut variant_ctor_origins: Map<Str, Str> = map_new()
     let mut types: Map<Str, TypeDef> = map_new()
     let mut type_aliases: Map<Str, TypeAliasDef> = map_new()
     let mut effects: Map<Str, EffectDef> = map_new()
     let mut effect_aliases: Map<Str, EffectAliasDef> = map_new()
     let mut traits: Map<Str, TraitDef> = map_new()
+    let mut sigs: Map<Str, SigDef> = map_new()
     let mut impl_methods: Map<Str, Map<Str, TypeScheme>> = map_new()
     let mut inherent_methods: Map<Str, List<Str>> = map_new()
     let mut struct_field_orders: Map<Str, List<Str>> = map_new()
@@ -622,8 +710,10 @@ pub fn extract_exports(
     for decl in program.decls {
         let canonical_decl = module_prefix_decl_name(module_prefix, decl)
         extract_decl_export(canonical_decl, env, fn_mut_params_map, program,
-            values, value_origins, variant_ctor_origins,
-            types, type_aliases, effects, effect_aliases, traits,
+            values, value_origins, exact_value_origins,
+            exact_value_binding_kinds, value_binding_kinds,
+            variant_ctor_origins,
+            types, type_aliases, effects, effect_aliases, traits, sigs,
             impl_methods, inherent_methods, struct_field_orders,
             extern_values, mut_methods, fn_mut_params, true)
     }
@@ -642,8 +732,9 @@ pub fn extract_exports(
                         for item in names {
                             let local_name = match item.alias { some(a) => a, none => item.name }
                             copy_exported_name(source, item.name, local_name,
-                                values, value_origins, variant_ctor_origins,
-                                types, type_aliases, effects, effect_aliases, traits,
+                                values, value_origins, value_binding_kinds,
+                                variant_ctor_origins,
+                                types, type_aliases, effects, effect_aliases, traits, sigs,
                                 struct_field_orders, extern_values, fn_mut_params,
                                 impl_methods, inherent_methods, mut_methods)
                             // Importing an enum also imports its constructors.
@@ -651,8 +742,9 @@ pub fn extract_exports(
                                 some(TypeDef::EnumDef_(edef)) => {
                                     for v in edef.variants {
                                         copy_exported_name(source, v.name, v.name,
-                                            values, value_origins, variant_ctor_origins,
-                                            types, type_aliases, effects, effect_aliases, traits,
+                                            values, value_origins, value_binding_kinds,
+                                            variant_ctor_origins,
+                                            types, type_aliases, effects, effect_aliases, traits, sigs,
                                             struct_field_orders, extern_values, fn_mut_params,
                                             impl_methods, inherent_methods, mut_methods)
                                     }
@@ -669,12 +761,14 @@ pub fn extract_exports(
                         for entry in source.effects.entries() { let (name, _) = entry; names.insert(name) }
                         for entry in source.effect_aliases.entries() { let (name, _) = entry; names.insert(name) }
                         for entry in source.traits.entries() { let (name, _) = entry; names.insert(name) }
+                        for entry in source.sigs.entries() { let (name, _) = entry; names.insert(name) }
                         let mut sorted_names = names.to_list()
                         sorted_names.sort()
                         for name in sorted_names {
                             copy_exported_name(source, name, name,
-                                values, value_origins, variant_ctor_origins,
-                                types, type_aliases, effects, effect_aliases, traits,
+                                values, value_origins, value_binding_kinds,
+                                variant_ctor_origins,
+                                types, type_aliases, effects, effect_aliases, traits, sigs,
                                 struct_field_orders, extern_values, fn_mut_params,
                                 impl_methods, inherent_methods, mut_methods)
                         }
@@ -719,12 +813,14 @@ pub fn extract_exports(
         module_prefix: module_prefix,
         values: values,
         value_origins: value_origins,
+        value_binding_kinds: value_binding_kinds,
         variant_ctor_origins: variant_ctor_origins,
         types: types,
         type_aliases: type_aliases,
         effects: effects,
         effect_aliases: effect_aliases,
         traits: traits,
+        sigs: sigs,
         trait_impls: trait_impls,
         impl_methods: impl_methods,
         inherent_methods: inherent_methods,

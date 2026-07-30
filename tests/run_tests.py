@@ -456,6 +456,47 @@ def discover_negative_cases(directory: Path) -> List[Path]:
     return cases
 
 
+def error_contract_failure(contract_text: str, output: str) -> Optional[str]:
+    """Return why compiler output violates a .error contract, if it does.
+
+    Legacy contracts without a `!` line remain one exact multiline substring.
+    Contracts containing `!` treat each non-empty line independently: ordinary
+    lines are required substrings and `!pattern` lines are forbidden substrings.
+    """
+    contract = contract_text.strip()
+    if not contract:
+        return "malformed .error contract: empty or whitespace-only"
+
+    lines = [line.strip() for line in contract.splitlines() if line.strip()]
+    has_forbidden = any(line.startswith("!") for line in lines)
+    if has_forbidden:
+        required = [line for line in lines if not line.startswith("!")]
+        forbidden: List[str] = []
+        for line in lines:
+            if line.startswith("!"):
+                pattern = line[1:].strip()
+                if not pattern:
+                    return "malformed .error contract: empty forbidden pattern"
+                forbidden.append(pattern)
+        if not required:
+            return (
+                "malformed .error contract: forbidden-pattern mode requires "
+                "at least one required pattern"
+            )
+    else:
+        required = [contract]
+        forbidden = []
+
+    output_lower = output.lower()
+    for pattern in required:
+        if pattern.lower() not in output_lower:
+            return f'missing required diagnostic pattern "{pattern}"'
+    for pattern in forbidden:
+        if pattern.lower() in output_lower:
+            return f'found forbidden diagnostic pattern "{pattern}"'
+    return None
+
+
 def discover_module_positive(modules_dir: Path) -> List[Path]:
     """Return sorted list of module main.ring files that have main.expected."""
     if not modules_dir.is_dir():
@@ -565,7 +606,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             continue
 
         error_file = ring_file.with_suffix(".error")
-        pattern = error_file.read_text(encoding="utf-8").strip()
+        contract = error_file.read_text(encoding="utf-8")
 
         try:
             r = ring_check(ring_exe, str(ring_file))
@@ -579,14 +620,15 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 "expected non-zero exit, got 0"))
             continue
 
-        # Check all output (stdout + stderr) for the pattern
+        # Check all output (stdout + stderr) against the companion contract.
         combined = (r.stdout or "") + (r.stderr or "")
-        if pattern.lower() in combined.lower():
+        contract_failure = error_contract_failure(contract, combined)
+        if contract_failure is None:
             collector.add(TestResult(TestResult.PASS, suite, f"neg:{rel}"))
         else:
             collector.add(TestResult(
                 TestResult.FAIL, suite, f"neg:{rel}",
-                f'expected pattern "{pattern}" in output, got: {combined[:300]}'))
+                f"{contract_failure}; output: {combined[:300]}"))
 
     # --- Module positive ---
     mod_positive = discover_module_positive(MODULES_DIR)
@@ -631,7 +673,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             continue
 
         error_file = main_file.parent / "main.error"
-        pattern = error_file.read_text(encoding="utf-8").strip()
+        contract = error_file.read_text(encoding="utf-8")
 
         try:
             r = ring_check(ring_exe, str(main_file))
@@ -646,12 +688,13 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             continue
 
         combined = (r.stdout or "") + (r.stderr or "")
-        if pattern.lower() in combined.lower():
+        contract_failure = error_contract_failure(contract, combined)
+        if contract_failure is None:
             collector.add(TestResult(TestResult.PASS, suite, f"mod-neg:{mod_name}"))
         else:
             collector.add(TestResult(
                 TestResult.FAIL, suite, f"mod-neg:{mod_name}",
-                f'expected "{pattern}" in output, got: {combined[:300]}'))
+                f"{contract_failure}; output: {combined[:300]}"))
 
 
 # ---------------------------------------------------------------------------

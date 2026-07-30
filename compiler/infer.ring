@@ -10,7 +10,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HProgram, DerivedImpl,
     TraitDispatch, DictDispatchInfo, DictRef, TraitBound,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod,
-    HForInDestructure, HLetDestructureBinding,
+    HForInDestructure, HLetDestructureBinding, ValueBindingKind,
     trait_bound_param_name,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
     hexpr_type, hexpr_effects, hexpr_span, map_index_helper_identity}
@@ -34,7 +34,7 @@ use infer_helpers::{MethodLookupResult, StmtResult,
     check_assign_target_mutable, find_root_expr, get_assign_target_root_def_id, get_hexpr_root_type,
     infer_ident, infer_numeric_op, is_primitive_eq, is_primitive_ord, is_tuple_type,
     resolve_trait_dispatch,
-    resolve_arg_dict_closure, resolve_arg_bound_dict,
+    is_bounded_direct_callable_ident, resolve_callee_metadata,
     check_expr_is_let_def, get_expr_def_id, is_mut_method_call, check_receiver_mutability,
     lookup_impl_method, lookup_trait_method,
     rewrite_bare_enum_bindings}
@@ -89,6 +89,194 @@ pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
 // Statement inference (from infer-stmt.ts)
 // ============================================================
 
+fn hstmt_contains_bounded_callable_value(ctx: InferCtx, stmt: HStmt) -> Bool {
+    match stmt {
+        HStmt::Let { init, .. } => hexpr_contains_bounded_callable_value(ctx, init),
+        HStmt::Var { init, .. } => hexpr_contains_bounded_callable_value(ctx, init),
+        HStmt::Assign { target, value, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, target) ||
+            hexpr_contains_bounded_callable_value(ctx, value),
+        HStmt::ExprStmt { expr, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, expr),
+        HStmt::Return { value, .. } => match value {
+            some(v) => hexpr_contains_bounded_callable_value(ctx, v),
+            none => false
+        },
+        HStmt::While { condition, body, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, condition) ||
+            hexpr_contains_bounded_callable_value(ctx, body),
+        HStmt::ForIn { iterable, body, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, iterable) ||
+            hexpr_contains_bounded_callable_value(ctx, body),
+        HStmt::LetDestructure { init, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, init),
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            if hexpr_contains_bounded_callable_value(ctx, expr) ||
+               hexpr_contains_bounded_callable_value(ctx, then_block) {
+                return true
+            }
+            match else_block {
+                some(block) => hexpr_contains_bounded_callable_value(ctx, block),
+                none => false
+            }
+        },
+        HStmt::Break { .. } => false,
+        HStmt::Continue { .. } => false,
+        HStmt::Drop { .. } => false,
+        HStmt::Dup { .. } => false
+    }
+}
+
+fn hexpr_contains_bounded_callable_value(ctx: InferCtx, expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Ident { .. } => is_bounded_direct_callable_ident(ctx, expr),
+        HExpr::BinOp { left, right, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, left) ||
+            hexpr_contains_bounded_callable_value(ctx, right),
+        HExpr::UnaryOp { operand, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, operand),
+        HExpr::Call { callee, args, .. } => {
+            // A bare Ident callee is a direct invocation, not a function value.
+            match callee {
+                HExpr::Ident { .. } => {},
+                _ => {
+                    if hexpr_contains_bounded_callable_value(ctx, callee) {
+                        return true
+                    }
+                }
+            }
+            for arg in args {
+                if hexpr_contains_bounded_callable_value(ctx, arg) { return true }
+            }
+            false
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, receiver),
+        HExpr::StructLit { fields, spread, .. } => {
+            for field in fields {
+                if hexpr_contains_bounded_callable_value(ctx, field.value) { return true }
+            }
+            match spread {
+                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
+                none => false
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields {
+                if hexpr_contains_bounded_callable_value(ctx, field.value) { return true }
+            }
+            match spread {
+                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
+                none => false
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            if hexpr_contains_bounded_callable_value(ctx, scrutinee) { return true }
+            for arm in arms {
+                match arm.guard {
+                    some(guard) => {
+                        if hexpr_contains_bounded_callable_value(ctx, guard) { return true }
+                    },
+                    none => {}
+                }
+                if hexpr_contains_bounded_callable_value(ctx, arm.body) { return true }
+            }
+            false
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts {
+                if hstmt_contains_bounded_callable_value(ctx, stmt) { return true }
+            }
+            match tail {
+                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
+                none => false
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            if hexpr_contains_bounded_callable_value(ctx, condition) ||
+               hexpr_contains_bounded_callable_value(ctx, then_branch) {
+                return true
+            }
+            match else_branch {
+                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
+                none => false
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(value) => {
+                        if hexpr_contains_bounded_callable_value(ctx, value) { return true }
+                    },
+                    _ => {}
+                }
+            }
+            false
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            if hexpr_contains_bounded_callable_value(ctx, body) { return true }
+            for arm in arms {
+                match arm.guard {
+                    some(guard) => {
+                        if hexpr_contains_bounded_callable_value(ctx, guard) { return true }
+                    },
+                    none => {}
+                }
+                if hexpr_contains_bounded_callable_value(ctx, arm.body) { return true }
+            }
+            false
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            if hexpr_contains_bounded_callable_value(ctx, body) { return true }
+            for handler in handlers {
+                if hexpr_contains_bounded_callable_value(ctx, handler.body) { return true }
+            }
+            false
+        },
+        HExpr::Lambda { body, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, body),
+        HExpr::EffectOp { args, .. } => {
+            for arg in args {
+                if hexpr_contains_bounded_callable_value(ctx, arg) { return true }
+            }
+            false
+        },
+        HExpr::RangeExpr { start, end, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, start) ||
+            hexpr_contains_bounded_callable_value(ctx, end),
+        HExpr::ListLit { elements, .. } => {
+            for element in elements {
+                if hexpr_contains_bounded_callable_value(ctx, element) { return true }
+            }
+            false
+        },
+        // Keep this separate from ListLit. LLVM OrPattern lowering does not
+        // bind payload fields, so a shared arm leaks `elements` into codegen.
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                if hexpr_contains_bounded_callable_value(ctx, element) { return true }
+            }
+            false
+        },
+        HExpr::IndexExpr { receiver, index, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, receiver) ||
+            hexpr_contains_bounded_callable_value(ctx, index),
+        HExpr::Clone { inner, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, inner),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(inner) => hexpr_contains_bounded_callable_value(ctx, inner),
+            none => false
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            hexpr_contains_bounded_callable_value(ctx, body),
+        HExpr::IntLit { .. } => false,
+        HExpr::FloatLit { .. } => false,
+        HExpr::StrLit { .. } => false,
+        HExpr::BoolLit { .. } => false,
+        HExpr::DictConstruct { .. } => false
+    }
+}
+
 pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult {
     match stmt {
         Stmt::Let { name, name_span, type_annotation, init, span } => {
@@ -108,21 +296,12 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                 none => {}
             }
             let resolved = apply_subst(s, var_type)
-            // #214: if the init is a generic function with trait bounds, don't
-            // generalize — the LLVM dict-passing backend captures dicts in the
-            // closure wrapper at creation time, so the concrete type must be
-            // known (determined by later uses that unify the type variable).
-            // Without this, generalization makes the type variable a bound var
-            // that is never unified, and the codegen can't compute the dict.
-            let init_has_bounds = match init {
-                Expr::Ident { name: init_name, .. } => {
-                    match ctx.env.lookup(init_name) {
-                        some(init_scheme) => init_scheme.bounds.len() > 0,
-                        none => false,
-                    }
-                },
-                _ => false,
-            }
+            // A bounded direct callable hidden anywhere in a value position
+            // must stay monomorphic until later uses determine its concrete
+            // evidence. The DefId walk is shadow-safe and deliberately skips
+            // only a bare direct-call callee.
+            let init_has_bounds =
+                hexpr_contains_bounded_callable_value(ctx, init_r.hexpr)
             // Optimization: skip the expensive free_type_vars_in_env scan when the resolved
             // type is ground (no type variables). Most function-local let bindings have ground
             // types, so this avoids a full env scan on each one.
@@ -621,7 +800,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
 
             ctx.env.push_scope()
             let then_result = some({
-                bind_pattern(ctx, iflet_pattern, expr_type, s)
+                s = bind_pattern(ctx, iflet_pattern, expr_type, s)
                 infer_block(ctx, then_block, some(s))
             }) catch { _ => none }
             ctx.env.pop_scope()
@@ -1051,6 +1230,7 @@ fn infer_unary_op(mut ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, sub
 
 fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     let callee_r = infer_expr(ctx, callee, subst)
+    let callee_metadata = resolve_callee_metadata(ctx, callee_r.hexpr)
     let mut s = callee_r.subst
     let mut effects = callee_r.effects
 
@@ -1101,36 +1281,28 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
         ai = ai + 1
     }
 
-    // B-069: Fill in default arguments for missing trailing params
-    let callee_name_for_defaults: Str? = match callee { Expr::Ident { name: cn, .. } => some(cn), _ => none }
-    match callee_name_for_defaults {
-        some(cn) => {
-            match ctx.fn_defaults.get(cn) {
-                some(defaults) => {
-                    match ctx.fn_min_arity.get(cn) {
-                        some(min_ar) => {
-                            let total_arity = min_ar + defaults.len()
-                            if args.len() < total_arity && args.len() >= min_ar {
-                                // Append default HExprs for the missing params
-                                let defaults_start = args.len() - min_ar
-                                let mut di = defaults_start
-                                while di < defaults.len() {
-                                    match defaults.get(di) {
-                                        some(dh) => {
-                                            hargs.push(dh)
-                                            arg_types.push(hexpr_type(dh))
-                                        },
-                                        none => {}
-                                    }
-                                    di = di + 1
-                                }
-                            }
-                        },
-                        none => {}
+    // B-069: Fill in default arguments only from exact DirectCallable
+    // metadata. The resolver requires min/default maps as one atomic pair.
+    match callee_metadata {
+        some(metadata) => match metadata.defaults {
+            some(defaults) => {
+                let total_arity = defaults.min_arity + defaults.values.len()
+                if args.len() < total_arity && args.len() >= defaults.min_arity {
+                    let defaults_start = args.len() - defaults.min_arity
+                    let mut di = defaults_start
+                    while di < defaults.values.len() {
+                        match defaults.values.get(di) {
+                            some(dh) => {
+                                hargs.push(dh)
+                                arg_types.push(hexpr_type(dh))
+                            },
+                            none => {}
+                        }
+                        di = di + 1
                     }
-                },
-                none => {}
-            }
+                }
+            },
+            none => {}
         },
         none => {}
     }
@@ -1162,18 +1334,27 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     }
 
     let mut resolved_dicts: List<DictRef> = []
-    match callee {
-        Expr::Ident { name: callee_name, .. } => {
-            match ctx.env.lookup(callee_name) {
-                some(callee_scheme) => {
-                    if callee_scheme.bounds.len() > 0 {
-                        resolved_dicts = resolve_dicts_from_scheme(ctx.sink, ctx.env, ctx.current_fn_bounds, callee_scheme, hexpr_type(callee_r.hexpr), s, span)
-                    }
-                },
-                none => {}
-            }
+    match callee_metadata {
+        some(metadata) => match metadata.kind {
+            ValueBindingKind::DirectCallable => {
+                if metadata.live_scheme.bounds.len() > 0 {
+                    resolved_dicts = resolve_dicts_from_scheme(
+                        ctx.sink, ctx.env, ctx.current_fn_bounds,
+                        metadata.live_scheme, hexpr_type(callee_r.hexpr), s, span)
+                }
+            },
+            ValueBindingKind::ExternCallable => {
+                if metadata.live_scheme.bounds.len() > 0 {
+                    // Extern ABI never receives Ring dictionaries. Resolution
+                    // remains mandatory for static bound validation.
+                    let _ = resolve_dicts_from_scheme(
+                        ctx.sink, ctx.env, ctx.current_fn_bounds,
+                        metadata.live_scheme, hexpr_type(callee_r.hexpr), s, span)
+                }
+            },
+            ValueBindingKind::ConstGetter | ValueBindingKind::LocalBorrow => {}
         },
-        _ => {}
+        none => {}
     }
 
     // B-100 Fix 3: compute result_type AFTER dict resolution so that
@@ -1181,61 +1362,51 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     // reflected in the result.
     let result_type = apply_subst(s, ret_var)
 
-    // Call-site pre-boxing: if callee has mut value-type params, mark mutable var args as boxed
-    match callee {
-        Expr::Ident { name: callee_name, .. } => {
-            match ctx.fn_mut_params.get(callee_name) {
-                some(mut_flags) => {
-                    let mut mi = 0
-                    while mi < mut_flags.len() && mi < args.len() {
-                        match (mut_flags.get(mi), hargs.get(mi)) {
-                            (some(is_mut), some(harg)) => {
-                                if is_mut {
-                                    // Check if the arg is a mutable variable Ident
-                                    match harg {
-                                        HExpr::Ident { def_id: some(arg_did), .. } => {
-                                            if ctx.env.scope.mutable_vars.contains(arg_did) {
-                                                // Check if the param type is a value type
-                                                match resolved_callee_type {
-                                                    Type::FnType { params: fn_params, .. } => {
-                                                        match fn_params.get(mi) {
-                                                            some(pt) => {
-                                                                let resolved_pt = apply_subst(s, pt)
-                                                                if is_value_type(resolved_pt) {
-                                                                    ctx.boxed_vars.insert(arg_did)
-                                                                }
-                                                            },
-                                                            none => {}
-                                                        }
-                                                    },
-                                                    _ => {}
-                                                }
+    // Call-site pre-boxing consumes only exact DirectCallable metadata.
+    match callee_metadata {
+        some(metadata) => match metadata.mut_flags {
+            some(mut_flags) => {
+                let mut mi = 0
+                while mi < mut_flags.len() && mi < args.len() {
+                    match (mut_flags.get(mi), hargs.get(mi)) {
+                        (some(is_mut), some(harg)) => {
+                            if is_mut {
+                                match harg {
+                                    HExpr::Ident { def_id: some(arg_did), .. } => {
+                                        if ctx.env.scope.mutable_vars.contains(arg_did) {
+                                            match resolved_callee_type {
+                                                Type::FnType { params: fn_params, .. } => {
+                                                    match fn_params.get(mi) {
+                                                        some(pt) => {
+                                                            let resolved_pt = apply_subst(s, pt)
+                                                            if is_value_type(resolved_pt) {
+                                                                ctx.boxed_vars.insert(arg_did)
+                                                            }
+                                                        },
+                                                        none => {}
+                                                    }
+                                                },
+                                                _ => {}
                                             }
-                                        },
-                                        _ => {}
-                                    }
+                                        }
+                                    },
+                                    _ => {}
                                 }
-                            },
-                            _ => {}
-                        }
-                        mi = mi + 1
+                            }
+                        },
+                        _ => {}
                     }
-                },
-                none => {}
-            }
+                    mi = mi + 1
+                }
+            },
+            none => {}
         },
-        _ => {}
-    }
-
-    // Post-process: resolve dict_closure_dicts for ident args
-    let mut final_hargs: List<HExpr> = []
-    for harg in hargs {
-        final_hargs.push(resolve_arg_dict_closure(ctx, harg, s))
+        none => {}
     }
 
     InferResult {
         hexpr: HExpr::Call {
-            callee: callee_r.hexpr, args: final_hargs, type_args: [],
+            callee: callee_r.hexpr, args: hargs, type_args: [],
             resolved_dicts: resolved_dicts, dict_dispatch: none,
             ty: result_type, effects: effects, span: span
         },
@@ -2005,7 +2176,7 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
         ctx.env.push_scope()
         let arm_result = some({
             let match_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
-            bind_pattern(ctx, match_pattern, hexpr_type(scrut_r.hexpr), s)
+            s = bind_pattern(ctx, match_pattern, hexpr_type(scrut_r.hexpr), s)
 
             let mut guard_hexpr: HExpr? = none
             match arm.guard {
@@ -2252,7 +2423,7 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
         ctx.env.push_scope()
         let arm_result = some({
             let catch_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
-            bind_pattern(ctx, catch_pattern, error_type, s)
+            s = bind_pattern(ctx, catch_pattern, error_type, s)
 
             let mut guard_hexpr: HExpr? = none
             match arm.guard {

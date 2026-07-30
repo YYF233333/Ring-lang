@@ -12,8 +12,8 @@
 //     sites).  Borrow of a binding in scope.
 //   * DictRef::Wrapped{..}   — a parameterized type's dict resolution.
 //
-// This pass rewrites every use site (Call.resolved_dicts and BinOp
-// eq/ord_dispatch extra_dicts):
+// This pass rewrites every use site (Call.resolved_dicts,
+// Ident.dict_closure_dicts, and BinOp eq/ord_dispatch extra_dicts):
 //   1. Static(name) plain refs  → registered in HProgram.static_dicts
 //      (footprint; LLVM memoises the singleton on first use).
 //   2. Wrapped with ALL-STATIC inners → ONE module-level singleton instance
@@ -28,9 +28,6 @@
 //      D2 verifier accounts it like any owned local (no exemption class).
 //
 // NOT rewritten (documented residuals):
-//   * Ident.dict_closure_dicts (List<Str> names) — name-based references; the
-//     resolver's name chain returns memoised singletons for static names,
-//     params resolve from scope.
 //   * BinOp dispatch extra_dicts with a DYNAMIC inner stay Wrapped: codegen
 //     ignores extra_dicts in Eq/Ord dispatch (pre-existing functional gap,
 //     reported — nothing is constructed, so nothing leaks).
@@ -194,8 +191,8 @@ fn dl_decl(d: HDecl, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
             }
             HDecl::Effect { name: name, type_params: type_params, ops: new_ops, is_pub: is_pub, span: span }
         },
-        HDecl::ExternFn { name, def_id, type_params, params, return_type, effects, is_pub, span } =>
-            HDecl::ExternFn { name: name, def_id: def_id, type_params: type_params, params: params, return_type: return_type, effects: effects, is_pub: is_pub, span: span },
+        HDecl::ExternFn { name, abi_name, def_id, type_params, params, return_type, effects, is_pub, span } =>
+            HDecl::ExternFn { name: name, abi_name: abi_name, def_id: def_id, type_params: type_params, params: params, return_type: return_type, effects: effects, is_pub: is_pub, span: span },
         HDecl::ExternType { name, type_params, is_pub, span } =>
             HDecl::ExternType { name: name, type_params: type_params, is_pub: is_pub, span: span },
         HDecl::TypeAlias { name, ty, is_pub, span } =>
@@ -322,8 +319,35 @@ fn dl_expr(e: HExpr, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
             HExpr::StrLit { value: value, ty: ty, effects: effects, span: span },
         HExpr::BoolLit { value, ty, effects, span } =>
             HExpr::BoolLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
-            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } => {
+            let mut lets: List<HStmt> = []
+            let lowered_dicts = match dict_closure_dicts {
+                some(dicts) => {
+                    let mut lowered: List<DictRef> = []
+                    for dr in dicts {
+                        lowered.push(dl_ref_dyn(dr, defs, seen, counter, lets, span))
+                    }
+                    some(lowered)
+                },
+                none => none,
+            }
+            let ident = HExpr::Ident {
+                name: name, resolved_name: resolved_name, def_id: def_id,
+                dict_closure_dicts: lowered_dicts,
+                ty: ty, effects: effects, span: span
+            }
+            if lets.len() == 0 {
+                ident
+            } else {
+                // A dynamic wrapped dict is constructed exactly once, then
+                // captured (dup) by the closure wrapper.  The local's ordinary
+                // scope drop balances the construction reference.
+                HExpr::Block {
+                    stmts: lets, tail: some(ident),
+                    ty: ty, effects: effects, span: span
+                }
+            }
+        },
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } =>
             HExpr::BinOp { op: op,
                 left: dl_expr(left, defs, seen, counter),

@@ -17,7 +17,7 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     hexpr_type, hexpr_span, hexpr_effects,
     is_rc_excluded_type, type_contains_extern_handle,
     is_borrow_returning_call, is_user_drop_type,
-    is_nullary_variant_ctor_ident,
+    is_nullary_variant_ctor_ident, is_materialized_fn_value,
     slot_read_identity, slot_take_identity, slot_write_identity}
 use types::{Type}
 
@@ -279,6 +279,63 @@ fn anf_fn_body(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr 
 //   - MatchExpr/Block/DictConstruct: NOT materialized (conservative), IS
 //     droppable (binding position needs branch-recursive analysis)
 // When adding a NEW HExpr variant, update BOTH functions.
+//
+// Callable control flow is the one deliberately stronger case: a function
+// value can be certified fresh when every value-producing path creates a
+// wrapper/lambda or returns a fresh Call result. Diverging paths produce no
+// value and therefore do not veto that proof. Keep this helper public so the
+// post-RC verifier rejects any such shape that survives ANF in a borrow site.
+pub fn is_materializable_fn_value(expr: HExpr, externs: Set<Str>) -> Bool {
+    let ty = hexpr_type(expr)
+    let is_fn = match ty { Type::FnType { .. } => true, _ => false }
+    if is_fn == false {
+        return false
+    }
+    if is_rc_excluded_type(ty, externs) || type_contains_extern_handle(ty, externs) {
+        return false
+    }
+    if is_unresolved_var_type(ty) || expr_diverges(expr) {
+        return false
+    }
+    match expr {
+        HExpr::Ident { dict_closure_dicts, .. } =>
+            dict_closure_dicts.is_some(),
+        HExpr::Lambda { .. } => true,
+        HExpr::Call { callee, .. } => is_borrow_returning_call(callee) == false,
+        HExpr::Clone { .. } => true,
+        HExpr::Block { tail, .. } => match tail {
+            some(value) => is_materializable_fn_value(value, externs),
+            none => false
+        },
+        HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
+            some(value) =>
+                is_materializable_fn_branch(then_branch, externs) &&
+                is_materializable_fn_branch(value, externs),
+            none => false
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut all = arms.len() > 0
+            for arm in arms {
+                if is_materializable_fn_branch(arm.body, externs) == false {
+                    all = false
+                }
+            }
+            all
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            is_materializable_fn_value(body, externs),
+        _ => false
+    }
+}
+
+fn is_materializable_fn_branch(body: HExpr, externs: Set<Str>) -> Bool {
+    if expr_diverges(body) {
+        true
+    } else {
+        is_materializable_fn_value(body, externs)
+    }
+}
+
 fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
     //   ② a Unit-typed expression has no value semantics (checker-guaranteed).
@@ -323,6 +380,13 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     // (an extra dup on a live pointer only pins — crash-free).
     if is_unresolved_var_type(ty) {
         return false
+    }
+    // A checker-marked module function value allocates a fresh wrapper closure
+    // at codegen.  The explicit some([]) marker is just as owned as a bounded
+    // some(dicts) wrapper; control-flow/Block forms share this classification
+    // through hir.is_materialized_fn_value.
+    if is_materializable_fn_value(expr, externs) {
+        return true
     }
     let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
     match expr {
@@ -505,8 +569,8 @@ fn anf_materialize(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>)
 // condition, index expression, interpolation piece).  Here materialise+scope-drop
 // is SOUND: the fresh-owned box is consumed by the op (box_int/box_bool/unbox/
 // stringify) and never aliased back out as the enclosing expression's value, so the
-// caller's scope-end Drop is balanced.  Recurse, then materialise if fresh-owned
-// (R1/R4).
+// caller's scope-end Drop is balanced. Recurse, then materialise if fresh-owned
+// (R1/R4). The same rule is now used for non-borrow callee expressions.
 //
 // This now covers EVERY operand position, including CALL / EFFECTOP arguments
 // and the MATCH scrutinee.  The historical alias hazards are all closed: a match
@@ -1087,20 +1151,25 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
     }
 }
 
-// Normalise a callee expression (the function/method being called): an Ident or a
-// FieldAccess (method receiver).  Its subexprs are normalised but the callee
-// itself is a borrow read — never materialised.
+// Normalise a callee expression. Ordinary Ident/FieldAccess callees are borrow
+// reads, but a checker-marked wrapper (including a dynamic-dict Block wrapper)
+// and any other provably fresh callee Call must be materialised so the closure
+// pair/env is scope-end-dropped after the immediate invocation.
 fn anf_callee(callee: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
-    anf_borrow(callee, hoists, externs, counter)
+    let normalized = anf_borrow(callee, hoists, externs, counter)
+    if is_materializable_fn_value(normalized, externs) || anf_should_materialize(normalized, externs) {
+        anf_materialize(normalized, hoists, counter)
+    } else {
+        normalized
+    }
 }
 
 // Normalise an expression on the residual NO-MATERIALISE path: recurse into its
 // subexprs (which still hoist their own fresh operands), but NEVER materialise
-// the top expression.  Since B-104 D1 Stage 2 (receiver positions now go through
-// anf_operand — see the FieldAccess/IndexExpr arms) only two positions remain:
-//   * the CALLEE expression itself (an Ident or the method FieldAccess — never a
-//     materialisable form; a hypothetical Call-callee `get_fn()(x)` would be a
-//     residual leak, kept conservative);
+// the top expression. Since B-104 D1 Stage 2 (receiver positions now go through
+// anf_operand — see the FieldAccess/IndexExpr arms) this helper first normalises:
+//   * the CALLEE expression itself; anf_callee then materialises a fresh Call or
+//     checker-marked wrapper while leaving Ident/method borrows in place;
 //   * a STRUCT/VARIANT SPREAD source: codegen copies the source's field pointers
 //     RAW (no dup) into the new struct — materialising a fresh spread source
 //     would scope-end-drop it, deep-freeing the fields the new struct now holds
@@ -1248,6 +1317,12 @@ fn transform_fn_body(params: List<HParam>, body: HExpr, boxed: Set<Int>, externs
 // closure, string-interp, .values()/.entries() which build owned containers):
 // it has no other owner, so the sink moves it in (no clone — cloning would leak).
 fn is_owner_bearing(expr: HExpr) -> Bool {
+    // Module callable markers are productions, not reads: evaluating them
+    // allocates a fresh {thunk, env} pair. Clone-wrapping would dup the fresh
+    // pair and strand its original construction reference.
+    if is_materialized_fn_value(expr) {
+        return false
+    }
     let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
     match expr {
         // Ordinary identifiers read an existing owner.  A fieldless variant is
@@ -1820,6 +1895,9 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     // (zonked) types are unaffected.
     if is_unresolved_var_type(ty) {
         return false
+    }
+    if is_materialized_fn_value(init) {
+        return true
     }
     match init {
         // Owner-bearing reads → rc_escape wraps in a fresh Clone.
@@ -2637,6 +2715,18 @@ pub fn stmt_diverges(stmt: HStmt) -> Bool {
 
 // (pub: shared with verify_rc.ring's path accounting.)
 pub fn expr_diverges(expr: HExpr) -> Bool {
+    // Never is the type-level proof of divergence.  In particular, a direct
+    // `panic(...)` is a Call rather than a ReturnExpr, so structural matching
+    // alone would incorrectly treat it as a value-producing branch.  Every
+    // HExpr variant carries a type, making this guard both total and the most
+    // precise first check for new Never-producing expression forms.
+    let is_never = match hexpr_type(expr) {
+        Type::NeverType => true,
+        _ => false
+    }
+    if is_never {
+        return true
+    }
     match expr {
         HExpr::Block { stmts, tail, .. } => {
             // Diverges if any top-level statement diverges (statements after it
@@ -2672,6 +2762,9 @@ pub fn expr_diverges(expr: HExpr) -> Bool {
         },
         // B-113: return in expression position always diverges.
         HExpr::ReturnExpr { .. } => true,
+        // Unsafe is ownership-transparent; its body's control transfer still
+        // prevents the enclosing scope end from being reached.
+        HExpr::UnsafeBlock { body, .. } => expr_diverges(body),
         _ => false,
     }
 }

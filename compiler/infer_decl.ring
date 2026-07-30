@@ -5,7 +5,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
-    collect_extern_type_names, compare_by_first}
+    collect_extern_type_names, compare_by_first, extern_abi_leaf}
 use env::{TypeScheme, SchemeBound, apply_subst, apply_subst_map, apply_subst_row_map, find_impl, has_impl}
 use union_find::{UnionFind}
 use unify::{empty_subst}
@@ -15,7 +15,9 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, AssocRebindEntry, CompileE
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type,
-    generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses}
+    generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses,
+    enter_project_root_frame, enter_project_child_frame,
+    exit_project_namespace_frame}
 use infer_helpers::{is_value_type}
 use infer_register::{register_decls_two_phase, register_module_decls_two_phase,
     resolve_declared_effects, prefix_decl_name, insert_mod_aliases,
@@ -30,7 +32,9 @@ use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names, collect_sel
 // Pass 2: Check declarations (from infer.ts)
 // ============================================================
 
-fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
+fn check_decl(
+    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?
+) -> HDecl {
     match decl {
         Decl::Struct { name, type_params, is_pub, span, .. } =>
             check_struct_decl(ctx, name, type_params, is_pub, span),
@@ -60,7 +64,9 @@ fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
         Decl::Const { name, type_annotation, init, is_pub, span } =>
             check_const_decl(ctx, name, type_annotation, init, is_pub, span),
         Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
-            check_mod_decl(ctx, name, uses, decls, required_effects, is_pub, span),
+            check_mod_decl(
+                ctx, name, uses, decls, required_effects,
+                is_pub, span, frame_decl_index),
         Decl::Sig { name, members, is_pub, span } =>
             check_sig_decl(ctx, name, members, is_pub, span),
         Decl::EffectAlias { name, is_pub, span, .. } =>
@@ -74,21 +80,20 @@ fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
     }
 }
 
-fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: List<Decl>, required_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
-    // Push only the last segment onto mod_path_stack for self::/super:: resolution.
-    // mod_name may be fully qualified (e.g. "a::b") when nested mods are prefixed.
-    let segments = mod_name.split("::")
-    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
-    ctx.mod_path_stack.push(simple_name)
-
+fn check_mod_decl_body(
+    mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>,
+    decls: List<Decl>, required_effects: List<EffectExpr>?,
+    is_pub: Bool, span: Span, project_frame_active: Bool
+) -> HDecl {
     // Register short-name aliases for mod-internal types so that
     // type annotations like `c: Circle` resolve to `shapes::Circle`.
     // These aliases remain in scope for the rest of the file, which
     // is acceptable because inline mods share the file scope.
-    insert_mod_aliases(ctx, mod_name, decls, false)
-
-    // Resolve use declarations with relative paths (self::/super::)
-    resolve_mod_uses(ctx, uses, true)
+    if !project_frame_active {
+        insert_mod_aliases(ctx, mod_name, decls, false)
+        // Resolve use declarations with relative paths (self::/super::)
+        resolve_mod_uses(ctx, uses, true)
+    }
 
     // Resolve required effects if present
     let mut cap_row: EffectRow? = none
@@ -100,7 +105,6 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     }
 
     // B-125: set mod_unsafe_allowed based on whether unsafe is in required effects
-    let prev_unsafe_allowed = ctx.mod_unsafe_allowed
     match cap_row {
         some(cap) => {
             ctx.mod_unsafe_allowed = cap.effects.any(fn(e) {
@@ -113,9 +117,22 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     }
 
     let mut hdecls: List<HDecl> = []
-    for decl in decls {
-        let prefixed = prefix_decl_name(mod_name, decl)
-        let result = some(check_decl(ctx, prefixed)) catch { _ => none }
+    for decl_index in 0..decls.len() {
+        let decl = decls.get(decl_index).unwrap()
+        // Project extern types retain their foreign ABI identity. Registration
+        // keeps only that raw source definition and the exact namespace frame
+        // supplies its visible spelling; HIR must therefore use the same raw
+        // identity. Single-file inline modules keep their legacy prefix.
+        let prefixed = if project_frame_active {
+            match decl {
+                Decl::ExternType { .. } => decl,
+                _ => prefix_decl_name(mod_name, decl)
+            }
+        } else {
+            prefix_decl_name(mod_name, decl)
+        }
+        let result = some(check_decl(
+            ctx, prefixed, some(decl_index))) catch { _ => none }
         match result {
             some(hd) => {
                 // Update fn effects (same as check_one_decl)
@@ -161,9 +178,48 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
             _ => {}
         }
     }
-    ctx.mod_path_stack.pop()
-    ctx.mod_unsafe_allowed = prev_unsafe_allowed
     HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
+}
+
+fn check_mod_decl(
+    mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>,
+    decls: List<Decl>, required_effects: List<EffectExpr>?,
+    is_pub: Bool, span: Span, frame_decl_index: Int?
+) -> HDecl {
+    let project_active = ctx.project_namespace_file_key.is_some()
+    let mut entered_project_frame = false
+    if project_active {
+        entered_project_frame = match frame_decl_index {
+            some(decl_index) => enter_project_child_frame(ctx, decl_index),
+            none => false
+        }
+        if !entered_project_frame {
+            panic("unreachable: resolver plan missing inline check frame")
+        }
+    }
+
+    // Keep self/super path state paired with the exact namespace frame.
+    let segments = mod_name.split("::")
+    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
+    ctx.mod_path_stack.push(simple_name)
+    let prev_unsafe_allowed = ctx.mod_unsafe_allowed
+    let result = check_mod_decl_body(
+        ctx, mod_name, uses, decls, required_effects,
+        is_pub, span, project_active) catch { _ => {
+            ctx.mod_unsafe_allowed = prev_unsafe_allowed
+            let _ = ctx.mod_path_stack.pop()
+            if entered_project_frame {
+                let _ = exit_project_namespace_frame(ctx)
+            }
+            fail.raise(CompileError {})
+        }
+    }
+    ctx.mod_unsafe_allowed = prev_unsafe_allowed
+    let _ = ctx.mod_path_stack.pop()
+    if entered_project_frame {
+        let _ = exit_project_namespace_frame(ctx)
+    }
+    result
 }
 
 fn check_capability(mut ctx: InferCtx, decl: HDecl, cap: EffectRow, mod_span: Span) {
@@ -256,13 +312,30 @@ fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
         },
         none => {}
     }
-    let resolved = apply_subst(s, init_ty)
+    // A const initializer is a value position.  Resolve its fully unified
+    // function-value evidence before restoring the declaration substitution;
+    // otherwise a bounded module function reaches codegen without its DictRef.
+    let zctx = ZonkCtx {
+        subst: s, names: map_new(),
+        dict_resolver: some(ctx)
+    }
+    let resolved = zonk_type(zctx, init_ty)
+    let zonked_init = some(zonk_expr(zctx, init_r.hexpr)) catch { _ => none }
+    let final_init = match zonked_init {
+        some(value) => value,
+        none => {
+            // Declaration-level recovery continues checking later declarations.
+            // Never leak this const's isolated substitution through that path.
+            ctx.subst = saved_subst
+            fail.raise(CompileError {})
+        }
+    }
     let gen_scheme = generalize(ctx.env, resolved, s)
     // Preserve the original def_id so mutability checks work
     let scheme = TypeScheme { ty: gen_scheme.ty, type_vars: gen_scheme.type_vars, bounds: gen_scheme.bounds, def_id: old_def_id }
     ctx.env.rebind(name, scheme)
     ctx.subst = saved_subst
-    HDecl::Const { name: name, def_id: old_def_id, ty: resolved, init: init_r.hexpr, is_pub: is_pub, span: span }
+    HDecl::Const { name: name, def_id: old_def_id, ty: resolved, init: final_init, is_pub: is_pub, span: span }
 }
 
 fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span) -> HDecl {
@@ -341,7 +414,10 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
                     let body_type = hexpr_type(body_result.hexpr)
                     ctx.subst = unify_at(ctx.sink, ctx.env, body_type, op.return_type, ctx.subst, span)
                     // Zonk the default body
-                    let zctx = ZonkCtx { subst: ctx.subst, names: map_new() }
+                    let zctx = ZonkCtx {
+                        subst: ctx.subst, names: map_new(),
+                        dict_resolver: some(ctx)
+                    }
                     default_body = some(zonk_block(zctx, body_result.hexpr))
                     let _ = ctx.env.pop_scope()
                 },
@@ -1144,21 +1220,25 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
 
     let body_result = some(infer_block(ctx, body, none)) catch { _ => none }
 
-    ctx.env.pop_scope()
-    ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
-    ctx.type_param_scope = saved_tp_scope
-    ctx.qualified_assoc_scope = saved_qualified_assoc
-
     let final_body = match body_result {
         some(br) => {
             ctx.subst = br.subst
-            let zctx = ZonkCtx { subst: ctx.subst, names: map_new() }
+            let zctx = ZonkCtx {
+                subst: ctx.subst, names: map_new(),
+                dict_resolver: some(ctx)
+            }
             let result = some(zonk_block(zctx, br.hexpr))
             ctx.subst = saved_subst
             result
         },
         none => { ctx.subst = saved_subst; none }
     }
+    // Keep the trait's Self/supertrait bounds and parameter scope alive
+    // through value-zonk so bounded function values can capture them.
+    ctx.env.pop_scope()
+    ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
+    ctx.type_param_scope = saved_tp_scope
+    ctx.qualified_assoc_scope = saved_qualified_assoc
     final_body
 }
 
@@ -1200,7 +1280,8 @@ fn check_extern_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypePara
         none => EMPTY_ROW
     }
     HDecl::ExternFn {
-        name: name, def_id: scheme.def_id, type_params: type_params,
+        name: name, abi_name: extern_abi_leaf(name),
+        def_id: scheme.def_id, type_params: type_params,
         params: hparams, return_type: fn_ret, effects: extern_effects,
         is_pub: is_pub, span: span
     }
@@ -1293,7 +1374,10 @@ fn check_fn_body(
         }
     }
 
-    let zctx = ZonkCtx { subst: ctx.subst, names: local_names }
+    let zctx = ZonkCtx {
+        subst: ctx.subst, names: local_names,
+        dict_resolver: some(ctx)
+    }
     let mut final_params: List<HParam> = []
     for hp in hparams { final_params.push(zonk_param(zctx, hp)) }
     let final_ret = zonk_type(zctx, expected_ret)
@@ -1435,6 +1519,12 @@ fn capture_assoc_rebind_provenance(
 }
 
 fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
+    // This check owns the declaration's default metadata. Clear both halves
+    // before entering transient scopes so impl-method seeds or earlier SCC
+    // prechecks with the same spelling cannot leak into this owner.
+    ctx.fn_defaults.remove(name)
+    ctx.fn_min_arity.remove(name)
+
     // Save the registration scheme before entering the parameter scope: a
     // parameter is allowed to have the same spelling as its function.
     let registration_scheme = ctx.env.lookup(name)
@@ -1579,6 +1669,24 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
         )
     ) catch { _ => none }
 
+    // Default expressions share the function's type variables, but their
+    // dictionary evidence belongs to each CALLER instantiation.  Zonk only
+    // types/effects here and preserve unresolved function-value provenance;
+    // caller final-zonk resolves DictRefs with its substitution and bounds.
+    let mut zonked_defaults: List<HExpr> = []
+    match try_result {
+        some(_) => {
+            let zctx_defaults = ZonkCtx {
+                subst: ctx.subst, names: map_new(),
+                dict_resolver: none
+            }
+            for dh in default_hexprs {
+                zonked_defaults.push(zonk_expr(zctx_defaults, dh))
+            }
+        },
+        none => {},
+    }
+
     // Save complete bounds (inherited + own) before pop
     let complete_fn_bounds = ctx.current_fn_bounds
 
@@ -1706,13 +1814,7 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     ctx.fn_mut_params.insert(name, mut_flags)
 
     // B-069: Register default parameter info for call-site expansion
-    if default_hexprs.len() > 0 {
-        // Zonk the default HExprs so they are fully resolved
-        let zctx_defaults = ZonkCtx { subst: ctx.subst, names: map_new() }
-        let mut zonked_defaults: List<HExpr> = []
-        for dh in default_hexprs {
-            zonked_defaults.push(zonk_expr(zctx_defaults, dh))
-        }
+    if zonked_defaults.len() > 0 {
         ctx.fn_defaults.insert(name, zonked_defaults)
         ctx.fn_min_arity.insert(name, min_arity)
     }
@@ -1729,18 +1831,27 @@ fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) 
     ctx.subst = empty_subst()
     ctx.env.push_scope()
     let body_result = some(infer_block(ctx, body, none)) catch { _ => none }
-    ctx.env.pop_scope()
 
     let final_body = match body_result {
         some(br) => {
             ctx.subst = br.subst
-            let zctx = ZonkCtx { subst: ctx.subst, names: map_new() }
+            let zctx = ZonkCtx {
+                subst: ctx.subst, names: map_new(),
+                dict_resolver: some(ctx)
+            }
             let result = zonk_block(zctx, br.hexpr)
             ctx.subst = saved_subst
             result
         },
-        none => { ctx.subst = saved_subst; fail.raise(CompileError {}) }
+        none => {
+            ctx.subst = saved_subst
+            // The scope must be restored before re-raising the declaration
+            // error; the success path pops once below after value-zonk.
+            ctx.env.pop_scope()
+            fail.raise(CompileError {})
+        }
     }
+    ctx.env.pop_scope()
 
     HDecl::Test { description: description, body: final_body, span: span }
 }
@@ -1749,8 +1860,11 @@ fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) 
 // Public entry point
 // ============================================================
 
-fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
-    let hd = check_decl(ctx, decl)
+fn check_one_decl(
+    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?,
+    mut hdecls: List<HDecl>
+) {
+    let hd = check_decl(ctx, decl, frame_decl_index)
 
     // Update fn effects before push (modifies ctx.env, not hdecls)
     match hd {
@@ -1791,8 +1905,11 @@ fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
 // After check_fn_decl, the registered type scheme still has unresolved fresh vars
 // from Pass 1. Rebinding replaces it with the fully-resolved type from inference,
 // so that subsequent callers (in SCC topological order) see correct return types.
-fn check_one_decl_with_rebind(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
-    let hd = check_decl(ctx, decl)
+fn check_one_decl_with_rebind(
+    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?,
+    mut hdecls: List<HDecl>
+) {
+    let hd = check_decl(ctx, decl, frame_decl_index)
 
     // Update fn effects and rebind resolved types
     match hd {
@@ -1846,20 +1963,19 @@ fn check_one_decl_with_rebind(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HD
 // in the same module context used by the final HIR pass.  This lets recursive
 // call-graph ordering cross ModBlock boundaries without flattening the emitted
 // HIR or losing self/super import resolution.
-fn precheck_inline_fn_in_mod(
+fn precheck_inline_fn_in_mod_body(
     mut ctx: InferCtx,
     mod_name: Str,
     uses: List<UseDecl>,
     decls: List<Decl>,
     required_effects: List<EffectExpr>?,
-    target_name: Str
+    target_name: Str,
+    project_frame_active: Bool
 ) -> Bool {
-    let segments = mod_name.split("::")
-    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
-    ctx.mod_path_stack.push(simple_name)
-    insert_mod_aliases(ctx, mod_name, decls, false)
-    resolve_mod_uses(ctx, uses, true)
-    let prev_unsafe_allowed = ctx.mod_unsafe_allowed
+    if !project_frame_active {
+        insert_mod_aliases(ctx, mod_name, decls, false)
+        resolve_mod_uses(ctx, uses, true)
+    }
     match required_effects {
         some(req_effs) => {
             let cap = resolve_declared_effects(ctx, req_effs)
@@ -1871,18 +1987,23 @@ fn precheck_inline_fn_in_mod(
     }
 
     let mut found = false
-    for decl in decls {
+    for decl_index in 0..decls.len() {
+        let decl = decls.get(decl_index).unwrap()
         let prefixed = prefix_decl_name(mod_name, decl)
         match prefixed {
             Decl::Fn { name, .. } => {
                 if name == target_name {
                     let mut discarded: List<HDecl> = []
-                    let result = some(check_one_decl_with_rebind(ctx, prefixed, discarded)) catch { _ => none }
+                    let result = some(check_one_decl_with_rebind(
+                        ctx, prefixed, some(decl_index),
+                        discarded)) catch { _ => none }
                     found = true
                 }
             },
             Decl::ModBlock { name, uses: nested_uses, decls: nested_decls, required_effects: nested_required, .. } => {
-                if !found && precheck_inline_fn_in_mod(ctx, name, nested_uses, nested_decls, nested_required, target_name) {
+                if !found && precheck_inline_fn_in_mod(
+                    ctx, name, nested_uses, nested_decls,
+                    nested_required, target_name, decl_index) {
                     found = true
                 }
             },
@@ -1890,18 +2011,60 @@ fn precheck_inline_fn_in_mod(
         }
         if found { break }
     }
-    ctx.mod_unsafe_allowed = prev_unsafe_allowed
-    ctx.mod_path_stack.pop()
     found
+}
+
+fn precheck_inline_fn_in_mod(
+    mut ctx: InferCtx,
+    mod_name: Str,
+    uses: List<UseDecl>,
+    decls: List<Decl>,
+    required_effects: List<EffectExpr>?,
+    target_name: Str,
+    frame_decl_index: Int
+) -> Bool {
+    let project_active = ctx.project_namespace_file_key.is_some()
+    let mut entered_project_frame = false
+    if project_active {
+        entered_project_frame = enter_project_child_frame(
+            ctx, frame_decl_index)
+        if !entered_project_frame {
+            panic("unreachable: resolver plan missing inline precheck frame")
+        }
+    }
+    let segments = mod_name.split("::")
+    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
+    ctx.mod_path_stack.push(simple_name)
+    let prev_unsafe_allowed = ctx.mod_unsafe_allowed
+    let result = precheck_inline_fn_in_mod_body(
+        ctx, mod_name, uses, decls, required_effects,
+        target_name, project_active) catch { _ => {
+            ctx.mod_unsafe_allowed = prev_unsafe_allowed
+            let _ = ctx.mod_path_stack.pop()
+            if entered_project_frame {
+                let _ = exit_project_namespace_frame(ctx)
+            }
+            fail.raise(CompileError {})
+        }
+    }
+    ctx.mod_unsafe_allowed = prev_unsafe_allowed
+    let _ = ctx.mod_path_stack.pop()
+    if entered_project_frame {
+        let _ = exit_project_namespace_frame(ctx)
+    }
+    result
 }
 
 fn precheck_inline_fn(
     mut ctx: InferCtx, decls: List<Decl>, target_name: Str
 ) -> Bool {
-    for decl in decls {
+    for decl_index in 0..decls.len() {
+        let decl = decls.get(decl_index).unwrap()
         match decl {
             Decl::ModBlock { name, uses, decls: mod_decls, required_effects, .. } => {
-                if precheck_inline_fn_in_mod(ctx, name, uses, mod_decls, required_effects, target_name) { return true }
+                if precheck_inline_fn_in_mod(
+                    ctx, name, uses, mod_decls, required_effects,
+                    target_name, decl_index) { return true }
             },
             _ => {}
         }
@@ -1974,7 +2137,8 @@ fn precheck_top_level_fn_at(
     match decls.get(index) {
         some(decl) => {
             let mut discarded: List<HDecl> = []
-            let result = some(check_one_decl_with_rebind(ctx, decl, discarded)) catch { _ => none }
+            let result = some(check_one_decl_with_rebind(
+                ctx, decl, none, discarded)) catch { _ => none }
         },
         none => {}
     }
@@ -1992,27 +2156,43 @@ fn precheck_top_level_fn_at(
 // contains TypeVars (e.g., generic identity fn), we build a mapping from
 // check-time var ids to registration-time var ids using param correspondence,
 // so the scheme remains consistent.
-// File modules keep both a canonical value binding (`module$$_name`) and a
-// source-spelled display alias (`name`, or `outer::name` for inline modules).
-// Both bindings share the same DefId.  Refresh the alias together with the
-// canonical scheme; otherwise later functions in the same module keep using
-// the registration-time EMPTY_ROW / unresolved return variables.
+// A checked function can have its canonical value binding plus source-spelled,
+// inline-published, and consumer aliases. File-module canonical names contain
+// `$$_`, while single-file inline names do not, so exact origin — never the
+// spelling shape — is the selection criterion. Every alias
+// deliberately has its own lexical DefId, whose recorded origin is flattened
+// to the canonical binding. Refresh every exact-origin alias together with the
+// canonical scheme; otherwise a pub-use chain can keep the registration-time
+// EMPTY_ROW / unresolved return variables. Each fresh alias DefId must survive
+// the refresh so local shadowing and provenance remain lexical.
 fn rebind_fn_scheme_with_alias(mut ctx: InferCtx, name: Str, scheme: TypeScheme) {
     ctx.env.rebind(name, scheme)
 
-    let identity_parts = name.split("$$_")
-    if identity_parts.len() < 2 { return }
-    let display = identity_parts.get(1).unwrap_or("")
-    if display == "" { return }
-
-    match ctx.env.lookup(display) {
-        some(alias_scheme) => match (scheme.def_id, alias_scheme.def_id) {
-            (some(canonical_id), some(alias_id)) => {
-                if canonical_id == alias_id { ctx.env.rebind(display, scheme) }
-            },
-            _ => {}
-        },
-        none => {}
+    // Update the map entry in its owning scope rather than calling
+    // TypeEnv.rebind(alias_name): two lexical scopes may contain the same
+    // spelling, and only the DefId whose exact origin is `name` may change.
+    for scope in ctx.env.scope.scopes {
+        let mut aliases = scope.variables.entries()
+        aliases.sort_by(compare_by_first)
+        for entry in aliases {
+            let (alias_name, alias_scheme) = entry
+            match alias_scheme.def_id {
+                some(alias_id) => match ctx.use_aliases.get(alias_id) {
+                    some(origin) => {
+                        if origin == name {
+                            scope.variables.insert(alias_name, TypeScheme {
+                                ty: scheme.ty,
+                                type_vars: scheme.type_vars,
+                                bounds: scheme.bounds,
+                                def_id: alias_scheme.def_id
+                            })
+                        }
+                    },
+                    none => {}
+                },
+                none => {}
+            }
+        }
     }
 }
 
@@ -3346,8 +3526,35 @@ pub fn check_module_identity(mut ctx: InferCtx, program: Program, module_prefix:
 }
 
 fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
+    // Derive mutates canonical registries. Complete it before the lexical root
+    // overlay snapshots any payload, so frame aliases always observe the
+    // authoritative post-derive definitions.
     let derived_impls = run_derive_pass(ctx.env)
+    let project_active = ctx.project_namespace_file_key.is_some()
+    let mut entered_project_frame = false
+    if project_active {
+        entered_project_frame = enter_project_root_frame(ctx)
+        if !entered_project_frame {
+            panic("unreachable: resolver plan missing file root check frame")
+        }
+    }
+    let result = check_registered_body(
+        ctx, program, derived_impls) catch { _ => {
+        if entered_project_frame {
+            let _ = exit_project_namespace_frame(ctx)
+        }
+        fail.raise(CompileError {})
+    } }
+    if entered_project_frame {
+        let _ = exit_project_namespace_frame(ctx)
+    }
+    result
+}
 
+fn check_registered_body(
+    mut ctx: InferCtx, program: Program,
+    derived_impls: List<DerivedImpl>
+) -> HProgram {
     // Effect pre-pass: check impl blocks to populate impl_methods with inferred effects.
     // Without this, callers defined before impl blocks see EMPTY_ROW effects from Pass 1.
     // The main pass re-checks with correct effects visible.
@@ -3428,7 +3635,8 @@ fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
             Decl::Fn { .. } => {},
             Decl::Impl { .. } => {},
             _ => {
-                let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+                let result = some(check_one_decl_with_rebind(
+                    ctx, decl, some(di), hdecls)) catch { _ => none }
                 checked.insert(di)
             }
         }
@@ -3444,7 +3652,8 @@ fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
         match decl {
             Decl::Impl { .. } => {
                 if !checked.contains(ii) {
-                    let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+                    let result = some(check_one_decl_with_rebind(
+                        ctx, decl, some(ii), hdecls)) catch { _ => none }
                     checked.insert(ii)
                 }
             },
@@ -3464,7 +3673,8 @@ fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
                     if !checked.contains(i) {
                         match program.decls.get(i) {
                             some(decl) => {
-                                let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+                                let result = some(check_one_decl_with_rebind(
+                                    ctx, decl, some(i), hdecls)) catch { _ => none }
                                 checked.insert(i)
                             },
                             none => {}
@@ -3481,7 +3691,8 @@ fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
     let mut ri = 0
     for decl in program.decls {
         if !checked.contains(ri) {
-            let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+            let result = some(check_one_decl_with_rebind(
+                ctx, decl, some(ri), hdecls)) catch { _ => none }
         }
         ri = ri + 1
     }
@@ -3490,8 +3701,20 @@ fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
     check_default_effect_cycles(ctx, program.decls)
 
     // static_dicts is populated by dict_lower (checker pipeline) — empty here.
-    // B-144: collect extern type names from this module's HIR decls.
-    let extern_names = collect_extern_type_names(hdecls)
+    // B-144/B-145: declarations contribute directly. In project mode the root
+    // namespace frame is still active here, so explicitly imported externs are
+    // visible transactionally in `structs`; capture their raw ABI identities
+    // for codegen before the caller rolls the frame back. Unimported dependency
+    // externs live only in `extern_structs` and therefore cannot enter this set.
+    let mut extern_names = collect_extern_type_names(hdecls)
+    if ctx.project_namespace_file_key.is_some() {
+        for entry in ctx.env.types.structs.entries() {
+            let (_, def) = entry
+            if def.is_extern {
+                extern_names.insert(def.name)
+            }
+        }
+    }
     HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars, static_dicts: [], extern_type_names: extern_names, drop_types: ctx.drop_types }
 }
 
@@ -3504,7 +3727,7 @@ pub fn check_prelude_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
     // where cross-module effect propagation doesn't work (effects registered as
     // EMPTY_ROW in Pass 1), we must explicitly surface the fail effect here so
     // callers pass the __ring_ev_fail evidence.
-    let result = check_decl(ctx, decl)
+    let result = check_decl(ctx, decl, none)
     if false { fail.raise(CompileError {}) }
     result
 }
