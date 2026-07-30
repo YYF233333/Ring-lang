@@ -184,7 +184,17 @@ pub fn cli_main() {
                 }
                 generate_c(rc_program, c_path, o_path, parsed.c_lines)
             } else {
-                let out_path = file_path.replace(".ring", ".o")
+                // --out-dir redirects the .o when explicitly given; default
+                // drops it next to the source. This matches the C backend
+                // branch above and the project branch, so a caller passing
+                // --out-dir always finds the artifact there regardless of
+                // whether the entry file turned out to have dependencies.
+                let out_path = if parsed.out_dir_set {
+                    let base = path_basename(file_path).replace(".ring", "")
+                    path_join(path_resolve(parsed.out_dir), "${base}.o")
+                } else {
+                    file_path.replace(".ring", ".o")
+                }
                 generate_llvm(rc_program, out_path)
             }
         } else {

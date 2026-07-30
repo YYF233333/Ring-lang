@@ -646,8 +646,13 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             expected_file = main_file.parent / "main.expected"
             expected = norm(expected_file.read_text(encoding="utf-8"))
 
+            # Per-case work dir: module cases all emit "main.o", so a shared
+            # directory would let a case that failed to place its artifact
+            # silently link a predecessor's main.o and run the wrong binary.
+            case_dir = os.path.join(tmpdir, mod_name)
+            os.makedirs(case_dir, exist_ok=True)
             ok, stdout, detail = compile_link_run(
-                ring_exe, clang_path, str(main_file), tmpdir, is_module=True,
+                ring_exe, clang_path, str(main_file), case_dir, is_module=True,
                 backend=backend)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, f"mod:{mod_name}", detail))
