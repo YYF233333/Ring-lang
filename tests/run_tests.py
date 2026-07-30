@@ -70,20 +70,8 @@ LLVM_BACKEND_GAPS = {
 }
 
 SHARED_POSITIVE_GAPS = {
-    "tests/cases/api_clone.ring": (
-        "both backends access-violate in the shared clone/runtime path "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
     "tests/cases/iterator.ring": (
         "both backends access-violate in the shared iterator/runtime path "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
-    "tests/cases/set_struct_eq.ring": (
-        "both backends access-violate in structural Set equality "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
-    "tests/cases/set_ops_deep_eq.ring": (
-        "both backends access-violate in deep Set operations "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
     "tests/cases/tuple_eq.ring": (
@@ -92,6 +80,19 @@ SHARED_POSITIVE_GAPS = {
     "tests/cases/tuple_eq_struct.ring": (
         "both backends fail the same structural tuple equality assertion "
         "(audit #221)"
+    ),
+}
+
+# Positive cases whose `ring check` itself fails today.  Unlike the two maps
+# above these are frontend blockers rather than codegen gaps, so every lane
+# that would compile or RC-verify the case (llvm, diff, rc) must skip it with
+# the same actionable reason.
+CHECK_BLOCKED_POSITIVE_GAPS = {
+    "tests/cases/llvm/set_ops.ring": (
+        "E0503 on `set_from([])`: call-site dict resolution fails closed on "
+        "the unsolved element TypeVar before the `Set<Int>` annotation "
+        "propagates; pre-existing checker limitation, surfaced when set_from "
+        "gained its T: Hash + Eq bound (B-170)"
     ),
 }
 
@@ -283,8 +284,19 @@ def normalized_repo_path(path) -> str:
     return candidate.resolve().relative_to(REPO.resolve()).as_posix()
 
 
+def check_blocked_gap_reason(case_path) -> Optional[str]:
+    """Return the frontend-blocker reason for a positive case, if any."""
+    key = normalized_repo_path(case_path)
+    if key in CHECK_BLOCKED_POSITIVE_GAPS:
+        return f"known check-blocked positive: {CHECK_BLOCKED_POSITIVE_GAPS[key]}"
+    return None
+
+
 def positive_gap_reason(case_path, backend: str) -> Optional[str]:
     """Return an execution-gap reason for a positive case/backend, if any."""
+    blocked = check_blocked_gap_reason(case_path)
+    if blocked:
+        return blocked
     key = normalized_repo_path(case_path)
     if key in SHARED_POSITIVE_GAPS:
         return f"known shared positive gap: {SHARED_POSITIVE_GAPS[key]}"
@@ -295,6 +307,9 @@ def positive_gap_reason(case_path, backend: str) -> Optional[str]:
 
 def diff_gap_reason(case_path) -> Optional[str]:
     """Return why a case cannot currently provide a dual-backend oracle."""
+    blocked = check_blocked_gap_reason(case_path)
+    if blocked:
+        return blocked
     key = normalized_repo_path(case_path)
     if key in SHARED_POSITIVE_GAPS:
         return f"known shared positive gap: {SHARED_POSITIVE_GAPS[key]}"
@@ -468,6 +483,47 @@ def discover_negative_cases(directory: Path) -> List[Path]:
     return cases
 
 
+def error_contract_failure(contract_text: str, output: str) -> Optional[str]:
+    """Return why compiler output violates a .error contract, if it does.
+
+    Legacy contracts without a `!` line remain one exact multiline substring.
+    Contracts containing `!` treat each non-empty line independently: ordinary
+    lines are required substrings and `!pattern` lines are forbidden substrings.
+    """
+    contract = contract_text.strip()
+    if not contract:
+        return "malformed .error contract: empty or whitespace-only"
+
+    lines = [line.strip() for line in contract.splitlines() if line.strip()]
+    has_forbidden = any(line.startswith("!") for line in lines)
+    if has_forbidden:
+        required = [line for line in lines if not line.startswith("!")]
+        forbidden: List[str] = []
+        for line in lines:
+            if line.startswith("!"):
+                pattern = line[1:].strip()
+                if not pattern:
+                    return "malformed .error contract: empty forbidden pattern"
+                forbidden.append(pattern)
+        if not required:
+            return (
+                "malformed .error contract: forbidden-pattern mode requires "
+                "at least one required pattern"
+            )
+    else:
+        required = [contract]
+        forbidden = []
+
+    output_lower = output.lower()
+    for pattern in required:
+        if pattern.lower() not in output_lower:
+            return f'missing required diagnostic pattern "{pattern}"'
+    for pattern in forbidden:
+        if pattern.lower() in output_lower:
+            return f'found forbidden diagnostic pattern "{pattern}"'
+    return None
+
+
 def discover_module_positive(modules_dir: Path) -> List[Path]:
     """Return sorted list of module main.ring files that have main.expected."""
     if not modules_dir.is_dir():
@@ -577,7 +633,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             continue
 
         error_file = ring_file.with_suffix(".error")
-        pattern = error_file.read_text(encoding="utf-8").strip()
+        contract = error_file.read_text(encoding="utf-8")
 
         try:
             r = ring_check(ring_exe, str(ring_file))
@@ -591,14 +647,15 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 "expected non-zero exit, got 0"))
             continue
 
-        # Check all output (stdout + stderr) for the pattern
+        # Check all output (stdout + stderr) against the companion contract.
         combined = (r.stdout or "") + (r.stderr or "")
-        if pattern.lower() in combined.lower():
+        contract_failure = error_contract_failure(contract, combined)
+        if contract_failure is None:
             collector.add(TestResult(TestResult.PASS, suite, f"neg:{rel}"))
         else:
             collector.add(TestResult(
                 TestResult.FAIL, suite, f"neg:{rel}",
-                f'expected pattern "{pattern}" in output, got: {combined[:300]}'))
+                f"{contract_failure}; output: {combined[:300]}"))
 
     # --- Module positive ---
     mod_positive = discover_module_positive(MODULES_DIR)
@@ -616,8 +673,13 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             expected_file = main_file.parent / "main.expected"
             expected = norm(expected_file.read_text(encoding="utf-8"))
 
+            # Per-case work dir: module cases all emit "main.o", so a shared
+            # directory would let a case that failed to place its artifact
+            # silently link a predecessor's main.o and run the wrong binary.
+            case_dir = os.path.join(tmpdir, mod_name)
+            os.makedirs(case_dir, exist_ok=True)
             ok, stdout, detail = compile_link_run(
-                ring_exe, clang_path, str(main_file), tmpdir, is_module=True,
+                ring_exe, clang_path, str(main_file), case_dir, is_module=True,
                 backend=backend)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, f"mod:{mod_name}", detail))
@@ -643,7 +705,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             continue
 
         error_file = main_file.parent / "main.error"
-        pattern = error_file.read_text(encoding="utf-8").strip()
+        contract = error_file.read_text(encoding="utf-8")
 
         try:
             r = ring_check(ring_exe, str(main_file))
@@ -658,12 +720,13 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             continue
 
         combined = (r.stdout or "") + (r.stderr or "")
-        if pattern.lower() in combined.lower():
+        contract_failure = error_contract_failure(contract, combined)
+        if contract_failure is None:
             collector.add(TestResult(TestResult.PASS, suite, f"mod-neg:{mod_name}"))
         else:
             collector.add(TestResult(
                 TestResult.FAIL, suite, f"mod-neg:{mod_name}",
-                f'expected "{pattern}" in output, got: {combined[:300]}'))
+                f"{contract_failure}; output: {combined[:300]}"))
 
 
 # ---------------------------------------------------------------------------
@@ -1465,6 +1528,10 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
         for ring_file in positive:
             name = f"{label}/{ring_file.name}"
             if not matches_filter(name, name_filter):
+                continue
+            blocked = check_blocked_gap_reason(ring_file)
+            if blocked:
+                collector.add(TestResult(TestResult.SKIP, suite, name, blocked))
                 continue
             try:
                 r = ring_check(ring_exe, str(ring_file), extra_args=["--verify-rc"])

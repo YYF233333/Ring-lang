@@ -1,22 +1,25 @@
-use types::{Type, UNIT}
-use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
-use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
-    HStringInterpPart, HEffectHandler,
+use types::{Type, UNIT, nominal_display_name}
+use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam}
+use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImplFact,
+    HStringInterpPart, HEffectHandler, ValueBindingKind,
+    CHECKER_ONLY_EXTERN_CALLABLES,
     compare_by_first, is_user_drop_type, hexpr_type,
     map_index_helper_source_name, map_index_helper_identity,
-    slot_read_source_name, slot_take_source_name, slot_write_source_name,
-    slot_read_identity, slot_take_identity, slot_write_identity,
+    prelude_extern_identity,
     is_nullary_variant_ctor_ident}
-use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
-use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
+use diagnostics::{Severity, DiagnosticContext, CollectingSink, new_collecting_sink, make_diag}
+use env::{TypeEnv, TypeScheme, SigDef, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_module_identity, check_prelude_decl}
 use dict_lower::{lower_dicts}
 use andor_lower::{lower_andor}
-use infer_ctx::{InferCtx, type_error, record_value_origin, record_variant_ctor_origin}
+use infer_ctx::{InferCtx, type_error, record_value_origin, record_variant_ctor_origin,
+    record_value_binding_kind, install_project_namespace_plan}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
-use codes::{E0702, E0703, E0705, E0707, E0801}
+use resolver::{ResolvedNamespacePlan, ModuleFramePlan, AstSite, ImportIssue,
+    ImportIssueKind, NamespaceKind}
+use codes::{E0702, E0703, E0704, E0705, E0707, E0801}
 use parser::{parse}
 use union_find::{UnionFind}
 use unify::{empty_subst}
@@ -25,9 +28,18 @@ pub struct CheckResult {
     pub program: HProgram,
     pub env: TypeEnv,
     pub fn_mut_params: Map<Str, List<Bool>>,
-    // Source lookup/display name -> canonical value identity.  Re-export
-    // extraction forwards this unchanged instead of guessing from use paths.
-    pub value_origins: Map<Int, Str>
+    // Exact lexical DefId -> final canonical value identity. Re-export
+    // extraction follows this map instead of preserving intermediate aliases.
+    pub value_origins: Map<Int, Str>,
+    // Exact lexical DefId -> registration kind.  Export extraction consumes
+    // this map so same-file inline aliases retain provenance across arbitrary
+    // pub-use hops without falling back to leaf-name guesses.
+    pub value_binding_kinds: Map<Int, ValueBindingKind>,
+    // User-declared impl blocks with the canonical target identity resolved
+    // during checking (while namespace frames were live). Collected from the
+    // module's own HIR before prelude decls are prepended, so exports never
+    // have to re-resolve an impl target against the rolled-back environment.
+    pub impl_facts: List<ModuleImplFact>
 }
 
 const STD_FILES: List<Str> =
@@ -102,15 +114,23 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                 },
                 none => {}
             }
-            // list.ring and map.ring both declare these extern bridges.  Phase
-            // 1 has now finished, so each lookup points at the final prelude
-            // binding/DefId (the map.ring declaration with today's STD_FILES
-            // order).  Attach the ABI ownership identity to that exact DefId;
-            // later user shadowing receives a different DefId and no origin.
-            record_value_origin(ctx, slot_read_source_name(), slot_read_identity())
-            record_value_origin(ctx, slot_take_source_name(), slot_take_identity())
-            record_value_origin(ctx, slot_write_source_name(), slot_write_identity())
-            // Phase 2: compile struct/enum/trait declarations, non-extern impl methods, and top-level functions
+            // Phase 1 has finished, so duplicate std declarations now resolve
+            // to their final exact DefIds. Give every top-level prelude extern
+            // an unspellable semantic identity; later user fn/const bindings
+            // receive distinct DefIds and cannot collide in backend registries.
+            for decl in all_prelude_decls {
+                match decl {
+                    Decl::ExternFn { name, .. } => {
+                        record_value_origin(ctx, name,
+                            prelude_extern_identity(name))
+                    },
+                    _ => {}
+                }
+            }
+            // Phase 2: compile declarations needed by native codegen. Top-level
+            // ExternFn declarations also become HDecl metadata: unlike impl
+            // extern methods, their first-class values need an exact
+            // declaration identity -> ABI leaf mapping in both backends.
             for decl in all_prelude_decls {
                 match decl {
                     Decl::Struct { .. } => {
@@ -164,6 +184,35 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                             none => {}
                         }
                     },
+                    Decl::ExternFn { .. } => {
+                        let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
+                        match result {
+                            some(HDecl::ExternFn {
+                                name, abi_name, def_id, type_params, params,
+                                return_type, effects, is_pub, span
+                            }) => {
+                                // A small number of compiler-owned extern
+                                // bridges carry an unspellable exact origin on
+                                // their DefId. Preserve it in HDecl while
+                                // keeping the parsed ABI leaf separately.
+                                let exact_name = match def_id {
+                                    some(id) => match ctx.use_aliases.get(id) {
+                                        some(origin) => origin,
+                                        none => name
+                                    },
+                                    none => name
+                                }
+                                prelude_hdecls.push(HDecl::ExternFn {
+                                    name: exact_name, abi_name: abi_name,
+                                    def_id: def_id, type_params: type_params,
+                                    params: params, return_type: return_type,
+                                    effects: effects, is_pub: is_pub, span: span
+                                })
+                            },
+                            some(_) => {},
+                            none => {}
+                        }
+                    },
                     _ => {}
                 }
             }
@@ -178,7 +227,7 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
     register_builtins(env)
     register_hof_intrinsics(env)
 
-    InferCtx {
+    let mut ctx = InferCtx {
         env: env,
         subst: empty_subst(),
         sink: sink,
@@ -189,11 +238,11 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         loop_depth: 0,
         mod_path_stack: [],
         use_aliases: map_new(),
+        value_binding_kinds: map_new(),
         boxed_vars: set_new(),
         lambda_depth: 0,
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
-        file_extern_values: set_new(),
         file_extern_types: set_new(),
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
@@ -201,7 +250,53 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         fn_defaults: map_new(),
         fn_min_arity: map_new(),
         mod_unsafe_allowed: false,
-        drop_types: set_new()
+        drop_types: set_new(),
+        project_namespace_file_key: none,
+        project_namespace_root_frame: none,
+        project_namespace_child_frames: map_new(),
+        project_namespace_bindings: map_new(),
+        project_namespace_ctor_enums: map_new(),
+        project_namespace_frame_stack: []
+    }
+    // These bindings are created only by register_builtins above. Record their
+    // freshly allocated DefIds now; later same-spelled locals cannot inherit
+    // this provenance. `some` remains on the independent variant-ctor path.
+    for builtin in (CHECKER_ONLY_EXTERN_CALLABLES) {
+        record_value_binding_kind(ctx, builtin, ValueBindingKind::ExternCallable)
+    }
+    ctx
+}
+
+// Collect ModuleImplFact entries from a module's own HIR (pre-prelude).
+// Non-public inline mods are skipped: their impls were never exported by the
+// AST-walking extractor either, so consumers cannot observe those methods.
+fn collect_module_impl_facts(
+    decls: List<HDecl>, is_top_level: Bool, mut facts: List<ModuleImplFact>
+) {
+    for decl in decls {
+        match decl {
+            HDecl::Impl { target_type, trait_name, methods, .. } => {
+                let mut method_names: List<Str> = []
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name, .. } => method_names.push(name),
+                        _ => {}
+                    }
+                }
+                facts.push(ModuleImplFact {
+                    target: target_type,
+                    is_trait_impl: trait_name.is_some(),
+                    method_names: method_names,
+                    is_top_level: is_top_level
+                })
+            },
+            HDecl::ModBlock { decls: mod_decls, is_pub, .. } => {
+                if is_pub {
+                    collect_module_impl_facts(mod_decls, false, facts)
+                }
+            },
+            _ => {}
+        }
     }
 }
 
@@ -209,6 +304,8 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     let mut ctx = new_infer_ctx(sink)
     let prelude_hdecls = load_prelude(ctx)
     let hprogram = infer_check(ctx, program)
+    let mut impl_facts: List<ModuleImplFact> = []
+    collect_module_impl_facts(hprogram.decls, true, impl_facts)
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
@@ -224,16 +321,218 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
-        value_origins: map_clone(ctx.use_aliases)
+        value_origins: map_clone(ctx.use_aliases),
+        value_binding_kinds: map_clone(ctx.value_binding_kinds),
+        impl_facts: impl_facts
     }
 }
 
-pub fn check_module(program: Program, module_prefix: Str, module_exports: List<ModuleExports>, sink: CollectingSink) -> CheckResult {
+struct NamespaceFrameAst {
+    uses: List<UseDecl>,
+    decls: List<Decl>
+}
+
+fn namespace_kind_name(namespace: NamespaceKind) -> Str {
+    match namespace {
+        NamespaceKind::Value => "value",
+        NamespaceKind::Struct => "struct",
+        NamespaceKind::Enum => "enum",
+        NamespaceKind::TypeAlias => "type alias",
+        NamespaceKind::Effect => "effect",
+        NamespaceKind::EffectAlias => "effect alias",
+        NamespaceKind::Trait => "trait",
+        NamespaceKind::Sig => "sig"
+    }
+}
+
+fn namespace_decl_span(decl: Decl) -> Span {
+    match decl {
+        Decl::Fn { span, .. } => span,
+        Decl::Struct { span, .. } => span,
+        Decl::Enum { span, .. } => span,
+        Decl::Impl { span, .. } => span,
+        Decl::Effect { span, .. } => span,
+        Decl::Test { span, .. } => span,
+        Decl::Trait { span, .. } => span,
+        Decl::ExternFn { span, .. } => span,
+        Decl::ExternType { span, .. } => span,
+        Decl::TypeAlias { span, .. } => span,
+        Decl::Const { span, .. } => span,
+        Decl::ModBlock { span, .. } => span,
+        Decl::Sig { span, .. } => span,
+        Decl::EffectAlias { span, .. } => span,
+        Decl::Delegate { span, .. } => span,
+        Decl::AssocType { span, .. } => span
+    }
+}
+
+fn find_namespace_frame(
+    plan: ResolvedNamespacePlan, file_key: Str, frame_index: Int
+) -> ModuleFramePlan? {
+    for frame in plan.frames {
+        if frame.file_key == file_key && frame.frame_index == frame_index {
+            return some(frame)
+        }
+    }
+    none
+}
+
+// Recover an inline frame through its exact parent frame and declaration
+// index. Duplicate same-named ModBlocks therefore remain distinct AST sites.
+fn find_namespace_frame_ast(
+    program: Program, plan: ResolvedNamespacePlan,
+    file_key: Str, frame_index: Int
+) -> NamespaceFrameAst? {
+    match find_namespace_frame(plan, file_key, frame_index) {
+        none => none,
+        some(frame) => {
+            if frame.parent_frame_index < 0 {
+                return some(NamespaceFrameAst {
+                    uses: program.uses,
+                    decls: program.decls
+                })
+            }
+            match find_namespace_frame_ast(
+                program, plan, file_key, frame.parent_frame_index) {
+                none => none,
+                some(parent) => match parent.decls.get(frame.decl_index) {
+                    some(Decl::ModBlock { uses, decls, .. }) =>
+                        some(NamespaceFrameAst { uses: uses, decls: decls }),
+                    _ => none
+                }
+            }
+        }
+    }
+}
+
+fn namespace_issue_span(
+    program: Program, plan: ResolvedNamespacePlan, site: AstSite
+) -> Span {
+    match find_namespace_frame_ast(
+        program, plan, site.file_key, site.frame_index) {
+        none => program.span,
+        some(frame) => {
+            if site.use_index >= 0 {
+                match frame.uses.get(site.use_index) {
+                    none => return program.span,
+                    some(use_decl) => {
+                        if site.item_index >= 0 {
+                            match use_decl.imports {
+                                UseImport::NamedItems { names } => {
+                                    match names.get(site.item_index) {
+                                        some(item) => return item.span,
+                                        none => {}
+                                    }
+                                },
+                                UseImport::Module => {}
+                            }
+                        }
+                        return use_decl.path.span
+                    }
+                }
+            }
+            if site.use_index == -1 && site.item_index >= 0 {
+                match frame.decls.get(site.item_index) {
+                    some(decl) => return namespace_decl_span(decl),
+                    none => {}
+                }
+            }
+            program.span
+        }
+    }
+}
+
+fn report_namespace_plan_issues(
+    mut ctx: InferCtx, module_key: Str,
+    program: Program, plan: ResolvedNamespacePlan
+) {
+    for issue in plan.issues {
+        if issue.site.file_key != module_key { continue }
+        let span = namespace_issue_span(program, plan, issue.site)
+        let namespace = namespace_kind_name(issue.namespace)
+        let source_owner = nominal_display_name(issue.source_owner)
+        match issue.kind {
+            ImportIssueKind::RelativeOutOfScope => {
+                let message = if issue.site.frame_index == 0 {
+                    "Cannot use '${issue.source_name}::' at file level — relative paths are only supported inside mod blocks"
+                } else {
+                    "Cannot use 'super::' — relative path exceeds module nesting depth"
+                }
+                ctx.sink.report(make_diag(
+                    E0705, Severity::SevError, message, span,
+                    DiagnosticContext::OtherContext {
+                        detail: some("relative path out of scope")
+                    }))
+            },
+            ImportIssueKind::SourceFrameMissing => {
+                ctx.sink.report(make_diag(
+                    E0702, Severity::SevError,
+                    "Module '${source_owner}' not found", span,
+                    DiagnosticContext::OtherContext {
+                        detail: some("source namespace frame not found")
+                    }))
+            },
+            ImportIssueKind::SourceNameMissing => {
+                let message = if issue.source_name == "" {
+                    "Import from module '${source_owner}' does not name a symbol"
+                } else {
+                    "Symbol '${issue.source_name}' not found in module '${source_owner}'"
+                }
+                ctx.sink.report(make_diag(
+                    E0703, Severity::SevError, message, span,
+                    DiagnosticContext::OtherContext {
+                        detail: some("source name not found")
+                    }))
+            },
+            ImportIssueKind::AmbiguousBinding => {
+                let mut related: List<Str> = []
+                for payload in issue.related_owners {
+                    related.push(nominal_display_name(payload))
+                }
+                let conflict = if related.len() == 2 {
+                    "'${related.get(0).unwrap_or("")}' and '${related.get(1).unwrap_or("")}'"
+                } else {
+                    related.join(", ")
+                }
+                ctx.sink.report(make_diag(
+                    E0707, Severity::SevError,
+                    "Ambiguous ${namespace} name '${issue.local_name}': conflicting payloads ${conflict}",
+                    span,
+                    DiagnosticContext::OtherContext {
+                        detail: some("ambiguous ${namespace} binding")
+                    }))
+            },
+            ImportIssueKind::UnresolvedImportCycle => {
+                let subject = if issue.local_name == "" {
+                    ""
+                } else {
+                    " for '${issue.local_name}'"
+                }
+                ctx.sink.report(make_diag(
+                    E0704, Severity::SevError,
+                    "Unresolved ${namespace} import dependency SCC${subject} in module '${source_owner}'",
+                    span,
+                    DiagnosticContext::OtherContext {
+                        detail: some("namespace import dependency SCC")
+                    }))
+            }
+        }
+    }
+}
+
+pub fn check_module(
+    program: Program, module_key: Str, module_prefix: Str,
+    namespace_plan: ResolvedNamespacePlan,
+    module_exports: List<ModuleExports>, sink: CollectingSink
+) -> CheckResult {
     let mut ctx = new_infer_ctx(sink)
     let prelude_hdecls = load_prelude(ctx)
     inject_module_exports(ctx, module_exports)
-    resolve_uses(ctx, program.uses, module_exports)
+    let _ = install_project_namespace_plan(ctx, module_key, namespace_plan)
+    report_namespace_plan_issues(ctx, module_key, program, namespace_plan)
     let hprogram = check_module_identity(ctx, program, module_prefix)
+    let mut impl_facts: List<ModuleImplFact> = []
+    collect_module_impl_facts(hprogram.decls, true, impl_facts)
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
@@ -247,19 +546,81 @@ pub fn check_module(program: Program, module_prefix: Str, module_exports: List<M
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
-        value_origins: map_clone(ctx.use_aliases)
+        value_origins: map_clone(ctx.use_aliases),
+        value_binding_kinds: map_clone(ctx.value_binding_kinds),
+        impl_facts: impl_facts
     }
 }
 
 fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
+    // Canonical value payloads are the only source keys consumed by the
+    // resolver plan. Export display keys are intentionally not hydrated:
+    // same-leaf exports from unrelated modules may coexist, while each exact
+    // value/constructor origin is installed once with a checker-local DefId.
+    let mut hydrated_value_origins: Set<Str> = set_new()
     for mod_ in exports {
+        let mut sorted_values = mod_.values.entries()
+        sorted_values.sort_by(compare_by_first)
+        for entry in sorted_values {
+            let (lookup_name, scheme) = entry
+            let value_origin = mod_.value_origins.get(lookup_name)
+            let ctor_origin = mod_.variant_ctor_origins.get(lookup_name)
+            let mut exact_origins: List<Str> = []
+            match value_origin {
+                some(origin) => { exact_origins.push(origin) },
+                none => {}
+            }
+            match ctor_origin {
+                some(origin) => {
+                    if !exact_origins.contains(origin) {
+                        exact_origins.push(origin)
+                    }
+                },
+                none => {}
+            }
+            for origin in exact_origins {
+                if !hydrated_value_origins.contains(origin) {
+                    ctx.env.bind(origin, TypeScheme { ..scheme, def_id: none })
+                    let ultimate = match value_origin {
+                        some(value) => value,
+                        none => origin
+                    }
+                    record_value_origin(ctx, origin, ultimate)
+                    match mod_.value_binding_kinds.get(lookup_name) {
+                        some(kind) => {
+                            record_value_binding_kind(ctx, origin, kind)
+                        },
+                        none => {}
+                    }
+                    match ctor_origin {
+                        some(ctor) => {
+                            record_variant_ctor_origin(ctx, origin, ctor)
+                        },
+                        none => {}
+                    }
+                    match mod_.fn_mut_params.get(lookup_name) {
+                        some(flags) => { ctx.fn_mut_params.insert(origin, flags) },
+                        none => {}
+                    }
+                    hydrated_value_origins.insert(origin)
+                }
+            }
+        }
         let mut sorted_types = mod_.types.entries()
         sorted_types.sort_by(compare_by_first)
         for entry in sorted_types {
             let (name, def) = entry
             match def {
                 TypeDef::StructDef_(sdef) => {
-                    ctx.env.types.structs.insert(sdef.name, sdef)
+                    if sdef.is_extern {
+                        // Dependency hydration exposes only the raw ABI source.
+                        // Named/wildcard imports install visible spellings via
+                        // the project namespace frame; infer_decl snapshots
+                        // their raw codegen identities before frame rollback.
+                        ctx.env.types.extern_structs.insert(sdef.name, sdef)
+                    } else {
+                        ctx.env.types.structs.insert(sdef.name, sdef)
+                    }
                 },
                 TypeDef::EnumDef_(edef) => {
                     ctx.env.types.enums.insert(edef.name, edef)
@@ -289,6 +650,14 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
         for entry in sorted_traits {
             let (name, tdef) = entry
             ctx.env.trait_reg.traits.insert(tdef.name, tdef)
+        }
+        let mut sorted_sigs = mod_.sigs.entries()
+        sorted_sigs.sort_by(compare_by_first)
+        for entry in sorted_sigs {
+            let (_, sigdef) = entry
+            // Resolver bindings consume canonical payload identities. Display
+            // and leaf aliases are transactional namespace-frame overlays.
+            ctx.env.types.sigs.insert(sigdef.name, sigdef)
         }
         for impl_ in mod_.trait_impls {
             add_impl(ctx.env.trait_reg, impl_)
@@ -337,248 +706,6 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
         for entry in sorted_fmp {
             let (fn_name, flags) = entry
             ctx.fn_mut_params.insert(fn_name, flags)
-        }
-    }
-}
-
-fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<ModuleExports>) {
-    let mut module_map: Map<Str, ModuleExports> = map_new()
-    for mod_ in available_modules {
-        module_map.insert(mod_.module_key, mod_)
-    }
-
-    // Track which module each imported name came from, for ambiguity detection
-    let mut import_origins: Map<Str, Str> = map_new()
-
-    for use_decl in uses {
-        // Reject relative paths (self::/super::) at file level
-        let first_seg = use_decl.path.segments.get(0).unwrap_or("")
-        if first_seg == "self" || first_seg == "super" {
-            let d = make_diag(
-                E0705, Severity::SevError,
-                "Cannot use '${first_seg}::' at file level — relative paths are only supported inside mod blocks",
-                use_decl.path.span,
-                DiagnosticContext::OtherContext { detail: some("relative path out of scope") }
-            )
-            ctx.sink.report(d)
-            continue
-        }
-
-        let mod_key = use_decl.path.segments.join("::")
-        match module_map.get(mod_key) {
-            none => {
-                let d = make_diag(
-                    E0702, Severity::SevError,
-                    "Module '${mod_key}' not found",
-                    use_decl.path.span,
-                    DiagnosticContext::OtherContext { detail: some("module not found") }
-                )
-                ctx.sink.report(d)
-            },
-            some(mod_) => {
-                match use_decl.imports {
-                    UseImport::NamedItems { names } => {
-                        for item in names {
-                            let local_name = match item.alias {
-                                some(a) => a,
-                                none => item.name,
-                            }
-                            let mut found = false
-
-                            // Check for ambiguous import before binding
-                            match import_origins.get(local_name) {
-                                some(prev_mod) => {
-                                    if prev_mod != mod_key {
-                                        let d = make_diag(
-                                            E0707, Severity::SevError,
-                                            "Ambiguous name '${local_name}': imported from both module '${prev_mod}' and module '${mod_key}'. Use qualified name (${prev_mod}::${local_name} / ${mod_key}::${local_name}) to disambiguate",
-                                            item.span,
-                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") }
-                                        )
-                                        ctx.sink.report(d)
-                                        continue
-                                    }
-                                },
-                                none => {}
-                            }
-
-                            match mod_.values.get(item.name) {
-                                some(scheme) => {
-                                    // Exported DefIds belong to another module's
-                                    // checker. Allocate a local binding id before
-                                    // attaching the exact canonical origin.
-                                    ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
-                                    match mod_.value_origins.get(item.name) {
-                                        some(origin) => { record_value_origin(ctx, local_name, origin) },
-                                        none => {}
-                                    }
-                                    match mod_.variant_ctor_origins.get(item.name) {
-                                        some(origin) => { record_variant_ctor_origin(ctx, local_name, origin) },
-                                        none => {}
-                                    }
-                                    match mod_.fn_mut_params.get(item.name) {
-                                        some(flags) => { ctx.fn_mut_params.insert(local_name, flags) },
-                                        none => {}
-                                    }
-                                    found = true
-                                },
-                                none => {},
-                            }
-
-                            match mod_.types.get(item.name) {
-                                some(tdef) => {
-                                    found = true
-                                    match tdef {
-                                        TypeDef::EnumDef_(edef) => {
-                                            ctx.env.types.enums.insert(local_name, edef)
-                                            for v in edef.variants {
-                                                match mod_.values.get(v.name) {
-                                                    some(vscheme) => {
-                                                        ctx.env.bind(v.name, TypeScheme { ..vscheme, def_id: none })
-                                                        ctx.env.types.variant_to_enum.insert(v.name, edef.name)
-                                                        match mod_.value_origins.get(v.name) {
-                                                            some(origin) => { record_value_origin(ctx, v.name, origin) },
-                                                            none => {}
-                                                        }
-                                                        match mod_.variant_ctor_origins.get(v.name) {
-                                                            some(origin) => { record_variant_ctor_origin(ctx, v.name, origin) },
-                                                            none => {}
-                                                        }
-                                                    },
-                                                    none => {},
-                                                }
-                                            }
-                                        },
-                                        TypeDef::StructDef_(sdef) => {
-                                            ctx.env.types.structs.insert(local_name, sdef)
-                                        },
-                                    }
-                                },
-                                none => {},
-                            }
-
-                            match mod_.type_aliases.get(item.name) {
-                                some(def) => { ctx.env.types.type_aliases.insert(local_name, def); found = true },
-                                none => {}
-                            }
-
-                            match mod_.effects.get(item.name) {
-                                some(def) => { ctx.env.types.effects.insert(local_name, def); found = true },
-                                none => {}
-                            }
-                            match mod_.effect_aliases.get(item.name) {
-                                some(def) => { ctx.env.types.effect_aliases.insert(local_name, def); found = true },
-                                none => {}
-                            }
-                            match mod_.traits.get(item.name) {
-                                some(def) => { ctx.env.trait_reg.traits.insert(local_name, def); found = true },
-                                none => {}
-                            }
-
-                            if found == false {
-                                let d = make_diag(
-                                    E0703, Severity::SevError,
-                                    "Symbol '${item.name}' not found in module '${mod_key}'",
-                                    item.span,
-                                    DiagnosticContext::OtherContext { detail: some("symbol not found") }
-                                )
-                                ctx.sink.report(d)
-                            } else {
-                                import_origins.insert(local_name, mod_key)
-                            }
-                        }
-                    },
-                    UseImport::Module => {
-                        let mut sorted_mod_values = mod_.values.entries()
-                        sorted_mod_values.sort_by(compare_by_first)
-                        for entry in sorted_mod_values {
-                            let (name, scheme) = entry
-                            // Check for ambiguous wildcard import
-                            match import_origins.get(name) {
-                                some(prev_mod) => {
-                                    if prev_mod != mod_key {
-                                        let d = make_diag(
-                                            E0707, Severity::SevError,
-                                            "Ambiguous name '${name}': imported from both module '${prev_mod}' and module '${mod_key}'. Use qualified name to disambiguate",
-                                            use_decl.path.span,
-                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") }
-                                        )
-                                        ctx.sink.report(d)
-                                        continue
-                                    }
-                                },
-                                none => {}
-                            }
-                            ctx.env.bind(name, TypeScheme { ..scheme, def_id: none })
-                            match mod_.value_origins.get(name) {
-                                some(origin) => { record_value_origin(ctx, name, origin) },
-                                none => {}
-                            }
-                            match mod_.variant_ctor_origins.get(name) {
-                                some(origin) => { record_variant_ctor_origin(ctx, name, origin) },
-                                none => {}
-                            }
-                            match mod_.fn_mut_params.get(name) {
-                                some(flags) => { ctx.fn_mut_params.insert(name, flags) },
-                                none => {}
-                            }
-                            import_origins.insert(name, mod_key)
-                        }
-                        let mut sorted_mod_types = mod_.types.entries()
-                        sorted_mod_types.sort_by(compare_by_first)
-                        for entry in sorted_mod_types {
-                            let (name, tdef) = entry
-                            match tdef {
-                                TypeDef::EnumDef_(edef) => {
-                                    ctx.env.types.enums.insert(name, edef)
-                                    for v in edef.variants {
-                                        match mod_.values.get(v.name) {
-                                            some(vscheme) => {
-                                                ctx.env.bind(v.name, TypeScheme { ..vscheme, def_id: none })
-                                                ctx.env.types.variant_to_enum.insert(v.name, edef.name)
-                                                match mod_.value_origins.get(v.name) {
-                                                    some(origin) => { record_value_origin(ctx, v.name, origin) },
-                                                    none => {}
-                                                }
-                                                match mod_.variant_ctor_origins.get(v.name) {
-                                                    some(origin) => { record_variant_ctor_origin(ctx, v.name, origin) },
-                                                    none => {}
-                                                }
-                                            },
-                                            none => {},
-                                        }
-                                    }
-                                },
-                                TypeDef::StructDef_(sdef) => { ctx.env.types.structs.insert(name, sdef) },
-                            }
-                        }
-                        let mut sorted_mod_type_aliases = mod_.type_aliases.entries()
-                        sorted_mod_type_aliases.sort_by(compare_by_first)
-                        for entry in sorted_mod_type_aliases {
-                            let (name, def) = entry
-                            ctx.env.types.type_aliases.insert(name, def)
-                        }
-                        let mut sorted_mod_effects = mod_.effects.entries()
-                        sorted_mod_effects.sort_by(compare_by_first)
-                        for entry in sorted_mod_effects {
-                            let (name, def) = entry
-                            ctx.env.types.effects.insert(name, def)
-                        }
-                        let mut sorted_mod_aliases = mod_.effect_aliases.entries()
-                        sorted_mod_aliases.sort_by(compare_by_first)
-                        for entry in sorted_mod_aliases {
-                            let (name, def) = entry
-                            ctx.env.types.effect_aliases.insert(name, def)
-                        }
-                        let mut sorted_mod_traits = mod_.traits.entries()
-                        sorted_mod_traits.sort_by(compare_by_first)
-                        for entry in sorted_mod_traits {
-                            let (name, def) = entry
-                            ctx.env.trait_reg.traits.insert(name, def)
-                        }
-                    },
-                }
-            },
         }
     }
 }

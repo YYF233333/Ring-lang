@@ -1,1 +1,2 @@
-E0201
+error[E0703]: Symbol 'Set' not found in module 'defs'
+!E0201

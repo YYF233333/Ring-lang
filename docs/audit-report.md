@@ -16,7 +16,41 @@
 
 **影响**：CI/自编译假红；更深层是编译器存在真实内存错误，当前仅以崩溃形式暴露（fail loud），不排除同根源存在静默错误产出路径。**归因方向**：ASan gating 档跑受累用例集定位；与 #247/#242（module verification failed 族）是否同根待查。B-163 P2 LLVM 退役后若信号消失可归因 LLVM 信道并关闭；若 C 后端仍现则为共享层/RC 问题升级处理。
 
+> **2026-07-31 补充观测（B-107 merge 收官轮，merged 编译器）**：单轮 3 AV——`adversarial_dispatch_option_and_then`、`adversarial_effect_multi_delegate`、`generic_ord_dispatch`，全部 dict/dispatch 族聚集（B-107 动过 dict evidence 面），高于基线 ~1/轮但单轮样本不足定论；B-107 worktree 干净 ×3 的 AV 用例（effect/range/catch/reexport 族）无此聚集。#265 修复后的全量轮继续记录：若 dict 族聚集复现，优先用 ASan gating 跑该三用例。
+
 发现者：Repository Steward main 基线 ×3 定量
+
+### #265 #258 lexical tail handler contracts 引入 checker 误报 E0301（合法程序被拒）[critical] [judgment] [open]
+
+2026-07-31 B-107 merge 收官轮暴露、三编译器对照归因闭合：`tests/cases/mut_param.ring` 与 `tests/cases/llvm/adversarial_regress_closure_nested_effect.ring` 被误报 `E0301: cannot unify Str with ?N` / `Str with ()`（e2e/llvm/rc 多 lane）。对照：B-107 worktree 编译器（a511d50 base，无 #258）exit 0；`082f9a7` 编译器（含 #258 `6a67552`，无 B-107）与 merged 编译器同报同错——**回归由 #258 引入，自 2026-07-28 起潜伏于 main**，因 9df75ea merge 后根 ring.exe 未重链（stale exe 掩盖）从未被含 #258 的编译器全量验证。
+
+**修复约束**：fix-forward，不 revert #258（用户拍板的 soundness 收口，负面用例组依赖）；修复 tail-handler arm 约束与普通 unify 路径的交互（两用例均涉 closure/mut effect + 字符串，怀疑 handler arm result 约束污染非 handler 上下文的 TypeVar）。验收：两用例三 lane 转绿 + #258 负面组九用例保持红 + tail_handler_contract 行为不回归。
+
+**流程改进（同批落实）**：runner 启动时校验 ring.exe mtime ≥ dist-llvm/main.o mtime，不同步则 warning——防 stale exe 再次掩盖回归。
+
+发现者：Repository Steward merge 收官轮 + 三编译器对照
+
+### #262 derived Hash/Eq 泛型嵌套字段每次调用现场构造/回收动态 wrapped dict [medium] [judgment] [open]
+
+2026-07-31 B-107 merge review（b973859）发现：`Outer<T>` 的嵌套泛型字段（如 `Inner<Inner<T>>`）每次 `hash()`/`eq()` 都经 `resolve_derived_extra_dicts` 现场构造 dynamic wrapped dict（dict+closure+env 三次 alloc/method slot）再 drop（`emit_dict_hash_call`/`emit_c_derived_dict_call`，双后端同型）。Map/Set 探测是热路径——探测一次 = 每层泛型字段一轮 alloc/free。`dict_lower.ring:36-38` 注释自认只 memoise 全 static wrapper。功能正确（128 轮循环测试验证），纯 perf。
+
+**修复方向**：dynamic wrapped dict 的 per-callsite/per-monomorph 缓存，或在 derived 方法入口一次构造复用。
+
+发现者：B-107 merge 独立 review
+
+### #263 `ImplDictBound.type_param_index` 假设 impl 头参数与类型声明参数位置一致 [medium] [judgment] [open]
+
+2026-07-31 B-107 merge review（b973859）发现：`resolve_named_impl_dict_ref`（infer_ctx.ring ~825，行号=立项时）用 impl 侧 index 直接取用点类型的 `type_params[i]`——`impl<A,B> Trait for Foo<B,A>` 形态会取错 evidence。`env.ring:100-102` 注释自认不完整。旧代码更糟（所有参数套同一 trait），新代码是净改善，但该假设现在承载 runtime evidence 正确性。
+
+**修复方向**：按 impl 头类型实参到声明参数的映射重排 index；补 reorder 形态的行为/负面测试。
+
+发现者：B-107 merge 独立 review
+
+### #264 derived hash 对缺失字段/未知 enum tag 静默降级（失真不响）[medium] [judgment] [open]
+
+2026-07-31 B-107 merge review（b973859）发现两处防御性静默，与公理④「失真必须响」相悖：① `emit_struct_hash_fn`（LLVM/C 同型）对 field name 查不到时 `if field_idx >= 0` 静默跳过该字段——「Eq 区分、hash 相同」的静默失真（同型旧模式在 Eq/Ord 也存在）；② enum hash 的 default 分支（未知 tag = 内存损坏时）两后端静默返回 `DERIVED_HASH_SEED` 而非 panic。**修复方向**：两处统一 fail-loud（panic）；顺带排查 Eq/Ord 同型位置。另记录：`map_set_for_each` golden 弱化为 order-independent 总长（Set 迭代序 unspecified 口径），跨后端一致性由 `derive_hash_set` hash 值 golden 兜底——已接受，无行动项。
+
+发现者：B-107 merge 独立 review
 
 ### #259 inline mod 短类型别名泄漏使顶层显式注解发生 registration/check 身份分裂 [critical] [judgment] [open]
 
@@ -27,6 +61,8 @@
 **修复约束**：显式类型注解必须在同一 lexical type context 下绑定一次并保持 exact nominal identity，或让 inline mod 的短类型别名按 lexical scope 恢复。禁止只让 rebind return 保留 registration type：那会掩盖 scheme 分裂，但 HIR 参数、返回与函数体此前已按错误 normal identity 检查。验收至少覆盖 raw extern / 普通 struct 同叶、inline re-export 位于顶层函数前后、直接调用与一等函数值、C/LLVM/diff 以及 raw alloc/dealloc 路径的 RC 文本/运行检查。
 
 发现者：B-107 HOF implementation + independent review
+
+> **2026-07-31 B-107 Unit 3 merge 后注记**：Unit 3 的 delta journal frame 进出（value + 七类 type-like alias 恢复）与 `ModuleImplFact` 导出通道可能已修复本条的污染链；`inline_pub_use_namespaces` fixture 部分覆盖该场景但未含 raw extern type 同叶形态。下一 wave（C′ 主体，同在 resolver/frame 域）必须先按本条原始场景构造精确复现：已修则补回归 fixture 后关闭，未修则按修复约束实施。不得未验证即关闭。
 
 
 ## Runtime
@@ -169,16 +205,6 @@ LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理
 checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[T: Clone]` bounds 的 scheme → 调用位按 scheme 传 dict 参数；LLVM `emit_clone_fn` 却用 empty_bounds 生成单参函数——调用位多传 1 个 dict 参数，LLVM-C 不校验、x64 调用约定下静默无害（plan §0.1「类型系统真空」实例）。C 侧修复 = clone 签名与 scheme 对齐（接收 dict 参数，body 忽略）。
 
 **修复方向**：`emit_clone_fn` 传 `di.bounds` 对齐 scheme；或不修随 Phase 2 退役消亡。Phase 1 期间动 LLVM derived 区的任何改动需先修此项。
-
-发现者：step 5 worker（feedback 分诊）
-
-### #250 `--target=llvm` 单文件模式不遵守 `--out-dir`（双后端 CLI 不对称）[low] [mechanical] [open]
-
-> 2026-07-11 step 5 worker 发现（.o 落源文件旁，手动 Move-Item 绕过）。
-
-`ring.exe build foo.ring --target=llvm --out-dir=<dir>` 单文件模式下 .o 落源文件旁；C 后端（steps 1-3 起）正确遵守 `out_dir_set`。project mode 两者都遵守。
-
-**修复方向**（解法唯一）：LLVM 单文件路径消费 `out_dir_set`，对齐 C 后端行为。注意 Python runner 的 LLVM 单文件路径当前依赖"源旁 .o"现状（runner 取舍已备案），修复时同步调整 runner。
 
 发现者：step 5 worker（feedback 分诊）
 

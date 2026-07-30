@@ -8,6 +8,18 @@ pub enum Signal {
 // than leaking this unrelated scheme into ModuleExports.
 const Ready: Int = 99
 
+pub fn local_ready_value() -> Int {
+    Ready
+}
+
+pub mod local_probe {
+    use super::{Ready as LocalReady}
+
+    pub fn ready_value() -> Int {
+        LocalReady
+    }
+}
+
 pub enum Status {
     Up,
     Down,

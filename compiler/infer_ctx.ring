@@ -4,13 +4,20 @@ use types::{Type, Effect, EffectRow, RecordField, StructField,
     row_merge, effects_match_kind}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr,
     UseDecl, UseImport}
-use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
+use hir::{HExpr, HStmt, HParam, DictRef, ValueBindingKind,
+    trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote, Diagnostic, CollectingSink, Severity, Suggestion, make_diag, make_diagnostic}
 use codes::{E0201, E0204, E0301, E0302, E0407, E0503, E0511, E0512, E0513, E0705, E0707}
 use union_find::{UnionFind, new_union_find, uf_find}
-use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
+use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry,
+    StructDef, EnumDef, TypeAliasDef, EffectDef, EffectAliasDef, TraitDef, SigDef,
+    new_type_env, mono,
+    apply_subst, apply_subst_row, apply_subst_map, find_impl, lookup_variant,
+    exact_scheme_value_origin}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
+use resolver::{ResolvedNamespacePlan, ModuleFramePlan, ResolvedNamespaceBinding,
+    NamespaceKind}
 
 // ============================================================
 // InferResult — return type for expression inference
@@ -53,6 +60,29 @@ pub struct CompileError {}
 // InferCtx — mutable type inference context
 // ============================================================
 
+// Project namespace frames are lexical overlays on the current inference
+// scope. Every mutation records the exact previous payload (or absence), so a
+// nested frame can be removed without cloning the environment or disturbing
+// canonical registrations made while the frame was active.
+pub enum ProjectNamespaceUndo {
+    Value { name: Str, previous: TypeScheme?, new_def_id: Int },
+    Struct { name: Str, previous: StructDef? },
+    Enum { name: Str, previous: EnumDef? },
+    TypeAlias { name: Str, previous: TypeAliasDef? },
+    Effect { name: Str, previous: EffectDef? },
+    EffectAlias { name: Str, previous: EffectAliasDef? },
+    Trait { name: Str, previous: TraitDef? },
+    Sig { name: Str, previous: SigDef? },
+    VariantToEnum { name: Str, previous: Str? },
+    FnMutParams { name: Str, previous: List<Bool>? }
+}
+
+pub struct ProjectNamespaceFrameState {
+    pub frame_index: Int,
+    pub applied_bindings: Set<Str>,
+    pub journal: List<ProjectNamespaceUndo>
+}
+
 pub struct InferCtx {
     pub env: TypeEnv,
     pub subst: UnionFind,
@@ -66,14 +96,14 @@ pub struct InferCtx {
     // Local binding DefId -> canonical value origin.  DefIds are lexical, so
     // a same-spelled local binding naturally shadows an imported/module alias.
     pub use_aliases: Map<Int, Str>,
+    // Registration-owned binding kind.  Absence is deliberately interpreted
+    // as LocalBorrow; neither a FnType nor a spelling may manufacture direct
+    // callable/const-getter provenance.
+    pub value_binding_kinds: Map<Int, ValueBindingKind>,
     pub boxed_vars: Set<Int>,
     pub lambda_depth: Int,
     pub var_lambda_depth: Map<Int, Int>,
     pub fn_mut_params: Map<Str, List<Bool>>,
-    // Raw ABI extern declarations belonging to the current source file. This
-    // excludes prelude-only externs so `use super::abi_name` cannot invent a
-    // file-module member that the export pass would refuse to expose.
-    pub file_extern_values: Set<Str>,
     pub file_extern_types: Set<Str>,
     // Default effect handler dependency graph: effect name -> list of effect names it depends on
     pub effect_default_deps: Map<Str, List<Str>>,
@@ -91,7 +121,16 @@ pub struct InferCtx {
     // B-125: whether the current module context allows unsafe blocks
     pub mod_unsafe_allowed: Bool,
     // B-002p1: types with user `impl Drop` — collected during impl checking
-    pub drop_types: Set<Str>
+    pub drop_types: Set<Str>,
+    // B-107 Unit3B: one installed resolver plan, pre-indexed by exact AST
+    // frame site and exact frame index. These overlays never infer ownership
+    // from display names or leaf spellings.
+    pub project_namespace_file_key: Str?,
+    pub project_namespace_root_frame: Int?,
+    pub project_namespace_child_frames: Map<Str, Int>,
+    pub project_namespace_bindings: Map<Int, List<ResolvedNamespaceBinding>>,
+    pub project_namespace_ctor_enums: Map<Str, Str>,
+    pub project_namespace_frame_stack: List<ProjectNamespaceFrameState>
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -106,11 +145,11 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         loop_depth: 0,
         mod_path_stack: [],
         use_aliases: map_new(),
+        value_binding_kinds: map_new(),
         boxed_vars: set_new(),
         lambda_depth: 0,
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
-        file_extern_values: set_new(),
         file_extern_types: set_new(),
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
@@ -118,8 +157,387 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         fn_defaults: map_new(),
         fn_min_arity: map_new(),
         mod_unsafe_allowed: false,
-        drop_types: set_new()
+        drop_types: set_new(),
+        project_namespace_file_key: none,
+        project_namespace_root_frame: none,
+        project_namespace_child_frames: map_new(),
+        project_namespace_bindings: map_new(),
+        project_namespace_ctor_enums: map_new(),
+        project_namespace_frame_stack: []
     }
+}
+
+fn project_child_site_key(parent_frame_index: Int, decl_index: Int) -> Str {
+    "${parent_frame_index}|${decl_index}"
+}
+
+fn project_binding_key(binding: ResolvedNamespaceBinding) -> Str {
+    let namespace = match binding.namespace {
+        NamespaceKind::Value => "value",
+        NamespaceKind::Struct => "struct",
+        NamespaceKind::Enum => "enum",
+        NamespaceKind::TypeAlias => "type-alias",
+        NamespaceKind::Effect => "effect",
+        NamespaceKind::EffectAlias => "effect-alias",
+        NamespaceKind::Trait => "trait",
+        NamespaceKind::Sig => "sig"
+    }
+    "${namespace}|${binding.exposed_name}|${binding.payload}"
+}
+
+fn current_scope_value(ctx: InferCtx, name: Str) -> TypeScheme? {
+    if ctx.env.scope.scopes.len() == 0 { return none }
+    let index = ctx.env.scope.scopes.len() - 1
+    match ctx.env.scope.scopes.get(index) {
+        some(scope) => scope.variables.get(name),
+        none => none
+    }
+}
+
+fn set_current_scope_value(mut ctx: InferCtx, name: Str, scheme: TypeScheme) {
+    let index = ctx.env.scope.scopes.len() - 1
+    match ctx.env.scope.scopes.get(index) {
+        some(scope) => { scope.variables.insert(name, scheme) },
+        none => panic("unreachable: project namespace frame without inference scope")
+    }
+}
+
+fn remove_current_scope_value(mut ctx: InferCtx, name: Str) {
+    let index = ctx.env.scope.scopes.len() - 1
+    match ctx.env.scope.scopes.get(index) {
+        some(scope) => { scope.variables.remove(name) },
+        none => {}
+    }
+}
+
+fn apply_project_value_binding(
+    mut ctx: InferCtx,
+    binding: ResolvedNamespaceBinding,
+    mut state: ProjectNamespaceFrameState
+) -> Bool {
+    match ctx.env.lookup(binding.payload) {
+        none => false,
+        some(source_scheme) => {
+            let previous = current_scope_value(ctx, binding.exposed_name)
+            let new_def_id = ctx.env.fresh_def_id()
+            state.journal.push(ProjectNamespaceUndo::Value {
+                name: binding.exposed_name,
+                previous: previous,
+                new_def_id: new_def_id
+            })
+            set_current_scope_value(ctx, binding.exposed_name, TypeScheme {
+                ty: source_scheme.ty,
+                type_vars: source_scheme.type_vars,
+                bounds: source_scheme.bounds,
+                def_id: some(new_def_id)
+            })
+
+            let ultimate = exact_scheme_value_origin(
+                ctx.use_aliases, source_scheme, binding.payload)
+            ctx.use_aliases.insert(new_def_id, ultimate)
+            ctx.value_binding_kinds.insert(
+                new_def_id, value_binding_kind(ctx, source_scheme.def_id))
+            match variant_ctor_origin(ctx, source_scheme) {
+                some(origin) => {
+                    ctx.env.types.variant_ctor_origins.insert(new_def_id, origin)
+                },
+                none => {}
+            }
+
+            // Spelling-keyed metadata is part of the lexical overlay too.
+            // Absence on the canonical source removes any parent-frame entry,
+            // preventing stale metadata from leaking through shadowing.
+            let previous_variant = ctx.env.types.variant_to_enum.get(
+                binding.exposed_name)
+            state.journal.push(ProjectNamespaceUndo::VariantToEnum {
+                name: binding.exposed_name,
+                previous: previous_variant
+            })
+            match ctx.project_namespace_ctor_enums.get(binding.payload) {
+                some(enum_payload) => {
+                    ctx.env.types.variant_to_enum.insert(
+                        binding.exposed_name, enum_payload)
+                },
+                none => { ctx.env.types.variant_to_enum.remove(binding.exposed_name) }
+            }
+
+            let previous_mut = ctx.fn_mut_params.get(binding.exposed_name)
+            state.journal.push(ProjectNamespaceUndo::FnMutParams {
+                name: binding.exposed_name,
+                previous: previous_mut
+            })
+            let source_mut = match ctx.fn_mut_params.get(binding.payload) {
+                some(flags) => some(flags),
+                none => ctx.fn_mut_params.get(ultimate)
+            }
+            match source_mut {
+                some(flags) => { ctx.fn_mut_params.insert(binding.exposed_name, flags) },
+                none => { ctx.fn_mut_params.remove(binding.exposed_name) }
+            }
+            true
+        }
+    }
+}
+
+fn apply_project_namespace_binding(
+    mut ctx: InferCtx,
+    binding: ResolvedNamespaceBinding,
+    mut state: ProjectNamespaceFrameState
+) -> Bool {
+    match binding.namespace {
+        NamespaceKind::Value => apply_project_value_binding(ctx, binding, state),
+        NamespaceKind::Struct => {
+            let source = match ctx.env.types.extern_structs.get(binding.payload) {
+                some(def) => some(def),
+                none => ctx.env.types.structs.get(binding.payload)
+            }
+            match source {
+                none => false,
+                some(def) => {
+                    state.journal.push(ProjectNamespaceUndo::Struct {
+                        name: binding.exposed_name,
+                        previous: ctx.env.types.structs.get(binding.exposed_name)
+                    })
+                    ctx.env.types.structs.insert(binding.exposed_name, def)
+                    true
+                }
+            }
+        },
+        NamespaceKind::Enum => match ctx.env.types.enums.get(binding.payload) {
+            none => false,
+            some(def) => {
+                state.journal.push(ProjectNamespaceUndo::Enum {
+                    name: binding.exposed_name,
+                    previous: ctx.env.types.enums.get(binding.exposed_name)
+                })
+                ctx.env.types.enums.insert(binding.exposed_name, def)
+                true
+            }
+        },
+        NamespaceKind::TypeAlias => match ctx.env.types.type_aliases.get(binding.payload) {
+            none => false,
+            some(def) => {
+                state.journal.push(ProjectNamespaceUndo::TypeAlias {
+                    name: binding.exposed_name,
+                    previous: ctx.env.types.type_aliases.get(binding.exposed_name)
+                })
+                ctx.env.types.type_aliases.insert(binding.exposed_name, def)
+                true
+            }
+        },
+        NamespaceKind::Effect => match ctx.env.types.effects.get(binding.payload) {
+            none => false,
+            some(def) => {
+                state.journal.push(ProjectNamespaceUndo::Effect {
+                    name: binding.exposed_name,
+                    previous: ctx.env.types.effects.get(binding.exposed_name)
+                })
+                ctx.env.types.effects.insert(binding.exposed_name, def)
+                true
+            }
+        },
+        NamespaceKind::EffectAlias => match ctx.env.types.effect_aliases.get(binding.payload) {
+            none => false,
+            some(def) => {
+                state.journal.push(ProjectNamespaceUndo::EffectAlias {
+                    name: binding.exposed_name,
+                    previous: ctx.env.types.effect_aliases.get(binding.exposed_name)
+                })
+                ctx.env.types.effect_aliases.insert(binding.exposed_name, def)
+                true
+            }
+        },
+        NamespaceKind::Trait => match ctx.env.trait_reg.traits.get(binding.payload) {
+            none => false,
+            some(def) => {
+                state.journal.push(ProjectNamespaceUndo::Trait {
+                    name: binding.exposed_name,
+                    previous: ctx.env.trait_reg.traits.get(binding.exposed_name)
+                })
+                ctx.env.trait_reg.traits.insert(binding.exposed_name, def)
+                true
+            }
+        },
+        NamespaceKind::Sig => match ctx.env.types.sigs.get(binding.payload) {
+            none => false,
+            some(def) => {
+                state.journal.push(ProjectNamespaceUndo::Sig {
+                    name: binding.exposed_name,
+                    previous: ctx.env.types.sigs.get(binding.exposed_name)
+                })
+                ctx.env.types.sigs.insert(binding.exposed_name, def)
+                true
+            }
+        }
+    }
+}
+
+fn restore_project_namespace_undo(mut ctx: InferCtx, undo: ProjectNamespaceUndo) {
+    match undo {
+        ProjectNamespaceUndo::Value { name, previous, new_def_id } => {
+            match previous {
+                some(scheme) => set_current_scope_value(ctx, name, scheme),
+                none => remove_current_scope_value(ctx, name)
+            }
+            ctx.use_aliases.remove(new_def_id)
+            ctx.value_binding_kinds.remove(new_def_id)
+            ctx.env.types.variant_ctor_origins.remove(new_def_id)
+        },
+        ProjectNamespaceUndo::Struct { name, previous } => match previous {
+            some(def) => { ctx.env.types.structs.insert(name, def) },
+            none => { ctx.env.types.structs.remove(name) }
+        },
+        ProjectNamespaceUndo::Enum { name, previous } => match previous {
+            some(def) => { ctx.env.types.enums.insert(name, def) },
+            none => { ctx.env.types.enums.remove(name) }
+        },
+        ProjectNamespaceUndo::TypeAlias { name, previous } => match previous {
+            some(def) => { ctx.env.types.type_aliases.insert(name, def) },
+            none => { ctx.env.types.type_aliases.remove(name) }
+        },
+        ProjectNamespaceUndo::Effect { name, previous } => match previous {
+            some(def) => { ctx.env.types.effects.insert(name, def) },
+            none => { ctx.env.types.effects.remove(name) }
+        },
+        ProjectNamespaceUndo::EffectAlias { name, previous } => match previous {
+            some(def) => { ctx.env.types.effect_aliases.insert(name, def) },
+            none => { ctx.env.types.effect_aliases.remove(name) }
+        },
+        ProjectNamespaceUndo::Trait { name, previous } => match previous {
+            some(def) => { ctx.env.trait_reg.traits.insert(name, def) },
+            none => { ctx.env.trait_reg.traits.remove(name) }
+        },
+        ProjectNamespaceUndo::Sig { name, previous } => match previous {
+            some(def) => { ctx.env.types.sigs.insert(name, def) },
+            none => { ctx.env.types.sigs.remove(name) }
+        },
+        ProjectNamespaceUndo::VariantToEnum { name, previous } => match previous {
+            some(enum_name) => { ctx.env.types.variant_to_enum.insert(name, enum_name) },
+            none => { ctx.env.types.variant_to_enum.remove(name) }
+        },
+        ProjectNamespaceUndo::FnMutParams { name, previous } => match previous {
+            some(flags) => { ctx.fn_mut_params.insert(name, flags) },
+            none => { ctx.fn_mut_params.remove(name) }
+        }
+    }
+}
+
+// Install the one-file view of the portable project plan. The frame tree is
+// indexed by exact `(parent_frame, decl_index)` sites; no owner or leaf key is
+// used for child-frame recovery.
+pub fn install_project_namespace_plan(
+    mut ctx: InferCtx, file_key: Str, plan: ResolvedNamespacePlan
+) -> Bool {
+    ctx.project_namespace_file_key = some(file_key)
+    ctx.project_namespace_root_frame = none
+    ctx.project_namespace_child_frames = map_new()
+    ctx.project_namespace_bindings = map_new()
+    ctx.project_namespace_ctor_enums = map_new()
+    ctx.project_namespace_frame_stack = []
+
+    for frame in plan.frames {
+        if frame.file_key == file_key {
+            if frame.parent_frame_index < 0 {
+                ctx.project_namespace_root_frame = some(frame.frame_index)
+            } else {
+                ctx.project_namespace_child_frames.insert(
+                    project_child_site_key(
+                        frame.parent_frame_index, frame.decl_index),
+                    frame.frame_index)
+            }
+        }
+    }
+    for binding in plan.bindings {
+        if binding.file_key == file_key {
+            match ctx.project_namespace_bindings.get(binding.frame_index) {
+                some(existing) => existing.push(binding),
+                none => {
+                    ctx.project_namespace_bindings.insert(
+                        binding.frame_index, [binding])
+                }
+            }
+        }
+    }
+    for entry in plan.enum_variant_facts.entries() {
+        let (enum_payload, ctor_facts) = entry
+        for ctor in ctor_facts {
+            ctx.project_namespace_ctor_enums.insert(ctor.payload, enum_payload)
+        }
+    }
+    ctx.project_namespace_root_frame.is_some()
+}
+
+pub fn enter_project_root_frame(mut ctx: InferCtx) -> Bool {
+    match ctx.project_namespace_root_frame {
+        none => false,
+        some(frame_index) => {
+            ctx.project_namespace_frame_stack.push(ProjectNamespaceFrameState {
+                frame_index: frame_index,
+                applied_bindings: set_new(),
+                journal: []
+            })
+            refresh_project_namespace_frame(ctx)
+            true
+        }
+    }
+}
+
+pub fn enter_project_child_frame(mut ctx: InferCtx, decl_index: Int) -> Bool {
+    if ctx.project_namespace_frame_stack.len() == 0 { return false }
+    let parent_stack_index = ctx.project_namespace_frame_stack.len() - 1
+    let parent_frame_index = match ctx.project_namespace_frame_stack.get(
+        parent_stack_index) {
+        some(state) => state.frame_index,
+        none => return false
+    }
+    match ctx.project_namespace_child_frames.get(
+        project_child_site_key(parent_frame_index, decl_index)) {
+        none => false,
+        some(frame_index) => {
+            ctx.project_namespace_frame_stack.push(ProjectNamespaceFrameState {
+                frame_index: frame_index,
+                applied_bindings: set_new(),
+                journal: []
+            })
+            refresh_project_namespace_frame(ctx)
+            true
+        }
+    }
+}
+
+pub fn refresh_project_namespace_frame(mut ctx: InferCtx) {
+    if ctx.project_namespace_frame_stack.len() == 0 { return }
+    let state_index = ctx.project_namespace_frame_stack.len() - 1
+    match ctx.project_namespace_frame_stack.get(state_index) {
+        none => {},
+        some(state) => match ctx.project_namespace_bindings.get(state.frame_index) {
+            none => {},
+            some(bindings) => {
+                for binding in bindings {
+                    let key = project_binding_key(binding)
+                    if !state.applied_bindings.contains(key) {
+                        if apply_project_namespace_binding(ctx, binding, state) {
+                            // A binding becomes applied only after its exact
+                            // canonical payload was found and installed.
+                            state.applied_bindings.insert(key)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn exit_project_namespace_frame(mut ctx: InferCtx) -> Bool {
+    if ctx.project_namespace_frame_stack.len() == 0 { return false }
+    let mut state = ctx.project_namespace_frame_stack.pop().unwrap()
+    while state.journal.len() > 0 {
+        match state.journal.pop() {
+            some(undo) => restore_project_namespace_undo(ctx, undo),
+            none => {}
+        }
+    }
+    true
 }
 
 // ============================================================
@@ -801,6 +1219,120 @@ fn collect_effect_var_mappings(scheme_row: EffectRow, inst_row: EffectRow, type_
     }
 }
 
+fn resolve_fn_bound_dict_ref(
+    current_fn_bounds: List<FnBoundsEntry>,
+    id: Int, s: UnionFind, trait_name: Str
+) -> DictRef? {
+    let matching = current_fn_bounds.find(fn(fb) {
+        if fb.trait_name != trait_name { false } else {
+            let resolved_fb = apply_subst(s, Type::TypeVar {
+                id: fb.type_param_var_id,
+                name: none
+            })
+            let resolved_match = match resolved_fb {
+                Type::TypeVar { id: resolved_id, .. } => resolved_id == id,
+                _ => false
+            }
+            fb.type_param_var_id == id ||
+                uf_find(s, fb.type_param_var_id) == id ||
+                resolved_match
+        }
+    })
+    match matching {
+        some(fb) => some(DictRef::Simple(
+            trait_bound_param_name(fb.type_param_name, fb.trait_name))),
+        none => none
+    }
+}
+
+pub fn record_value_binding_kind(mut ctx: InferCtx, local_name: Str, kind: ValueBindingKind) {
+    match ctx.env.lookup(local_name) {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => { ctx.value_binding_kinds.insert(def_id, kind) },
+            none => {}
+        },
+        none => {}
+    }
+}
+
+pub fn value_binding_kind(ctx: InferCtx, def_id: Int?) -> ValueBindingKind {
+    match def_id {
+        some(id) => match ctx.value_binding_kinds.get(id) {
+            some(kind) => kind,
+            none => ValueBindingKind::LocalBorrow
+        },
+        none => ValueBindingKind::LocalBorrow
+    }
+}
+
+fn resolve_named_impl_dict_ref(
+    env: TypeEnv, current_fn_bounds: List<FnBoundsEntry>,
+    name: Str, type_params: List<Type>, s: UnionFind, trait_name: Str
+) -> DictRef? {
+    match find_impl(env.trait_reg, name, trait_name) {
+        none => none,
+        some(impl_entry) => {
+            let dict_name = trait_dict_name(name, trait_name)
+            if impl_entry.dict_bounds.len() == 0 {
+                return some(DictRef::Static(dict_name))
+            }
+
+            let mut inner_dicts: List<DictRef> = []
+            for impl_bound in impl_entry.dict_bounds {
+                match type_params.get(impl_bound.type_param_index) {
+                    none => { return none },
+                    some(type_arg) => {
+                        match resolve_dict_ref_for_type(
+                            env, current_fn_bounds, type_arg, s,
+                            impl_bound.trait_name
+                        ) {
+                            some(inner_dict) => inner_dicts.push(inner_dict),
+                            none => { return none }
+                        }
+                    }
+                }
+            }
+            some(DictRef::Wrapped {
+                dict: dict_name,
+                trait_name: trait_name,
+                inner_dicts: inner_dicts
+            })
+        }
+    }
+}
+
+// Resolve exactly the runtime evidence declared by an impl.  Failure is
+// propagated to the caller so diagnostics can be emitted at the use site;
+// this function never fabricates a base or "__unknown" dictionary.
+pub fn resolve_dict_ref_for_type(
+    env: TypeEnv, current_fn_bounds: List<FnBoundsEntry>,
+    t: Type, s: UnionFind, trait_name: Str
+) -> DictRef? {
+    let concrete = apply_subst(s, t)
+    match concrete {
+        Type::TypeVar { id, .. } =>
+            resolve_fn_bound_dict_ref(current_fn_bounds, id, s, trait_name),
+        Type::StructType { name, type_params, .. } =>
+            resolve_named_impl_dict_ref(
+                env, current_fn_bounds, name, type_params, s, trait_name),
+        Type::EnumType { name, type_params, .. } =>
+            resolve_named_impl_dict_ref(
+                env, current_fn_bounds, name, type_params, s, trait_name),
+        _ => {
+            match type_to_builtin_name(concrete) {
+                some(builtin_name) => {
+                    match find_impl(env.trait_reg, builtin_name, trait_name) {
+                        some(_) => some(DictRef::Static(
+                            trait_dict_name(builtin_name, trait_name))),
+                        none => none
+                    }
+                },
+                none => none
+            }
+        }
+    }
+}
+
 pub fn resolve_dicts_from_scheme(
     sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
@@ -814,69 +1346,29 @@ pub fn resolve_dicts_from_scheme(
         match var_map.get(bound.type_var) {
             some(fresh_var) => {
                 let concrete = apply_subst(s, fresh_var)
-                match concrete {
-                    Type::StructType { name, type_params, .. } => {
-                        if has_impl(env.trait_reg, name, bound.trait_name) {
-                            if type_params.len() > 0 {
-                                let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span)
-                                resolved_dicts.push(DictRef::Wrapped {
-                                    dict: trait_dict_name(name, bound.trait_name),
-                                    trait_name: bound.trait_name,
-                                    inner_dicts: inner
-                                })
-                            } else {
-                                resolved_dicts.push(DictRef::Static(trait_dict_name(name, bound.trait_name)))
+                match resolve_dict_ref_for_type(
+                    env, current_fn_bounds, concrete, s, bound.trait_name
+                ) {
+                    some(dict_ref) => {
+                        resolved_dicts.push(dict_ref)
+                        found = true
+                        // Associated constraints remain checked against the
+                        // selected named impl after dictionary resolution.
+                        match concrete {
+                            Type::StructType { name, .. } =>
+                                check_assoc_constraints(
+                                    sink, env, bound, name, var_map, s, span),
+                            Type::EnumType { name, .. } =>
+                                check_assoc_constraints(
+                                    sink, env, bound, name, var_map, s, span),
+                            _ => match type_to_builtin_name(concrete) {
+                                some(name) => check_assoc_constraints(
+                                    sink, env, bound, name, var_map, s, span),
+                                none => {}
                             }
-                            found = true
-                            // Validate associated type constraints
-                            check_assoc_constraints(sink, env, bound, name, var_map, s, span)
                         }
                     },
-                    Type::EnumType { name, type_params, .. } => {
-                        if has_impl(env.trait_reg, name, bound.trait_name) {
-                            if type_params.len() > 0 {
-                                let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span)
-                                resolved_dicts.push(DictRef::Wrapped {
-                                    dict: trait_dict_name(name, bound.trait_name),
-                                    trait_name: bound.trait_name,
-                                    inner_dicts: inner
-                                })
-                            } else {
-                                resolved_dicts.push(DictRef::Static(trait_dict_name(name, bound.trait_name)))
-                            }
-                            found = true
-                            // Validate associated type constraints
-                            check_assoc_constraints(sink, env, bound, name, var_map, s, span)
-                        }
-                    },
-                    Type::TypeVar { id, .. } => {
-                        let matching = current_fn_bounds.find(fn(fb) {
-                            let resolved_fb = apply_subst(s, Type::TypeVar { id: fb.type_param_var_id, name: none })
-                            let resolved_match = match resolved_fb { Type::TypeVar { id: rid, .. } => rid == id, _ => false }
-                            (fb.type_param_var_id == id || uf_find(s, fb.type_param_var_id) == id || resolved_match) && fb.trait_name == bound.trait_name
-                        })
-                        match matching {
-                            some(fb) => {
-                                resolved_dicts.push(DictRef::Simple(trait_bound_param_name(fb.type_param_name, fb.trait_name)))
-                                found = true
-                            },
-                            none => {}
-                        }
-                    },
-                    _ => {}
-                }
-                if !found {
-                    match type_to_builtin_name(concrete) {
-                        some(prim_name) => {
-                            if has_impl(env.trait_reg, prim_name, bound.trait_name) {
-                                resolved_dicts.push(DictRef::Static(trait_dict_name(prim_name, bound.trait_name)))
-                                found = true
-                                // Validate associated type constraints
-                                check_assoc_constraints(sink, env, bound, prim_name, var_map, s, span)
-                            }
-                        },
-                        none => {}
-                    }
+                    none => {}
                 }
             },
             none => {}
@@ -885,7 +1377,9 @@ pub fn resolve_dicts_from_scheme(
             let trait_display = nominal_display_name(bound.trait_name)
             let _ = type_error(sink, E0503,
                 "Type does not satisfy trait bound '${trait_display}'",
-                span, DiagnosticContext::TraitError { detail: "type does not satisfy '${trait_display}'" })
+                span, DiagnosticContext::TraitError {
+                    detail: "type does not satisfy '${trait_display}'"
+                })
         }
     }
     resolved_dicts
@@ -937,92 +1431,6 @@ fn check_assoc_constraints(
             }
         },
         none => {}
-    }
-}
-
-fn resolve_inner_dicts_from_type_params(
-    sink: CollectingSink, env: TypeEnv,
-    current_fn_bounds: List<FnBoundsEntry>,
-    type_params: List<Type>,
-    s: UnionFind,
-    trait_name: Str, span: Span
-) -> List<DictRef> {
-    let mut result: List<DictRef> = []
-    for param in type_params {
-        let concrete = apply_subst(s, param)
-        result.push(resolve_concrete_type_to_dict_ref(sink, env, current_fn_bounds, concrete, s, trait_name, span))
-    }
-    result
-}
-
-fn resolve_concrete_type_to_dict_ref(
-    sink: CollectingSink, env: TypeEnv,
-    current_fn_bounds: List<FnBoundsEntry>,
-    t: Type,
-    s: UnionFind,
-    trait_name: Str, span: Span
-) -> DictRef {
-    match type_to_builtin_name(t) {
-        some(builtin_name) => match t {
-            Type::StructType { .. } => {},
-            Type::EnumType { .. } => {},
-            _ => { return DictRef::Static(trait_dict_name(builtin_name, trait_name)) }
-        },
-        none => {}
-    }
-    match t {
-        Type::TypeVar { id, .. } => {
-            let bound = current_fn_bounds.find(fn(fb) {
-                fb.type_param_var_id == id && fb.trait_name == trait_name
-            })
-            match bound {
-                some(b) => DictRef::Simple(trait_bound_param_name(b.type_param_name, trait_name)),
-                none => DictRef::Static(trait_dict_name("__unknown", trait_name))
-            }
-        },
-        Type::StructType { name, type_params, .. } => {
-            if has_impl(env.trait_reg, name, trait_name) {
-                if type_params.len() > 0 {
-                    let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span)
-                    DictRef::Wrapped {
-                        dict: trait_dict_name(name, trait_name),
-                        trait_name: trait_name,
-                        inner_dicts: inner
-                    }
-                } else {
-                    DictRef::Static(trait_dict_name(name, trait_name))
-                }
-            } else {
-                let type_display = nominal_display_name(name)
-                let trait_display = nominal_display_name(trait_name)
-                let _ = type_error(sink, E0503,
-                    "Type '${type_display}' does not implement trait '${trait_display}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
-                DictRef::Static(trait_dict_name(name, trait_name))
-            }
-        },
-        Type::EnumType { name, type_params, .. } => {
-            if has_impl(env.trait_reg, name, trait_name) {
-                if type_params.len() > 0 {
-                    let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span)
-                    DictRef::Wrapped {
-                        dict: trait_dict_name(name, trait_name),
-                        trait_name: trait_name,
-                        inner_dicts: inner
-                    }
-                } else {
-                    DictRef::Static(trait_dict_name(name, trait_name))
-                }
-            } else {
-                let type_display = nominal_display_name(name)
-                let trait_display = nominal_display_name(trait_name)
-                let _ = type_error(sink, E0503,
-                    "Type '${type_display}' does not implement trait '${trait_display}'",
-                    span, DiagnosticContext::TraitError { detail: "type '${type_display}' does not satisfy '${trait_display}'" })
-                DictRef::Static(trait_dict_name(name, trait_name))
-            }
-        },
-        _ => DictRef::Static(trait_dict_name("__unknown", trait_name))
     }
 }
 
@@ -1392,9 +1800,55 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
 // Pattern binding
 // ============================================================
 
-pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, subst: UnionFind) {
+// Error recovery must preserve lexical scope without attempting any further
+// type or constructor resolution. In particular, nested constructor syntax in
+// an already-invalid pattern must not emit secondary diagnostics.
+fn bind_pattern_recovery(mut ctx: InferCtx, pattern: Pattern) {
     match pattern {
         Pattern::Wildcard { .. } => {},
+        Pattern::Binding { name, span } => {
+            ctx.env.bind_mono(name, Type::ErrorType)
+            match ctx.env.lookup(name) {
+                some(scheme) => match scheme.def_id {
+                    some(did) => ctx.env.record_def_span(did, span),
+                    none => {}
+                },
+                none => {}
+            }
+        },
+        Pattern::Constructor { fields, .. } => {
+            for field in fields {
+                bind_pattern_recovery(ctx, field)
+            }
+        },
+        Pattern::Literal { .. } => {},
+        Pattern::NamedConstructor { fields, .. } => {
+            for field in fields {
+                bind_pattern_recovery(ctx, field.pattern)
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for element in elements {
+                bind_pattern_recovery(ctx, element)
+            }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            for alternative in patterns {
+                bind_pattern_recovery(ctx, alternative)
+            }
+        }
+    }
+}
+
+fn bind_named_pattern_fields_recovery(ctx: InferCtx, fields: List<NamedPatternField>) {
+    for field in fields {
+        bind_pattern_recovery(ctx, field.pattern)
+    }
+}
+
+pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, subst: UnionFind) -> UnionFind {
+    match pattern {
+        Pattern::Wildcard { .. } => subst,
         Pattern::Binding { name, span } => {
             ctx.env.bind_mono(name, apply_subst(subst, expected_type))
             match ctx.env.lookup(name) {
@@ -1404,10 +1858,11 @@ pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, su
                 },
                 none => {}
             }
+            subst
         },
         Pattern::Constructor { name, qualifier, fields, span } =>
             bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span),
-        Pattern::Literal { .. } => {},
+        Pattern::Literal { .. } => subst,
         Pattern::NamedConstructor { name, qualifier, fields, span, .. } =>
             bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span),
         Pattern::TuplePattern { elements, span } => {
@@ -1419,27 +1874,69 @@ pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, su
                             "Tuple pattern has ${elements.len().to_str()} elements but type has ${type_elems.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
+                    let mut s = subst
                     let mut i = 0
                     while i < elements.len() {
                         match (elements.get(i), type_elems.get(i)) {
-                            (some(pat), some(ty)) => bind_pattern(ctx, pat, ty, subst),
+                            (some(pat), some(ty)) => {
+                                s = bind_pattern(ctx, pat, ty, s)
+                            },
+                            (some(pat), none) => {
+                                bind_pattern_recovery(ctx, pat)
+                            },
                             _ => {}
                         }
                         i = i + 1
                     }
+                    s
                 },
-                _ => { let _ = type_error(ctx.sink, E0301,
-                    "Tuple pattern requires tuple type, got ${type_to_string(resolved)}",
-                    span, DiagnosticContext::TypeMismatch { expected: "tuple", actual: type_to_string(resolved), expression: none }) }
+                Type::TypeVar { .. } => {
+                    let mut element_types: List<Type> = []
+                    let mut i = 0
+                    while i < elements.len() {
+                        element_types.push(ctx.env.fresh_var())
+                        i = i + 1
+                    }
+                    let tuple_type = Type::TupleType { elements: element_types }
+                    let mut s = unify_at(ctx.sink, ctx.env, expected_type, tuple_type, subst, span)
+                    i = 0
+                    while i < elements.len() {
+                        match (elements.get(i), element_types.get(i)) {
+                            (some(pat), some(ty)) => {
+                                s = bind_pattern(ctx, pat, ty, s)
+                            },
+                            _ => {}
+                        }
+                        i = i + 1
+                    }
+                    s
+                },
+                Type::ErrorType => {
+                    for pat in elements {
+                        bind_pattern_recovery(ctx, pat)
+                    }
+                    subst
+                },
+                _ => {
+                    let _ = type_error(ctx.sink, E0301,
+                        "Tuple pattern requires tuple type, got ${type_to_string(resolved)}",
+                        span, DiagnosticContext::TypeMismatch { expected: "tuple", actual: type_to_string(resolved), expression: none })
+                    for pat in elements {
+                        bind_pattern_recovery(ctx, pat)
+                    }
+                    subst
+                }
             }
         },
         Pattern::OrPattern { patterns, span } => {
             // Bind each sub-pattern against the same expected type.
             // For or-patterns without bindings, this just validates each alternative.
             // For or-patterns with bindings, each sub-pattern introduces the same names.
+            let mut s = subst
             for pat in patterns {
-                bind_pattern(ctx, pat, expected_type, subst)
+                s = bind_pattern(ctx, pat, expected_type, s)
             }
+            s
         }
     }
 }
@@ -1447,7 +1944,18 @@ pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, su
 fn bind_constructor_pattern(
     ctx: InferCtx, name: Str, qualifier: Str?, fields: List<Pattern>,
     expected_type: Type, subst: UnionFind, span: Span
-) {
+) -> UnionFind {
+    let mut s = subst
+    let resolved_expected = apply_subst(s, expected_type)
+    match resolved_expected {
+        Type::ErrorType => {
+            for field in fields {
+                bind_pattern_recovery(ctx, field)
+            }
+            return s
+        },
+        _ => {}
+    }
     let enum_name = resolve_pattern_enum(ctx, name, qualifier, span)
     match enum_name {
         some(ename) => match ctx.env.types.enums.get(ename) {
@@ -1455,7 +1963,6 @@ fn bind_constructor_pattern(
                 let variant = lookup_variant(enum_def, name)
                 match variant {
                     some(v) => {
-                        let resolved_expected = apply_subst(subst, expected_type)
                         match resolved_expected {
                             Type::EnumType { name: rname, .. } => {
                                 if rname != ename {
@@ -1464,12 +1971,22 @@ fn bind_constructor_pattern(
                                     let _ = type_error(ctx.sink, E0301,
                                         "variant '${name}' belongs to enum '${enum_display}', not '${expected_display}'",
                                         span, DiagnosticContext::TypeMismatch { expected: expected_display, actual: enum_display, expression: none })
+                                    for field in fields {
+                                        bind_pattern_recovery(ctx, field)
+                                    }
+                                    return s
                                 }
                             },
                             Type::TypeVar { .. } => {},
-                            _ => { let _ = type_error(ctx.sink, E0301,
-                                "cannot destructure type '${type_to_string(resolved_expected)}' with constructor pattern '${name}'",
-                                span, DiagnosticContext::PatternError { detail: "constructor pattern on non-enum type" }) }
+                            _ => {
+                                let _ = type_error(ctx.sink, E0301,
+                                    "cannot destructure type '${type_to_string(resolved_expected)}' with constructor pattern '${name}'",
+                                    span, DiagnosticContext::PatternError { detail: "constructor pattern on non-enum type" })
+                                for field in fields {
+                                    bind_pattern_recovery(ctx, field)
+                                }
+                                return s
+                            }
                         }
                         let inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected)
                         if fields.len() != v.fields.len() {
@@ -1478,30 +1995,55 @@ fn bind_constructor_pattern(
                                 span, DiagnosticContext::OtherContext { detail: some("constructor arity mismatch") })
                         }
                         let mut i = 0
-                        while i < fields.len() && i < v.fields.len() {
+                        while i < fields.len() {
                             match (fields.get(i), v.fields.get(i)) {
                                 (some(fpat), some(ftype)) => {
                                     let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, ftype) } else { ftype }
-                                    bind_pattern(ctx, fpat, field_type, subst)
+                                    s = bind_pattern(ctx, fpat, field_type, s)
+                                },
+                                (some(fpat), none) => {
+                                    bind_pattern_recovery(ctx, fpat)
                                 },
                                 _ => {}
                             }
                             i = i + 1
                         }
                     },
-                    none => {}
+                    none => {
+                        for field in fields {
+                            bind_pattern_recovery(ctx, field)
+                        }
+                    }
                 }
             },
-            none => {}
+            none => {
+                for field in fields {
+                    bind_pattern_recovery(ctx, field)
+                }
+            }
         },
-        none => {}
+        none => {
+            for field in fields {
+                bind_pattern_recovery(ctx, field)
+            }
+        }
     }
+    s
 }
 
 fn bind_named_constructor_pattern(
     ctx: InferCtx, name: Str, qualifier: Str?, fields: List<NamedPatternField>,
     expected_type: Type, subst: UnionFind, span: Span
-) {
+) -> UnionFind {
+    let mut s = subst
+    let resolved_expected = apply_subst(s, expected_type)
+    match resolved_expected {
+        Type::ErrorType => {
+            bind_named_pattern_fields_recovery(ctx, fields)
+            return s
+        },
+        _ => {}
+    }
     // Resolve relative paths (self::/super::) to actual qualified names
     let mut resolved_qualifier = qualifier
     match qualifier {
@@ -1519,7 +2061,8 @@ fn bind_named_constructor_pattern(
                         let _ = type_error(ctx.sink, E0705,
                             "Cannot use '${q}' — relative path exceeds module nesting depth",
                             span, DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
-                        return
+                        bind_named_pattern_fields_recovery(ctx, fields)
+                        return s
                     }
                 }
             }
@@ -1536,7 +2079,6 @@ fn bind_named_constructor_pattern(
                 match variant {
                     some(v) => match v.field_names {
                         some(vfield_names) => {
-                            let resolved_expected = apply_subst(subst, expected_type)
                             match resolved_expected {
                                 Type::EnumType { name: rname, .. } => {
                                     if rname != ename {
@@ -1545,9 +2087,15 @@ fn bind_named_constructor_pattern(
                                         let _ = type_error(ctx.sink, E0301,
                                             "variant '${name}' belongs to enum '${enum_display}', not '${expected_display}'",
                                             span, DiagnosticContext::TypeMismatch { expected: expected_display, actual: enum_display, expression: none })
+                                        bind_named_pattern_fields_recovery(ctx, fields)
+                                        return s
                                     }
                                 },
-                                _ => {}
+                                Type::TypeVar { .. } => {},
+                                _ => {
+                                    bind_named_pattern_fields_recovery(ctx, fields)
+                                    return s
+                                }
                             }
                             let inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected)
                             for field in fields {
@@ -1556,22 +2104,36 @@ fn bind_named_constructor_pattern(
                                     some(idx) => match v.fields.get(idx) {
                                         some(ftype) => {
                                             let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, ftype) } else { ftype }
-                                            bind_pattern(ctx, field.pattern, field_type, subst)
+                                            s = bind_pattern(ctx, field.pattern, field_type, s)
                                         },
-                                        none => {}
+                                        none => {
+                                            bind_pattern_recovery(ctx, field.pattern)
+                                        }
                                     },
-                                    none => { let _ = type_error(ctx.sink, E0301,
-                                        "variant '${name}' has no field '${field.name}'",
-                                        field.span, DiagnosticContext::OtherContext { detail: some("unknown field '${field.name}'") }) }
+                                    none => {
+                                        let _ = type_error(ctx.sink, E0301,
+                                            "variant '${name}' has no field '${field.name}'",
+                                            field.span, DiagnosticContext::OtherContext { detail: some("unknown field '${field.name}'") })
+                                        bind_pattern_recovery(ctx, field.pattern)
+                                    }
                                 }
                             }
                         },
-                        none => {}
+                        none => {
+                            let _ = type_error(ctx.sink, E0301,
+                                "variant '${name}' uses positional fields and cannot be matched with named fields",
+                                span, DiagnosticContext::PatternError { detail: "named pattern on positional variant" })
+                            bind_named_pattern_fields_recovery(ctx, fields)
+                        }
                     },
-                    none => {}
+                    none => {
+                        bind_named_pattern_fields_recovery(ctx, fields)
+                    }
                 }
             },
-            none => {}
+            none => {
+                bind_named_pattern_fields_recovery(ctx, fields)
+            }
         },
         none => {
             // Not an enum variant — try struct lookup
@@ -1579,30 +2141,53 @@ fn bind_named_constructor_pattern(
                 some(q) => "${q}::${name}",
                 none => name
             }
-            bind_struct_pattern_fields(ctx, struct_name, name, fields, expected_type, subst, span)
+            s = bind_struct_pattern_fields(ctx, struct_name, name, fields, expected_type, s, span)
         }
     }
+    s
 }
 
 fn bind_struct_pattern_fields(
     ctx: InferCtx, struct_name: Str, display_name: Str, fields: List<NamedPatternField>,
     expected_type: Type, subst: UnionFind, span: Span
-) {
+) -> UnionFind {
+    let mut s = subst
+    let resolved_expected = apply_subst(s, expected_type)
+    match resolved_expected {
+        Type::ErrorType => {
+            bind_named_pattern_fields_recovery(ctx, fields)
+            return s
+        },
+        _ => {}
+    }
     match ctx.env.types.structs.get(struct_name) {
         some(struct_def) => {
-            let resolved_expected = apply_subst(subst, expected_type)
+            match resolved_expected {
+                Type::StructType { name: expected_name, .. } => {
+                    if expected_name != struct_def.name {
+                        bind_named_pattern_fields_recovery(ctx, fields)
+                        return s
+                    }
+                },
+                Type::TypeVar { .. } => {},
+                _ => {
+                    bind_named_pattern_fields_recovery(ctx, fields)
+                    return s
+                }
+            }
             let inst_map = build_instantiation_map(struct_def.type_param_vars, resolved_expected)
             for field in fields {
                 let found = struct_def.fields.find(fn(sf) { sf.name == field.name })
                 match found {
                     some(sf) => {
                         let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, sf.ty) } else { sf.ty }
-                        bind_pattern(ctx, field.pattern, field_type, subst)
+                        s = bind_pattern(ctx, field.pattern, field_type, s)
                     },
                     none => {
                         let _ = type_error(ctx.sink, E0301,
                             "struct '${display_name}' has no field '${field.name}'",
                             field.span, DiagnosticContext::OtherContext { detail: some("unknown field '${field.name}'") })
+                        bind_pattern_recovery(ctx, field.pattern)
                     }
                 }
             }
@@ -1614,24 +2199,43 @@ fn bind_struct_pattern_fields(
                 let full_name = "${mod_prefix}::${struct_name}"
                 match ctx.env.types.structs.get(full_name) {
                     some(sdef) => {
-                        let resolved_expected = apply_subst(subst, expected_type)
+                        match resolved_expected {
+                            Type::StructType { name: expected_name, .. } => {
+                                if expected_name != sdef.name {
+                                    bind_named_pattern_fields_recovery(ctx, fields)
+                                    return s
+                                }
+                            },
+                            Type::TypeVar { .. } => {},
+                            _ => {
+                                bind_named_pattern_fields_recovery(ctx, fields)
+                                return s
+                            }
+                        }
                         let inst_map = build_instantiation_map(sdef.type_param_vars, resolved_expected)
                         for field in fields {
                             let found = sdef.fields.find(fn(sf) { sf.name == field.name })
                             match found {
                                 some(sf) => {
                                     let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, sf.ty) } else { sf.ty }
-                                    bind_pattern(ctx, field.pattern, field_type, subst)
+                                    s = bind_pattern(ctx, field.pattern, field_type, s)
                                 },
-                                none => {}
+                                none => {
+                                    bind_pattern_recovery(ctx, field.pattern)
+                                }
                             }
                         }
                     },
-                    none => {}
+                    none => {
+                        bind_named_pattern_fields_recovery(ctx, fields)
+                    }
                 }
+            } else {
+                bind_named_pattern_fields_recovery(ctx, fields)
             }
         }
     }
+    s
 }
 
 // Like resolve_pattern_enum but returns none silently if not found (no E0201 error).
@@ -1828,69 +2432,188 @@ fn append_import_identity(prefix: Str, name: Str) -> Str {
     else { "${prefix}::${name}" }
 }
 
-fn bind_relative_import(mut ctx: InferCtx, local_name: Str, qualified_name: Str) -> Bool {
+// Copy one already-resolved source key to one alias key across every namespace.
+// Value metadata is snapshotted before bind allocates a new DefId, and its
+// origin is flattened immediately to the final declaration identity.
+pub fn bind_exact_import_alias(
+    mut ctx: InferCtx, alias_name: Str, source_identity: Str, include_values: Bool
+) -> Bool {
     let mut found = false
-    match ctx.env.lookup(qualified_name) {
-        some(scheme) => {
-            let ctor_origin = variant_ctor_origin(ctx, scheme)
-            ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
-            if local_name != qualified_name { record_value_origin(ctx, local_name, qualified_name) }
-            match ctor_origin {
-                some(origin) => { record_variant_ctor_origin(ctx, local_name, origin) },
-                none => {}
+    if include_values {
+        match ctx.env.lookup(source_identity) {
+            some(scheme) => {
+                let exact_origin = exact_scheme_value_origin(
+                    ctx.use_aliases, scheme, source_identity)
+                // The source key may itself be a stale re-export alias created
+                // before an inferred function was checked. Prefer the flattened
+                // declaration's live scheme when it is already rebound; the
+                // canonical rebind scan handles the opposite ordering where
+                // this fresh alias exists first.
+                let live_scheme = match ctx.env.lookup(exact_origin) {
+                    some(origin_scheme) => origin_scheme,
+                    none => scheme
+                }
+                let source_kind = value_binding_kind(ctx, scheme.def_id)
+                let ctor_origin = variant_ctor_origin(ctx, scheme)
+                let mut_flags = match ctx.fn_mut_params.get(source_identity) {
+                    some(flags) => some(flags),
+                    none => ctx.fn_mut_params.get(exact_origin)
+                }
+                if alias_name != source_identity {
+                    ctx.env.bind(alias_name, TypeScheme {
+                        ty: live_scheme.ty,
+                        type_vars: live_scheme.type_vars,
+                        bounds: live_scheme.bounds,
+                        def_id: none
+                    })
+                    record_value_origin(ctx, alias_name, exact_origin)
+                    match source_kind {
+                        ValueBindingKind::DirectCallable =>
+                            record_value_binding_kind(ctx, alias_name, source_kind),
+                        ValueBindingKind::ExternCallable =>
+                            record_value_binding_kind(ctx, alias_name, source_kind),
+                        ValueBindingKind::ConstGetter =>
+                            record_value_binding_kind(ctx, alias_name, source_kind),
+                        ValueBindingKind::LocalBorrow => {}
+                    }
+                    match ctor_origin {
+                        some(origin) => {
+                            record_variant_ctor_origin(ctx, alias_name, origin)
+                        },
+                        none => {}
+                    }
+                    match mut_flags {
+                        some(flags) => { ctx.fn_mut_params.insert(alias_name, flags) },
+                        none => {}
+                    }
+                }
+                found = true
+            },
+            none => {}
+        }
+    }
+    match ctx.env.types.structs.get(source_identity) {
+        some(def) => {
+            if alias_name != source_identity {
+                ctx.env.types.structs.insert(alias_name, def)
             }
             found = true
         },
-        none => {
-            // File-module extern functions retain their raw ABI spelling. Only
-            // declarations from this source file may satisfy the fallback;
-            // prelude externs are intentionally not implicit module members.
-            let abi_name = import_identity_leaf(qualified_name)
-            if ctx.file_extern_values.contains(abi_name) {
-                match ctx.env.lookup(abi_name) {
-                    some(scheme) => {
-                        ctx.env.bind(local_name, TypeScheme { ..scheme, def_id: none })
-                        record_value_origin(ctx, local_name, abi_name)
-                        found = true
-                    },
-                    none => {}
-                }
+        none => {}
+    }
+    match ctx.env.types.enums.get(source_identity) {
+        some(def) => {
+            if alias_name != source_identity {
+                ctx.env.types.enums.insert(alias_name, def)
             }
-        }
+            found = true
+        },
+        none => {}
     }
-    match ctx.env.types.structs.get(qualified_name) {
-        some(def) => { ctx.env.types.structs.insert(local_name, def); found = true },
-        none => {
-            let abi_name = import_identity_leaf(qualified_name)
-            if ctx.file_extern_types.contains(abi_name) {
-                match ctx.env.types.structs.get(abi_name) {
-                    some(def) => {
-                        if def.is_extern { ctx.env.types.structs.insert(local_name, def); found = true }
-                    },
-                    none => {}
-                }
+    match ctx.env.types.type_aliases.get(source_identity) {
+        some(def) => {
+            if alias_name != source_identity {
+                ctx.env.types.type_aliases.insert(alias_name, def)
             }
-        }
+            found = true
+        },
+        none => {}
     }
-    match ctx.env.types.enums.get(qualified_name) {
-        some(def) => { ctx.env.types.enums.insert(local_name, def); found = true }, none => {}
+    match ctx.env.types.effects.get(source_identity) {
+        some(def) => {
+            if alias_name != source_identity {
+                ctx.env.types.effects.insert(alias_name, def)
+            }
+            found = true
+        },
+        none => {}
     }
-    match ctx.env.types.type_aliases.get(qualified_name) {
-        some(def) => { ctx.env.types.type_aliases.insert(local_name, def); found = true }, none => {}
+    match ctx.env.types.effect_aliases.get(source_identity) {
+        some(def) => {
+            if alias_name != source_identity {
+                ctx.env.types.effect_aliases.insert(alias_name, def)
+            }
+            found = true
+        },
+        none => {}
     }
-    match ctx.env.types.effects.get(qualified_name) {
-        some(def) => { ctx.env.types.effects.insert(local_name, def); found = true }, none => {}
+    match ctx.env.trait_reg.traits.get(source_identity) {
+        some(def) => {
+            if alias_name != source_identity {
+                ctx.env.trait_reg.traits.insert(alias_name, def)
+            }
+            found = true
+        },
+        none => {}
     }
-    match ctx.env.types.effect_aliases.get(qualified_name) {
-        some(def) => { ctx.env.types.effect_aliases.insert(local_name, def); found = true }, none => {}
-    }
-    match ctx.env.trait_reg.traits.get(qualified_name) {
-        some(def) => { ctx.env.trait_reg.traits.insert(local_name, def); found = true }, none => {}
-    }
-    match ctx.env.types.sigs.get(qualified_name) {
-        some(def) => { ctx.env.types.sigs.insert(local_name, def); found = true }, none => {}
+    match ctx.env.types.sigs.get(source_identity) {
+        some(def) => {
+            if alias_name != source_identity {
+                ctx.env.types.sigs.insert(alias_name, def)
+            }
+            found = true
+        },
+        none => {}
     }
     found
+}
+
+fn bind_raw_extern_type_alias(mut ctx: InferCtx, alias_name: Str, abi_name: Str) -> Bool {
+    match ctx.env.types.extern_structs.get(abi_name) {
+        some(def) => {
+            if def.is_extern {
+                if alias_name != abi_name {
+                    ctx.env.types.structs.insert(alias_name, def)
+                }
+                return true
+            }
+        },
+        none => {}
+    }
+    false
+}
+
+fn bind_relative_import(
+    mut ctx: InferCtx, local_name: Str, qualified_name: Str,
+    published_identity: Str?
+) -> Bool {
+    // Snapshot before alias insertion: a real canonical struct with the same
+    // leaf always wins over this file's raw ExternType ABI spelling.
+    let exact_struct_found = ctx.env.types.structs.contains_key(qualified_name)
+    // Both aliases consume the same immutable source key. The helper snapshots
+    // value provenance before allocating either alias DefId.
+    let mut found = bind_exact_import_alias(ctx, local_name, qualified_name, true)
+    match published_identity {
+        some(identity) => {
+            if bind_exact_import_alias(ctx, identity, qualified_name, true) {
+                found = true
+            }
+        },
+        none => {}
+    }
+
+    // Extern types deliberately retain their raw ABI identity. Only an actual
+    // declaration in this file may satisfy the relative module membership.
+    let abi_name = import_identity_leaf(qualified_name)
+    if !exact_struct_found && ctx.file_extern_types.contains(abi_name) {
+        if bind_raw_extern_type_alias(ctx, local_name, abi_name) {
+            found = true
+        }
+        match published_identity {
+            some(identity) => {
+                if bind_raw_extern_type_alias(ctx, identity, abi_name) {
+                    found = true
+                }
+            },
+            none => {}
+        }
+    }
+    found
+}
+
+fn published_import_identity(ctx: InferCtx, is_pub: Bool, local_name: Str) -> Str? {
+    if !is_pub || ctx.mod_path_stack.len() == 0 { return none }
+    some("${ctx.mod_path_stack.join("::")}::${local_name}")
 }
 
 pub fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>, report_errors: Bool) {
@@ -1963,7 +2686,12 @@ pub fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>, report_errors: B
                                 },
                                 none => {}
                             }
-                            if bind_relative_import(ctx, local_name, qualified_name) {
+                            let published_identity = published_import_identity(
+                                ctx, use_decl.is_pub, local_name)
+                            if bind_relative_import(
+                                ctx, local_name, qualified_name,
+                                published_identity
+                            ) {
                                 import_origins.insert(local_name, qualified_name)
                             } else {
                                 let qualified_display = nominal_display_name(qualified_name)
@@ -1997,7 +2725,12 @@ pub fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>, report_errors: B
                                 },
                                 none => {}
                             }
-                            if bind_relative_import(ctx, local_name, qualified_name) {
+                            let published_identity = published_import_identity(
+                                ctx, use_decl.is_pub, local_name)
+                            if bind_relative_import(
+                                ctx, local_name, qualified_name,
+                                published_identity
+                            ) {
                                 import_origins.insert(local_name, qualified_name)
                             } else {
                                 let qualified_display = nominal_display_name(qualified_name)

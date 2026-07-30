@@ -1,8 +1,7 @@
-use types::{Type, Effect, EffectRow, effect_kind_name, type_to_builtin_name, type_to_string}
-use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
+use types::{Type, Effect, EffectRow, EMPTY_ROW, effect_kind_name, type_to_builtin_name, type_to_string}
+use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField, Span}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler, HEffectOp, DictRef, DictDispatchInfo, TraitDispatch,
-    TraitBound,
     evidence_param_name, effect_name_from_evidence_param,
     trait_dict_name, trait_bound_param_name, compare_by_first,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
@@ -100,22 +99,11 @@ extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -
 extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
 
 // ============================================================
-// Type-aware map/set dispatch helpers
+// Type-aware collection dispatch helpers
 // ============================================================
 
 // B-152 P3: is_int_keyed_map removed — Map is now a unified Ring struct with
 // Hash + Eq trait bounds; no dual dispatch needed.
-
-fn is_int_set(ty: Type) -> Bool {
-    match ty {
-        Type::StructType { name, type_params } =>
-            name == "Set" && type_params.len() == 1 && match type_params[0] {
-                Type::IntType => true,
-                _ => false,
-            },
-        _ => false,
-    }
-}
 
 // B-134: Validate that a StructType claiming to be List/Map/Set has the correct
 // structural signature (type_params count). Returns false for user
@@ -145,7 +133,8 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef with {} {
         HExpr::FloatLit { value, .. } => gen_float_lit(ctx, value),
         HExpr::StrLit { value, .. } => gen_str_lit(ctx, value),
         HExpr::BoolLit { value, .. } => gen_bool_lit(ctx, value),
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, .. } => gen_ident(ctx, name, resolved_name, def_id, dict_closure_dicts, ty),
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, span, .. } =>
+            gen_ident(ctx, name, resolved_name, def_id, dict_closure_dicts, ty, span),
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, .. } => gen_binop(ctx, op, left, right, eq_dispatch, ord_dispatch, ty),
         HExpr::UnaryOp { op, operand, ty, .. } => gen_unaryop(ctx, op, operand, ty),
         HExpr::Call { callee, args, resolved_dicts, dict_dispatch, ty, effects, .. } =>
@@ -378,7 +367,7 @@ pub fn build_cell_store(mut ctx: LlvmCtx, cell_ptr: LLVMValueRef, new_val: LLVMV
     discard(LLVMBuildStore(ctx.builder, new_val, value_slot))
 }
 
-fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<Str>?, ty: Type) -> LLVMValueRef {
+fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<DictRef>?, ty: Type, span: Span) -> LLVMValueRef {
     // #B-087 gap 1: a polymorphic function used as a first-class value carries
     // dict_closure_dicts (the resolved trait dicts for its bounds). The function is
     // generated with the dicts as trailing params (fn(args, dict...)), but a bare
@@ -388,10 +377,18 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dic
     // function.
     match dict_closure_dicts {
         some(dicts) => {
-            if dicts.len() > 0 {
-                let lk = match resolved_name { some(rn) => rn, none => name }
+            let lk = match resolved_name { some(rn) => rn, none => name }
+            // Exact Ring function/ctor (including an extern-forward bridge)
+            // wins over the extern registry. This protects user `print`/Cell
+            // shadowing and retains bridge evidence on the Ring ABI path.
+            let ring_key = llvm_resolve_fn(ctx, lk)
+            if ctx.ring_callable_names.contains(ring_key) {
                 return gen_dict_closure_wrapper(ctx, lk, name, dicts, ty)
             }
+            if ctx.extern_callable_names.contains(ring_key) {
+                return gen_extern_closure_wrapper(ctx, lk, name, dicts, ty, span)
+            }
+            panic("LLVM codegen: function value '${name}' has provenance but no exact Ring or extern target")
         },
         none => {},
     }
@@ -413,9 +410,12 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dic
                     if boxed { build_cell_load(ctx, cur, name) } else { cur }
                 },
                 none => {
+                    // Exact checker provenance is mandatory for every module
+                    // direct-callable value, including zero-bound functions.
+                    // LocalBorrow was handled by named_values above.
                     match ty {
                         Type::FnType { .. } => {
-                            return gen_dict_closure_wrapper(ctx, lookup_name, name, [], ty)
+                            panic("LLVM codegen: function value '${name}' is missing materialization provenance")
                         },
                         _ => {},
                     }
@@ -481,6 +481,97 @@ fn call_zero_arg_or_return(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str)
     }
 }
 
+// Extern/builtin function values need a distinct uniform-closure thunk: their
+// direct ABI captures no Ring dictionaries/evidence, and LLVM-C declarations
+// may require scalar/list/string marshalling. Emit a typed synthetic direct
+// Call inside the thunk so ordinary call lowering remains the sole authority
+// for print coercion, Unit normalization, runtime mapping and C-ABI bridging.
+fn gen_extern_closure_wrapper(
+    mut ctx: LlvmCtx, lookup_name: Str, name: Str,
+    dict_refs: List<DictRef>, ty: Type, span: Span
+) -> LLVMValueRef {
+    if dict_refs.len() != 0 {
+        panic("LLVM codegen: extern closure wrapper for '${name}' received ${dict_refs.len()} dicts")
+    }
+    let (param_types, return_type, fn_effects) = match ty {
+        Type::FnType { params, return_type, effects } => (params, return_type, effects),
+        _ => panic("LLVM codegen: extern closure wrapper for non-function '${name}'"),
+    }
+
+    let thunk_name = fresh_name(ctx, "ring_externwrap_")
+    let mut thunk_param_types: List<LLVMTypeRef> = [ctx.ptr_type]
+    for _ in param_types { thunk_param_types.push(ctx.ptr_type) }
+    let thunk_ty = LLVMFunctionType(ctx.ptr_type, thunk_param_types, 0)
+    let thunk_fn = LLVMAddFunction(ctx.module, thunk_name, thunk_ty)
+
+    let saved_fn = ctx.current_fn
+    let saved_fn_name = ctx.current_fn_name
+    let saved_named = ctx.named_values
+    let saved_cleanup = ctx.handle_cleanup_stack
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(thunk_fn)
+    ctx.current_fn_name = thunk_name
+    ctx.named_values = map_new()
+    ctx.handle_cleanup_stack = []
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, thunk_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+    let mut synthetic_args: List<HExpr> = []
+    let mut i = 0
+    for param_ty in param_types {
+        let param_name = "__ring_extern_arg_${thunk_name}_${i}"
+        let param_alloca = build_entry_alloca(ctx, ctx.ptr_type, param_name)
+        discard(LLVMBuildStore(ctx.builder, LLVMGetParam(thunk_fn, i + 1), param_alloca))
+        ctx.named_values.insert(param_name, param_alloca)
+        synthetic_args.push(HExpr::Ident {
+            name: param_name, resolved_name: none, def_id: none,
+            dict_closure_dicts: none, ty: param_ty,
+            effects: EMPTY_ROW, span: span
+        })
+        i = i + 1
+    }
+    let synthetic_callee = HExpr::Ident {
+        name: name, resolved_name: some(lookup_name), def_id: none,
+        dict_closure_dicts: none, ty: ty, effects: EMPTY_ROW, span: span
+    }
+    let result = gen_llvm_expr(ctx, HExpr::Call {
+        callee: synthetic_callee, args: synthetic_args, type_args: [],
+        resolved_dicts: [], dict_dispatch: none, ty: return_type,
+        effects: fn_effects, span: span
+    })
+    discard(LLVMBuildRet(ctx.builder, result))
+
+    ctx.handle_cleanup_stack = saved_cleanup
+    ctx.named_values = saved_named
+    ctx.current_fn_name = saved_fn_name
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+
+    // Zero-capture env still stores the count consumed by drop_closure_env.
+    let env_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let env_alloc = LLVMBuildCall2(
+        ctx.builder, alloc_ty, alloc_fn,
+        [LLVMSizeOf(env_ty), LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)],
+        fresh_name(ctx, "xenv")
+    )
+    let count_slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, 0, fresh_name(ctx, "xcnt"))
+    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), count_slot))
+
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let closure_ptr = LLVMBuildCall2(
+        ctx.builder, alloc_ty, alloc_fn,
+        [LLVMSizeOf(closure_ty), LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE, 0)],
+        fresh_name(ctx, "xcls")
+    )
+    let fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "xfp"))
+    discard(LLVMBuildStore(ctx.builder, thunk_fn, fn_slot))
+    let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "xep"))
+    discard(LLVMBuildStore(ctx.builder, env_alloc, env_slot))
+    closure_ptr
+}
+
 // #B-087 gap 1: build a closure value for a polymorphic function used as a first-class
 // value. The function `real_fn` is generated as fn(args, dict0..dictM, ev0..evK) -> ptr
 // (direct ABI). A bare function value is invoked through the uniform closure ABI
@@ -493,7 +584,7 @@ fn call_zero_arg_or_return(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str)
 // are never-drop no-ops, a dynamic dict-param-backed dict gets a real reference
 // released by drop_closure_env) followed by UNcounted evidence slots (handler-
 // scoped lifetime, B-096).
-fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> LLVMValueRef {
+fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_refs: List<DictRef>, ty: Type) -> LLVMValueRef {
     // Resolve the real function.
     let mangled = llvm_resolve_fn(ctx, lookup_name)
     let found = find_function_in_ctx(ctx, mangled, name)
@@ -513,66 +604,33 @@ fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_
         _ => 0,
     }
 
-    // Resolve the dicts at this site (current scope) into LLVMValueRefs.
-    let mut dict_vals: List<LLVMValueRef> = []
-    for dn in dict_names {
-        dict_vals.push(resolve_dict_ref(ctx, DictRef::Simple(dn)))
+    let expected_dict_count = match ctx.fn_trait_bounds.get(fn_info.fn_mangled) {
+        some(bounds) => bounds.len(),
+        none => 0,
+    }
+    if dict_refs.len() != expected_dict_count {
+        panic("LLVM codegen: dict-closure wrapper for '${name}' expected ${expected_dict_count} checker-resolved dicts, got ${dict_refs.len()}")
     }
 
-    // #214: if no dict names were provided (dict_closure_dicts was none — the checker
-    // does not resolve dicts for identifiers outside call arguments), compute the
-    // concrete dict names from the function's trait bounds + the instantiated FnType.
-    if dict_vals.len() == 0 {
-        match ctx.fn_trait_bounds.get(fn_info.fn_mangled) {
-            some(bounds) => {
-                if bounds.len() > 0 {
-                    let concrete_params = match ty {
-                        Type::FnType { params: fps, .. } => fps,
-                        _ => [],
-                    }
-                    let orig_types = match ctx.fn_original_param_types.get(fn_info.fn_mangled) {
-                        some(t) => t,
-                        none => [],
-                    }
-                    // Build type-var substitution: type_param_name → concrete type name
-                    let mut subst: Map<Str, Str> = map_new()
-                    let mut idx = 0
-                    for ot in orig_types {
-                        if idx < concrete_params.len() {
-                            match ot {
-                                Type::TypeVar { name: tv_name, .. } => {
-                                    match tv_name {
-                                        some(n) => {
-                                            match concrete_params.get(idx) {
-                                                some(cp) => {
-                                                    match type_to_builtin_name(cp) {
-                                                        some(cn) => { subst.insert(n, cn) },
-                                                        none => {},
-                                                    }
-                                                },
-                                                none => {},
-                                            }
-                                        },
-                                        none => {},
-                                    }
-                                },
-                                _ => {},
-                            }
-                        }
-                        idx = idx + 1
-                    }
-                    for b in bounds {
-                        match subst.get(b.type_param) {
-                            some(concrete_name) => {
-                                let dn = trait_dict_name(concrete_name, b.trait_name)
-                                dict_vals.push(resolve_dict_ref(ctx, DictRef::Simple(dn)))
-                            },
-                            none => {},
-                        }
-                    }
-                }
+    // Resolve checker-selected evidence.  Raw Wrapped is defensive only:
+    // dict_lower normally exposes it as a DictConstruct local.  If one
+    // survives, release its fresh construction ref after the env takes a dup.
+    let mut dict_vals: List<LLVMValueRef> = []
+    let mut owned_dict_vals: List<LLVMValueRef> = []
+    for dr in dict_refs {
+        match dr {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name,
+                    inner_dicts: inner_dicts
+                })
+                dict_vals.push(value)
+                owned_dict_vals.push(value)
             },
-            none => {},
+            DictRef::Simple(n) =>
+                dict_vals.push(resolve_dict_ref(ctx, DictRef::Simple(n))),
+            DictRef::Static(n) =>
+                dict_vals.push(resolve_dict_ref(ctx, DictRef::Static(n))),
         }
     }
 
@@ -651,6 +709,11 @@ fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_
         let slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, slot_idx + 1, fresh_name(ctx, "wstore"))
         discard(LLVMBuildStore(ctx.builder, ev, slot))
         slot_idx = slot_idx + 1
+    }
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    for owned in owned_dict_vals {
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [owned], ""))
     }
 
     // Closure pair { fn_ptr=thunk, env_ptr } (RING_TYPEID_CLOSURE).
@@ -1254,7 +1317,22 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
             // would crash / mis-print. Coerce a non-Str arg to its Str rendering via
             // the same convert_to_str path string interpolation uses. (resolved_name
             // for the builtin is "print"; guard on a single arg.)
-            if call_name == "print" && args.len() == 1 {
+            let print_key = llvm_resolve_fn(ctx, call_name)
+            let mut is_extern_print = false
+            if ctx.named_values.contains_key(call_name) == false &&
+               ctx.ring_callable_names.contains(print_key) == false {
+                if call_name == "print" {
+                    is_extern_print = true
+                } else {
+                    match ctx.extern_abi_names.get(print_key) {
+                        some(abi_name) => {
+                            if abi_name == "print" { is_extern_print = true }
+                        },
+                        none => {},
+                    }
+                }
+            }
+            if is_extern_print && args.len() == 1 {
                 match args.get(0) {
                     some(arg0) => {
                         let arg_ty = hexpr_type(arg0)
@@ -1275,13 +1353,7 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
                     none => {},
                 }
             }
-            // B-152 P3: Map int-keyed dispatch removed — Map is now a unified Ring struct.
-            let final_name = if call_name == "set_new" && is_int_set(result_ty) {
-                "set_int_new"
-            } else { if call_name == "set_from" && is_int_set(result_ty) {
-                "set_int_from"
-            } else { call_name } }
-            gen_direct_call(ctx, final_name, arg_vals, dict_vals)
+            gen_direct_call(ctx, call_name, arg_vals, dict_vals)
         },
         HExpr::FieldAccess { receiver, field, .. } => {
             // Method call: receiver.method(args)
@@ -1317,13 +1389,13 @@ fn resolve_dict_refs(mut ctx: LlvmCtx, dicts: List<DictRef>) -> List<LLVMValueRe
     result
 }
 
-fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
+pub fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
     match dr {
         DictRef::Simple(name) => {
             // A scope reference: dict parameter (__ring_T_Eq) or dict_lower's
             // local dict binding (__ring_dictlocal_N).  Name-based legacy
-            // callers (dict_closure_dicts / derive extra_dicts strings) also
-            // funnel here, so unknown names fall through to the static chain.
+            // callers (`dict_closure_dicts` names and derived Simple refs)
+            // also funnel here, so unknown names fall through to static.
             match ctx.named_values.get(name) {
                 some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "dict")),
                 none => resolve_static_dict_by_name(ctx, name),
@@ -1335,8 +1407,8 @@ fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
             // #B-087 gap 2: a wrapped dict for a parameterized type whose trait impl
             // needs the inner type-param dicts bound. Build a real wrapper dict (see
             // build_wrapped_dict). Previously returned null → dispatch crash.
-            // Post-dict_lower this survives only in BinOp dispatch extra_dicts
-            // (which the LLVM Eq/Ord dispatch ignores — pre-existing gap).
+            // Post-dict_lower this survives in BinOp dispatch extra_dicts and
+            // dynamic derived FieldAction evidence.
             build_wrapped_dict(ctx, dict, trait_name, inner_dicts)
         },
     }
@@ -1603,8 +1675,24 @@ fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_d
 fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>, dict_tid: Int) -> LLVMValueRef {
     // Resolve the inner dicts at this site.
     let mut inner_vals: List<LLVMValueRef> = []
+    // A surviving Wrapped child is freshly owned.  Parent method envs dup
+    // every inner below; release the construction temporaries after all
+    // slots have captured them.
+    let mut owned_inner_vals: List<LLVMValueRef> = []
     for d in inner_dicts {
-        inner_vals.push(resolve_dict_ref(ctx, d))
+        match d {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
+                })
+                inner_vals.push(value)
+                owned_inner_vals.push(value)
+            },
+            DictRef::Simple(name) =>
+                inner_vals.push(resolve_dict_ref(ctx, DictRef::Simple(name))),
+            DictRef::Static(name) =>
+                inner_vals.push(resolve_dict_ref(ctx, DictRef::Static(name))),
+        }
     }
 
     // Recover the target type name from the dict name "__<Type>_<Trait>".
@@ -1711,6 +1799,12 @@ fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, i
             },
             none => {},
         }
+    }
+
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    for owned in owned_inner_vals {
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [owned], ""))
     }
 
     dict_ptr
@@ -2251,7 +2345,61 @@ fn gen_extern_LLVMAddIncoming(mut ctx: LlvmCtx, arg_vals: List<LLVMValueRef>, in
     LLVMConstPointerNull(ctx.ptr_type)
 }
 
+// Route a proven ABI leaf through the complete legacy extern pipeline:
+// explicit runtime mapping, implicit ring_<leaf> runtime mapping (including
+// assert's Bool unboxing), LLVM-C marshalling, then raw foreign ABI fallback.
+fn gen_extern_abi_call(
+    mut ctx: LlvmCtx, abi_name: Str, arg_vals: List<LLVMValueRef>
+) -> LLVMValueRef {
+    match extern_fn_to_runtime(abi_name) {
+        some(rtn) => {
+            let mut param_types: List<LLVMTypeRef> = []
+            for _ in arg_vals { param_types.push(ctx.ptr_type) }
+            let _ = get_or_declare_runtime_fn(ctx, rtn, param_types, ctx.ptr_type)
+            return gen_runtime_call(ctx, rtn, arg_vals)
+        },
+        none => {},
+    }
+    let rt_fallback = "ring_${abi_name}"
+    match ctx.rt_fns.get(rt_fallback) {
+        some(_) => {
+            let mut runtime_args = arg_vals
+            if rt_fallback == "ring_assert" {
+                let first = match runtime_args.get(0) {
+                    some(v) => v, none => panic("ring_assert: missing arg 0")
+                }
+                let second = match runtime_args.get(1) {
+                    some(v) => v, none => panic("ring_assert: missing arg 1")
+                }
+                let bool_i1 = unbox_to_i1(ctx, first)
+                let bool_i64 = LLVMBuildZExt(ctx.builder, bool_i1,
+                    ctx.i64_type, fresh_name(ctx, "az"))
+                runtime_args = [bool_i64, second]
+            }
+            return gen_runtime_call(ctx, rt_fallback, runtime_args)
+        },
+        none => {},
+    }
+    match ctx.extern_fn_infos.get(abi_name) {
+        some(info) => { return gen_extern_fn_call(ctx, abi_name, arg_vals, info) },
+        none => {},
+    }
+    let mut param_types: List<LLVMTypeRef> = []
+    for _ in arg_vals { param_types.push(ctx.ptr_type) }
+    let _ = get_or_declare_runtime_fn(ctx, abi_name, param_types, ctx.ptr_type)
+    gen_runtime_call(ctx, abi_name, arg_vals)
+}
+
 fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>, dict_vals: List<LLVMValueRef>) -> LLVMValueRef {
+    // LOCAL scope is authoritative before every name-based builtin special.
+    match ctx.named_values.get(name) {
+        some(alloca) => {
+            let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "clos"))
+            return gen_closure_call(ctx, closure_ptr, arg_vals)
+        },
+        none => {},
+    }
+
     // B-125: ptr_from_addr — pure codegen (identity: Int → Ptr<T>)
     if name == "ptr_from_addr" {
         // ptr_from_addr(a: Int) -> Ptr<T>: a is a tagged Ring Int, just return it as-is.
@@ -2264,43 +2412,36 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
         return LLVMBuildIntToPtr(ctx.builder, raw, ctx.ptr_type, fresh_name(ctx, "from_addr"))
     }
 
-    // Check for known extern fn → runtime mapping
-    let rt_name = extern_fn_to_runtime(name)
-    match rt_name {
-        some(rtn) => {
-            let mut param_types: List<LLVMTypeRef> = []
-            for _ in arg_vals { param_types.push(ctx.ptr_type) }
-            let _ = get_or_declare_runtime_fn(ctx, rtn, param_types, ctx.ptr_type)
-            return gen_runtime_call(ctx, rtn, arg_vals)
-        },
-        none => {},
-    }
+    let resolved_key = llvm_resolve_fn(ctx, name)
 
-    // B-099: Check for LLVM-C extern fn with C-ABI marshalling
-    match ctx.extern_fn_infos.get(name) {
-        some(info) => {
-            return gen_extern_fn_call(ctx, name, arg_vals, info)
-        },
-        none => {},
-    }
-
-    // #243: LOCAL scope first — a closure/fn-value param or local shadows any
-    // module-level fn of the same name (language scoping; gen_ident already
-    // resolves references local-first).  Without this a prelude HOF body like
-    // List.fold's `f(acc, elem)` binds to a user's global `fn f` and silently
-    // emits an arity-mismatched call.  Aligns with the C backend
-    // (codegen_c_expr::gen_c_direct_call, fixed in 2b85e9f).
-    match ctx.named_values.get(name) {
-        some(alloca) => {
-            let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "clos"))
-            return gen_closure_call(ctx, closure_ptr, arg_vals)
-        },
-        none => {},
+    // Project extern-forwards resolve to exact Ring keys. Only a genuine exact
+    // extern declaration crosses back from canonical HIR identity to ABI leaf.
+    if ctx.ring_callable_names.contains(resolved_key) == false {
+        match ctx.extern_abi_names.get(resolved_key) {
+            some(abi_name) => {
+                return gen_extern_abi_call(ctx, abi_name, arg_vals)
+            },
+            none => {},
+        }
+        // Backward-compatible raw paths for compiler-synthesised calls without
+        // an HDecl registration. Exact Ring declarations always win.
+        match extern_fn_to_runtime(name) {
+            some(rtn) => {
+                let mut param_types: List<LLVMTypeRef> = []
+                for _ in arg_vals { param_types.push(ctx.ptr_type) }
+                let _ = get_or_declare_runtime_fn(ctx, rtn, param_types, ctx.ptr_type)
+                return gen_runtime_call(ctx, rtn, arg_vals)
+            },
+            none => {},
+        }
+        match ctx.extern_fn_infos.get(name) {
+            some(info) => { return gen_extern_fn_call(ctx, name, arg_vals, info) },
+            none => {},
+        }
     }
 
     // Look up in functions map — try module-aware resolution first
-    let mangled = llvm_resolve_fn(ctx, name)
-    let found_fn = find_function_in_ctx(ctx, mangled, name)
+    let found_fn = find_function_in_ctx(ctx, resolved_key, name)
     match found_fn {
         some(fn_info) => {
             // Add trait dict params
@@ -2339,12 +2480,8 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
                 },
                 none => {},
             }
-            // B-152: unknown extern fn → declare as external + call (linker resolves).
-            // All Ring extern fns use ptr (void*) ABI for all params and return.
-            let mut param_types: List<LLVMTypeRef> = []
-            for _ in arg_vals { param_types.push(ctx.ptr_type) }
-            let _ = get_or_declare_runtime_fn(ctx, name, param_types, ctx.ptr_type)
-            gen_runtime_call(ctx, name, arg_vals)
+            // B-152: complete extern runtime/LLVM-C/raw-FFI fallback.
+            gen_extern_abi_call(ctx, name, arg_vals)
         },
     }
 }
@@ -2454,7 +2591,6 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "eprintln" { return some("ring_eprintln") }
     if name == "exit" || name == "exit_process" { return some("ring_exit") }
     if name == "argv" { return some("ring_args") }
-    if name == "set_new" { return some("ring_set_new") }
     if name == "read_file" { return some("ring_read_file") }
     if name == "write_file" { return some("ring_write_file") }
     if name == "file_exists" { return some("ring_file_exists") }
@@ -2467,12 +2603,9 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     if name == "cwd" { return some("ring_cwd") }
     if name == "parse_int" { return some("ring_parse_int") }
     if name == "parse_float" { return some("ring_parse_float") }
-    if name == "set_from" { return some("ring_set_from_list") }
     // B-152 P2: list_new removed — list() is now a Ring function.
     // gen_list_lit still calls ring_list_new directly via get_or_declare_runtime_fn.
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
-    if name == "set_int_new" { return some("ring_set_int_new") }
-    if name == "set_int_from" { return some("ring_set_int_from_list") }
     if name == "Cell" { return some("ring_Cell_new") }
     // B-125: Ptr<T> builtins
     if name == "alloc" { return some("ring_raw_alloc") }
@@ -2510,17 +2643,7 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_has" { return true }
-    if name == "ring_set_len" { return true }
     if name == "ring_sb_len" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_int_len" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2532,19 +2655,11 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     if name == "ring_str_eq" { return true }
     if name == "ring_str_lt" { return true }
     if name == "ring_list_is_empty" { return true }
-    if name == "ring_set_has" { return true }
     if name == "ring_list_any" { return true }
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2668,39 +2783,13 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
     // B-134: Only dispatch to runtime builtins if the collection type has the
     // correct structural signature (prevents user structs named List/Map/Set
     // from being misrouted to C runtime functions).
-    let rt_method = if (type_name == "List" || type_name == "Map" || type_name == "Set") && !is_builtin_collection(recv_type) {
+    let rt_method = if (type_name == "List" || type_name == "Map") && !is_builtin_collection(recv_type) {
         none
     } else {
         method_to_runtime(type_name, method)
     }
     match rt_method {
-        some(base_rt_name) => {
-            // B-152 P3: int-keyed Map dispatch removed — Map is now a unified Ring struct.
-            // Dispatch to int-keyed variants for Set only.
-            let rt_name = if is_int_set(recv_type) {
-                match method {
-                    "add" => "ring_set_int_add",
-                    "insert" => "ring_set_int_add",
-                    "has" => "ring_set_int_has",
-                    "contains" => "ring_set_int_has",
-                    "to_list" => "ring_set_int_to_list",
-                    "len" => "ring_set_int_len",
-                    "from_list" => "ring_set_int_from_list",
-                    "for_each" => "ring_set_int_for_each",
-                    "remove" => "ring_set_int_delete",
-                    "clear" => "ring_set_int_clear",
-                    "clone" => "ring_set_int_clone",
-                    "is_empty" => "ring_set_int_is_empty",
-                    "union" => "ring_set_int_union",
-                    "intersect" => "ring_set_int_intersect",
-                    "difference" => "ring_set_int_difference",
-                    "fold" => "ring_set_int_fold",
-                    "filter" => "ring_set_int_filter",
-                    "any" => "ring_set_int_any",
-                    "all" => "ring_set_int_all",
-                    _ => base_rt_name,
-                }
-            } else { base_rt_name }
+        some(rt_name) => {
             // Build call args with proper unboxing
             let mut call_args: List<LLVMValueRef> = []
 
@@ -2847,26 +2936,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
     // B-152 P2: List methods are now pure Ring — no method_to_runtime entries.
     // All List method calls fall through to the Ring-compiled impl methods.
-    // B-152 P3 closure: Map methods are pure Ring impl methods.
-    // Set methods
-    if type_name == "Set" && method == "add" { return some("ring_set_add") }
-    if type_name == "Set" && method == "insert" { return some("ring_set_add") }
-    if type_name == "Set" && method == "has" { return some("ring_set_has") }
-    if type_name == "Set" && method == "contains" { return some("ring_set_has") }
-    if type_name == "Set" && method == "to_list" { return some("ring_set_to_list") }
-    if type_name == "Set" && method == "len" { return some("ring_set_len") }
-    if type_name == "Set" && method == "is_empty" { return some("ring_set_is_empty") }
-    if type_name == "Set" && method == "from_list" { return some("ring_set_from_list") }
-    if type_name == "Set" && method == "for_each" { return some("ring_set_for_each") }
-    if type_name == "Set" && method == "remove" { return some("ring_set_delete") }
-    if type_name == "Set" && method == "clear" { return some("ring_set_clear") }
-    if type_name == "Set" && method == "union" { return some("ring_set_union") }
-    if type_name == "Set" && method == "intersect" { return some("ring_set_intersect") }
-    if type_name == "Set" && method == "difference" { return some("ring_set_difference") }
-    if type_name == "Set" && method == "fold" { return some("ring_set_fold") }
-    if type_name == "Set" && method == "filter" { return some("ring_set_filter") }
-    if type_name == "Set" && method == "any" { return some("ring_set_any") }
-    if type_name == "Set" && method == "all" { return some("ring_set_all") }
+    // B-152 P3/P4: Map and Set methods are pure Ring impl methods.
     // Option methods
     if type_name == "Option" && method == "unwrap_or" { return some("ring_Option_unwrap_or") }
     if type_name == "Option" && method == "unwrap" { return some("ring_Option_unwrap") }
@@ -5090,8 +5160,16 @@ fn collect_dictref_names(ctx: LlvmCtx, dr: DictRef, params: List<HParam>, mut ca
 // Collect variable names referenced in an expression that are not params or global functions
 fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut captures: List<Str>) {
     match expr {
-        HExpr::Ident { name, resolved_name, .. } => {
+        HExpr::Ident { name, resolved_name, dict_closure_dicts, .. } => {
             consider_capture_name(ctx, name, resolved_name, params, captures)
+            match dict_closure_dicts {
+                some(dicts) => {
+                    for d in dicts {
+                        collect_dictref_names(ctx, d, params, captures)
+                    }
+                },
+                none => {},
+            }
         },
         HExpr::BinOp { left, right, eq_dispatch, ord_dispatch, .. } => {
             collect_captures(ctx, left, params, captures)

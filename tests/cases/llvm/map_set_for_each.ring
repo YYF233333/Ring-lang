@@ -1,9 +1,9 @@
 // B-129 Map/Set HOF llvm_diff coverage.
 // Pure-Ring Map HOF methods iterate occupied slots and obtain owned callback
-// arguments through ring_slot_read; Set HOFs use their low-level runtime
-// bridges. Fixed inputs have deterministic slot/traversal order, which this
-// golden pins. Callbacks include heap-allocated intermediates to exercise the
-// #152 HOF drop fix.
+// arguments through ring_slot_read; pure-Ring Set HOFs delegate to that Map.
+// Map output below pins fixed-input traversal; Set assertions stay
+// order-independent because Set iteration order is unspecified. Callbacks
+// include heap-allocated intermediates to exercise the #152 HOF drop fix.
 
 fn main() {
     // ── Map<Str, Str> fold ──
@@ -47,8 +47,8 @@ fn main() {
     s.insert("x")
     s.insert("y")
     s.insert("z")
-    let s_joined = s.fold("", fn(acc, v) { "${acc}${v}," })
-    print("set_fold=${s_joined}")
+    let s_total_len = s.fold(0, fn(acc, v) { acc + v.len() })
+    print("set_fold_total_len=${s_total_len}")
 
     // ── Set<Str> filter ──
     let sf = s.filter(fn(v) { v != "y" })

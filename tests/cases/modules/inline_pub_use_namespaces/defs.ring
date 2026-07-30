@@ -1,10 +1,19 @@
 pub extern type ForeignHandle
+// Same leaf as origin::Item below. Relative pub-use must keep the canonical
+// normal struct and never fall back to this raw extern ABI type.
+pub extern type Item
+// Freeze the raw ABI nominal before inline modules mutate the short `Item`
+// binding. The consumer still imports raw Item as Foreign beside local Item.
+pub type RawItem = Item
 pub extern fn parse_int(s: Str) -> Option<Int>
+pub extern fn ring_raw_alloc(count: Int) -> Item
+pub extern fn ring_raw_dealloc(value: Item, count: Int) -> Unit
 
 pub struct TopItem { value: Int }
 pub type TopCount = Int
 pub fn top_value() -> Int { 41 }
 pub fn make_top(value: Int) -> TopItem { TopItem { value: value } }
+pub fn keep_raw(value: RawItem) -> RawItem { value }
 
 // Deliberately precedes its private source sibling: registration must follow
 // inline-module dependencies, not source order.

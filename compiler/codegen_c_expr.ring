@@ -24,8 +24,8 @@
 // the whole std prelude to program.decls (checker.ring load_prelude), so
 // prelude bodies flow through this backend from step 1.
 
-use types::{Type, EffectRow, type_to_builtin_name, BUILTIN_RANGE}
-use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
+use types::{Type, EffectRow, EMPTY_ROW, type_to_builtin_name, BUILTIN_RANGE}
+use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
     HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
     TraitDispatch, DictDispatchInfo, effect_op_slot,
@@ -63,17 +63,6 @@ fn is_bool_type(ty: Type) -> Bool {
 
 fn is_unit_type(ty: Type) -> Bool {
     match ty { Type::UnitType => true, _ => false }
-}
-
-fn is_int_set(ty: Type) -> Bool {
-    match ty {
-        Type::StructType { name, type_params } =>
-            name == "Set" && type_params.len() == 1 && match type_params[0] {
-                Type::IntType => true,
-                _ => false,
-            },
-        _ => false,
-    }
 }
 
 // B-134 port: structural validation for builtin collection dispatch.
@@ -114,8 +103,8 @@ pub fn gen_c_expr(mut ctx: CCtx, expr: HExpr) -> Str {
         },
         HExpr::StrLit { value, .. } => gen_c_str_lit(ctx, value),
         HExpr::BoolLit { value, .. } => if value { "RING_TRUE" } else { "RING_FALSE" },
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, .. } =>
-            gen_c_ident(ctx, name, resolved_name, def_id, dict_closure_dicts, ty),
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, span, .. } =>
+            gen_c_ident(ctx, name, resolved_name, def_id, dict_closure_dicts, ty, span),
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, .. } =>
             gen_c_binop(ctx, op, left, right, eq_dispatch, ord_dispatch, ty),
         HExpr::UnaryOp { op, operand, ty, .. } => gen_c_unaryop(ctx, op, operand, ty),
@@ -233,16 +222,25 @@ fn c_find_function_in_ctx(ctx: CCtx, mangled: Str, name: Str) -> CFnLookup? {
 // Identifiers
 // ============================================================
 
-fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<Str>?, ty: Type) -> Str {
+fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<DictRef>?, ty: Type, span: Span) -> Str {
     // #B-087 gap 1: a polymorphic function used as a first-class value carries
     // dict_closure_dicts (the resolved trait dicts for its bounds).  Build a
     // {thunk, env} closure whose env captures the dicts (+ evidence).
     match dict_closure_dicts {
         some(dicts) => {
-            if dicts.len() > 0 {
-                let lk = match resolved_name { some(rn) => rn, none => name }
+            let lk = match resolved_name { some(rn) => rn, none => name }
+            let callable_key = c_resolve_fn(ctx, lk)
+            // Exact Ring function/ctor (including an extern-forward bridge)
+            // wins over the extern registry. This preserves user shadowing
+            // such as a Ring `fn print`/`fn Cell` and keeps bridge evidence on
+            // the ordinary Ring wrapper path.
+            if ctx.ring_callable_names.contains(callable_key) {
                 return gen_c_dict_closure_wrapper(ctx, lk, name, dicts, ty)
             }
+            if ctx.extern_callable_names.contains(callable_key) {
+                return gen_c_extern_closure_wrapper(ctx, lk, name, dicts, ty, span)
+            }
+            panic("C codegen: function value '${name}' has provenance but no exact Ring or extern target")
         },
         none => {},
     }
@@ -267,14 +265,12 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
             t
         },
         none => {
-            // A module-level FUNCTION used as a value: wrap it into the
-            // uniform {thunk, env} closure pair (LLVM parity — a bare fn
-            // pointer would be mis-called through the closure ABI).  The
-            // zero-dict wrapper also forwards evidence and computes concrete
-            // dicts from the fn's trait bounds when needed (#214).
+            // Module direct-callable values must carry exact checker
+            // provenance, including the explicit empty marker for zero-bound
+            // functions. Never guess from FnType/name at the backend.
             match ty {
                 Type::FnType { .. } => {
-                    return gen_c_dict_closure_wrapper(ctx, lookup_name, name, [], ty)
+                    panic("C codegen: function value '${name}' is missing materialization provenance")
                 },
                 _ => {},
             }
@@ -319,13 +315,76 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
     }
 }
 
+// Extern/builtin function values use a separate uniform-closure thunk.  Their
+// direct ABI is intentionally not the Ring fn(args, dicts, evidence) ABI:
+// runtime externs need exact symbol mapping and scalar print coercion, while
+// LLVM-C externs (in the LLVM backend twin below) need C-ABI marshalling.
+// Build a typed synthetic direct Call in the thunk so the ordinary call
+// lowering remains the single source of truth for all of those conversions.
+fn gen_c_extern_closure_wrapper(
+    mut ctx: CCtx, lookup_name: Str, name: Str,
+    dict_refs: List<DictRef>, ty: Type, span: Span
+) -> Str {
+    if dict_refs.len() != 0 {
+        panic("C codegen: extern closure wrapper for '${name}' received ${dict_refs.len()} dicts")
+    }
+    let (param_types, return_type, fn_effects) = match ty {
+        Type::FnType { params, return_type, effects } => (params, return_type, effects),
+        _ => panic("C codegen: extern closure wrapper for non-function '${name}'"),
+    }
+
+    let wn = ctx.dictwrap_counter
+    ctx.dictwrap_counter = wn + 1
+    let thunk_name = "ring_externwrap_${wn}"
+    let mut sig_parts: List<Str> = ["void* env"]
+    for i in 0..param_types.len() { sig_parts.push("void* p${i}") }
+    let params_str = sig_parts.join(", ")
+    ctx.fn_protos.push("void* ${thunk_name}(${params_str});")
+
+    let saved = c_push_fn(ctx, thunk_name)
+    let mut synthetic_args: List<HExpr> = []
+    let mut i = 0
+    for param_ty in param_types {
+        let param_name = "__ring_extern_arg_${wn}_${i}"
+        ctx.named_values.insert(param_name, "p${i}")
+        synthetic_args.push(HExpr::Ident {
+            name: param_name, resolved_name: none, def_id: none,
+            dict_closure_dicts: none, ty: param_ty,
+            effects: EMPTY_ROW, span: span
+        })
+        i = i + 1
+    }
+    let synthetic_callee = HExpr::Ident {
+        name: name, resolved_name: some(lookup_name), def_id: none,
+        dict_closure_dicts: none, ty: ty, effects: EMPTY_ROW, span: span
+    }
+    let result = gen_c_expr(ctx, HExpr::Call {
+        callee: synthetic_callee, args: synthetic_args, type_args: [],
+        resolved_dicts: [], dict_dispatch: none, ty: return_type,
+        effects: fn_effects, span: span
+    })
+    c_emit(ctx, "return ${result};")
+    c_pop_fn(ctx, thunk_name, params_str, saved)
+
+    // Zero-capture env still carries the count header required by typeid 15.
+    rt_use(ctx, "ring_alloc", 2)
+    let env = fresh_tmp(ctx)
+    c_emit(ctx, "${env} = ring_alloc((int64_t)sizeof(int64_t), 15);")
+    c_emit(ctx, "*(int64_t*)${env} = 0;")
+    let cls = fresh_tmp(ctx)
+    c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")
+    c_emit(ctx, "((void**)${cls})[0] = (void*)${thunk_name};")
+    c_emit(ctx, "((void**)${cls})[1] = ${env};")
+    cls
+}
+
 // #B-087 gap 1 port (gen_dict_closure_wrapper): wrap a direct-ABI function
 // fn(args, dict0..dictM, ev0..evK) into a uniform closure {thunk, env}.
 // The thunk loads the captured dicts/evidence from env and forwards.
 // B-104 D4 RC honesty: env count = dict_count — dict slots are OWNED
 // (ring_dup'd; static singletons are never-drop no-ops), evidence slots are
 // stored AFTER the dicts, OUTSIDE the counted window (handler-scoped, B-096).
-fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> Str {
+fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_refs: List<DictRef>, ty: Type) -> Str {
     // Resolve the real function (step 8: module-aware chain, LLVM parity).
     let mangled = c_resolve_fn(ctx, lookup_name)
     let found = match c_find_function_in_ctx(ctx, mangled, name) {
@@ -341,65 +400,33 @@ fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_n
         _ => 0,
     }
 
-    // Resolve the dicts at this site (current scope).
-    let mut dict_vals: List<Str> = []
-    for dn in dict_names {
-        dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(dn)))
+    let expected_dict_count = match ctx.fn_trait_bounds.get(fn_key) {
+        some(bounds) => bounds.len(),
+        none => 0,
+    }
+    if dict_refs.len() != expected_dict_count {
+        panic("C codegen: dict-closure wrapper for '${name}' expected ${expected_dict_count} checker-resolved dicts, got ${dict_refs.len()}")
     }
 
-    // #214: no dict names provided (checker does not resolve dicts for
-    // identifiers outside call arguments) — compute concrete dict names from
-    // the fn's trait bounds + the instantiated FnType.
-    if dict_vals.len() == 0 {
-        match ctx.fn_trait_bounds.get(fn_key) {
-            some(bounds) => {
-                if bounds.len() > 0 {
-                    let concrete_params = match ty {
-                        Type::FnType { params: fps, .. } => fps,
-                        _ => [],
-                    }
-                    let orig_types = match ctx.fn_original_param_types.get(fn_key) {
-                        some(t) => t,
-                        none => [],
-                    }
-                    let mut subst: Map<Str, Str> = map_new()
-                    let mut idx = 0
-                    for ot in orig_types {
-                        if idx < concrete_params.len() {
-                            match ot {
-                                Type::TypeVar { name: tv_name, .. } => {
-                                    match tv_name {
-                                        some(n) => {
-                                            match concrete_params.get(idx) {
-                                                some(cp) => {
-                                                    match type_to_builtin_name(cp) {
-                                                        some(cn) => { subst.insert(n, cn) },
-                                                        none => {},
-                                                    }
-                                                },
-                                                none => {},
-                                            }
-                                        },
-                                        none => {},
-                                    }
-                                },
-                                _ => {},
-                            }
-                        }
-                        idx = idx + 1
-                    }
-                    for b in bounds {
-                        match subst.get(b.type_param) {
-                            some(concrete_name) => {
-                                let dn = trait_dict_name(concrete_name, b.trait_name)
-                                dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(dn)))
-                            },
-                            none => {},
-                        }
-                    }
-                }
+    // Resolve the checker-selected dicts at this site.  A raw Wrapped value is
+    // defensive only (dict_lower normally makes it an HIR-visible local): it
+    // is freshly owned, so release that construction ref after the env dup.
+    let mut dict_vals: List<Str> = []
+    let mut owned_dict_vals: List<Str> = []
+    for dr in dict_refs {
+        match dr {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name,
+                    inner_dicts: inner_dicts
+                })
+                dict_vals.push(value)
+                owned_dict_vals.push(value)
             },
-            none => {},
+            DictRef::Simple(n) =>
+                dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(n))),
+            DictRef::Static(n) =>
+                dict_vals.push(c_resolve_dict_ref(ctx, DictRef::Static(n))),
         }
     }
 
@@ -450,6 +477,10 @@ fn gen_c_dict_closure_wrapper(mut ctx: CCtx, lookup_name: Str, name: Str, dict_n
     for ev in ev_vals {
         c_emit(ctx, "((void**)${env})[${slot_idx + 1}] = ${ev};")
         slot_idx = slot_idx + 1
+    }
+    for owned in owned_dict_vals {
+        rt_use(ctx, "ring_drop", 1)
+        c_emit(ctx, "ring_drop(${owned});")
     }
     let cls = fresh_tmp(ctx)
     c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")
@@ -766,8 +797,8 @@ pub fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
     match dr {
         DictRef::Simple(n) => {
             // Scope reference: dict param / dict_lower local.  Unknown names
-            // (dict_closure_dicts / derive extra_dicts strings) fall through
-            // to the static singleton chain (LLVM parity).
+            // (`dict_closure_dicts` names and derived Simple refs) fall
+            // through to the static singleton chain (LLVM parity).
             match ctx.named_values.get(n) {
                 some(cv) => cv,
                 none => resolve_c_static_dict(ctx, n),
@@ -775,8 +806,8 @@ pub fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
         },
         DictRef::Static(n) => resolve_c_static_dict(ctx, n),
         DictRef::Wrapped { dict, trait_name, inner_dicts } => {
-            // Post-dict_lower this survives only in BinOp dispatch
-            // extra_dicts resolution (B-121 gap 1 path).
+            // Post-dict_lower this survives in BinOp dispatch and dynamic
+            // derived FieldAction evidence.
             build_c_wrapped_dict(ctx, dict, trait_name, inner_dicts)
         },
     }
@@ -872,8 +903,24 @@ pub fn build_c_wrapped_dict(mut ctx: CCtx, dict_name: Str, trait_name: Str, inne
 pub fn build_c_wrapped_dict_typed(mut ctx: CCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>, dict_tid: Int) -> Str {
     // Resolve the inner dicts at this site.
     let mut inner_vals: List<Str> = []
+    // A surviving Wrapped child is freshly owned.  The parent wrapper envs
+    // take their own refs below, so release these construction temporaries
+    // once every method slot has captured them.
+    let mut owned_inner_vals: List<Str> = []
     for d in inner_dicts {
-        inner_vals.push(c_resolve_dict_ref(ctx, d))
+        match d {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
+                })
+                inner_vals.push(value)
+                owned_inner_vals.push(value)
+            },
+            DictRef::Simple(name) =>
+                inner_vals.push(c_resolve_dict_ref(ctx, DictRef::Simple(name))),
+            DictRef::Static(name) =>
+                inner_vals.push(c_resolve_dict_ref(ctx, DictRef::Static(name))),
+        }
     }
 
     let target_type = c_wrapped_dict_target_type(dict_name, trait_name)
@@ -935,6 +982,11 @@ pub fn build_c_wrapped_dict_typed(mut ctx: CCtx, dict_name: Str, trait_name: Str
             },
             none => {},
         }
+    }
+
+    for owned in owned_inner_vals {
+        rt_use(ctx, "ring_drop", 1)
+        c_emit(ctx, "ring_drop(${owned});")
     }
 
     dict
@@ -1140,8 +1192,16 @@ fn collect_c_dictref_names(ctx: CCtx, dr: DictRef, params: List<HParam>, mut cap
 // collect_captures).
 fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures: List<Str>) {
     match expr {
-        HExpr::Ident { name, resolved_name, .. } => {
+        HExpr::Ident { name, resolved_name, dict_closure_dicts, .. } => {
             consider_c_capture_name(ctx, name, resolved_name, params, captures)
+            match dict_closure_dicts {
+                some(dicts) => {
+                    for d in dicts {
+                        collect_c_dictref_names(ctx, d, params, captures)
+                    }
+                },
+                none => {},
+            }
         },
         HExpr::BinOp { left, right, eq_dispatch, ord_dispatch, .. } => {
             collect_c_captures(ctx, left, params, captures)
@@ -2187,8 +2247,25 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
                 some(rn) => rn,
                 none => name,
             }
-            // #132 print parity: coerce scalar args to Str.
-            if call_name == "print" && args.len() == 1 {
+            // #132 print parity applies only to the genuine extern ABI. A
+            // local callable or exact Ring declaration named `print` must win
+            // before this early-return path, just like gen_c_direct_call.
+            let print_key = c_resolve_fn(ctx, call_name)
+            let mut is_extern_print = false
+            if ctx.named_values.contains_key(call_name) == false &&
+               ctx.ring_callable_names.contains(print_key) == false {
+                if call_name == "print" {
+                    is_extern_print = true
+                } else {
+                    match ctx.extern_abi_names.get(print_key) {
+                        some(abi_name) => {
+                            if abi_name == "print" { is_extern_print = true }
+                        },
+                        none => {},
+                    }
+                }
+            }
+            if is_extern_print && args.len() == 1 {
                 match args.get(0) {
                     some(arg0) => {
                         let arg_ty = hexpr_type(arg0)
@@ -2208,14 +2285,7 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
                     none => {},
                 }
             }
-            let final_name = if call_name == "set_new" && is_int_set(result_ty) {
-                "set_int_new"
-            } else if call_name == "set_from" && is_int_set(result_ty) {
-                "set_int_from"
-            } else {
-                call_name
-            }
-            gen_c_direct_call(ctx, final_name, arg_vals, dict_vals)
+            gen_c_direct_call(ctx, call_name, arg_vals, dict_vals)
         },
         HExpr::FieldAccess { receiver, field, .. } => {
             let recv_val = gen_c_expr(ctx, receiver)
@@ -2250,7 +2320,6 @@ fn extern_fn_to_runtime_c(name: Str) -> Str? {
     if name == "eprintln" { return some("ring_eprintln") }
     if name == "exit" || name == "exit_process" { return some("ring_exit") }
     if name == "argv" { return some("ring_args") }
-    if name == "set_new" { return some("ring_set_new") }
     if name == "read_file" { return some("ring_read_file") }
     if name == "write_file" { return some("ring_write_file") }
     if name == "file_exists" { return some("ring_file_exists") }
@@ -2263,10 +2332,7 @@ fn extern_fn_to_runtime_c(name: Str) -> Str? {
     if name == "cwd" { return some("ring_cwd") }
     if name == "parse_int" { return some("ring_parse_int") }
     if name == "parse_float" { return some("ring_parse_float") }
-    if name == "set_from" { return some("ring_set_from_list") }
     if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
-    if name == "set_int_new" { return some("ring_set_int_new") }
-    if name == "set_int_from" { return some("ring_set_int_from_list") }
     if name == "Cell" { return some("ring_Cell_new") }
     // B-125: Ptr<T> builtins
     if name == "alloc" { return some("ring_raw_alloc") }
@@ -2309,7 +2375,43 @@ fn gen_c_runtime_call(mut ctx: CCtx, name: Str, args: List<Str>) -> Str {
     }
 }
 
+// Send a proven extern ABI leaf through the complete legacy direct-call
+// pipeline. Many std extern spellings map implicitly to `ring_<leaf>` rather
+// than appearing in extern_fn_to_runtime_c (notably assert/json_stringify).
+// Only after both known runtime paths miss is the raw foreign symbol valid.
+fn gen_c_extern_abi_call(mut ctx: CCtx, abi_name: Str, arg_vals: List<Str>) -> Str {
+    match extern_fn_to_runtime_c(abi_name) {
+        some(rtn) => { return gen_c_runtime_call(ctx, rtn, arg_vals) },
+        none => {},
+    }
+    let rt_fallback = "ring_${abi_name}"
+    match rt_known_arity(rt_fallback) {
+        some(_) => {
+            if rt_fallback == "ring_assert" {
+                let first = match arg_vals.get(0) {
+                    some(v) => v, none => panic("ring_assert: missing arg 0")
+                }
+                let second = match arg_vals.get(1) {
+                    some(v) => v, none => panic("ring_assert: missing arg 1")
+                }
+                return gen_c_runtime_call(ctx, rt_fallback,
+                    ["RING_COND(${first})", second])
+            }
+            gen_c_runtime_call(ctx, rt_fallback, arg_vals)
+        },
+        none => gen_c_runtime_call(ctx, abi_name, arg_vals),
+    }
+}
+
 fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: List<Str>) -> Str {
+    // LOCAL scope is authoritative before every name-based builtin special.
+    // Otherwise a legal local `ptr_from_addr`/`print`/Cell closure can inherit
+    // backend behavior that belongs to a different exact DefId.
+    match ctx.named_values.get(name) {
+        some(cv) => { return gen_c_closure_call(ctx, cv, arg_vals) },
+        none => {},
+    }
+
     // B-125: ptr_from_addr — pure codegen identity (untag Int → raw address).
     if name == "ptr_from_addr" {
         let a = match arg_vals.get(0) { some(v) => v, none => panic("ptr_from_addr: missing arg") }
@@ -2318,27 +2420,29 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
         return t
     }
 
-    // Known extern fn → runtime mapping.
-    match extern_fn_to_runtime_c(name) {
-        some(rtn) => { return gen_c_runtime_call(ctx, rtn, arg_vals) },
-        none => {},
-    }
+    let resolved_key = c_resolve_fn(ctx, name)
 
-    // LOCAL scope first: a closure/fn-value param or local shadows any
-    // module-level fn of the same name (language scoping; gen_c_ident already
-    // resolves references local-first).  Without this, a prelude HOF body
-    // like List.fold's `f(acc, elem)` binds to a user's global `fn f` —
-    // clang then hard-errors on the arity mismatch (audit #243 fixed the
-    // LLVM backend's inverted order to match).
-    match ctx.named_values.get(name) {
-        some(cv) => { return gen_c_closure_call(ctx, cv, arg_vals) },
-        none => {},
+    // A project extern-forward resolves directly to the exact Ring target and
+    // therefore bypasses ABI lowering. Only a genuine exact extern identity
+    // is converted back to its separately stored foreign leaf.
+    if ctx.ring_callable_names.contains(resolved_key) == false {
+        match ctx.extern_abi_names.get(resolved_key) {
+            some(abi_name) => {
+                return gen_c_extern_abi_call(ctx, abi_name, arg_vals)
+            },
+            none => {},
+        }
+        // Backward-compatible raw builtin path for compiler-synthesised calls
+        // that have no HDecl registration. Exact Ring declarations always win.
+        match extern_fn_to_runtime_c(name) {
+            some(rtn) => { return gen_c_runtime_call(ctx, rtn, arg_vals) },
+            none => {},
+        }
     }
 
     // Ring function lookup (step 8: module-aware resolution, gen_direct_call
     // parity — resolved key first, then bare, then precise cross-module).
-    let mangled = c_resolve_fn(ctx, name)
-    match c_find_function_in_ctx(ctx, mangled, name) {
+    match c_find_function_in_ctx(ctx, resolved_key, name) {
         some(lookup) => {
             let mut call_args: List<Str> = []
             for a in arg_vals { call_args.push(a) }
@@ -2368,9 +2472,8 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
                     gen_c_runtime_call(ctx, rt_fallback, arg_vals)
                 },
                 none => {
-                    // B-152: unknown extern fn — declare with the uniform
-                    // boxed ABI and let the linker resolve.
-                    gen_c_runtime_call(ctx, name, arg_vals)
+                    // B-152: complete extern runtime/FFI fallback.
+                    gen_c_extern_abi_call(ctx, name, arg_vals)
                 },
             }
         },
@@ -2397,17 +2500,7 @@ fn rt_method_returns_i64_c(name: Str) -> Bool {
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_has" { return true }
-    if name == "ring_set_len" { return true }
     if name == "ring_sb_len" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_int_len" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2418,19 +2511,11 @@ fn rt_method_returns_bool_c(name: Str) -> Bool {
     if name == "ring_str_eq" { return true }
     if name == "ring_str_lt" { return true }
     if name == "ring_list_is_empty" { return true }
-    if name == "ring_set_has" { return true }
     if name == "ring_list_any" { return true }
     if name == "ring_list_all" { return true }
     if name == "ring_Option_is_some" { return true }
     if name == "ring_Option_is_none" { return true }
-    if name == "ring_set_int_has" { return true }
-    if name == "ring_set_is_empty" { return true }
-    if name == "ring_set_int_is_empty" { return true }
     if name == "ring_str_is_empty" { return true }
-    if name == "ring_set_any" { return true }
-    if name == "ring_set_all" { return true }
-    if name == "ring_set_int_any" { return true }
-    if name == "ring_set_int_all" { return true }
     false
 }
 
@@ -2491,26 +2576,7 @@ fn method_to_runtime_c(type_name: Str, method: Str) -> Str? {
     if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
     // B-152 P2: List methods are pure Ring — no entries (fall through to
     // the Ring-compiled impl methods).
-    // B-152 P3 closure: Map methods are pure Ring impl methods.
-    // Set methods
-    if type_name == "Set" && method == "add" { return some("ring_set_add") }
-    if type_name == "Set" && method == "insert" { return some("ring_set_add") }
-    if type_name == "Set" && method == "has" { return some("ring_set_has") }
-    if type_name == "Set" && method == "contains" { return some("ring_set_has") }
-    if type_name == "Set" && method == "to_list" { return some("ring_set_to_list") }
-    if type_name == "Set" && method == "len" { return some("ring_set_len") }
-    if type_name == "Set" && method == "is_empty" { return some("ring_set_is_empty") }
-    if type_name == "Set" && method == "from_list" { return some("ring_set_from_list") }
-    if type_name == "Set" && method == "for_each" { return some("ring_set_for_each") }
-    if type_name == "Set" && method == "remove" { return some("ring_set_delete") }
-    if type_name == "Set" && method == "clear" { return some("ring_set_clear") }
-    if type_name == "Set" && method == "union" { return some("ring_set_union") }
-    if type_name == "Set" && method == "intersect" { return some("ring_set_intersect") }
-    if type_name == "Set" && method == "difference" { return some("ring_set_difference") }
-    if type_name == "Set" && method == "fold" { return some("ring_set_fold") }
-    if type_name == "Set" && method == "filter" { return some("ring_set_filter") }
-    if type_name == "Set" && method == "any" { return some("ring_set_any") }
-    if type_name == "Set" && method == "all" { return some("ring_set_all") }
+    // B-152 P3/P4: Map and Set methods are pure Ring impl methods.
     // Option methods
     if type_name == "Option" && method == "unwrap_or" { return some("ring_Option_unwrap_or") }
     if type_name == "Option" && method == "unwrap" { return some("ring_Option_unwrap") }
@@ -2596,38 +2662,13 @@ fn gen_c_method_call(mut ctx: CCtx, recv: Str, recv_type: Type, method: Str, arg
 
     // B-134: only dispatch to runtime builtins for structurally-valid
     // builtin collections.
-    let rt_method = if (type_name == "List" || type_name == "Map" || type_name == "Set") && !is_builtin_collection(recv_type) {
+    let rt_method = if (type_name == "List" || type_name == "Map") && !is_builtin_collection(recv_type) {
         none
     } else {
         method_to_runtime_c(type_name, method)
     }
     match rt_method {
-        some(base_rt_name) => {
-            // Int-keyed Set dispatch (B-152 P3: Map is unified, Set is not yet).
-            let rt_name = if is_int_set(recv_type) {
-                match method {
-                    "add" => "ring_set_int_add",
-                    "insert" => "ring_set_int_add",
-                    "has" => "ring_set_int_has",
-                    "contains" => "ring_set_int_has",
-                    "to_list" => "ring_set_int_to_list",
-                    "len" => "ring_set_int_len",
-                    "from_list" => "ring_set_int_from_list",
-                    "for_each" => "ring_set_int_for_each",
-                    "remove" => "ring_set_int_delete",
-                    "clear" => "ring_set_int_clear",
-                    "clone" => "ring_set_int_clone",
-                    "is_empty" => "ring_set_int_is_empty",
-                    "union" => "ring_set_int_union",
-                    "intersect" => "ring_set_int_intersect",
-                    "difference" => "ring_set_int_difference",
-                    "fold" => "ring_set_int_fold",
-                    "filter" => "ring_set_int_filter",
-                    "any" => "ring_set_int_any",
-                    "all" => "ring_set_int_all",
-                    _ => base_rt_name,
-                }
-            } else { base_rt_name }
+        some(rt_name) => {
 
             let mut call_args: List<Str> = []
             // Receiver (unboxed for Int/Float/Bool to_str).
@@ -4226,16 +4267,11 @@ fn emit_c_for_list(mut ctx: CCtx, binding: Str, destructure: List<HForInDestruct
     let lv = match hexpr_type(iterable) {
         Type::StructType { name, type_params } => {
             if name == "Set" && type_params.len() == 1 {
-                let is_int_elem = match type_params[0] {
-                    Type::IntType => true,
-                    _ => false,
-                }
-                let conv_name = if is_int_elem { "ring_set_int_to_list" } else { "ring_set_to_list" }
-                rt_use(ctx, conv_name, 1)
                 collection_converted = true
-                let t = fresh_tmp(ctx)
-                c_emit(ctx, "${t} = ${conv_name}(${raw});")
-                t
+                gen_c_method_call(
+                    ctx, raw,
+                    Type::StructType { name: name, type_params: type_params },
+                    "to_list", [], [])
             } else if name == "Map" && type_params.len() == 2 {
                 collection_converted = true
                 gen_c_method_call(

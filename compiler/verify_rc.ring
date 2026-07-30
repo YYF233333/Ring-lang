@@ -54,8 +54,6 @@
 //                       leaks the previous value.
 //   x-spread            struct/variant spread copies the source's field
 //                       pointers raw (no dup) — leak-on-spread, L1 posture.
-//   x-callee-call       a callee that is itself a Call stays a conservative
-//                       borrow (anf_borrow; D1 保守保留).
 //   x-discard           `let _ = <owned>` discards without a drop.
 //   NOT REPORTED (excluded from the account by rule, design.md §7.11):
 //     Unit-typed values (D1 rule ②), extern-handle / contains-extern values
@@ -107,10 +105,11 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
     is_rc_excluded_type, type_contains_extern_handle,
     is_borrow_returning_call, is_fresh_owned_bool_value,
-    is_nullary_variant_ctor_ident}
+    is_nullary_variant_ctor_ident, is_materialized_fn_value}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
     sink_arg_indices, is_variant_constructor_call, expr_diverges, stmt_diverges,
-    is_scalar_type, is_owned_slot_result_call, is_owned_slot_result_callee}
+    is_scalar_type, is_owned_slot_result_call, is_owned_slot_result_callee,
+    is_materializable_fn_value}
 
 // Value classes (what an expression's value IS, ownership-wise)
 const CLS_OWNED: Int = 0     // fresh / dup'd — somebody must consume it exactly once
@@ -448,6 +447,9 @@ fn v_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     if is_unresolved_var_type(ty) {
         return false
     }
+    if is_materialized_fn_value(init) {
+        return true
+    }
     match init {
         HExpr::Ident { .. } => true,
         HExpr::FieldAccess { .. } => true,
@@ -548,8 +550,13 @@ fn v_consume(expr: HExpr, mut ctx: VCtx) -> Int {
 // consumer — a leak.  `exempt` names the documented exemption class; "" means
 // the position is supposed to be fully covered by the ANF pass → fatal.
 fn v_borrow(expr: HExpr, exempt: Str, mut ctx: VCtx) -> Int {
+    let missed_materialization =
+        exempt == "" && is_materializable_fn_value(expr, ctx.externs)
     let cls = v_expr(expr, M_BORROWED, ctx)
-    if cls == CLS_OWNED {
+    if missed_materialization {
+        v_report(ctx, "leak-temp", true,
+            "fresh callable control-flow value survived ANF in a read position", hexpr_span(expr))
+    } else if cls == CLS_OWNED {
         if exempt == "" {
             v_report(ctx, "leak-temp", true,
                 "owned temporary is never consumed (no binding, no drop) in a read position", hexpr_span(expr))
@@ -582,6 +589,7 @@ fn v_cond(expr: HExpr, mut ctx: VCtx) {
 
 fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
     let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
+    let materialized_fn_value = is_materialized_fn_value(expr)
     match expr {
         HExpr::IntLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
         HExpr::FloatLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
@@ -592,7 +600,7 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             // Inference represents a fieldless enum construction as an Ident,
             // but both native backends call its zero-argument constructor.  It
             // is therefore a fresh owned production, not a binding/global read.
-            if nullary_variant_ctor {
+            if nullary_variant_ctor || materialized_fn_value {
                 v_cls_of_fresh(ty, ctx.externs)
             } else {
                 v_ident(name, ty, span, mode, ctx)
@@ -616,14 +624,10 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
         },
 
         HExpr::Call { callee, args, ty, .. } => {
-            // Callee: an Ident (fn ref / closure binding read) or a method
-            // FieldAccess (whose receiver is a read position, materialised by
-            // ANF if fresh).  A callee that is itself a Call is the documented
-            // conservative hold-out.
-            match callee {
-                HExpr::Call { .. } => { v_borrow(callee, "x-callee-call", ctx) },
-                _ => { v_borrow(callee, "", ctx) },
-            }
+            // ANF materialises every fresh callee (including checker-marked
+            // wrappers and Call-produced closures). Any owned callee still
+            // inline here is therefore a fatal accounting gap.
+            v_borrow(callee, "", ctx)
             let ctor = is_variant_constructor_call(callee, ty)
             let sinks = sink_arg_indices(callee, args.len())
             let owned_slot_result = args.len() == 2 && is_owned_slot_result_callee(callee)

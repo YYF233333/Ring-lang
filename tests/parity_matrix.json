@@ -592,13 +592,12 @@
       "reason": "A nested file-module path preserves its canonical $-prefix while top-level and inline-child default effect evidence executes under both backends."
     },
     {
-      "feature_id": "gap.shared.api_clone",
+      "feature_id": "collections.api_clone",
       "evidence": ["tests/cases/api_clone.ring"],
-      "oracle": "shared-failure-no-parity",
+      "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends access-violate in the shared clone/runtime path (B-163 Phase2 P2.1 probe 2026-07-27)"
+      "status": "covered",
+      "reason": "List, Map, and Map-backed Set structural clone APIs execute under both backends without shared runtime container aliases."
     },
     {
       "feature_id": "gap.shared.iterator",
@@ -610,22 +609,57 @@
       "reason": "both backends access-violate in the shared iterator/runtime path (B-163 Phase2 P2.1 probe 2026-07-27)"
     },
     {
-      "feature_id": "gap.shared.set_struct_eq",
+      "feature_id": "collections.set_struct_eq",
       "evidence": ["tests/cases/set_struct_eq.ring"],
-      "oracle": "shared-failure-no-parity",
+      "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends access-violate in structural Set equality (B-163 Phase2 P2.1 probe 2026-07-27)"
+      "status": "covered",
+      "reason": "Auto-derived Eq and Hash evidence supports structural keys in the pure-Ring Map-backed Set on both backends."
     },
     {
-      "feature_id": "gap.shared.set_ops_deep_eq",
+      "feature_id": "collections.set_ops_deep_eq",
       "evidence": ["tests/cases/set_ops_deep_eq.ring"],
-      "oracle": "shared-failure-no-parity",
+      "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends access-violate in deep Set operations (B-163 Phase2 P2.1 probe 2026-07-27)"
+      "status": "covered",
+      "reason": "Union, intersection, and difference use Hash+Eq Map lookups for deep structural values under both backends."
+    },
+    {
+      "feature_id": "derive.hash.auto_eq_fixpoint",
+      "evidence": ["tests/cases/derive_hash_set.ring"],
+      "oracle": "handwritten-golden+dual-backend",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "covered",
+      "reason": "Auto-Eq structs and enums derive stable field-order Hash evidence, including recursively nested generic arguments, tuples, recursion, and enum discriminators."
+    },
+    {
+      "feature_id": "collections.set_hash_collision_rehash",
+      "evidence": ["tests/cases/set_hash_collision_rehash.ring"],
+      "oracle": "handwritten-golden+dual-backend",
+      "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
+      "status": "covered",
+      "reason": "The pure-Ring Map-backed Set preserves Hash+Eq semantics across collisions, duplicate inserts, tombstones, rehash, and set algebra."
+    },
+    {
+      "feature_id": "backend.frontend_hash_reject_manual_eq_without_hash",
+      "evidence": ["tests/cases/errors/set_manual_eq_missing_hash.ring"],
+      "oracle": "diagnostic-substring",
+      "lane": ["check"],
+      "status": "covered",
+      "reason": "A manual Eq implementation does not implicitly gain Hash evidence for Set mutation."
+    },
+    {
+      "feature_id": "backend.frontend_hash_reject_float_field",
+      "evidence": [
+        "tests/cases/errors/derive_hash_float_missing.ring",
+        "tests/cases/errors/derive_nested_hash_float_missing.ring",
+        "tests/cases/errors/derive_nested_hash_float_set_missing.ring",
+        "tests/cases/errors/derive_nested_hash_float_map_missing.ring"
+      ],
+      "oracle": "diagnostic-substring",
+      "lane": ["check"],
+      "status": "covered",
+      "reason": "Auto-Eq does not derive usable Hash evidence when a direct or recursively nested type argument lacks a required impl bound, including direct dispatch and Set/Map method schemes instantiated with Float."
     },
     {
       "feature_id": "backend.effect_custom_and_fail",

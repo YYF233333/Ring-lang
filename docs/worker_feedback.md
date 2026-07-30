@@ -15,3 +15,5 @@
 ---
 
 当前无待用户处理的决策。
+
+- `[里程碑]` 2026-07-31：B-107 主体 merge（`ce994fc`）——自动 `derive Hash` + Set-on-Map（B-152 P4 完成，runtime -440 行）+ Unit 3 `ResolvedNamespacePlan` 抽取 + E0305 导出修复（对抗 review 抓到并消灭 plan-replay 镜像机制）。门禁：双 review + 干净 ×3 + double bootstrap 固定点。剩余工作分流为 B-171（裸名收紧实施）/ B-172（C′ 主体）/ B-173（Hash 覆盖面）。间歇编译器 AV 定量立案 #261（~1/全量轮，先于本分支存在）。

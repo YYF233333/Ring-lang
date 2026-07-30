@@ -29,6 +29,9 @@ fn mode_score(mode: inline_facade::State) -> Int {
 
 fn main() {
     let ready = Pulse::Ready
+    print(local_ready_value())
+    print(local_probe::ready_value())
+    print(score(Ready))
     print(score(ready))
     print(score(Pulse::Waiting))
     print(score(passthrough(Pulse::Ready)))

@@ -516,11 +516,11 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
 
     let list_val_raw = gen_llvm_expr(ctx, iterable)
 
-    // A Set is backed by a hash table, not a vector — convert it to a List before
+    // A Set wraps a Map, not a vector — call its pure Ring to_list method before
     // index-based iteration. List iterables pass through unchanged.
     //
     // B-104 D1 Stage 2: the conversion list is a codegen-SYNTHESIZED fresh
-    // temporary (ring_set_to_list allocs the list AND fresh element strs/boxes)
+    // temporary (Set.to_list allocs the list and duplicates occupied keys)
     // that perceus never sees — it leaked on every set iteration.  Drop it at
     // loop exit (merge_bb below), the same codegen-level pattern as the B-104b
     // range bound/counter drops.  Sound: loop-body borrows of its elements end
@@ -532,13 +532,15 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
     let list_val = match hexpr_type(iterable) {
         Type::StructType { name, type_params } => {
             if name == "Set" && type_params.len() == 1 {
-                let is_int_elem = match type_params[0] {
-                    Type::IntType => true,
-                    _ => false,
+                let mangled = llvm_mangle_method("Set", "to_list")
+                let conv_fn = match ctx.functions.get(mangled) {
+                    some(f) => f,
+                    none => panic("LLVM codegen: Set.to_list function not found"),
                 }
-                let conv_name = if is_int_elem { "ring_set_int_to_list" } else { "ring_set_to_list" }
-                let conv_fn = get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type)
-                let conv_ty = get_rt_fn_type(ctx, conv_name)
+                let conv_ty = match ctx.fn_types.get(mangled) {
+                    some(t) => t,
+                    none => panic("LLVM codegen: Set.to_list function type not found"),
+                }
                 collection_converted = true
                 LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "s2l"))
             } else { if name == "Map" && type_params.len() == 2 {

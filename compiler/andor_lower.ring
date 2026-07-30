@@ -108,8 +108,8 @@ fn al_decl(d: HDecl) -> HDecl {
             }
             HDecl::Effect { name: name, type_params: type_params, ops: new_ops, is_pub: is_pub, span: span }
         },
-        HDecl::ExternFn { name, def_id, type_params, params, return_type, effects, is_pub, span } =>
-            HDecl::ExternFn { name: name, def_id: def_id, type_params: type_params, params: params, return_type: return_type, effects: effects, is_pub: is_pub, span: span },
+        HDecl::ExternFn { name, abi_name, def_id, type_params, params, return_type, effects, is_pub, span } =>
+            HDecl::ExternFn { name: name, abi_name: abi_name, def_id: def_id, type_params: type_params, params: params, return_type: return_type, effects: effects, is_pub: is_pub, span: span },
         HDecl::ExternType { name, type_params, is_pub, span } =>
             HDecl::ExternType { name: name, type_params: type_params, is_pub: is_pub, span: span },
         HDecl::TypeAlias { name, ty, is_pub, span } =>

@@ -1,8 +1,8 @@
 // B-103 → B-104 D1 rule ② regression: RECEIVER-RETURNING MUTATORS must not be
 // dropped or cloned.
 //
-// List/Set mutators still cross low-level runtime bridges that may return the
-// receiver ABI value, while pure-Ring Map mutators update slot buffers through
+// List mutators still cross a low-level runtime bridge that may return the
+// receiver ABI value, while pure-Ring Map/Set mutators update slot buffers through
 // ring_slot_write/ring_slot_replace/ring_slot_drop. Their source-level result is
 // uniformly Unit. Binding such a call (`let r = xs.push(4)`) must therefore
 // create no RC ownership; otherwise a raw receiver could be scope-end-dropped

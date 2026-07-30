@@ -100,7 +100,7 @@ Ring-lang/
 | StringBuilder | `pub struct`（原 `pub extern type`） | 简单（P0 已验证） | ✅ P0 |
 | List | `pub struct`（原 `pub extern type`） | 中等 | ✅ P2 |
 | Map | `pub struct`（原 `pub extern type`） | 中等（同 List 模式） | ✅ P3 |
-| Set | `pub extern type`（structs map） | 中等（复用 Map） | 待做 P4 |
+| Set | `pub struct`（`Map<T, Unit>` wrapper） | 中等（复用 Map） | ✅ P4（B-107，2026-07-31） |
 | Str | `Type::StrType`（Type 枚举变体） | 困难（需改类型系统 26 处） | P1 Step 1 ✅，Step 2 排最后 |
 
 - **extern type**（List/Map/Set/StringBuilder）：走 structs map 的 `Type::StructType`，改为 `pub struct` 后 checker/codegen 自然走通
@@ -137,7 +137,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 ### 已知陷阱
 
 1. **Drop/Clone 冲突**（E0802）：Ring 禁止同时 `impl Drop` + `impl Clone`。内建容器（List/Map/Set）有编译器内建的 Clone，加 `impl Drop` 会触发 E0802。解法（2026-07-12 修正，B-163 step 7 核实）：容器 drop 由 **runtime 在固定 typeid 上原生处理**（drop_list/drop_map tid 4/5、drop_option tid 8），codegen 的 `emit_drop_functions` **skip 这些 typeid 不生成**（RingList/RingMapStruct 布局是 runtime 私有，per-field drop 会漏 slot buffer）；Set/StringBuilder 是 extern type 不进 struct_types。注意 Result 当前两侧都不处理 = 泄漏（audit #256）
-2. **`let mut` effect 泄漏**：impl 方法中 `let mut i = 0; while i < n { ... i = i + 1 }` 会导致 `mut` effect 泄漏到方法签名。解法：用 `for i in 0..n` 代替 while 循环（range iterator 不泄漏 mut）
+2. **HOF 方法内的 range iterator effect 传染**（2026-07-31 修订，与旧表述相反）：HOF 方法（for_each/map/filter 等）内用 `for i in 0..n` 会把 range iterator 的 `mut` effect 泄入 closure 参数的 effect row 造成 effect mismatch；正确写法是 `let mut i` + while 索引循环（局部 `let mut` 不泄漏，std/map.ring HOF 注释实证）
 3. **Effect 暴露**：C runtime 函数没有 effect 签名，Ring 方法有。迁移后调用者可能因新暴露的 effect 而编译失败。需检查 HOF 方法（map/filter/fold 等）的 effect 传播
 4. **Typeid 一致性**：用户定义的 struct 会被分配 user typeid（≥64），但 C runtime 的 drop/dup 使用固定 typeid（如 RING_TYPEID_LIST=4）。需在 codegen 中强制分配匹配的 typeid（`get_or_assign_typeid` 特殊化）
 5. **C++ bootstrap shim 生命周期**：只有当前跟踪的 bootstrap anchor 仍引用旧 runtime 符号时才保留 compatibility shim；新源码完成 fixed point、跟踪 anchor 不再引用后必须删除。B-152 P3 的 `ring_map_*` shim 已在 B-163 step 9 按此规则全部删除
@@ -173,7 +173,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 - 不支持 `dyn Trait` 动态分发、GATs
 - `pub` 可见性在单文件模式不强制（向后兼容）
 - 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证
-- `Map<K,V>` 已要求 `K: Hash + Eq`，支持 Str/Int/Bool 及手写 `Hash + Eq` impl 的用户类型（已有 struct 回归）；`derive Hash` 仍追踪于 B-107
+- `Map<K,V>` / `Set<T>` 要求 `K: Hash + Eq`；`derive Hash` 已自动派生（B-107 ✅ 2026-07-31）：struct 按字段声明序 combine，enum 先混入稳定 variant discriminator；manual Eq 阻断 auto-Hash（coherence）；Float 字段拒绝（E0503）；Option/tuple/List 字段暂无 Hash evidence（fail-closed，B-173）
 
 ### 语法
 
@@ -193,7 +193,7 @@ extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
 
 **当前**：**B-163 C 后端迁移 Phase 1 ✅ / Phase 2 进行中**——steps 1–9 完成，C 单文件/project/self-host、C 文本固定点与 LLVM anchor 固定点均已闭合；Phase 2 P2.1 machine-readable parity matrix 与诚实 skip/gap 分流已落地，当前进入 P2.2 shared gap 修复与 manual gate 自动化（check-only gap 已清零）。认证完成前不退役 LLVM、不切换 dist-c、不恢复 CI bootstrap。测试状态以 Python runner 实跑为准，不在此记录具体计数。
 
-**后续**：先完成 B-163 Phase 2；B-152 RIIR std 的剩余 P4 Set / P1 Step 2 Str / P5 在整个 B-163 完成前保持暂停，之后恢复 → B-002p2 unwind 补全；再后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
+**后续**：先完成 B-163 Phase 2；B-152 RIIR std 的剩余 P1 Step 2 Str / P5 在整个 B-163 完成前保持暂停（P4 Set 已随 B-107 完成），之后恢复 → B-002p2 unwind 补全；再后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
 
 **基础设施**：B-151 CI 重设计 ✅（Python runner + GitHub Actions Windows CI，零 Node 依赖）
 

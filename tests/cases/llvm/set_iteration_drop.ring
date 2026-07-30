@@ -1,8 +1,8 @@
 // B-104 D1 Stage 2 regression: SET-ITERATION conversion temporary.
 //
-// emit_for_in_list converts a Set iterable to a fresh List (ring_set_to_list /
-// ring_set_int_to_list — fresh list AND fresh element copies) that perceus
-// never sees; it now drops at loop exit (merge_bb).  What this pins:
+// Set.iter converts the Map-backed Set to a fresh key List (fresh list and
+// fresh element copies) that Perceus owns and drops at loop exit. What this
+// pins:
 //   * the conversion list + elements are released exactly once — a double
 //     release (or dropping while body borrows are live) crashes natively;
 //   * element ESCAPES out of the loop (push into an outer list) are
@@ -10,7 +10,7 @@
 //     values are re-read after the loop (the expected output pins them);
 //   * `break` routes through merge (the drop still runs — no crash on
 //     re-iteration);
-//   * both Str sets and Int sets (the two conversion paths).
+//   * both heap-valued Str sets and immediate Int sets.
 
 fn main() {
     let mut s: Set<Str> = set_new()
@@ -46,7 +46,7 @@ fn main() {
     }
     print("first-nonempty=${first.len() > 0}")
 
-    // Int set (ring_set_int_to_list path).
+    // Int set (immediate element path).
     let mut si: Set<Int> = set_new()
     si.insert(3)
     si.insert(1)

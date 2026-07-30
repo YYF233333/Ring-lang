@@ -19,7 +19,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
     default_method_self_name, scan_trait_method_order, collect_all_supertraits,
     type_contains_extern_handle,
-    DerivedImpl, DerivedField, DerivedVariant, FieldAction, TypeKind}
+    DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef, TypeKind,
+    DERIVED_HASH_SEED}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
     CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_local, c_mangle_fn,
     c_mangle_fn_with_prefix, c_mangle_method, c_sanitize, c_symbol_for_fn_key, c_symbol_fragment,
@@ -28,7 +29,7 @@ use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
     get_or_assign_c_typeid, is_runtime_symbol, fresh_tmp, fresh_i64, fresh_dbl,
     fresh_label, c_push_fn, c_pop_fn, c_global_cstr}
 use codegen_c_expr::{gen_c_expr, emit_c_stmt, c_resolve_dict_ref,
-    resolve_c_static_dict, ensure_c_dict_getter, gen_c_closure_call,
+    ensure_c_dict_getter, gen_c_closure_call,
     emit_c_default_evidence_init}
 use effect_analysis::{extract_effect_names, collect_fn_callees}
 use resolver::{module_prefix}
@@ -130,7 +131,10 @@ pub fn generate_c_project(
     extern_forward_bridges: Map<Str, Str>
 ) {
     let mut ctx = new_c_ctx(emit_lines)
-    ctx.extern_forward_bridges = extern_forward_bridges
+    for entry in extern_forward_bridges.entries() {
+        let (source, target) = entry
+        ctx.extern_forward_bridges.insert(c_mangle_fn(source), c_mangle_fn(target))
+    }
 
     // Scan pass over ALL modules (generate_llvm_project parity, same union
     // rules).  #134: boxed_vars is deliberately NOT unioned here — def_ids
@@ -399,6 +403,9 @@ fn c_register_builtin_enums(mut ctx: CCtx) {
     ctx.functions.insert("ring_Option_none", CFnInfo { c_name: "ring_Option_none", total_params: 0 })
     ctx.functions.insert("ring_Result_Ok", CFnInfo { c_name: "ring_Result_Ok", total_params: 1 })
     ctx.functions.insert("ring_Result_Err", CFnInfo { c_name: "ring_Result_Err", total_params: 1 })
+    for key in ["ring_Option_some", "ring_Result_Ok", "ring_Result_Err"] {
+        ctx.ring_callable_names.insert(key)
+    }
     let mut ev1: List<Str> = []
     ctx.fn_evidence_params.insert("ring_Option_some", ev1)
     let mut ev2: List<Str> = []
@@ -461,6 +468,7 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     some(p) => c_mangle_fn_with_prefix(p, name),
                     none => c_mangle_fn(name),
                 }
+                ctx.ring_callable_names.insert(mangled)
                 let effect_key = match prefix {
                     some(_) => mangled,
                     none => name,
@@ -472,7 +480,9 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     match m {
                         HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, .. } => {
                             // #177: qualified effect key matching scan_fn_effects_c.
-                            c_declare_fn(ctx, c_mangle_method(target_type, mn), "${target_type}_${mn}", mp, me, mtb)
+                            let method_key = c_mangle_method(target_type, mn)
+                            ctx.ring_callable_names.insert(method_key)
+                            c_declare_fn(ctx, method_key, "${target_type}_${mn}", mp, me, mtb)
                         },
                         _ => {},
                     }
@@ -575,7 +585,17 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                 c_forward_declare_with_prefix(ctx, md, prefix)
             },
             HDecl::Effect { .. } => {},       // ops registry: register_effect_ops_c
-            HDecl::ExternFn { .. } => {},     // declared lazily at call sites
+            HDecl::ExternFn { name, abi_name, .. } => {
+                // C externs remain lazily declared at direct call sites, but
+                // first-class values need an exact declaration identity and a
+                // separate ABI-leaf mapping.
+                let extern_key = match prefix {
+                    some(p) => c_mangle_fn_with_prefix(p, name),
+                    none => c_mangle_fn(name),
+                }
+                ctx.extern_callable_names.insert(extern_key)
+                ctx.extern_abi_names.insert(extern_key, abi_name)
+            },
             HDecl::ExternType { .. } => {},
             HDecl::TypeAlias { .. } => {},
             HDecl::Sig { .. } => {},
@@ -640,6 +660,12 @@ fn c_emit_enum_ctors(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) {
         }
         let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { c_symbol_for_fn_key(key) }
         ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: v.fields.len() })
+        // Only positional payload variants are first-class function values.
+        // Named-field variants lower structurally; fieldless variants are
+        // singleton values rather than fn() constructors.
+        if v.field_names.is_none() && v.fields.len() > 0 {
+            ctx.ring_callable_names.insert(key)
+        }
         let mut no_ev: List<Str> = []
         ctx.fn_evidence_params.insert(key, no_ev)
 
@@ -737,12 +763,9 @@ fn c_declare_fn(mut ctx: CCtx, mangled: Str, effect_key: Str, params: List<HPara
     let total = params.len() + trait_bounds.len() + ev_params.len()
     ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: total })
 
-    // #214 (fn value with dicts): record bounds + original param types so
-    // gen_c_dict_closure_wrapper can compute concrete dict names later.
+    // Function-value ABI invariant: wrappers must receive one checker-resolved
+    // DictRef per declared bound.
     ctx.fn_trait_bounds.insert(mangled, trait_bounds)
-    let mut ptypes: List<Type> = []
-    for p in params { ptypes.push(p.ty) }
-    ctx.fn_original_param_types.insert(mangled, ptypes)
 
     let mut ps: List<Str> = []
     for _p in params { ps.push("void*") }
@@ -972,7 +995,8 @@ fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: St
 //     4/5, registered by ring_runtime_init — the RingList/RingMapStruct
 //     layouts are runtime-private; B-152 P2/P3).  Option/Result keep the
 //     builtin recursion (drop_option; Result has no registered drop — LLVM
-//     parity).  Set/StringBuilder are extern types (not in struct_types).
+//     parity).  Set is an ordinary generated struct; StringBuilder remains an
+//     extern type (not in struct_types).
 // Deviation from the LLVM oracle (recorded in worker_feedback): the user
 // drop call passes RING_UNIT / the default-evidence global for the drop
 // method's evidence params — the LLVM backend builds the call with data_ptr
@@ -1722,8 +1746,9 @@ fn emit_c_default_method_stubs(mut ctx: CCtx, target_type: Str, trait_name: Str,
 }
 
 // ============================================================
-// B-100 Fix 2 port: C codegen for auto-derived trait impls (Eq/Clone/Ord/
-// Debug) — emit_derived_impls_llvm / emit_builtin_derived_impls and the
+// B-100 Fix 2 port: C codegen for auto-derived trait impls
+// (Eq/Hash/Clone/Ord/Debug) — emit_derived_impls_llvm /
+// emit_builtin_derived_impls and the
 // per-trait method emitters, rendered as plain C (no phi/bb bookkeeping).
 // ============================================================
 
@@ -1734,6 +1759,7 @@ pub fn emit_c_derived_impls(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
             "Clone" => emit_c_derived_clone(ctx, di),
             "Debug" => emit_c_derived_debug(ctx, di),
             "Ord" => emit_c_derived_ord(ctx, di),
+            "Hash" => emit_c_derived_hash(ctx, di),
             _ => {},
         }
     }
@@ -1744,6 +1770,7 @@ pub fn emit_c_derived_impls(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
 fn c_option_some_variant(dict_name: Str) -> DerivedVariant {
     DerivedVariant {
         name: "some",
+        discriminator: 0,
         fields: [DerivedField {
             name: "_0",
             positional_index: some(0),
@@ -1754,7 +1781,7 @@ fn c_option_some_variant(dict_name: Str) -> DerivedVariant {
 }
 
 fn c_option_none_variant() -> DerivedVariant {
-    DerivedVariant { name: "none", fields: [], has_named_fields: false }
+    DerivedVariant { name: "none", discriminator: 1, fields: [], has_named_fields: false }
 }
 
 pub fn emit_c_builtin_derived_impls(mut ctx: CCtx) {
@@ -1875,24 +1902,39 @@ fn end_c_derived_fn(mut ctx: CCtx, d: CDerivedFn) {
 // Resolve a dict by name for derived impls: type-param dict passed as a fn
 // param (named_values) or the static singleton chain.
 fn resolve_c_dict_for_derived(mut ctx: CCtx, name: Str) -> Str {
-    match ctx.named_values.get(name) {
-        some(cv) => cv,
-        none => resolve_c_static_dict(ctx, name),
-    }
+    c_resolve_dict_ref(ctx, DictRef::Simple(name))
 }
 
 // Call a dict's slot-0 closure on the given args (+ resolved extra dicts) —
 // shared shape of the derived eq/cmp/debug dict calls.
-fn emit_c_derived_dict_call(mut ctx: CCtx, dict_name: Str, extra_dicts: List<Str>, args: List<Str>) -> Str {
-    let dict = resolve_c_dict_for_derived(ctx, dict_name)
+fn emit_c_derived_dict_call(mut ctx: CCtx, dict_name: Str, extra_dicts: List<DictRef>, args: List<Str>) -> Str {
+    let resolved_dict = resolve_c_dict_for_derived(ctx, dict_name)
     let cls = fresh_tmp(ctx)
-    c_emit(ctx, "${cls} = ((void**)${dict})[1];")
+    c_emit(ctx, "${cls} = ((void**)${resolved_dict})[1];")
     let mut call_args: List<Str> = []
+    let mut owned_extra_dicts: List<Str> = []
     for a in args { call_args.push(a) }
     for ed in extra_dicts {
-        call_args.push(resolve_c_dict_for_derived(ctx, ed))
+        match ed {
+            DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
+                    dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
+                })
+                call_args.push(value)
+                owned_extra_dicts.push(value)
+            },
+            DictRef::Simple(name) =>
+                call_args.push(c_resolve_dict_ref(ctx, DictRef::Simple(name))),
+            DictRef::Static(name) =>
+                call_args.push(c_resolve_dict_ref(ctx, DictRef::Static(name))),
+        }
     }
-    gen_c_closure_call(ctx, cls, call_args)
+    let result = gen_c_closure_call(ctx, cls, call_args)
+    for owned in owned_extra_dicts {
+        rt_use(ctx, "ring_drop", 1)
+        c_emit(ctx, "ring_drop(${owned});")
+    }
+    result
 }
 
 // A fresh Str literal value (fresh alloc, RC=1) — derived debug pieces.
@@ -2103,6 +2145,157 @@ fn emit_c_ne_fn(mut ctx: CCtx, type_name: Str) {
     def.push("    return RING_BOOL(1 - RING_UNTAG(${eq_fi.c_name}(${fwd.join(", ")})));")
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
+}
+
+// ── Hash ─────────────────────────────────────────────────────
+
+fn emit_c_derived_hash(mut ctx: CCtx, di: DerivedImpl) {
+    let type_name = di.type_name
+    match di.type_kind {
+        TypeKind::StructKind => match di.struct_fields {
+            some(fields) => {
+                emit_c_struct_hash_fn(ctx, type_name, fields, di.bounds)
+            },
+            none => {},
+        },
+        TypeKind::EnumKind => match di.enum_variants {
+            some(variants) => {
+                emit_c_enum_hash_fn(ctx, type_name, variants, di.bounds)
+            },
+            none => {},
+        },
+    }
+}
+
+fn emit_c_hash_combine(mut ctx: CCtx, lhs: Str, rhs: Str) -> Str {
+    rt_use(ctx, "ring_hash_combine", 2)
+    let combined = fresh_i64(ctx)
+    c_emit(ctx, "${combined} = ring_hash_combine(${lhs}, ${rhs});")
+    combined
+}
+
+// Return an unboxed deterministic hash for a field.  Hash derivation emits
+// Call/Tuple actions only; the remaining arms are deterministic fail-closed
+// fallbacks and never inspect a pointer address.
+fn emit_c_field_hash_raw(mut ctx: CCtx, value: Str, action: FieldAction) -> Str {
+    match action {
+        FieldAction::Call { dict_name, extra_dicts } => {
+            let boxed = emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [value])
+            let raw = fresh_i64(ctx)
+            c_emit(ctx, "${raw} = RING_UNTAG(${boxed});")
+            raw
+        },
+        FieldAction::Tuple { element_actions } => {
+            rt_use(ctx, "ring_list_get", 2)
+            let mut acc = fresh_i64(ctx)
+            c_emit(ctx, "${acc} = ${DERIVED_HASH_SEED};")
+            for i in 0..element_actions.len() {
+                match element_actions.get(i) {
+                    some(elem_action) => {
+                        let elem = fresh_tmp(ctx)
+                        c_emit(ctx, "${elem} = ring_list_get(${value}, ${i});")
+                        let elem_hash = emit_c_field_hash_raw(ctx, elem, elem_action)
+                        acc = emit_c_hash_combine(ctx, acc, elem_hash)
+                    },
+                    none => {},
+                }
+            }
+            acc
+        },
+        FieldAction::Identity => {
+            let raw = fresh_i64(ctx)
+            c_emit(ctx, "${raw} = 0;")
+            raw
+        },
+        FieldAction::FloatIdentity => {
+            let raw = fresh_i64(ctx)
+            c_emit(ctx, "${raw} = 0;")
+            raw
+        },
+        FieldAction::BoolIdentity => {
+            let raw = fresh_i64(ctx)
+            c_emit(ctx, "${raw} = 0;")
+            raw
+        },
+        FieldAction::FnLiteral => {
+            let raw = fresh_i64(ctx)
+            c_emit(ctx, "${raw} = 0;")
+            raw
+        },
+    }
+}
+
+fn emit_c_struct_hash_fn(mut ctx: CCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
+    let scaffold_opt = begin_c_derived_fn(ctx, type_name, "hash", "Hash", false, bounds)
+    if scaffold_opt.is_none() { return }
+    let scaffold = scaffold_opt.unwrap()
+    // Register the dictionary after the direct method is known but before its
+    // body resolves field evidence. Recursive Hash fields can now call this
+    // singleton instead of falling through to a nonexistent builtin dict.
+    emit_c_derived_trait_dict(ctx, type_name, "Hash")
+    let struct_info_opt = ctx.struct_types.get(type_name)
+    let mut acc = fresh_i64(ctx)
+    c_emit(ctx, "${acc} = ${DERIVED_HASH_SEED};")
+    match struct_info_opt {
+        some(struct_info) => {
+            for field in fields {
+                let field_idx = c_find_field_index(struct_info.field_names, field.name)
+                if field_idx >= 0 {
+                    let field_value = fresh_tmp(ctx)
+                    c_emit(ctx, "${field_value} = ((void**)${scaffold.self_var})[${field_idx}];")
+                    let field_hash = emit_c_field_hash_raw(ctx, field_value, field.action)
+                    acc = emit_c_hash_combine(ctx, acc, field_hash)
+                }
+            }
+        },
+        none => {},
+    }
+    c_emit(ctx, "return RING_INT(${acc});")
+    end_c_derived_fn(ctx, scaffold)
+}
+
+fn emit_c_enum_hash_fn(mut ctx: CCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
+    let scaffold_opt = begin_c_derived_fn(ctx, type_name, "hash", "Hash", false, bounds)
+    if scaffold_opt.is_none() { return }
+    let scaffold = scaffold_opt.unwrap()
+    emit_c_derived_trait_dict(ctx, type_name, "Hash")
+    let enum_info_opt = ctx.enum_types.get(type_name)
+    if enum_info_opt.is_none() {
+        c_emit(ctx, "return RING_INT(${DERIVED_HASH_SEED});")
+        end_c_derived_fn(ctx, scaffold)
+        return
+    }
+    let enum_info = enum_info_opt.unwrap()
+    let tag = fresh_i64(ctx)
+    c_emit(ctx, "${tag} = *(int64_t*)${scaffold.self_var};")
+    let mut vi = 0
+    for variant in variants {
+        let runtime_tag = match enum_info.variants.get(variant.name) {
+            some(vinfo) => vinfo.tag,
+            none => vi,
+        }
+        vi = vi + 1
+        c_emit(ctx, "if (${tag} == ${runtime_tag}) {")
+        ctx.indent = ctx.indent + 1
+        let seed = fresh_i64(ctx)
+        c_emit(ctx, "${seed} = ${DERIVED_HASH_SEED};")
+        let discriminator = fresh_i64(ctx)
+        c_emit(ctx, "${discriminator} = ${variant.discriminator};")
+        let mut acc = emit_c_hash_combine(ctx, seed, discriminator)
+        let mut fi = 0
+        for field in variant.fields {
+            let field_value = fresh_tmp(ctx)
+            c_emit(ctx, "${field_value} = ((void**)${scaffold.self_var})[${fi + 1}];")
+            let field_hash = emit_c_field_hash_raw(ctx, field_value, field.action)
+            acc = emit_c_hash_combine(ctx, acc, field_hash)
+            fi = fi + 1
+        }
+        c_emit(ctx, "return RING_INT(${acc});")
+        ctx.indent = ctx.indent - 1
+        c_emit(ctx, "}")
+    }
+    c_emit(ctx, "return RING_INT(${DERIVED_HASH_SEED});")
+    end_c_derived_fn(ctx, scaffold)
 }
 
 // ── Ord ──────────────────────────────────────────────────────

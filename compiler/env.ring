@@ -24,6 +24,21 @@ pub struct TypeScheme {
     pub def_id: Int?
 }
 
+// Follow a scheme's lexical DefId to its final declaration identity. Alias
+// consumers in checker/export must share this rule: an intermediate re-export
+// key is a lookup location, never callable provenance.
+pub fn exact_scheme_value_origin(
+    exact_origins: Map<Int, Str>, scheme: TypeScheme, fallback: Str
+) -> Str {
+    match scheme.def_id {
+        some(def_id) => match exact_origins.get(def_id) {
+            some(origin) => origin,
+            none => fallback
+        },
+        none => fallback
+    }
+}
+
 // ============================================================
 // Struct / Enum / Effect definitions stored in environment
 // ============================================================
@@ -100,10 +115,19 @@ pub struct TraitDef {
     pub assoc_types: List<AssocTypeDef>
 }
 
+// Ordered impl predicates that require runtime dictionary evidence.
+// This is not a complete impl predicate: current impl registration does not
+// carry TypeBound type_args or assoc_constraints here.
+pub struct ImplDictBound {
+    pub type_param_index: Int,
+    pub trait_name: Str
+}
+
 pub struct ImplEntry {
     pub trait_name: Str,
     pub target_type_name: Str,
     pub type_params: List<Str>,
+    pub dict_bounds: List<ImplDictBound>,
     pub method_names: List<Str>,
     pub assoc_types: Map<Str, Type>
 }
@@ -152,6 +176,9 @@ pub struct Scope {
 
 pub struct TypeRegistry {
     pub structs: Map<Str, StructDef>,
+    // Stable raw-ABI extern definitions. Ordinary nominal aliases may replace
+    // the same leaf in `structs`, but must never erase the extern declaration.
+    pub extern_structs: Map<Str, StructDef>,
     pub enums: Map<Str, EnumDef>,
     pub effects: Map<Str, EffectDef>,
     pub variant_to_enum: Map<Str, Str>,
@@ -210,6 +237,7 @@ pub fn new_type_env() -> TypeEnv {
     TypeEnv {
         types: TypeRegistry {
             structs: map_new(),
+            extern_structs: map_new(),
             enums: map_new(),
             effects: map_new(),
             variant_to_enum: map_new(),

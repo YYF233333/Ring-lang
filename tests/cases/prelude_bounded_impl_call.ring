@@ -1,5 +1,5 @@
 // Test: bounded impl method-to-method calls in prelude (regression for #97)
-// Set.has() calls Set.contains(), both in impl<T: Eq> Set
+// Set.has() calls Set.contains(), both in impl<T: Hash + Eq> Set
 
 fn main() {
     let s = set_from([1, 2, 3])

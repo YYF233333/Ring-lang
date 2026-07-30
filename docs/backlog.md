@@ -1,4 +1,4 @@
-﻿# Backlog
+# Backlog
 
 > 活的工作看板。做完的条目删除，只在 git commit message 留记录。
 > 条目格式：`### B-xxx <标题> [类型] [优先级] [复杂度] [dispatch] [状态]`
@@ -9,7 +9,7 @@
 
 ## 层 3 排序（2026-06-27 Discussion 重定，JS 退役完成后启动）
 
-> **2026-07-10 插队更新**：**B-163 C 后端迁移 (XL) 插队为 P0**（B-155 泥潭止损，Discussion 拍板，计划见 `docs/plan-c-backend.md`）。B-152 RIIR 剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。下面原排序在 B-163 之后恢复。
+> **2026-07-10 插队更新**：**B-163 C 后端迁移 (XL) 插队为 P0**（B-155 泥潭止损，Discussion 拍板，计划见 `docs/plan-c-backend.md`）。B-152 RIIR 剩余阶段（P1s2 Str / P5）暂停（P4 Set 已随 B-107 完成 `ce994fc`：Map<T,Unit> wrapper、`ring_set_*` 37 符号删除、`T: Hash+Eq` 契约与自动 `derive Hash` 一并落地），B-163 完成后在 C 后端上继续。下面原排序在 B-163 之后恢复。
 >
 > **2026-07-29 B-163 后续更新**：B-163 完成后先执行 **B-168 C-native abort/unwind 实现模型探针 (P0/M)**，由用户依据实测 dossier 拍板；随后执行 **B-169 effect / trait 类型体系融洽性探针 (P1/M)**，再启动 B-167。原因：B-002 Phase 2 原 LLVM `invoke`/`landingpad` 路径随 LLVM 后端退役失效；B-165 已证明现行 `setjmp`/`longjmp` 有 C 局部变量可见性缺口；B-167 又将改动 effectful function value ABI。先固定 failure/control ABI，再在 function-value ABI 定型前决定 trait dictionary 与 effect evidence 的共享边界，避免 B-165、B-167、B-002 各自补丁化，也避免 effect/type 两套隐式证据永久割裂。audit #255/#256 等不触碰同一控制流/RC 文件的独立修复可并行。
 
@@ -513,7 +513,7 @@ fn test_fetch() {
 ### B-152 RIIR 标准库（纯 Ring 重写 ring_runtime.cpp）[feature] [P1] [XL] [judgment] [paused: B-163]
 
 > 2026-06-27 立项（Discussion，路线图重定）。消除 C++ STL 依赖，让 Ring 真正拥有自己的底层。容器（Str/List/Map/Set）全部用纯 Ring + `Ptr<T>` + Drop 重写。
-> **2026-07-10 暂停**：B-163 C 后端迁移插队 P0，剩余阶段（P4 Set / P1s2 Str / P5）暂停，B-163 完成后在 C 后端上继续。P3 Map 已 merge（`8871592`），但 trait-bounded impl 方法 dict 转发 bug 迫使 Map 方法仍走 `method_to_runtime` + C++ bootstrap shim——P3 验收「~30 个 ring_map_* 删除」未闭环，调查并入 B-163 计划（plan-c-backend.md §2.5 #1），修好后回本条目关 P3。
+> **2026-07-10 暂停**：B-163 C 后端迁移插队 P0，剩余阶段（P1s2 Str / P5）暂停（P4 Set 已随 B-107 完成 `ce994fc`：Map<T,Unit> wrapper、`ring_set_*` 37 符号删除、`T: Hash+Eq` 契约与自动 `derive Hash` 一并落地），B-163 完成后在 C 后端上继续。P3 Map 已 merge（`8871592`），但 trait-bounded impl 方法 dict 转发 bug 迫使 Map 方法仍走 `method_to_runtime` + C++ bootstrap shim——P3 验收「~30 个 ring_map_* 删除」未闭环，调查并入 B-163 计划（plan-c-backend.md §2.5 #1），修好后回本条目关 P3。
 > **2026-07-11 调查结论（B-163 step 5 worker）**：dict 转发 bug **HEAD 无法复现**——bounded impl 五场景 probe（调用位 dict 解析/方法内 bound dispatch/impl 互调转发/HOF closure 捕获 dict/双 bounds）+ Map 真实形状 Ring 路径 probe，LLVM/C 双后端全绿。共享层（resolve_dicts_from_scheme/dict_lower）无缺陷；P3 当时的 double bootstrap 崩溃疑似已被后续修复序列消除，或需自编译规模触发。**闭环实验留 B-163 step 9 后**：C 后端删 Map method_to_runtime 条目 + 全量 sweep + self-compile via C，全绿则删 C++ ring_map_* bootstrap shim，关 P3 遗留验收。
 > **2026-07-27 P3 闭环（B-163 step 9）**：Map 的 LLVM/C `method_to_runtime` 映射、下标特殊发射与全部 `ring_map_*` C++ bootstrap shim 已删除；`Map<K,V>` 只走纯 Ring `K: Hash + Eq` 实现，用户 struct 的手写 Hash/Eq dict 已有双后端回归。C/LLVM 三代固定点、全量双后端门禁、RC ×3 与 ASan capstone 通过，P3 遗留验收正式关闭。B-152 仍整体暂停，待 B-163 Phase 2 完成后从 P4 / P1s2 / P5 恢复。
 > **2026-07-27 P4 carve-out 决策（Discussion）**：为关闭 B-163 Phase 2 的 Set parity gap，P4 Set 与 B-107 自动 `derive Hash` 从暂停队列提前进入 B-163 P2.2；P1s2 Str 与 P5 仍保持暂停。标准 `Set<T>` 定位为有明确性能契约的哈希集合：语义等价关系来自 `Eq`，高性能表示要求 `Hash + Eq`，复用纯 Ring `Map<T, Unit>`，不得在缺 Hash 时静默退化为 O(n) List 扫描。
@@ -855,45 +855,30 @@ pub struct Map<K, V> {
 - `for (i, x) in xs.enumerate()` 可用且行为正确
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-107 自动 `derive Hash` + Set P4 性能契约 [feature] [P0] [L] [judgment] [doing: b107-derived-hash-set-p4]
+### B-171 裸名同名 enum variant 歧义收紧（lang-design §9.0 实施）[design-align] [P2] [M] [judgment] [queued] [with: B-172]
 
-> 2026-06-07 立项；2026-07-27 B-163 step 9 已关闭 Map runtime/shim 部分。2026-07-27 Discussion 用户拍板将剩余自动 Hash 与 B-152 P4 Set 一并提前，作为 B-163 Phase 2 parity gate；优先级随阻塞中的 B-163 P0 上调。完整 Set 表示/API 规范见 B-152 P4。
->
-> **2026-07-29 Repository Steward Argument（Set/Map `for-in` owner）**：这是恢复既有 ownership/scope-end 保证的内部实现选择，不是修改安全契约，故无需用户决策。选 A：在 ANF/Perceus/`verify_rc` 前把标准库 Set/Map 的迭代转换显式化为共享 HIR owner；拒绝 B（C/LLVM 各建 cleanup stack，重复且 verifier 不可见）与 C（明知保留 early-return leak，只有这种 waiver 才需用户拍板）。A 的合并硬约束如下：
-> - 转换 owner 必须位于循环语句专属 lexical scope：normal / `break` 后立即 drop，`continue` 不 drop，`return` 由统一 RC 路径在克隆返回值后 drop；不得被普通 ANF 提升到包含循环的外层 block 末，以免改变用户 `Drop` / `Weak` 可观测时序。
-> - 只按真实 std builtin identity 识别 Set/Map，禁止复制后端按 leaf type name/arity 猜测的逻辑；自定义或 shadow `Set`/`Map` 必须是负面回归，无法确认身份时 fail closed。
-> - 合成调用的 type/effect/dict 信息来自共享契约，并同步 iterable element type 为 List 语义；随后删除 C/LLVM 的重复转换与 drop 分支，防止双转换或双 drop。
-> - 定向门覆盖 Set/Map × normal/`break`/`continue`/`return`、fresh iterable、返回 loop element、Map destructure、nested loops、用户 `Drop`/`Weak` 的 post-break 时序，以及 C/LLVM/diff/RC verifier。
->
-> **2026-07-29 Repository Steward Argument + 用户批准（HOF exact dependency owner，Candidate C′）**：B-107 的 bounded generic function-value 自举暴露出 B-122 provisional precheck 的依赖边只认识 raw direct-call syntax；final HIR/LLVM/runtime 已正确而旧 `W0001` 仍可来自最终检查，证明问题是实际 resolver 依赖与 phase/diagnostic 边界，不是 codegen。否决两条方向：一是在 `scc.ring` 复制 module use、alias、shadow、pattern rewrite 与 spelling fallback；二是在同一 speculative `InferCtx` 中反复 recheck scheme/edge fixed point——前者持续偏离 checker，后者会累积 DefId/TypeVar、scope side table、default HIR、boxed/mut/effect/assoc 状态且 rebind 非幂等。
->
-> 选择 C′：先以独立 discovery context 完成声明注册、structured import 解析和 `run_derive_pass`（derive 生成的 callable/evidence 也是 resolver 可见状态，禁止为省时跳过），并将本 compilation unit 的 top-level / inline `Decl::Fn` 各 best-effort infer 恰好一次；真实 `infer_ident` 成功 lookup 后按 lexical DefId → flattened exact origin 与 `ValueBindingKind::DirectCallable` 记录 canonical edge，同时用完整 Ident occurrence census 证明合法函数体没有漏访。随后整个 discovery context（scheme、DefId/TypeVar、subst、HIR、diagnostics、defaults、boxed/mut/effect/assoc）全部丢弃；fresh authoritative context 独立注册、解析 import、derive 和 impl seed，先按现有边界权威检查 non-Fn 与 impl，再按 exact graph 将所有 eligible top/inline Fn 各检查一次并缓存 HDecl，最后按原 nested `ModBlock` source layout 组装、检查 capability。`Decl::Test` 不得在 Fn 前固化 HIR，必须留 slot 并在所有 eligible Fn 完成后，于所属完整 module frame 中权威检查恰好一次。进入/退出 module frame 必须激活并恢复 value/type/effect/trait/signature 等全部 namespace alias，不能只切换 `mod_path` / unsafe；全局 `TypeRegistry` 不得让 sibling module 继承上一个 frame 的 leaf alias。两 context 之间只允许携带 AST/function index、structured resolved-import facts、canonical owner/origin 字符串与 exact edges，禁止 portable scheme 或数字 ID。
->
-> 实施硬约束：① 先修 TuplePattern 在 provisional TypeVar/Error 下不建立语法 local binding 所造成的同名全局假边；② alias/qualified direct call 的 defaults、min-arity、mut flags 与 bounded scheme 必须在 call-time 从 resolved HExpr DefId 追到 ultimate origin，禁止 snapshot stale alias metadata；authoritative owner 入场时还必须先清除 impl seed 可能遗留的同名 `fn_defaults` / min-arity，避免无 default 的 top Fn 继承 method 元数据；③ pub relative import 只可从现有 `resolve_mod_uses` / `bind_relative_import` / `bind_exact_import_alias` 抽出 structured namespace result 与 O(NP) obligation worklist，禁止另写 path resolver、leaf fallback 或全局 bare rebind；该结果必须由 registration、discovery、authoritative、checker 与 exports 共同消费，任一消费者继续自行解释 path 都是 blocker；④ discovery incomplete 时不得信任空图：invalid source 可用旧 raw graph完成唯一用户诊断 pass，若 authoritative pass 无用户错误则必须 internal hard-fail；⑤ 复杂度上限为一次 discovery body traversal + 一次 authoritative body traversal + `O(NP + F + E)`，禁止 global sweep-until-stable。
->
-> **Unit 3 extraction audit 固定点**：唯一 pure owner 为既有 `compiler/resolver.ring`，从当前规则抽出 immutable `ResolvedNamespacePlan`，统一 value / struct / enum / type-alias / effect / effect-alias / trait / sig 八个 namespace；portable plan 只含 canonical owner/payload 字符串、AST index、namespace/status facts，禁止 `Span`、`TypeScheme`、`DefId`、`TypeVar`、HIR 或任何 context state。`ModuleExports` 必须补齐 sig payload。有限单调 obligation worklist 以 `(frame, local, namespace)` 判 ambiguity、以 ultimate payload 去重，并稳定区分 out-of-scope / module missing / symbol missing / seedless cycle；禁止 sweep-until-stable。每个 fresh context 只按 plan 从自己的 canonical registry 激活 payload；module frame 以 delta journal 进入/逆序恢复 value 与七类 type-like lexical alias、ctor provenance 和 mut metadata，禁止整表 clone或永久写入 sibling 可见 bare leaf。迁移退出门依次为：pure plan → registration/frame → checker/exports → discovery/auth → C/LLVM downstream adapter；在最后一步前，任何 valid-source SCC、checker、exports 或 codegen 路径继续拆 `UseDecl.path`、`$$_` / `::`、leaf/global fallback，都必须如实列为未闭合 blocker，不能宣称共享 resolver 已完成。
->
-> 本 owner 的诚实边界仅为本 compilation unit 的 top/inline `DirectCallable` Fn 内部排序；`ConstGetter → Fn`、Trait/Effect default body → Fn、Impl → Fn/Const、外部 file-module Fn 与 impl/mutual SCC 的 B-122/B-138 残留不在本单元扩张，不得宣称全局 exact。验收必须分别覆盖 alias/re-export/default/HOF-value/shadow/pattern、discovery census、每 eligible Fn authoritative check-count = 1、nested layout/capability，以及 `W0001 = 0`；不能以运行输出正确代替。
->
-> **2026-07-31 Steward 接管 + wave 收口约束（用户警示：已超 24h 未收尾且有过路线偏移，接手必须谨慎不跑偏）**：worktree checkpoint `44955a1` 经独立符合性审计判定「基本忠实、差收尾」——范围 = Unit 3 plan 抽取 + 硬约束①②，spec 禁止形态零发现；E0707 eager ambiguity 属陈旧证据（checkpoint 已含修复，裸名 enum-leaf 维持 main-parity last-wins shadow + qualified `E::V` 寻址增强，shadow 语义是否收紧已挂 lang-design §10）。当前 wave 范围锁定为 **Unit 3 最小可 merge 闭包**：修 E0305 跨模块 inherent-method 键失配（plan struct canonical identity 与 `impl_methods` 注入键必须同源）→ fixture 分流（aspirational 负例隔离为 staged probe/pending，不许为绿扩范围）→ 固定点 + 全套门。inline relative import 切轨、discovery/authoritative 两 context、`Param.default_value` census 边全部归下一 wave。目标是尽快 merge 解堵 29 文件冲突面（#260/#255/#256/B-163P2 gap 均被其阻塞）。
->
-> **2026-07-31 用户拍板（lang-design §9.0）**：裸名命中同帧同名 enum variant 收紧为编译错误（列候选、要求 qualified）；声明同名与 qualified 寻址保持合法。实施归下一 wave（新 E07xx + 正负回归；当前 wave 的 main-parity shadow 锁定回归届时翻转为负例）。当前 wave 仍按 main-parity 收尾 merge，不扩范围。
+2026-07-31 用户拍板（真值 = lang-design §9.0）：裸名命中同帧同名 variant → 编译错误并列出全部候选、要求 qualified 消歧；声明同名与 qualified `E::V` 寻址保持合法。随 B-172 wave 实施（resolver 在手，边际成本最低）。
 
-**自动派生**：
-1. `compiler/derive.ring`：把 Hash 纳入 Eq/Clone/Ord/Debug 同一 fixpoint 框架；struct 按字段声明序 combine，enum 必须先混入稳定 variant discriminator 再按字段序 combine，generic 字段产生 `T: Hash` bound。
-2. `compiler/hir.ring` 及 C/LLVM derived impl 发射：增加 Hash 方法的 field action / method body，复用 primitive `hash()` evidence 与确定性 `ring_hash_combine`，不得按类型名或地址生成 hash。
-3. coherence guard：检测到 manual Eq 时不自动派生结构化 Hash；缺 Hash 的 Map/Set 使用点正常报 trait-bound 错误。编译器自动 Eq+Hash 路径必须共享同一字段/variant 分解。
-4. P4 Set：`std/set.ring` 改为 `Map<T, Unit>` wrapper，所有 membership/变更/集合运算要求 `T: Hash + Eq`；不实现隐式 List fallback。
+- **实施**：新 E07xx 错误码；resolver value lane 的 enum-leaf last-wins shadow（`same_frame_seed_enum_leaf_shadow` 归约路径）改为 ambiguous 标记 + 裸名使用点报错，qualified 与单 payload 路径不受影响
+- **回归翻转**：`tests/cases/enum_leaf_shadow_last_wins.ring`（头注释已预告翻转）与 `project_namespace_same_frame_enum_leaf_shadow` 改为负例
+- **验收**：错误列全部候选 + qualified 建议（单轮可修）；qualified 寻址正反用例不回归；编译器自身源码（HExpr::Call/FieldAction::Call 共存、全 qualified 使用）继续零错误
 
-**涉及修改**：`compiler/derive.ring`、`compiler/hir.ring`、C/LLVM derived impl codegen、必要的 builtin/runtime hash combine 注册、`std/set.ring`、Set runtime/mapping 清理及正负面测试。
+### B-172 C′ exact dependency pipeline 主体（discovery/authoritative 两 context）[design-align] [P1] [L] [judgment] [queued]
 
-**验收标准**：
-- 自动派生覆盖 plain/nested/generic struct、positional/named/recursive enum；相等值在 C/LLVM 两后端产生相同 hash。
-- enum variant discriminator 参与 hash；构造顺序、Map 迭代顺序或地址不影响 hash，compiler fixed-point 保持确定。
-- manual Eq 类型不会获得不匹配的结构化 auto-Hash；显式 manual Hash+Eq 仍可用于 Map/Set。
-- `Map<自动Hash类型, V>` 与 P4 `Set<自动Hash类型>` 的 insert/get/contains/remove、扩容/rehash和强碰撞回归全绿。
-- 关闭三个 Set shared-positive gaps；C/LLVM/diff/RC 相关门 ×3、完整 fixed-point 与 workflow validator 通过。
+2026-07-31 立项：B-107 Unit 3（`ResolvedNamespacePlan` 抽取 + 硬约束①②）已 merge（`ce994fc`），本条承接 2026-07-29 用户批准的 Candidate C′ spec 剩余主体。**spec 真值 = ce994fc 时点 backlog B-107 条目注记全文**（五条实施硬约束、Unit 3 固定点段、诚实边界、验收；git 历史可查 7fb826e/6e700d2/51c3814 决策链），本条只记范围索引不复述。
 
+- **范围**：独立 discovery context（声明注册 + structured import + `run_derive_pass` + 每 top/inline `Decl::Fn` best-effort infer 恰好一次 + Ident occurrence census + canonical exact edge 记录）→ 整体丢弃 → fresh authoritative context 按 exact graph 每 eligible Fn 恰好检查一次；`Decl::Test` slot 延后；两 context 间只携带 AST/function index、structured facts、canonical 字符串与 exact edges
+- **G1/G2 门**：G1 = inline relative import（`use super::…`）切轨到 plan；G2 = 单文件模式 plan 构建。`tests/staged/b107/` 的 17 个 staged fixture 按 NOTES 注记随对应门激活转正
+- **前置核验**：audit #259 按原始场景（raw extern type + inline mod re-export 同叶）精确复现——Unit 3 的 delta journal 可能已修：已修补回归后关闭，未修按其修复约束实施
+- **`Param.default_value` census 边**：SCC/census 建边必须含参数默认值边 + 完整参数 shadow scope（2026-07-29 27a 迭代记录的前瞻要求；staged probe `.tmp-b107-callee-metadata-default-ordering` 已进 tests/staged 对应项）
+- **验收 = C′ spec 原文**：alias/re-export/default/HOF-value/shadow/pattern 覆盖、discovery census 无漏访、每 eligible Fn authoritative check-count = 1、nested layout/capability、`W0001 = 0`；诚实边界不扩张（ConstGetter→Fn、trait/effect default body→Fn、Impl→Fn/Const、外部 file-module 与 impl/mutual SCC 均不在本单元）
+
+### B-173 derive Hash 覆盖面扩展：Option / tuple / List 字段 [feature] [P2] [M] [judgment] [queued]
+
+2026-07-31 B-107 merge review concern：`Option<T>`、tuple-as-key、`List<T>` 字段无 Hash evidence（`resolve_hash_field_action` 覆盖集不含；`resolve_dict_ref_for_type` 对 TupleType 走 builtin 名失败），fail-closed 正确（E0503 拒绝）但含这些字段的类型进不了 Map/Set。与 audit #221（tuple eq dispatch crash）同族。
+
+- **修复方向**：为三类内建结构提供结构化 Hash evidence，与 #221 的 tuple eq 统一结构分解处理
+- **验收**：三类字段的 struct/enum 进 Map/Set 正反用例；Float 嵌套仍拒绝；与 #221 修复共享 tuple 分解路径
 ### B-133 UTF-8 字节串模型落地（B-131 probe 拍板 A）[feature] [P3] [L] [judgment] [queued]
 
 > 2026-06-15 立项（Discussion，B-131 design-probe 拍板 A = UTF-8 字节串 Rust 模型）。**设计真值 = design.md §1.7.1**（完整分析 + API 设计 + 迁移清单）。现状：design.md 写的 code point 语义两后端都没实现——LLVM 按字节、JS 按 UTF-16 码元；对 ASCII 两后端行为一致，非 ASCII 全失真。
