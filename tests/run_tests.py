@@ -256,6 +256,40 @@ def ensure_runtime(clang: str) -> bool:
         return False
 
 
+def warn_if_stale_root_exe() -> None:
+    """Audit #265 process fix: warn when the root ring.exe predates the
+    committed compiler object.
+
+    A stale root ring.exe masked a checker regression (#265) for three days:
+    after a merge rebuilt compiler/dist-llvm/main.o, nobody relinked ring.exe,
+    so every suite kept exercising the previous compiler. This check never
+    fails the run (a PATH exe or a freshly linked temp exe is legitimate);
+    it only makes the mismatch impossible to miss. Both paths are derived
+    from this script's own location, so worktree checkouts compare their own
+    exe against their own dist-llvm. Skipped when either file is absent.
+    """
+    exe_name = "ring.exe" if sys.platform == "win32" else "ring"
+    root_exe = REPO / exe_name
+    dist_o = DIST_LLVM_DIR / "main.o"
+    if not root_exe.is_file() or not dist_o.is_file():
+        return
+    if root_exe.stat().st_mtime >= dist_o.stat().st_mtime:
+        return
+    banner = "!" * 74
+    for line in (
+        banner,
+        f"WARNING: stale root exe: {root_exe}",
+        f"         is OLDER than:  {dist_o}",
+        "The root ring.exe was not relinked after the last dist-llvm rebuild, so",
+        "this run may test a STALE compiler (this masked regression #265 for",
+        "three days). Relink it:",
+        "  clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe \\",
+        "    -lmsvcrt <link flags from CLAUDE.md>",
+        banner,
+    ):
+        print(line, file=sys.stderr)
+
+
 # ---------------------------------------------------------------------------
 # Normalization
 # ---------------------------------------------------------------------------
@@ -1695,6 +1729,8 @@ def main() -> int:
         "--update-golden", action="store_true",
         help="Regenerate .expected golden snapshots instead of comparing.")
     args = parser.parse_args()
+
+    warn_if_stale_root_exe()
 
     # diff is opt-in: never part of the default all-suites run.
     suites = args.suites or ["e2e", "llvm", "rc", "self-compile", "parity"]
