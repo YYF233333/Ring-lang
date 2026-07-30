@@ -276,7 +276,7 @@ fn process_all(items: List<dyn Describable>) { ... }
 
 ### B-170 bounded generic + 空容器字面量的 bound 求解时序（E0503 误报）[bugfix] [P2] [M] [judgment] [queued]
 
-2026-07-31 B-107 wave 收尾归因立项。`let s: Set<Int> = set_from([])` 报 E0503：`resolve_dicts_from_scheme`（infer_ctx.ring:1306-1356，行号=立项时）对未解 TypeVar 的 trait bound fail-closed，而该求解发生在 let 注解双向传播之前——**带了显式注解也无法单轮修复**，违反公理①「错误单轮可修」。main 既有限制（任意 `fn f<T: Trait>(items: List<T>)` + `f([])` 同报，b973859 给 `set_from` 加 `T: Hash+Eq` 后被 `set_ops.ring` 撞出）。
+2026-07-31 B-107 wave 收尾归因立项。**主复现（通用形态，2026-07-31 于 B-107 tip 双重验证仍触发）**：`fn count_tags<T: Marker>(items: List<T>)` + `count_tags([])` → E0503 'Marker'。根因：`resolve_dicts_from_scheme`（infer_ctx.ring:1306-1356，行号=立项时）对未解 TypeVar 的 trait bound fail-closed，而该求解发生在 let 注解双向传播之前——**带了显式注解也无法单轮修复**（`let s: Set<Int> = set_from([])` 同报），违反公理①「错误单轮可修」。main 既有 checker 通用限制，非 Set 特有；b973859 给 `set_from` 加 `T: Hash+Eq` bound 后被 `set_ops.ring` 撞出（该用例经 runner `CHECK_BLOCKED_POSITIVE_GAPS` skip 挂本条，注意验证时编译器必须是含 bound 版 std 的分支/merge 后编译器——main 旧 std 无 bound 不触发，勿误判「已修复」）。
 
 - **修复方向**（实施时 Argument 二选一）：bound obligation 延迟到 zonk/注解传播后再解；或 let 显式注解先行双向传播再触发 dict 求解。不得对空容器做特殊 case 硬编码。
 - **验收**：`set_ops.ring` pending 解除转绿；`let x: List<T具体> = []` + bounded HOF 正反用例；不回归既有 E0503 真歧义报错（无注解、无任何类型来源时仍应报）。
