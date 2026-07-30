@@ -1,6 +1,6 @@
 use types::{Type, UNIT, nominal_display_name}
 use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam}
-use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit,
+use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImplFact,
     HStringInterpPart, HEffectHandler, ValueBindingKind,
     CHECKER_ONLY_EXTERN_CALLABLES,
     compare_by_first, is_user_drop_type, hexpr_type,
@@ -34,7 +34,12 @@ pub struct CheckResult {
     // Exact lexical DefId -> registration kind.  Export extraction consumes
     // this map so same-file inline aliases retain provenance across arbitrary
     // pub-use hops without falling back to leaf-name guesses.
-    pub value_binding_kinds: Map<Int, ValueBindingKind>
+    pub value_binding_kinds: Map<Int, ValueBindingKind>,
+    // User-declared impl blocks with the canonical target identity resolved
+    // during checking (while namespace frames were live). Collected from the
+    // module's own HIR before prelude decls are prepended, so exports never
+    // have to re-resolve an impl target against the rolled-back environment.
+    pub impl_facts: List<ModuleImplFact>
 }
 
 const STD_FILES: List<Str> =
@@ -262,10 +267,45 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
     ctx
 }
 
+// Collect ModuleImplFact entries from a module's own HIR (pre-prelude).
+// Non-public inline mods are skipped: their impls were never exported by the
+// AST-walking extractor either, so consumers cannot observe those methods.
+fn collect_module_impl_facts(
+    decls: List<HDecl>, is_top_level: Bool, mut facts: List<ModuleImplFact>
+) {
+    for decl in decls {
+        match decl {
+            HDecl::Impl { target_type, trait_name, methods, .. } => {
+                let mut method_names: List<Str> = []
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name, .. } => method_names.push(name),
+                        _ => {}
+                    }
+                }
+                facts.push(ModuleImplFact {
+                    target: target_type,
+                    is_trait_impl: trait_name.is_some(),
+                    method_names: method_names,
+                    is_top_level: is_top_level
+                })
+            },
+            HDecl::ModBlock { decls: mod_decls, is_pub, .. } => {
+                if is_pub {
+                    collect_module_impl_facts(mod_decls, false, facts)
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
 pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     let mut ctx = new_infer_ctx(sink)
     let prelude_hdecls = load_prelude(ctx)
     let hprogram = infer_check(ctx, program)
+    let mut impl_facts: List<ModuleImplFact> = []
+    collect_module_impl_facts(hprogram.decls, true, impl_facts)
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
@@ -282,7 +322,8 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
         value_origins: map_clone(ctx.use_aliases),
-        value_binding_kinds: map_clone(ctx.value_binding_kinds)
+        value_binding_kinds: map_clone(ctx.value_binding_kinds),
+        impl_facts: impl_facts
     }
 }
 
@@ -490,6 +531,8 @@ pub fn check_module(
     let _ = install_project_namespace_plan(ctx, module_key, namespace_plan)
     report_namespace_plan_issues(ctx, module_key, program, namespace_plan)
     let hprogram = check_module_identity(ctx, program, module_prefix)
+    let mut impl_facts: List<ModuleImplFact> = []
+    collect_module_impl_facts(hprogram.decls, true, impl_facts)
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
@@ -504,7 +547,8 @@ pub fn check_module(
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
         value_origins: map_clone(ctx.use_aliases),
-        value_binding_kinds: map_clone(ctx.value_binding_kinds)
+        value_binding_kinds: map_clone(ctx.value_binding_kinds),
+        impl_facts: impl_facts
     }
 }
 

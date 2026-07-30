@@ -32,6 +32,26 @@ pub fn is_module_item_identity(name: Str) -> Bool {
     name.index_of("$$_").is_some()
 }
 
+// One user-declared impl block, described by the identity the checker's
+// registration pass resolved while the module's namespace frames were still
+// live. Export extraction runs after the frame journal has been rolled back,
+// so it must consume these persisted facts instead of re-resolving the impl
+// target spelling against a dead environment (checker/exports shared
+// contract; see check_impl_decl and extract_exports).
+pub struct ModuleImplFact {
+    // Canonical nominal identity chosen by resolve_nominal_identity during
+    // checking: a declaration identity for user types, the bare builtin
+    // spelling (e.g. "Str") for builtin impls.
+    pub target: Str,
+    pub is_trait_impl: Bool,
+    // fn-method names in declaration order (delegates excluded upstream by
+    // HIR construction only when they do not lower to HDecl::Fn).
+    pub method_names: List<Str>,
+    // True for impls declared at file level (frame zero); inline-mod impls
+    // keep the public-frame gate applied during collection.
+    pub is_top_level: Bool
+}
+
 // Foreign declarations have two independent identities: `HDecl::ExternFn.name`
 // is the exact Ring declaration identity used by lookup/provenance, while the
 // ABI symbol remains the final source leaf. Keeping this split explicit stops

@@ -291,7 +291,7 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                         let exp = extract_exports(key, prefix, ast, result.program, result.env,
                                             result.fn_mut_params, result.value_origins,
                                             result.value_binding_kinds,
-                                            graph.namespace_plan, dep_exports)
+                                            result.impl_facts, dep_exports)
                                         module_exports_map.insert(key, exp)
                                     },
                                     none => {},

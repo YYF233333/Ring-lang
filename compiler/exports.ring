@@ -1,10 +1,10 @@
 use types::{Type, EnumVariant, EMPTY_ROW}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
-use hir::{HProgram, HDecl, ValueBindingKind, compare_by_first, variant_ctor_name}
+use hir::{HProgram, HDecl, ValueBindingKind, ModuleImplFact, compare_by_first,
+    variant_ctor_name}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry,
     TypeAliasDef, EffectAliasDef, SigDef, exact_scheme_value_origin}
 use infer_register::{prefix_decl_name, module_prefix_decl_name}
-use resolver::{ResolvedNamespacePlan, NamespaceKind, frame_decl_site_key}
 
 // ============================================================
 // ModuleExports — the public interface of a compiled module
@@ -45,105 +45,6 @@ pub enum TypeDef {
 fn export_display_name(identity: Str) -> Str {
     let parts = identity.split("$$_")
     if parts.len() > 1 { parts.get(1).unwrap_or(identity) } else { identity }
-}
-
-// ============================================================
-// Frame-scoped type identities from the resolver plan
-//
-// Impl targets keep their source spelling in the AST (see
-// module_prefix_decl_name). During checking that spelling is resolved through
-// the transactional project namespace frame, but by the time exports are
-// extracted the frame journal has been rolled back, so the environment no
-// longer answers bare spellings. The resolver plan is the single durable
-// source of truth for "spelling -> canonical nominal identity" per lexical
-// frame; exports must consume it instead of re-resolving names.
-// ============================================================
-
-struct ExportFrameIndex {
-    file_key: Str,
-    // frame_index -> parent_frame_index (root frame's parent is -1)
-    frame_parents: Map<Int, Int>,
-    // frame_decl_site_key(file, parent_frame, decl_index) -> child frame_index
-    frame_children: Map<Str, Int>,
-    // frame_index -> (exposed spelling -> canonical Struct/Enum payload)
-    type_identities: Map<Int, Map<Str, Str>>
-}
-
-fn build_export_frame_index(
-    plan: ResolvedNamespacePlan, module_key: Str
-) -> ExportFrameIndex {
-    let mut frame_parents: Map<Int, Int> = map_new()
-    let mut frame_children: Map<Str, Int> = map_new()
-    let mut type_identities: Map<Int, Map<Str, Str>> = map_new()
-    for frame in plan.frames {
-        if frame.file_key == module_key {
-            frame_parents.insert(frame.frame_index, frame.parent_frame_index)
-            if frame.parent_frame_index >= 0 {
-                frame_children.insert(
-                    frame_decl_site_key(
-                        frame.file_key, frame.parent_frame_index,
-                        frame.decl_index),
-                    frame.frame_index)
-            }
-        }
-    }
-    for binding in plan.bindings {
-        if binding.file_key == module_key {
-            let is_nominal_type = match binding.namespace {
-                NamespaceKind::Struct => true,
-                NamespaceKind::Enum => true,
-                _ => false
-            }
-            if is_nominal_type {
-                match type_identities.get(binding.frame_index) {
-                    some(existing) => {
-                        existing.insert(binding.exposed_name, binding.payload)
-                    },
-                    none => {
-                        let mut fresh: Map<Str, Str> = map_new()
-                        fresh.insert(binding.exposed_name, binding.payload)
-                        type_identities.insert(binding.frame_index, fresh)
-                    }
-                }
-            }
-        }
-    }
-    ExportFrameIndex {
-        file_key: module_key,
-        frame_parents: frame_parents,
-        frame_children: frame_children,
-        type_identities: type_identities
-    }
-}
-
-// Lexical resolution: the frame's own bindings win, then the parent chain.
-// This mirrors how the checker's namespace frame stack answered the spelling
-// during registration. Returns none when no Struct/Enum binding is visible —
-// that impl target is already a check error, so fail closed instead of
-// exporting a bare-leaf key that a same-spelled foreign type could satisfy.
-fn resolve_export_type_identity(
-    index: ExportFrameIndex, frame_index: Int, spelling: Str
-) -> Str? {
-    let mut current = frame_index
-    while current >= 0 {
-        match index.type_identities.get(current) {
-            some(identities) => match identities.get(spelling) {
-                some(payload) => { return some(payload) },
-                none => {}
-            },
-            none => {}
-        }
-        current = index.frame_parents.get(current).unwrap_or(-1)
-    }
-    none
-}
-
-fn export_child_frame_index(
-    index: ExportFrameIndex, frame_index: Int, decl_index: Int
-) -> Int {
-    index.frame_children.get(
-        frame_decl_site_key(index.file_key, frame_index, decl_index)
-    ).unwrap_or(-1)
 }
 
 // ============================================================
@@ -413,9 +314,6 @@ fn copy_inline_export(
 
 fn extract_decl_export(
     decl: Decl,
-    frame_data: ExportFrameIndex,
-    frame_index: Int,
-    decl_index: Int,
     env: TypeEnv,
     fn_mut_params_map: Map<Str, List<Bool>>,
     program: Program,
@@ -533,79 +431,9 @@ fn extract_decl_export(
                 }
             }
         },
-        Decl::Impl { target_type, trait_name, methods, .. } => {
-            // The registration pass resolved this spelling through the live
-            // namespace frame; that frame is rolled back before exports run.
-            // The resolver plan carries the same lexical answer durably, so
-            // both the impl_methods registration key and this export key come
-            // from one contract (declaration payload = StructDef/EnumDef.name).
-            let resolved_target = resolve_export_type_identity(
-                frame_data, frame_index, target_type)
-            if resolved_target.is_none() {
-                // No Struct/Enum binding is lexically visible for this
-                // target: checking already reported it. Exporting under
-                // the bare spelling would let a same-spelled type from
-                // another module adopt these methods, so fail closed.
-                return
-            }
-            let canonical_target = resolved_target.unwrap_or("")
-            match env.trait_reg.impl_methods.get(canonical_target) {
-                some(methods_map) => {
-                    impl_methods.insert(canonical_target, map_clone(methods_map))
-                },
-                none => {},
-            }
-            match env.trait_reg.mut_methods.get(canonical_target) {
-                some(ms) => { mut_methods.insert(canonical_target, ms) },
-                none => {},
-            }
-            for m in methods {
-                match m {
-                    Decl::Fn { name: mname, .. } => {
-                        let full_name = "${canonical_target}_${mname}"
-                        match fn_mut_params_map.get(full_name) {
-                            some(flags) => { fn_mut_params.insert(full_name, flags) },
-                            none => {},
-                        }
-                    },
-                    _ => {},
-                }
-            }
-            // Inherent methods — only at top level (mod-block nested impls
-            // don't do the pub-type scan, preserving existing behaviour)
-            if is_top_level {
-                match trait_name {
-                    none => {
-                        let mut is_pub_type = false
-                        for d in program.decls {
-                            match d {
-                                Decl::Struct { name, is_pub, .. } => {
-                                    if name == export_display_name(canonical_target) && is_pub { is_pub_type = true }
-                                },
-                                Decl::Enum { name, is_pub, .. } => {
-                                    if name == export_display_name(canonical_target) && is_pub { is_pub_type = true }
-                                },
-                                _ => {},
-                            }
-                        }
-                        if is_pub_type {
-                            let mut method_names: List<Str> = []
-                            for m in methods {
-                                match m {
-                                    Decl::Fn { name, .. } => method_names.push(name),
-                                    _ => {},
-                                }
-                            }
-                            match inherent_methods.get(canonical_target) {
-                                some(existing) => existing.extend(method_names),
-                                none => { inherent_methods.insert(canonical_target, method_names) },
-                            }
-                        }
-                    },
-                    some(_) => {},
-                }
-            }
-        },
+        // Decl::Impl is intentionally absent here: impl exports are driven by
+        // the checker's persisted ModuleImplFact list (export_impl_facts),
+        // whose targets were resolved while the namespace frames were live.
         Decl::ExternFn { name, is_pub, .. } => {
             if is_pub {
                 let display = export_display_name(name)
@@ -658,24 +486,15 @@ fn extract_decl_export(
         },
         Decl::ModBlock { name: mod_name, uses: mod_uses, decls: mod_decls, is_pub: mpub, .. } => {
             if mpub {
-                let child_frame = export_child_frame_index(
-                    frame_data, frame_index, decl_index)
-                for sub_index in 0..mod_decls.len() {
-                    match mod_decls.get(sub_index) {
-                        some(subdecl) => {
-                            let prefixed = prefix_decl_name(mod_name, subdecl)
-                            extract_decl_export(prefixed,
-                                frame_data, child_frame, sub_index,
-                                env, fn_mut_params_map, program,
-                                values, value_origins, exact_value_origins,
-                                exact_value_binding_kinds, value_binding_kinds,
-                                variant_ctor_origins,
-                                types, type_aliases, effects, effect_aliases, traits, sigs,
-                                impl_methods, inherent_methods, struct_field_orders,
-                                extern_values, mut_methods, fn_mut_params, false)
-                        },
-                        none => {}
-                    }
+                for subdecl in mod_decls {
+                    let prefixed = prefix_decl_name(mod_name, subdecl)
+                    extract_decl_export(prefixed, env, fn_mut_params_map, program,
+                        values, value_origins, exact_value_origins,
+                        exact_value_binding_kinds, value_binding_kinds,
+                        variant_ctor_origins,
+                        types, type_aliases, effects, effect_aliases, traits, sigs,
+                        impl_methods, inherent_methods, struct_field_orders,
+                        extern_values, mut_methods, fn_mut_params, false)
                 }
                 let facade = export_display_name(mod_name)
                 for use_decl in mod_uses {
@@ -792,6 +611,74 @@ fn copy_exported_name(
     }
 }
 
+// Export the methods of every user-declared impl block. The canonical target
+// in each ModuleImplFact was resolved by the checker while the module's
+// namespace frames were live (check_impl_decl -> resolve_nominal_identity),
+// so this consumes the registration result directly instead of replaying
+// lexical resolution against the rolled-back environment.
+fn export_impl_facts(
+    impl_facts: List<ModuleImplFact>,
+    env: TypeEnv,
+    fn_mut_params_map: Map<Str, List<Bool>>,
+    program: Program,
+    mut impl_methods: Map<Str, Map<Str, TypeScheme>>,
+    mut inherent_methods: Map<Str, List<Str>>,
+    mut mut_methods: Map<Str, Set<Str>>,
+    mut fn_mut_params: Map<Str, List<Bool>>
+) {
+    for fact in impl_facts {
+        match env.trait_reg.impl_methods.get(fact.target) {
+            some(methods_map) => {
+                impl_methods.insert(fact.target, map_clone(methods_map))
+            },
+            none => {
+                // Registration and checking resolve the target through the
+                // same live frames, so a fact with methods but no registry
+                // entry means the two passes disagreed. Exports only run on
+                // modules with zero user errors — never paper over it.
+                if fact.method_names.len() > 0 {
+                    panic("internal: impl methods for '${fact.target}' missing from registration")
+                }
+            }
+        }
+        match env.trait_reg.mut_methods.get(fact.target) {
+            some(ms) => { mut_methods.insert(fact.target, ms) },
+            none => {}
+        }
+        for mname in fact.method_names {
+            let full_name = "${fact.target}_${mname}"
+            match fn_mut_params_map.get(full_name) {
+                some(flags) => { fn_mut_params.insert(full_name, flags) },
+                none => {}
+            }
+        }
+        // Inherent-method name lists — only for top-level impls of pub types
+        // (mod-block nested impls never did the pub-type scan; preserved).
+        if fact.is_top_level && !fact.is_trait_impl {
+            let mut is_pub_type = false
+            for d in program.decls {
+                match d {
+                    Decl::Struct { name, is_pub, .. } => {
+                        if name == export_display_name(fact.target) && is_pub { is_pub_type = true }
+                    },
+                    Decl::Enum { name, is_pub, .. } => {
+                        if name == export_display_name(fact.target) && is_pub { is_pub_type = true }
+                    },
+                    _ => {}
+                }
+            }
+            if is_pub_type {
+                let mut method_names: List<Str> = []
+                for m in fact.method_names { method_names.push(m) }
+                match inherent_methods.get(fact.target) {
+                    some(existing) => existing.extend(method_names),
+                    none => { inherent_methods.insert(fact.target, method_names) }
+                }
+            }
+        }
+    }
+}
+
 pub fn extract_exports(
     module_key: Str,
     module_prefix: Str,
@@ -801,7 +688,7 @@ pub fn extract_exports(
     fn_mut_params_map: Map<Str, List<Bool>>,
     exact_value_origins: Map<Int, Str>,
     exact_value_binding_kinds: Map<Int, ValueBindingKind>,
-    namespace_plan: ResolvedNamespacePlan,
+    impl_facts: List<ModuleImplFact>,
     available_modules: List<ModuleExports>
 ) -> ModuleExports {
     let mut values: Map<Str, TypeScheme> = map_new()
@@ -820,24 +707,18 @@ pub fn extract_exports(
     let mut extern_values: Set<Str> = set_new()
     let mut mut_methods: Map<Str, Set<Str>> = map_new()
     let mut fn_mut_params: Map<Str, List<Bool>> = map_new()
-    let frame_data = build_export_frame_index(namespace_plan, module_key)
-    for decl_index in 0..program.decls.len() {
-        match program.decls.get(decl_index) {
-            some(decl) => {
-                let canonical_decl = module_prefix_decl_name(module_prefix, decl)
-                extract_decl_export(canonical_decl,
-                    frame_data, 0, decl_index,
-                    env, fn_mut_params_map, program,
-                    values, value_origins, exact_value_origins,
-                    exact_value_binding_kinds, value_binding_kinds,
-                    variant_ctor_origins,
-                    types, type_aliases, effects, effect_aliases, traits, sigs,
-                    impl_methods, inherent_methods, struct_field_orders,
-                    extern_values, mut_methods, fn_mut_params, true)
-            },
-            none => {}
-        }
+    for decl in program.decls {
+        let canonical_decl = module_prefix_decl_name(module_prefix, decl)
+        extract_decl_export(canonical_decl, env, fn_mut_params_map, program,
+            values, value_origins, exact_value_origins,
+            exact_value_binding_kinds, value_binding_kinds,
+            variant_ctor_origins,
+            types, type_aliases, effects, effect_aliases, traits, sigs,
+            impl_methods, inherent_methods, struct_field_orders,
+            extern_values, mut_methods, fn_mut_params, true)
     }
+    export_impl_facts(impl_facts, env, fn_mut_params_map, program,
+        impl_methods, inherent_methods, mut_methods, fn_mut_params)
 
     // Handle pub use re-exports from the dependency export objects themselves.
     // Payloads and origins are forwarded verbatim; only the facade lookup key
