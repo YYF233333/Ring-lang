@@ -4,6 +4,7 @@ use hir::{HProgram, HDecl, ValueBindingKind, compare_by_first, variant_ctor_name
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry,
     TypeAliasDef, EffectAliasDef, SigDef, exact_scheme_value_origin}
 use infer_register::{prefix_decl_name, module_prefix_decl_name}
+use resolver::{ResolvedNamespacePlan, NamespaceKind, frame_decl_site_key}
 
 // ============================================================
 // ModuleExports — the public interface of a compiled module
@@ -44,6 +45,105 @@ pub enum TypeDef {
 fn export_display_name(identity: Str) -> Str {
     let parts = identity.split("$$_")
     if parts.len() > 1 { parts.get(1).unwrap_or(identity) } else { identity }
+}
+
+// ============================================================
+// Frame-scoped type identities from the resolver plan
+//
+// Impl targets keep their source spelling in the AST (see
+// module_prefix_decl_name). During checking that spelling is resolved through
+// the transactional project namespace frame, but by the time exports are
+// extracted the frame journal has been rolled back, so the environment no
+// longer answers bare spellings. The resolver plan is the single durable
+// source of truth for "spelling -> canonical nominal identity" per lexical
+// frame; exports must consume it instead of re-resolving names.
+// ============================================================
+
+struct ExportFrameIndex {
+    file_key: Str,
+    // frame_index -> parent_frame_index (root frame's parent is -1)
+    frame_parents: Map<Int, Int>,
+    // frame_decl_site_key(file, parent_frame, decl_index) -> child frame_index
+    frame_children: Map<Str, Int>,
+    // frame_index -> (exposed spelling -> canonical Struct/Enum payload)
+    type_identities: Map<Int, Map<Str, Str>>
+}
+
+fn build_export_frame_index(
+    plan: ResolvedNamespacePlan, module_key: Str
+) -> ExportFrameIndex {
+    let mut frame_parents: Map<Int, Int> = map_new()
+    let mut frame_children: Map<Str, Int> = map_new()
+    let mut type_identities: Map<Int, Map<Str, Str>> = map_new()
+    for frame in plan.frames {
+        if frame.file_key == module_key {
+            frame_parents.insert(frame.frame_index, frame.parent_frame_index)
+            if frame.parent_frame_index >= 0 {
+                frame_children.insert(
+                    frame_decl_site_key(
+                        frame.file_key, frame.parent_frame_index,
+                        frame.decl_index),
+                    frame.frame_index)
+            }
+        }
+    }
+    for binding in plan.bindings {
+        if binding.file_key == module_key {
+            let is_nominal_type = match binding.namespace {
+                NamespaceKind::Struct => true,
+                NamespaceKind::Enum => true,
+                _ => false
+            }
+            if is_nominal_type {
+                match type_identities.get(binding.frame_index) {
+                    some(existing) => {
+                        existing.insert(binding.exposed_name, binding.payload)
+                    },
+                    none => {
+                        let mut fresh: Map<Str, Str> = map_new()
+                        fresh.insert(binding.exposed_name, binding.payload)
+                        type_identities.insert(binding.frame_index, fresh)
+                    }
+                }
+            }
+        }
+    }
+    ExportFrameIndex {
+        file_key: module_key,
+        frame_parents: frame_parents,
+        frame_children: frame_children,
+        type_identities: type_identities
+    }
+}
+
+// Lexical resolution: the frame's own bindings win, then the parent chain.
+// This mirrors how the checker's namespace frame stack answered the spelling
+// during registration. Returns none when no Struct/Enum binding is visible —
+// that impl target is already a check error, so fail closed instead of
+// exporting a bare-leaf key that a same-spelled foreign type could satisfy.
+fn resolve_export_type_identity(
+    index: ExportFrameIndex, frame_index: Int, spelling: Str
+) -> Str? {
+    let mut current = frame_index
+    while current >= 0 {
+        match index.type_identities.get(current) {
+            some(identities) => match identities.get(spelling) {
+                some(payload) => { return some(payload) },
+                none => {}
+            },
+            none => {}
+        }
+        current = index.frame_parents.get(current).unwrap_or(-1)
+    }
+    none
+}
+
+fn export_child_frame_index(
+    index: ExportFrameIndex, frame_index: Int, decl_index: Int
+) -> Int {
+    index.frame_children.get(
+        frame_decl_site_key(index.file_key, frame_index, decl_index)
+    ).unwrap_or(-1)
 }
 
 // ============================================================
@@ -115,20 +215,6 @@ fn declared_value_kind(kinds: Map<Int, ValueBindingKind>, scheme: TypeScheme) ->
     match scheme.def_id {
         some(def_id) => kinds.get(def_id),
         none => none
-    }
-}
-
-// Impl declarations deliberately retain their source spelling until the
-// module environment is complete. Export metadata must use the same canonical
-// nominal key that registration chose, otherwise a consumer imports the type
-// but loses all of its inherent methods.
-fn export_nominal_identity(env: TypeEnv, type_name: Str) -> Str {
-    match env.types.structs.get(type_name) {
-        some(def) => def.name,
-        none => match env.types.enums.get(type_name) {
-            some(def) => def.name,
-            none => type_name
-        }
     }
 }
 
@@ -327,6 +413,9 @@ fn copy_inline_export(
 
 fn extract_decl_export(
     decl: Decl,
+    frame_data: ExportFrameIndex,
+    frame_index: Int,
+    decl_index: Int,
     env: TypeEnv,
     fn_mut_params_map: Map<Str, List<Bool>>,
     program: Program,
@@ -445,7 +534,21 @@ fn extract_decl_export(
             }
         },
         Decl::Impl { target_type, trait_name, methods, .. } => {
-            let canonical_target = export_nominal_identity(env, target_type)
+            // The registration pass resolved this spelling through the live
+            // namespace frame; that frame is rolled back before exports run.
+            // The resolver plan carries the same lexical answer durably, so
+            // both the impl_methods registration key and this export key come
+            // from one contract (declaration payload = StructDef/EnumDef.name).
+            let resolved_target = resolve_export_type_identity(
+                frame_data, frame_index, target_type)
+            if resolved_target.is_none() {
+                // No Struct/Enum binding is lexically visible for this
+                // target: checking already reported it. Exporting under
+                // the bare spelling would let a same-spelled type from
+                // another module adopt these methods, so fail closed.
+                return
+            }
+            let canonical_target = resolved_target.unwrap_or("")
             match env.trait_reg.impl_methods.get(canonical_target) {
                 some(methods_map) => {
                     impl_methods.insert(canonical_target, map_clone(methods_map))
@@ -555,15 +658,24 @@ fn extract_decl_export(
         },
         Decl::ModBlock { name: mod_name, uses: mod_uses, decls: mod_decls, is_pub: mpub, .. } => {
             if mpub {
-                for subdecl in mod_decls {
-                    let prefixed = prefix_decl_name(mod_name, subdecl)
-                    extract_decl_export(prefixed, env, fn_mut_params_map, program,
-                        values, value_origins, exact_value_origins,
-                        exact_value_binding_kinds, value_binding_kinds,
-                        variant_ctor_origins,
-                        types, type_aliases, effects, effect_aliases, traits, sigs,
-                        impl_methods, inherent_methods, struct_field_orders,
-                        extern_values, mut_methods, fn_mut_params, false)
+                let child_frame = export_child_frame_index(
+                    frame_data, frame_index, decl_index)
+                for sub_index in 0..mod_decls.len() {
+                    match mod_decls.get(sub_index) {
+                        some(subdecl) => {
+                            let prefixed = prefix_decl_name(mod_name, subdecl)
+                            extract_decl_export(prefixed,
+                                frame_data, child_frame, sub_index,
+                                env, fn_mut_params_map, program,
+                                values, value_origins, exact_value_origins,
+                                exact_value_binding_kinds, value_binding_kinds,
+                                variant_ctor_origins,
+                                types, type_aliases, effects, effect_aliases, traits, sigs,
+                                impl_methods, inherent_methods, struct_field_orders,
+                                extern_values, mut_methods, fn_mut_params, false)
+                        },
+                        none => {}
+                    }
                 }
                 let facade = export_display_name(mod_name)
                 for use_decl in mod_uses {
@@ -689,6 +801,7 @@ pub fn extract_exports(
     fn_mut_params_map: Map<Str, List<Bool>>,
     exact_value_origins: Map<Int, Str>,
     exact_value_binding_kinds: Map<Int, ValueBindingKind>,
+    namespace_plan: ResolvedNamespacePlan,
     available_modules: List<ModuleExports>
 ) -> ModuleExports {
     let mut values: Map<Str, TypeScheme> = map_new()
@@ -707,15 +820,23 @@ pub fn extract_exports(
     let mut extern_values: Set<Str> = set_new()
     let mut mut_methods: Map<Str, Set<Str>> = map_new()
     let mut fn_mut_params: Map<Str, List<Bool>> = map_new()
-    for decl in program.decls {
-        let canonical_decl = module_prefix_decl_name(module_prefix, decl)
-        extract_decl_export(canonical_decl, env, fn_mut_params_map, program,
-            values, value_origins, exact_value_origins,
-            exact_value_binding_kinds, value_binding_kinds,
-            variant_ctor_origins,
-            types, type_aliases, effects, effect_aliases, traits, sigs,
-            impl_methods, inherent_methods, struct_field_orders,
-            extern_values, mut_methods, fn_mut_params, true)
+    let frame_data = build_export_frame_index(namespace_plan, module_key)
+    for decl_index in 0..program.decls.len() {
+        match program.decls.get(decl_index) {
+            some(decl) => {
+                let canonical_decl = module_prefix_decl_name(module_prefix, decl)
+                extract_decl_export(canonical_decl,
+                    frame_data, 0, decl_index,
+                    env, fn_mut_params_map, program,
+                    values, value_origins, exact_value_origins,
+                    exact_value_binding_kinds, value_binding_kinds,
+                    variant_ctor_origins,
+                    types, type_aliases, effects, effect_aliases, traits, sigs,
+                    impl_methods, inherent_methods, struct_field_orders,
+                    extern_values, mut_methods, fn_mut_params, true)
+            },
+            none => {}
+        }
     }
 
     // Handle pub use re-exports from the dependency export objects themselves.

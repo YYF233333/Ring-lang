@@ -548,7 +548,7 @@ fn owner_from_inline_parts(root_owner: Str, inline_parts: List<Str>) -> Str {
     }
 }
 
-fn frame_decl_site_key(
+pub fn frame_decl_site_key(
     file_key: Str, parent_frame_index: Int, decl_index: Int
 ) -> Str {
     "${file_key}|frame-decl|${parent_frame_index}|${decl_index}"

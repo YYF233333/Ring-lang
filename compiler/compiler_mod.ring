@@ -290,7 +290,8 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                         let prefix = module_prefix(mod_.path_segments)
                                         let exp = extract_exports(key, prefix, ast, result.program, result.env,
                                             result.fn_mut_params, result.value_origins,
-                                            result.value_binding_kinds, dep_exports)
+                                            result.value_binding_kinds,
+                                            graph.namespace_plan, dep_exports)
                                         module_exports_map.insert(key, exp)
                                     },
                                     none => {},
