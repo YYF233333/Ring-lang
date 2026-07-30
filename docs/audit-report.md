@@ -10,6 +10,14 @@
 
 ## 前端
 
+### #261 编译器自身间歇 AV（exit 3221225477）底噪 ~1 次/全量轮，先于 B-107 分支存在 [medium] [judgment] [open]
+
+2026-07-31 B-107 merge 门禁的 main 基线 ×3 实测定量：a511d50 时代 ring.exe（= B-107 分支分叉点）跑全量套件，AV 频次 round1=0 / round2=2（`closure_capture_loop`、`supertrait_evidence`）/ round3=1（`struct_basic`——最基础用例也能炸）；B-107 worktree 侧另有独立观测（`adversarial_method_set_all`、`effect_custom_typed` 各 1 次）。用例无规律、复跑即过——是编译器进程自身的间歇堆损坏，非被测程序缺陷；历史「间歇 AV 复跑即过」流程豁免对应的正是这个从未立案的问题。
+
+**影响**：CI/自编译假红；更深层是编译器存在真实内存错误，当前仅以崩溃形式暴露（fail loud），不排除同根源存在静默错误产出路径。**归因方向**：ASan gating 档跑受累用例集定位；与 #247/#242（module verification failed 族）是否同根待查。B-163 P2 LLVM 退役后若信号消失可归因 LLVM 信道并关闭；若 C 后端仍现则为共享层/RC 问题升级处理。
+
+发现者：Repository Steward main 基线 ×3 定量
+
 ### #259 inline mod 短类型别名泄漏使顶层显式注解发生 registration/check 身份分裂 [critical] [judgment] [open]
 
 2026-07-29 B-107 HOF 门禁实锤：文件先声明 raw `extern type Item`，后有 inline mod re-export 普通 `origin::Item`，顶层 `keep_raw(value: Item) -> Item` 会先注册为 `(raw Item) -> raw Item`，最终却导出成 `(raw Item) -> origin::Item`。若调用方把 `ring_raw_alloc` 的无 RC header 指针传入该函数，HIR 与公开 scheme 对 nominal identity 的分歧可使 Perceus/codegen 对 raw 指针执行 `ring_dup` / `ring_drop`，存在越界 header 读写和内存破坏风险。
