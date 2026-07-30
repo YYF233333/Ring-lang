@@ -868,6 +868,8 @@ pub struct Map<K, V> {
 > 本 owner 的诚实边界仅为本 compilation unit 的 top/inline `DirectCallable` Fn 内部排序；`ConstGetter → Fn`、Trait/Effect default body → Fn、Impl → Fn/Const、外部 file-module Fn 与 impl/mutual SCC 的 B-122/B-138 残留不在本单元扩张，不得宣称全局 exact。验收必须分别覆盖 alias/re-export/default/HOF-value/shadow/pattern、discovery census、每 eligible Fn authoritative check-count = 1、nested layout/capability，以及 `W0001 = 0`；不能以运行输出正确代替。
 >
 > **2026-07-31 Steward 接管 + wave 收口约束（用户警示：已超 24h 未收尾且有过路线偏移，接手必须谨慎不跑偏）**：worktree checkpoint `44955a1` 经独立符合性审计判定「基本忠实、差收尾」——范围 = Unit 3 plan 抽取 + 硬约束①②，spec 禁止形态零发现；E0707 eager ambiguity 属陈旧证据（checkpoint 已含修复，裸名 enum-leaf 维持 main-parity last-wins shadow + qualified `E::V` 寻址增强，shadow 语义是否收紧已挂 lang-design §10）。当前 wave 范围锁定为 **Unit 3 最小可 merge 闭包**：修 E0305 跨模块 inherent-method 键失配（plan struct canonical identity 与 `impl_methods` 注入键必须同源）→ fixture 分流（aspirational 负例隔离为 staged probe/pending，不许为绿扩范围）→ 固定点 + 全套门。inline relative import 切轨、discovery/authoritative 两 context、`Param.default_value` census 边全部归下一 wave。目标是尽快 merge 解堵 29 文件冲突面（#260/#255/#256/B-163P2 gap 均被其阻塞）。
+>
+> **2026-07-31 用户拍板（lang-design §9.0）**：裸名命中同帧同名 enum variant 收紧为编译错误（列候选、要求 qualified）；声明同名与 qualified 寻址保持合法。实施归下一 wave（新 E07xx + 正负回归；当前 wave 的 main-parity shadow 锁定回归届时翻转为负例）。当前 wave 仍按 main-parity 收尾 merge，不扩范围。
 
 **自动派生**：
 1. `compiler/derive.ring`：把 Hash 纳入 Eq/Clone/Ord/Debug 同一 fixpoint 框架；struct 按字段声明序 combine，enum 必须先混入稳定 variant discriminator 再按字段序 combine，generic 字段产生 `T: Hash` bound。
