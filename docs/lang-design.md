@@ -692,6 +692,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 { ... }
 - [ ] `lang.toml` formatter preset 配置格式
 - [ ] 方法名冲突的 qualified call 语法设计
 - [ ] 命名参数是否引入（实现默认参数时评估）
+- [ ] 同帧两 enum 声明同名 variant 时裸名 ctor 的 last-wins 静默 shadow 是否收紧（2026-07-31 B-107 Unit 3 审计实锤 main 语义：裸名绑最后声明者且无诊断，与公理④「失真必须响」存在张力；收紧 = breaking 语义变更需用户拍板。现状已被 main-parity 回归锁定，qualified `E::V` 恒无歧义）
 （comptime 设计已定，见 §12.4）
 （`io` 效果拆分已设计，见 §12.1；本条 TODO 替换为指向该节。）
 
