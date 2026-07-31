@@ -30,6 +30,12 @@
 
 发现者：Repository Steward merge 收官轮 + 三编译器对照
 
+### #266 fail effect payload 冲突合并恢复 pre-#258 静默 best-effort（契约空白记录）[low] [judgment] [open]
+
+2026-07-31 #265 修复决策记录：#258 曾把 pairwise 泛型实参强制 unify 施加到 fail effect 的 row 合并，但该增强无任何测试锚定、且含 #258 的编译器从未在 main 全量验证过（stale exe 掩盖窗口）；#265 修复将其收窄回 CustomEffect×CustomEffect，fail 恢复 pre-#258 的 first-match 静默合并。CLAUDE.md 已知限制中「开放 HOF fail row 会按 payload 做精确约束」描述的是另一条既有路径，不受影响。**若要为 fail row 合并建立与 custom effect 同级的冲突报错契约，应独立立项**（含正负锚定用例 + `catch` 穷尽性交互评估），不得再以无锚定方式顺手加强。
+
+发现者：#265 修复 Argument 记录
+
 ### #262 derived Hash/Eq 泛型嵌套字段每次调用现场构造/回收动态 wrapped dict [medium] [judgment] [open]
 
 2026-07-31 B-107 merge review（b973859）发现：`Outer<T>` 的嵌套泛型字段（如 `Inner<Inner<T>>`）每次 `hash()`/`eq()` 都经 `resolve_derived_extra_dicts` 现场构造 dynamic wrapped dict（dict+closure+env 三次 alloc/method slot）再 drop（`emit_dict_hash_call`/`emit_c_derived_dict_call`，双后端同型）。Map/Set 探测是热路径——探测一次 = 每层泛型字段一轮 alloc/free。`dict_lower.ring:36-38` 注释自认只 memoise 全 static wrapper。功能正确（128 轮循环测试验证），纯 perf。
@@ -197,6 +203,8 @@ LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理
 **影响**：verify 信道被既有噪声污染——verify 失败无法作为硬门槛（见 #242 扩注的 fail-stop 决策依赖）。**修复方向**：最小复现 → `LLVMVerifyModule` 的具体错误文本定位（action=2 会打到 stderr，先抓全错误内容）→ 定位发射游离/空 block 的路径。注：LLVM 后端 Phase 2 退役后本条随之消亡，但它 gate 着 verify fail-stop 决策，且 Phase 1 期间 LLVM 是 oracle——oracle 自身 verify 不过削弱差分可信度。
 
 发现者：#245 worker（feedback 分诊）
+
+> **2026-07-31 升级注记（#265 修复过程观测）**：含 #258（`6a67552`）的编译器上警告已**全局化**——任何 LLVM build（含 hello.ring）都打印 `LLVM module verification failed (1 errors) — attempting emit anyway`，082f9a7 与 6b1be7d 均复现；退出码与产物行为仍正确。触发源大概率是 #258 的 handler contract 发射模式落入本条的游离/空 block 家族。B-163 P2 期间 LLVM 仍是差分 oracle，全局 verify 噪声进一步削弱 oracle 可信度——若定位成本低应在退役前修，至少定位到具体发射位置再决定修/豁免。
 
 ### #248 LLVM derived clone 签名与 checker scheme 契约不一致（静默多传参）[low] [judgment] [open] [deferred: B-163p2-retire]
 
