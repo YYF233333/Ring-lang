@@ -285,6 +285,8 @@ def warn_if_stale_root_exe() -> None:
         "three days). Relink it:",
         "  clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe \\",
         "    -lmsvcrt <link flags from CLAUDE.md>",
+        "Note: a `ring` on PATH takes precedence over the root exe for this run;",
+        "if the runner is using a PATH exe, verify that one is fresh yourself.",
         banner,
     ):
         print(line, file=sys.stderr)
