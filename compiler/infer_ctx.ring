@@ -802,10 +802,15 @@ pub fn merge_effects(
     let resolved_b = apply_subst_row(s, b)
     let mut result_s = s
 
-    // Every explicit label of one kind denotes the same evidence value, even
-    // when duplicate labels already occur inside one input row. Concatenating
-    // A then B and visiting each unordered occurrence pair once covers A
-    // internally, B internally, and A x B without duplicate pair checks.
+    // #258 contract, scoped by #265: only custom effect labels denote one
+    // lexical evidence value per canonical name, so only their generic
+    // arguments form a hard agreement contract. Concatenating A then B and
+    // visiting each unordered occurrence pair once covers A internally, B
+    // internally, and A x B without duplicate pair checks.
+    // mut/fail stay outside this contract: mut<T> is a multi-instance marker
+    // (mut<Int> and mut<Str> legitimately coexist in one row, and a bare
+    // `with {mut}` instantiation is a fresh instance, not a shared one), and
+    // fail payload agreement is enforced by row unification / catch typing.
     // Unbound row tails are deliberately absent and remain unconstrained.
     let mut explicit_effects: List<Effect> = []
     for eff_a in resolved_a.effects { explicit_effects.push(eff_a) }
@@ -816,7 +821,11 @@ pub fn merge_effects(
         while right_index < explicit_effects.len() {
             match (explicit_effects.get(left_index), explicit_effects.get(right_index)) {
                 (some(eff_left), some(eff_right)) => {
-                    if effects_match_kind(eff_left, eff_right) {
+                    let both_custom = match (eff_left, eff_right) {
+                        (Effect::CustomEffect { .. }, Effect::CustomEffect { .. }) => true,
+                        _ => false
+                    }
+                    if both_custom && effects_match_kind(eff_left, eff_right) {
                         result_s = unify_effect_params(eff_left, eff_right, result_s, env) catch {
                             e => {
                                 let code = if e.is_occurs_check { E0302 } else { E0301 }
@@ -835,6 +844,23 @@ pub fn merge_effects(
             right_index = right_index + 1
         }
         left_index = left_index + 1
+    }
+
+    // Multi-instance kinds (mut, fail) keep the pre-#258 best-effort merge:
+    // bind a still-free parameter variable so row_merge's kind-based dedup
+    // does not lose a concrete instance, but let incompatible instances stay
+    // separate row entries instead of reporting a conflict.
+    for eff_b in resolved_b.effects {
+        match eff_b {
+            Effect::CustomEffect { .. } => { continue },
+            _ => {}
+        }
+        for eff_a in resolved_a.effects {
+            if effects_match_kind(eff_a, eff_b) {
+                result_s = (unify_effect_params(eff_a, eff_b, result_s, env)) catch { _ => result_s }
+                break
+            }
+        }
     }
 
     // Only deduplicate labels after all explicit parameter contracts have been

@@ -20,21 +20,13 @@
 
 发现者：Repository Steward main 基线 ×3 定量
 
-### #265 #258 lexical tail handler contracts 引入 checker 误报 E0301（合法程序被拒）[critical] [judgment] [open]
+### #267 Unit-return effect op 的 arm 值在 perform 点必然泄漏（EffectOp 保守不 drop 家族）[low] [judgment] [open]
 
-2026-07-31 B-107 merge 收官轮暴露、三编译器对照归因闭合：`tests/cases/mut_param.ring` 与 `tests/cases/llvm/adversarial_regress_closure_nested_effect.ring` 被误报 `E0301: cannot unify Str with ?N` / `Str with ()`（e2e/llvm/rc 多 lane）。对照：B-107 worktree 编译器（a511d50 base，无 #258）exit 0；`082f9a7` 编译器（含 #258 `6a67552`，无 B-107）与 merged 编译器同报同错——**回归由 #258 引入，自 2026-07-28 起潜伏于 main**，因 9df75ea merge 后根 ring.exe 未重链（stale exe 掩盖）从未被含 #258 的编译器全量验证。
+2026-07-31 #265 review 发现并记录：tail-resumptive handler 中 Unit-return op 的 arm 值（如 arm 尾值为 Str）按语句语义丢弃，但 arm body 以 escape=true 处理（perceus.ring:2519 附近，行号=立案时）owned 返回，perform 点的 EffectOp 值被 Perceus 有意不 drop（"leak, crash-free"）——豁免使该必然泄漏形态重新合法化。非新泄漏类：非 Unit op 的语句位丢弃同形态既有。与 #217（block-expr/IIFE 临时值无 HIR 层 drop）同族。
 
-**修复约束**：fix-forward，不 revert #258（用户拍板的 soundness 收口，负面用例组依赖）；修复 tail-handler arm 约束与普通 unify 路径的交互（两用例均涉 closure/mut effect + 字符串，怀疑 handler arm result 约束污染非 handler 上下文的 TypeVar）。验收：两用例三 lane 转绿 + #258 负面组九用例保持红 + tail_handler_contract 行为不回归。
+**修复方向**：EffectOp 结果在 Unit 消费位补 drop（需与 handler evidence 生命周期协调）；或并入 #217 的统一临时值 drop 方案。回归：`handler_unit_op_arm_discard.ring` 已锁行为，泄漏侧待 RC sweep 覆盖（该 fixture 在 tests/cases/ 非 llvm/，不进 rc lane）。
 
-**流程改进（同批落实）**：runner 启动时校验 ring.exe mtime ≥ dist-llvm/main.o mtime，不同步则 warning——防 stale exe 再次掩盖回归。
-
-发现者：Repository Steward merge 收官轮 + 三编译器对照
-
-### #266 fail effect payload 冲突合并恢复 pre-#258 静默 best-effort（契约空白记录）[low] [judgment] [open]
-
-2026-07-31 #265 修复决策记录：#258 曾把 pairwise 泛型实参强制 unify 施加到 fail effect 的 row 合并，但该增强无任何测试锚定、且含 #258 的编译器从未在 main 全量验证过（stale exe 掩盖窗口）；#265 修复将其收窄回 CustomEffect×CustomEffect，fail 恢复 pre-#258 的 first-match 静默合并。CLAUDE.md 已知限制中「开放 HOF fail row 会按 payload 做精确约束」描述的是另一条既有路径，不受影响。**若要为 fail row 合并建立与 custom effect 同级的冲突报错契约，应独立立项**（含正负锚定用例 + `catch` 穷尽性交互评估），不得再以无锚定方式顺手加强。
-
-发现者：#265 修复 Argument 记录
+发现者：#265 独立 review
 
 ### #262 derived Hash/Eq 泛型嵌套字段每次调用现场构造/回收动态 wrapped dict [medium] [judgment] [open]
 
