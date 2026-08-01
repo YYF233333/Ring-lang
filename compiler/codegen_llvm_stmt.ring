@@ -1,9 +1,9 @@
 use types::{Type, BUILTIN_RANGE}
 use ast::{Pattern, LiteralValue, NamedPatternField}
-use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type,
+use hir::{HExpr, HStmt, HLetDestructureBinding, hexpr_type,
     is_fresh_owned_bool_value}
 use codegen_llvm_ctx::{LlvmCtx, HandleCleanup, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca,
-    llvm_mangle_method, LLVM_INT_EQ, LLVM_INT_SLT, LLVM_INT_SLE}
+    LLVM_INT_EQ, LLVM_INT_SLT, LLVM_INT_SLE}
 
 // Re-declare LLVM types and functions to avoid ESM import issues
 extern type LLVMTypeRef
@@ -91,8 +91,8 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
         HStmt::While { condition, body, .. } => {
             emit_while(ctx, condition, body)
         },
-        HStmt::ForIn { binding, destructure, iterable, body, iterable_type_name, iter_type_name, .. } => {
-            emit_for_in(ctx, binding, destructure, iterable, body, iterable_type_name, iter_type_name)
+        HStmt::ForIn { binding, iterable, body, .. } => {
+            emit_for_in(ctx, binding, iterable, body)
         },
         HStmt::Break { .. } => {
             emit_break(ctx)
@@ -288,12 +288,7 @@ fn emit_while(mut ctx: LlvmCtx, condition: HExpr, body: HExpr) {
 // ForIn statement
 // ============================================================
 
-fn emit_for_in(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDestructure>?, iterable: HExpr, body: HExpr, iterable_type_name: Str?, iter_type_name: Str?) {
-    let current_fn = match ctx.current_fn {
-        some(f) => f,
-        none => panic("LLVM codegen: for-in outside function"),
-    }
-
+fn emit_for_in(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: HExpr) {
     // Check if iterable is a RangeExpr
     match iterable {
         HExpr::RangeExpr { start, end, inclusive, .. } => {
@@ -313,8 +308,7 @@ fn emit_for_in(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDestructu
     if is_range {
         emit_for_in_range_var(ctx, binding, iterable, body)
     } else {
-        // Default: for List, use index-based while loop
-        emit_for_in_list(ctx, binding, destructure, iterable, body)
+        panic("LLVM codegen invariant: non-Range for-in survived inference lowering")
     }
 }
 
@@ -492,152 +486,6 @@ fn emit_for_in_range_var(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: 
     ctx.loop_continue_bb = saved_continue
 
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-}
-
-// for x in list { body } — index-based while loop
-fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDestructure>?, iterable: HExpr, body: HExpr) {
-    let current_fn = match ctx.current_fn {
-        some(f) => f,
-        none => panic("LLVM codegen: for-in list outside function"),
-    }
-
-    let list_val_raw = gen_llvm_expr(ctx, iterable)
-
-    // A Set wraps a Map, not a vector — call its pure Ring to_list method before
-    // index-based iteration. List iterables pass through unchanged.
-    //
-    // B-104 D1 Stage 2: the conversion list is a codegen-SYNTHESIZED fresh
-    // temporary (Set.to_list allocs the list and duplicates occupied keys)
-    // that perceus never sees — it leaked on every set iteration.  Drop it at
-    // loop exit (merge_bb below), the same codegen-level pattern as the B-104b
-    // range bound/counter drops.  Sound: loop-body borrows of its elements end
-    // by merge (element escapes were Clone-wrapped by perceus); `break` routes
-    // through merge_bb (loop_break_bb).  Residual: a `return` mid-loop bypasses
-    // merge and leaks one conversion list — bounded O(loop-entries), the same
-    // accepted residual as the B-104b range drops.
-    let mut collection_converted = false
-    let list_val = match hexpr_type(iterable) {
-        Type::StructType { name, type_params } => {
-            if name == "Set" && type_params.len() == 1 {
-                let mangled = llvm_mangle_method("Set", "to_list")
-                let conv_fn = match ctx.functions.get(mangled) {
-                    some(f) => f,
-                    none => panic("LLVM codegen: Set.to_list function not found"),
-                }
-                let conv_ty = match ctx.fn_types.get(mangled) {
-                    some(t) => t,
-                    none => panic("LLVM codegen: Set.to_list function type not found"),
-                }
-                collection_converted = true
-                LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "s2l"))
-            } else { if name == "Map" && type_params.len() == 2 {
-                // Map for-in uses the pure Ring Map.entries impl.  The fresh
-                // entry list is dropped at loop exit like Set conversion.
-                let mangled = llvm_mangle_method("Map", "entries")
-                let conv_fn = match ctx.functions.get(mangled) {
-                    some(f) => f,
-                    none => panic("LLVM codegen: Map.entries function not found"),
-                }
-                let conv_ty = match ctx.fn_types.get(mangled) {
-                    some(t) => t,
-                    none => panic("LLVM codegen: Map.entries function type not found"),
-                }
-                collection_converted = true
-                LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "m2l"))
-            } else {
-                list_val_raw
-            }}
-        },
-        _ => list_val_raw,
-    }
-
-    // Get list length
-    let len_fn = get_or_declare_runtime_fn(ctx, "ring_list_len", [ctx.ptr_type], ctx.i64_type)
-    let len_ty = get_rt_fn_type(ctx, "ring_list_len")
-    let list_len = LLVMBuildCall2(ctx.builder, len_ty, len_fn, [list_val], fresh_name(ctx, "len"))
-
-    // Alloca for index counter
-    let counter_alloca = build_entry_alloca(ctx, ctx.i64_type, fresh_name(ctx, "idx"))
-    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
-    discard(LLVMBuildStore(ctx.builder, zero, counter_alloca))
-
-    let cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.cond")
-    let body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.body")
-    let incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.incr")
-    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.merge")
-
-    discard(LLVMBuildBr(ctx.builder, cond_bb))
-
-    // Condition: idx < len
-    LLVMPositionBuilderAtEnd(ctx.builder, cond_bb)
-    let current_idx = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
-    let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_SLT, current_idx, list_len, fresh_name(ctx, "cmp"))
-    discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb))
-
-    // Save and set loop context
-    let saved_break = ctx.loop_break_bb
-    let saved_continue = ctx.loop_continue_bb
-    ctx.loop_break_bb = some(merge_bb)
-    ctx.loop_continue_bb = some(incr_bb)
-
-    // Body
-    LLVMPositionBuilderAtEnd(ctx.builder, body_bb)
-    let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
-    let get_ty = get_rt_fn_type(ctx, "ring_list_get")
-    let elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [list_val, current_idx], fresh_name(ctx, "el"))
-
-    // Handle destructuring
-    match destructure {
-        some(ds) => {
-            if ds.len() > 0 {
-                // Destructure: each element is a tuple (list)
-                for i in 0..ds.len() {
-                    match ds.get(i) {
-                        some(d) => {
-                            let idx_val = LLVMConstInt(ctx.i64_type, i, 0)
-                            let sub_elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [elem, idx_val], fresh_name(ctx, "de"))
-                            let alloca = build_entry_alloca(ctx, ctx.ptr_type, d.name)
-                            discard(LLVMBuildStore(ctx.builder, sub_elem, alloca))
-                            ctx.named_values.insert(d.name, alloca)
-                        },
-                        none => {},
-                    }
-                }
-            } else {
-                let alloca = build_entry_alloca(ctx, ctx.ptr_type, binding)
-                discard(LLVMBuildStore(ctx.builder, elem, alloca))
-                ctx.named_values.insert(binding, alloca)
-            }
-        },
-        none => {
-            let alloca = build_entry_alloca(ctx, ctx.ptr_type, binding)
-            discard(LLVMBuildStore(ctx.builder, elem, alloca))
-            ctx.named_values.insert(binding, alloca)
-        },
-    }
-
-    discard(gen_llvm_expr(ctx, body))
-    discard(LLVMBuildBr(ctx.builder, incr_bb))
-
-    // Increment
-    LLVMPositionBuilderAtEnd(ctx.builder, incr_bb)
-    let current_idx2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
-    let one = LLVMConstInt(ctx.i64_type, 1, 0)
-    let next_idx = LLVMBuildAdd(ctx.builder, current_idx2, one, fresh_name(ctx, "ni"))
-    discard(LLVMBuildStore(ctx.builder, next_idx, counter_alloca))
-    discard(LLVMBuildBr(ctx.builder, cond_bb))
-
-    // Restore loop context
-    ctx.loop_break_bb = saved_break
-    ctx.loop_continue_bb = saved_continue
-
-    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-    // B-104 D1 Stage 2: release the set→list / map→entries conversion
-    // temporary (see the conversion comment above).  Deep drop frees
-    // the list + its fresh element copies; sharers hold Clone-wrapped dups.
-    if collection_converted {
-        emit_drop_value(ctx, list_val)
-    }
 }
 
 // ============================================================

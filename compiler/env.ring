@@ -1,6 +1,10 @@
-use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT}
+use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT,
+    effects_match_kind, nominal_display_name}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use ast::{Span, EffectExpr, TypeParam}
+use diagnostics::{CollectingSink, DiagnosticSink, DiagnosticContext, Severity,
+    make_diag}
+use codes::{E0504}
 
 // ============================================================
 // Type Scheme (for let-polymorphism)
@@ -129,7 +133,20 @@ pub struct ImplEntry {
     pub type_params: List<Str>,
     pub dict_bounds: List<ImplDictBound>,
     pub method_names: List<Str>,
-    pub assoc_types: Map<Str, Type>
+    pub assoc_types: Map<Str, Type>,
+    // Trait-specific method evidence.  This is authoritative for protocol
+    // lowering; impl_methods remains only the unambiguous ordinary-call view.
+    pub method_schemes: Map<Str, TypeScheme>,
+    // Stable across export/re-export hydration.  Distinct source impl blocks
+    // must never be collapsed merely because target/trait spellings match.
+    pub origin: Str,
+    pub span: Span
+}
+
+pub struct MethodOrigin {
+    pub origin: Str,
+    pub trait_name: Str?,
+    pub span: Span
 }
 
 // ============================================================
@@ -195,6 +212,7 @@ pub struct TraitRegistry {
     pub traits: Map<Str, TraitDef>,
     pub trait_impls: Map<Str, List<ImplEntry>>,
     pub impl_methods: Map<Str, Map<Str, TypeScheme>>,
+    pub method_origins: Map<Str, Map<Str, MethodOrigin>>,
     pub mut_methods: Map<Str, Set<Str>>
 }
 
@@ -250,6 +268,7 @@ pub fn new_type_env() -> TypeEnv {
             traits: map_new(),
             trait_impls: map_new(),
             impl_methods: map_new(),
+            method_origins: map_new(),
             mut_methods: map_new()
         },
         scope: ScopeManager {
@@ -384,9 +403,143 @@ impl TypeEnv {
 // trait_impls helpers (Map<Str, List<ImplEntry>> keyed by target_type_name)
 // ============================================================
 
+pub fn impl_origin(
+    target_type_name: Str, trait_name: Str?, span: Span
+) -> Str {
+    let trait_part = match trait_name {
+        some(name) => name,
+        none => "<inherent>"
+    }
+    "${span.file}:${span.start.offset.to_str()}:${target_type_name}:${trait_part}"
+}
+
+fn path_has_suffix(path: Str, suffix: Str) -> Bool {
+    let normalized = path.replace("\\", "/")
+    if normalized.len() < suffix.len() { return false }
+    normalized.slice(normalized.len() - suffix.len(), normalized.len()) == suffix
+}
+
+// List/Map/Set HOF schemes are compiler predeclarations for the matching
+// standard-library impl blocks. Give the declaration and definition one
+// stable source identity so the definition may rebind its inferred effects
+// without weakening duplicate detection for any user impl block.
+pub fn impl_decl_origin(
+    target_type_name: Str, trait_name: Str?,
+    type_params: List<TypeParam>, span: Span
+) -> Str {
+    if trait_name.is_none() {
+        let has_bounds = type_params.any(fn(param) {
+            param.bounds.len() > 0
+        })
+        if target_type_name == "List" && !has_bounds &&
+           path_has_suffix(span.file, "std/list.ring") {
+            return "<std-predecl>:List:unbounded"
+        }
+        if target_type_name == "Map" &&
+           path_has_suffix(span.file, "std/map.ring") {
+            if has_bounds {
+                return "<std-predecl>:Map:bounded"
+            }
+            return "<std-predecl>:Map:unbounded"
+        }
+        if target_type_name == "Set" &&
+           path_has_suffix(span.file, "std/set.ring") {
+            if has_bounds {
+                return "<std-predecl>:Set:bounded"
+            }
+            return "<std-predecl>:Set:unbounded"
+        }
+    }
+    impl_origin(target_type_name, trait_name, span)
+}
+
+pub fn impl_method_origin(impl_origin_: Str, method_name: Str) -> Str {
+    "${impl_origin_}::${method_name}"
+}
+
+fn method_owner_display(trait_name: Str?) -> Str {
+    match trait_name {
+        some(name) => "trait '${nominal_display_name(name)}'",
+        none => "an inherent impl"
+    }
+}
+
+// The sole writer for the ordinary method lookup table and its provenance.
+// Re-export hydration may replay the same origin, but no distinct source may
+// replace an existing same-target/same-name identity.
+pub fn install_method_scheme(
+    mut reg: TraitRegistry, mut sink: CollectingSink,
+    target_type: Str, method_name: Str,
+    scheme: TypeScheme, incoming: MethodOrigin
+) -> Bool {
+    let mut methods = match reg.impl_methods.get(target_type) {
+        some(existing) => existing,
+        none => {
+            let created: Map<Str, TypeScheme> = map_new()
+            reg.impl_methods.insert(target_type, created)
+            created
+        }
+    }
+    let mut origins = match reg.method_origins.get(target_type) {
+        some(existing) => existing,
+        none => {
+            let created: Map<Str, MethodOrigin> = map_new()
+            reg.method_origins.insert(target_type, created)
+            created
+        }
+    }
+
+    match origins.get(method_name) {
+        some(existing) => {
+            if existing.origin == incoming.origin {
+                methods.insert(method_name, scheme)
+                origins.insert(method_name, incoming)
+                true
+            } else {
+                let old_owner = method_owner_display(existing.trait_name)
+                let new_owner = method_owner_display(incoming.trait_name)
+                sink.report(make_diag(
+                    E0504, Severity::SevError,
+                    "Ambiguous method '${method_name}' on '${nominal_display_name(target_type)}': provided by ${old_owner} and ${new_owner}",
+                    incoming.span,
+                    DiagnosticContext::TraitError {
+                        detail: "same-target method origins must be unique"
+                    }))
+                false
+            }
+        },
+        none => {
+            if methods.contains_key(method_name) {
+                // A scheme without provenance cannot be proven identical to
+                // the incoming method. Preserve the prior recovery view.
+                sink.report(make_diag(
+                    E0504, Severity::SevError,
+                    "Ambiguous method '${method_name}' on '${nominal_display_name(target_type)}': existing method identity has no stable origin",
+                    incoming.span,
+                    DiagnosticContext::TraitError {
+                        detail: "method scheme is missing origin provenance"
+                    }))
+                false
+            } else {
+                methods.insert(method_name, scheme)
+                origins.insert(method_name, incoming)
+                true
+            }
+        }
+    }
+}
+
 pub fn add_impl(mut reg: TraitRegistry, entry: ImplEntry) {
     match reg.trait_impls.get(entry.target_type_name) {
-        some(impls) => impls.push(entry),
+        some(impls) => {
+            // The same exported impl may arrive through both its defining
+            // module and one or more facades.  Preserve one exact entry while
+            // retaining genuinely distinct, already-diagnosed collisions for
+            // checker recovery.
+            if !impls.any(fn(i) { i.origin == entry.origin }) {
+                impls.push(entry)
+            }
+        },
         none => {
             let mut list: List<ImplEntry> = []
             list.push(entry)
@@ -405,6 +558,15 @@ pub fn has_impl(reg: TraitRegistry, type_name: Str, trait_name: Str) -> Bool {
 pub fn find_impl(reg: TraitRegistry, type_name: Str, trait_name: Str) -> ImplEntry? {
     match reg.trait_impls.get(type_name) {
         some(impls) => impls.find(fn(i) { i.trait_name == trait_name }),
+        none => none
+    }
+}
+
+pub fn find_impl_by_origin(
+    reg: TraitRegistry, type_name: Str, origin: Str
+) -> ImplEntry? {
+    match reg.trait_impls.get(type_name) {
+        some(impls) => impls.find(fn(i) { i.origin == origin }),
         none => none
     }
 }
@@ -529,6 +691,358 @@ pub fn apply_subst_row_map(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
             none => EffectRow { effects: effects, tail: some(t_id) }
         },
         none => EffectRow { effects: effects, tail: none }
+    }
+}
+
+// ============================================================
+// Shared structural TypeVar mapping
+// ============================================================
+
+fn collect_effect_var_mappings(
+    source_row: EffectRow, target_row: EffectRow,
+    source_vars: Set<Int>, mut result: Map<Int, Type>
+) {
+    match (source_row.tail, target_row.tail) {
+        (some(source_id), some(target_id)) => {
+            if source_vars.contains(source_id) {
+                result.insert(source_id, Type::TypeVar {
+                    id: target_id, name: none
+                })
+            }
+        },
+        _ => {}
+    }
+
+    for source_effect in source_row.effects {
+        for target_effect in target_row.effects {
+            if effects_match_kind(source_effect, target_effect) {
+                match (source_effect, target_effect) {
+                    (Effect::FailEffect { error_type: source_type },
+                     Effect::FailEffect { error_type: target_type }) =>
+                        collect_var_mappings(
+                            source_type, target_type, source_vars, result),
+                    (Effect::MutEffect { state_type: source_type },
+                     Effect::MutEffect { state_type: target_type }) =>
+                        collect_var_mappings(
+                            source_type, target_type, source_vars, result),
+                    (Effect::CustomEffect { type_args: source_args, .. },
+                     Effect::CustomEffect { type_args: target_args, .. }) => {
+                        let mut i = 0
+                        while i < source_args.len() && i < target_args.len() {
+                            match (source_args.get(i), target_args.get(i)) {
+                                (some(source_arg), some(target_arg)) =>
+                                    collect_var_mappings(
+                                        source_arg, target_arg,
+                                        source_vars, result),
+                                _ => {}
+                            }
+                            i = i + 1
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn collect_var_mappings(
+    source_type: Type, target_type: Type,
+    source_vars: Set<Int>, mut result: Map<Int, Type>
+) {
+    match source_type {
+        Type::TypeVar { id, .. } => {
+            if source_vars.contains(id) {
+                result.insert(id, target_type)
+            }
+        },
+        Type::StructType { name: source_name, type_params: source_params } =>
+            match target_type {
+                Type::StructType {
+                    name: target_name, type_params: target_params
+                } => {
+                    if source_name == target_name {
+                        let mut i = 0
+                        while i < source_params.len() && i < target_params.len() {
+                            match (source_params.get(i), target_params.get(i)) {
+                                (some(source_param), some(target_param)) =>
+                                    collect_var_mappings(
+                                        source_param, target_param,
+                                        source_vars, result),
+                                _ => {}
+                            }
+                            i = i + 1
+                        }
+                    }
+                },
+                _ => {}
+            },
+        Type::EnumType { name: source_name, type_params: source_params } =>
+            match target_type {
+                Type::EnumType {
+                    name: target_name, type_params: target_params
+                } => {
+                    if source_name == target_name {
+                        let mut i = 0
+                        while i < source_params.len() && i < target_params.len() {
+                            match (source_params.get(i), target_params.get(i)) {
+                                (some(source_param), some(target_param)) =>
+                                    collect_var_mappings(
+                                        source_param, target_param,
+                                        source_vars, result),
+                                _ => {}
+                            }
+                            i = i + 1
+                        }
+                    }
+                },
+                _ => {}
+            },
+        Type::FnType {
+            params: source_params, return_type: source_return,
+            effects: source_effects
+        } => match target_type {
+            Type::FnType {
+                params: target_params, return_type: target_return,
+                effects: target_effects
+            } => {
+                let mut i = 0
+                while i < source_params.len() && i < target_params.len() {
+                    match (source_params.get(i), target_params.get(i)) {
+                        (some(source_param), some(target_param)) =>
+                            collect_var_mappings(
+                                source_param, target_param,
+                                source_vars, result),
+                        _ => {}
+                    }
+                    i = i + 1
+                }
+                collect_var_mappings(
+                    source_return, target_return, source_vars, result)
+                collect_effect_var_mappings(
+                    source_effects, target_effects, source_vars, result)
+            },
+            _ => {}
+        },
+        Type::TupleType { elements: source_elements } => match target_type {
+            Type::TupleType { elements: target_elements } => {
+                let mut i = 0
+                while i < source_elements.len() && i < target_elements.len() {
+                    match (source_elements.get(i), target_elements.get(i)) {
+                        (some(source_element), some(target_element)) =>
+                            collect_var_mappings(
+                                source_element, target_element,
+                                source_vars, result),
+                        _ => {}
+                    }
+                    i = i + 1
+                }
+            },
+            _ => {}
+        },
+        Type::GenericType { base: source_base, args: source_args } =>
+            match target_type {
+                Type::GenericType { base: target_base, args: target_args } => {
+                    collect_var_mappings(
+                        source_base, target_base, source_vars, result)
+                    let mut i = 0
+                    while i < source_args.len() && i < target_args.len() {
+                        match (source_args.get(i), target_args.get(i)) {
+                            (some(source_arg), some(target_arg)) =>
+                                collect_var_mappings(
+                                    source_arg, target_arg,
+                                    source_vars, result),
+                            _ => {}
+                        }
+                        i = i + 1
+                    }
+                },
+                _ => {}
+            },
+        Type::RecordType { fields: source_fields, tail: source_tail, .. } =>
+            match target_type {
+                Type::RecordType { fields: target_fields, tail: target_tail, .. } => {
+                    for source_field in source_fields {
+                        match target_fields.find(fn(field) {
+                            field.name == source_field.name
+                        }) {
+                            some(target_field) => collect_var_mappings(
+                                source_field.ty, target_field.ty,
+                                source_vars, result),
+                            none => {}
+                        }
+                    }
+                    match (source_tail, target_tail) {
+                        (some(source_id), some(target_id)) => {
+                            if source_vars.contains(source_id) {
+                                result.insert(source_id, Type::TypeVar {
+                                    id: target_id, name: none
+                                })
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                _ => {}
+            },
+        Type::PtrType { pointee: source_pointee } => match target_type {
+            Type::PtrType { pointee: target_pointee } =>
+                collect_var_mappings(
+                    source_pointee, target_pointee, source_vars, result),
+            _ => {}
+        },
+        Type::EffectRowType {
+            effects: source_effects, tail: source_tail
+        } => match target_type {
+            Type::EffectRowType {
+                effects: target_effects, tail: target_tail
+            } => collect_effect_var_mappings(
+                EffectRow { effects: source_effects, tail: source_tail },
+                EffectRow { effects: target_effects, tail: target_tail },
+                source_vars, result),
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+pub fn build_type_var_map(
+    source_type: Type, target_type: Type, source_var_ids: List<Int>
+) -> Map<Int, Type> {
+    let mut result: Map<Int, Type> = map_new()
+    collect_var_mappings(
+        source_type, target_type, set_from(source_var_ids), result)
+    result
+}
+
+pub fn build_scheme_var_map(
+    scheme: TypeScheme, instantiated_type: Type
+) -> Map<Int, Type> {
+    build_type_var_map(scheme.ty, instantiated_type, scheme.type_vars)
+}
+
+fn collect_type_var_ids(t: Type, mut result: Set<Int>) {
+    match t {
+        Type::TypeVar { id, .. } => { result.insert(id) },
+        Type::FnType { params, return_type, effects } => {
+            for param in params { collect_type_var_ids(param, result) }
+            collect_type_var_ids(return_type, result)
+            match effects.tail {
+                some(id) => { result.insert(id) }, none => {}
+            }
+            for eff in effects.effects {
+                match eff {
+                    Effect::FailEffect { error_type } =>
+                        collect_type_var_ids(error_type, result),
+                    Effect::MutEffect { state_type } =>
+                        collect_type_var_ids(state_type, result),
+                    Effect::CustomEffect { type_args, .. } => {
+                        for arg in type_args { collect_type_var_ids(arg, result) }
+                    },
+                    _ => {}
+                }
+            }
+        },
+        Type::StructType { type_params, .. } => {
+            for param in type_params { collect_type_var_ids(param, result) }
+        },
+        Type::EnumType { type_params, .. } => {
+            for param in type_params { collect_type_var_ids(param, result) }
+        },
+        Type::GenericType { base, args } => {
+            collect_type_var_ids(base, result)
+            for arg in args { collect_type_var_ids(arg, result) }
+        },
+        Type::RecordType { fields, tail, .. } => {
+            for field in fields { collect_type_var_ids(field.ty, result) }
+            match tail { some(id) => { result.insert(id) }, none => {} }
+        },
+        Type::TupleType { elements } => {
+            for element in elements { collect_type_var_ids(element, result) }
+        },
+        Type::PtrType { pointee } => collect_type_var_ids(pointee, result),
+        Type::EffectRowType { effects, tail } => {
+            match tail { some(id) => { result.insert(id) }, none => {} }
+            for eff in effects {
+                match eff {
+                    Effect::FailEffect { error_type } =>
+                        collect_type_var_ids(error_type, result),
+                    Effect::MutEffect { state_type } =>
+                        collect_type_var_ids(state_type, result),
+                    Effect::CustomEffect { type_args, .. } => {
+                        for arg in type_args { collect_type_var_ids(arg, result) }
+                    },
+                    _ => {}
+                }
+            }
+        },
+        _ => {}
+    }
+}
+
+// Specialize a trait declaration method for one concrete/generic impl owner.
+// Default methods and built-in impl entries share this exact construction.
+pub fn specialize_trait_method_scheme(
+    trait_def: TraitDef, method: TraitMethodDef,
+    self_type: Type, trait_type_args: List<Type>,
+    impl_type_vars: List<Int>, assoc_types: Map<Str, Type>,
+    bounds: List<SchemeBound>
+) -> TypeScheme {
+    let mut mapping: Map<Int, Type> = map_new()
+    match method.ty {
+        Type::FnType { params, .. } => match params.first() {
+            some(receiver) => {
+                let mut receiver_vars: Set<Int> = set_new()
+                collect_type_var_ids(receiver, receiver_vars)
+                let receiver_map = build_type_var_map(
+                    receiver, self_type, receiver_vars.to_list())
+                let mut receiver_ids = receiver_map.keys()
+                receiver_ids.sort()
+                for id in receiver_ids {
+                    match receiver_map.get(id) {
+                        some(mapped) => mapping.insert(id, mapped),
+                        none => {}
+                    }
+                }
+            },
+            none => {}
+        },
+        _ => {}
+    }
+
+    let mut trait_index = 0
+    while trait_index < trait_def.type_params.len() &&
+          trait_index < trait_def.type_param_vars.len() &&
+          trait_index < trait_type_args.len() {
+        match (trait_def.type_param_vars.get(trait_index),
+               trait_type_args.get(trait_index)) {
+            (some(source_id), some(target_type)) =>
+                mapping.insert(source_id, target_type),
+            _ => {}
+        }
+        trait_index = trait_index + 1
+    }
+    for assoc_def in trait_def.assoc_types {
+        match assoc_types.get(assoc_def.name) {
+            some(concrete) => mapping.insert(assoc_def.var_id, concrete),
+            none => {}
+        }
+    }
+
+    let specialized_type = apply_subst_map(mapping, method.ty)
+    let mut quantified = list_clone(impl_type_vars)
+    let mut remaining: Set<Int> = set_new()
+    collect_type_var_ids(specialized_type, remaining)
+    let mut remaining_ids = remaining.to_list()
+    remaining_ids.sort()
+    for id in remaining_ids {
+        if !quantified.contains(id) { quantified.push(id) }
+    }
+    TypeScheme {
+        ty: specialized_type,
+        type_vars: quantified,
+        bounds: bounds,
+        def_id: none
     }
 }
 

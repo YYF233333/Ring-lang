@@ -1,7 +1,10 @@
 use types::{Type, EffectRow, StructField, EnumVariant,
     INT, STR, BOOL, EMPTY_ROW}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
-    ImplEntry, ImplDictBound, add_impl, has_impl}
+    ImplEntry, ImplDictBound, MethodOrigin,
+    add_impl, has_impl, install_method_scheme}
+use ast::{span_zero}
+use diagnostics::{CollectingSink}
 use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef,
     TraitBound, TypeKind, trait_dict_name, trait_bound_param_name, compare_by_first}
 
@@ -27,19 +30,21 @@ const BUILTIN_TYPES: Set<Str> = set_from(["Option", "Cell", "List", "Map", "Set"
 // Public entry point
 // ================================================================
 
-pub fn run_derive_pass(mut env: TypeEnv) -> List<DerivedImpl> {
+pub fn run_derive_pass(
+    mut env: TypeEnv, sink: CollectingSink
+) -> List<DerivedImpl> {
     let mut derived_impls: List<DerivedImpl> = []
     let all_types = collect_user_types(env)
-    derive_trait(env, all_types, "Eq", derived_impls)
+    derive_trait(env, sink, all_types, "Eq", derived_impls)
     // B-107 coherence: only the compiler's structural Eq path may opt a type
     // into structural Hash.  At this point derived_impls contains only this
     // pass's Eq impls, so manual Eq impls already present in trait_reg cannot
     // be mistaken for auto Eq.
     let auto_eq_types = collect_derived_type_names(derived_impls, "Eq")
-    derive_hash_trait(env, all_types, auto_eq_types, derived_impls)
-    derive_trait(env, all_types, "Clone", derived_impls)
-    derive_trait(env, all_types, "Ord", derived_impls)
-    derive_trait(env, all_types, "Debug", derived_impls)
+    derive_hash_trait(env, sink, all_types, auto_eq_types, derived_impls)
+    derive_trait(env, sink, all_types, "Clone", derived_impls)
+    derive_trait(env, sink, all_types, "Ord", derived_impls)
+    derive_trait(env, sink, all_types, "Debug", derived_impls)
     derived_impls
 }
 
@@ -97,7 +102,11 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
 // Fixpoint derivation for a single trait
 // ================================================================
 
-fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mut derived_impls: List<DerivedImpl>) {
+fn derive_trait(
+    mut env: TypeEnv, sink: CollectingSink,
+    all_types: List<UserType>, trait_name: Str,
+    mut derived_impls: List<DerivedImpl>
+) {
     let mut known = set_new()
     let mut sorted_impls = env.trait_reg.trait_impls.entries()
     sorted_impls.sort_by(compare_by_first)
@@ -126,7 +135,7 @@ fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mu
                     match result {
                         some(di) => {
                             known.insert(ut.name)
-                            register_derived_impl(env, di, trait_name)
+                            register_derived_impl(env, sink, di, trait_name)
                             derived_impls.push(di)
                             changed = true
                         },
@@ -144,6 +153,7 @@ fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mu
 // A pre-existing manual Eq therefore never silently acquires structural Hash.
 fn derive_hash_trait(
     mut env: TypeEnv,
+    sink: CollectingSink,
     all_types: List<UserType>,
     auto_eq_types: Set<Str>,
     mut derived_impls: List<DerivedImpl>
@@ -176,7 +186,7 @@ fn derive_hash_trait(
                         match result {
                             some(di) => {
                                 known.insert(ut.name)
-                                register_derived_impl(env, di, "Hash")
+                                register_derived_impl(env, sink, di, "Hash")
                                 derived_impls.push(di)
                                 changed = true
                             },
@@ -609,11 +619,11 @@ fn resolve_type_arg_dict(
 // Register derived impl
 // ================================================================
 
-fn register_derived_impl(mut env: TypeEnv, di: DerivedImpl, trait_name: Str) {
-    let mut methods = match env.trait_reg.impl_methods.get(di.type_name) {
-        some(m) => m,
-        none => map_new(),
-    }
+fn register_derived_impl(
+    mut env: TypeEnv, sink: CollectingSink,
+    di: DerivedImpl, trait_name: Str
+) {
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     let mut type_var_ids: List<Int> = []
     let mut self_type_params: List<Type> = []
@@ -635,17 +645,37 @@ fn register_derived_impl(mut env: TypeEnv, di: DerivedImpl, trait_name: Str) {
         }
     }
 
+    let method_names = get_method_names(trait_name)
+    register_trait_methods(methods, trait_name, self_type, type_var_ids, scheme_bounds)
+
+    let origin = "<derive>:${di.type_name}:${trait_name}"
+    let span = span_zero()
+    let exact = map_clone(methods)
+
     add_impl(env.trait_reg, ImplEntry {
         trait_name: trait_name,
         target_type_name: di.type_name,
         type_params: di.type_params,
         dict_bounds: dict_bounds,
-        method_names: get_method_names(trait_name),
-        assoc_types: map_new()
+        method_names: method_names,
+        assoc_types: map_new(),
+        method_schemes: exact,
+        origin: origin,
+        span: span
     })
 
-    register_trait_methods(methods, trait_name, self_type, type_var_ids, scheme_bounds)
-    env.trait_reg.impl_methods.insert(di.type_name, methods)
+    let mut sorted_methods = methods.entries()
+    sorted_methods.sort_by(compare_by_first)
+    for entry in sorted_methods {
+        let (method_name, scheme) = entry
+        let _ = install_method_scheme(
+            env.trait_reg, sink, di.type_name, method_name, scheme,
+            MethodOrigin {
+                origin: origin,
+                trait_name: some(trait_name),
+                span: span
+            })
+    }
 }
 
 fn get_method_names(trait_name: Str) -> List<Str> {

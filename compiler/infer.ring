@@ -12,20 +12,21 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod,
     HForInDestructure, HLetDestructureBinding, ValueBindingKind,
     trait_bound_param_name,
-    BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
+    BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     hexpr_type, hexpr_effects, hexpr_span, map_index_helper_identity}
 use diagnostics::{DiagnosticContext, DiagnosticNote, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0206, E0301, E0303, E0304, E0305, E0306,
-    E0307, E0308, E0309, E0402, E0411, E0601, E0705, W0001}
+    E0307, E0308, E0309, E0402, E0411, E0503, E0601, E0705, W0001}
 use union_find::{UnionFind}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
-    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map, find_impl, lookup_variant}
+    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map,
+    build_scheme_var_map, find_impl, lookup_variant}
 use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, type_error_with_notes, merge_effects, unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_named_type,
-    bind_pattern, resolve_dicts_from_scheme,
+    bind_pattern, resolve_dicts_from_scheme, resolve_dict_ref_for_type,
     remove_fail_effect,
     generalize, free_type_vars, resolve_relative_qualifier}
 use exhaustive::{check_exhaustive}
@@ -276,6 +277,142 @@ fn hexpr_contains_bounded_callable_value(ctx: InferCtx, expr: HExpr) -> Bool {
     }
 }
 
+// B-163 C': non-Range for-in is lowered while inference still owns the
+// authoritative trait registry, method schemes, dictionaries, and effects.
+// These helpers deliberately validate a named protocol before invoking the
+// ordinary method-call inference path; an inherent same-spelled method cannot
+// manufacture Iterable/Iterator evidence.
+fn require_for_protocol_impl(
+    mut ctx: InferCtx, ty: Type, trait_name: Str,
+    subst: UnionFind, span: Span
+) -> ImplEntry {
+    let concrete = apply_subst(subst, ty)
+    match concrete {
+        Type::TypeVar { .. } => {
+            let trait_display = nominal_display_name(trait_name)
+            let _ = type_error(ctx.sink, E0503,
+                "for..in cannot lower abstract '${type_to_string(concrete)}: ${trait_display}' until associated iterator evidence is available",
+                span, DiagnosticContext::TraitError { detail: "associated iterator dictionary evidence is unavailable" })
+            fail.raise(CompileError {})
+        },
+        _ => {}
+    }
+
+    let type_name = match type_to_builtin_name(concrete) {
+        some(name) => name,
+        none => {
+            let _ = type_error(ctx.sink, E0301,
+                "for..in requires '${type_to_string(concrete)}' to implement '${nominal_display_name(trait_name)}'",
+                span, DiagnosticContext::TraitError { detail: "iteration protocol requires a named implementation" })
+            fail.raise(CompileError {})
+        }
+    }
+    let impl_entry = match find_impl(ctx.env.trait_reg, type_name, trait_name) {
+        some(entry) => entry,
+        none => {
+            let _ = type_error(ctx.sink, E0301,
+                "for..in requires an iterable type (one that implements '${nominal_display_name(trait_name)}'), got ${type_to_string(concrete)}",
+                span, DiagnosticContext::TraitError { detail: "same-spelled inherent methods do not satisfy the iteration protocol" })
+            fail.raise(CompileError {})
+        }
+    }
+
+    // Resolve the actual impl evidence now. This catches missing nested bounds
+    // before lowering and never lets a later backend guess a dictionary.
+    match resolve_dict_ref_for_type(
+        ctx.env, ctx.current_fn_bounds, concrete, subst, trait_name
+    ) {
+        some(_) => impl_entry,
+        none => {
+            let _ = type_error(ctx.sink, E0503,
+                "Cannot resolve '${nominal_display_name(trait_name)}' evidence for '${type_to_string(concrete)}'",
+                span, DiagnosticContext::TraitError { detail: "iteration protocol dictionary evidence is unavailable" })
+            fail.raise(CompileError {})
+        }
+    }
+}
+
+fn for_protocol_method_scheme(
+    mut ctx: InferCtx, impl_entry: ImplEntry, method: Str, span: Span
+) -> TypeScheme {
+    match impl_entry.method_schemes.get(method) {
+        some(scheme) => scheme,
+        none => {
+            let _ = type_error(ctx.sink, E0305,
+                "Iteration protocol implementation '${nominal_display_name(impl_entry.target_type_name)}' has no exact '${nominal_display_name(impl_entry.trait_name)}::${method}' method scheme",
+                span, DiagnosticContext::TraitError {
+                    detail: "protocol lowering does not fall back to default or flat method tables"
+                })
+            fail.raise(CompileError {})
+        }
+    }
+}
+
+struct MethodCallSelection {
+    method_type: Type?,
+    method_scheme: TypeScheme?,
+    dict_dispatch: DictDispatchInfo?
+}
+
+// Resolve an already-authoritative protocol impl into the same input consumed
+// by ordinary method-call inference. No trait declaration reconstruction and
+// no flat last-writer splice is permitted here: the exact ImplEntry scheme is
+// the complete receiver/result/effect/bounds identity.
+fn select_for_protocol_method(
+    mut ctx: InferCtx, impl_entry: ImplEntry, method: Str, span: Span
+) -> MethodCallSelection {
+    let impl_scheme = for_protocol_method_scheme(ctx, impl_entry, method, span)
+    let registered_method = ctx.env.instantiate(impl_scheme)
+    MethodCallSelection {
+        method_type: some(registered_method),
+        method_scheme: some(impl_scheme),
+        dict_dispatch: none
+    }
+}
+
+fn for_protocol_call_method_type(mut ctx: InferCtx, call: HExpr, span: Span) -> Type {
+    match call {
+        HExpr::Call { callee, .. } => match callee {
+            HExpr::FieldAccess { ty, .. } => ty,
+            _ => {
+                let _ = type_error(ctx.sink, E0305,
+                    "Internal iteration lowering expected a method call",
+                    span, DiagnosticContext::OtherContext { detail: some("protocol call lost method provenance") })
+                fail.raise(CompileError {})
+            }
+        },
+        _ => {
+            let _ = type_error(ctx.sink, E0305,
+                "Internal iteration lowering expected a call expression",
+                span, DiagnosticContext::OtherContext { detail: some("protocol call was not lowered as an ordinary call") })
+            fail.raise(CompileError {})
+        }
+    }
+}
+
+// Instantiate an impl-associated type through the exact method scheme that
+// ordinary call inference instantiated. build_scheme_var_map follows scheme
+// variable identity through the receiver/return structure; there is no
+// positional associated-type substitution here.
+fn for_protocol_assoc_type(
+    mut ctx: InferCtx, impl_entry: ImplEntry, method: Str,
+    assoc_name: Str, call: HExpr, subst: UnionFind, span: Span
+) -> Type {
+    let raw_assoc = match impl_entry.assoc_types.get(assoc_name) {
+        some(ty) => ty,
+        none => {
+            let _ = type_error(ctx.sink, E0301,
+                "Iteration protocol '${nominal_display_name(impl_entry.trait_name)}' implementation for '${nominal_display_name(impl_entry.target_type_name)}' is missing associated type '${assoc_name}'",
+                span, DiagnosticContext::TraitError { detail: "protocol associated type is missing" })
+            fail.raise(CompileError {})
+        }
+    }
+    let scheme = for_protocol_method_scheme(ctx, impl_entry, method, span)
+    let instantiated_method = for_protocol_call_method_type(ctx, call, span)
+    let var_map = build_scheme_var_map(scheme, instantiated_method)
+    apply_subst(subst, apply_subst_map(var_map, raw_assoc))
+}
+
 pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult {
     match stmt {
         Stmt::Let { name, name_span, type_annotation, init, span } => {
@@ -475,135 +612,23 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             let iter_r = infer_expr(ctx, iterable, subst)
             let mut s = iter_r.subst
             let iter_type = apply_subst(s, hexpr_type(iter_r.hexpr))
-            let is_destructure = destructure.is_some()
             let mut element_type: Type = ctx.env.fresh_var()
-            let mut iterable_type_name: Str? = none
-            let mut iter_type_name: Str? = none
             // Check for Range (builtin, keep special path)
             let is_range = match iter_type {
                 Type::EnumType { name, .. } => name == BUILTIN_RANGE,
                 _ => false
             }
-            if is_range {
-                match iter_type {
-                    Type::EnumType { type_params, .. } => {
-                        element_type = match type_params.first() { some(t) => t, none => INT }
-                    },
-                    _ => {}
-                }
-            } else {
-                // Look up Iterable trait impl to resolve element type
-                let type_name = type_to_builtin_name(iter_type)
-                match type_name {
-                    some(tn) => {
-                        let iterable_impl = find_impl(ctx.env.trait_reg, tn, "Iterable")
-                        match iterable_impl {
-                            some(impl_entry) => {
-                                iterable_type_name = some(tn)
-                                // Get the Iter associated type from the Iterable impl
-                                match impl_entry.assoc_types.get("Iter") {
-                                    some(iter_assoc_ty) => {
-                                        // Get the concrete iterable type params (e.g., [Int] for List<Int>)
-                                        let concrete_type_params = match iter_type {
-                                            Type::StructType { type_params: tps, .. } => tps,
-                                            Type::EnumType { type_params: tps, .. } => tps,
-                                            _ => []
-                                        }
-                                        // Extract the iterator type name from the assoc type
-                                        let concrete_iter_name = type_to_builtin_name(iter_assoc_ty)
-                                        match concrete_iter_name {
-                                            some(itn) => {
-                                                iter_type_name = some(itn)
-                                                // Build the concrete iterator type by using iterable's type params
-                                                // For impl<T> Iterable for List<T>, Iter = ListIterator<T>
-                                                // The T in ListIterator<T> maps positionally to T in List<T>
-                                                // So ListIterator gets the same concrete type params as List
-                                                let concrete_iter_type = Type::StructType { name: itn, type_params: concrete_type_params }
-                                                // Look up Iterator impl for the iterator type
-                                                let iterator_impl = find_impl(ctx.env.trait_reg, itn, "Iterator")
-                                                match iterator_impl {
-                                                    some(iter_impl_entry) => {
-                                                        // Get the Item associated type from Iterator impl
-                                                        match iter_impl_entry.assoc_types.get("Item") {
-                                                            some(item_assoc_ty) => {
-                                                                // Build the concrete element type
-                                                                // For simple cases (Item = T), use position-based mapping
-                                                                // The item_assoc_ty contains TypeVars from the impl registration
-                                                                // We substitute them using the concrete iterator type params
-                                                                let item_name = type_to_builtin_name(item_assoc_ty)
-                                                                match item_assoc_ty {
-                                                                    Type::TypeVar { .. } => {
-                                                                        // Item = T (single type var) — map to first concrete type param
-                                                                        element_type = match concrete_type_params.first() {
-                                                                            some(ct) => ct,
-                                                                            none => element_type
-                                                                        }
-                                                                    },
-                                                                    Type::TupleType { elements } => {
-                                                                        // Item = (K, V) — map TypeVars positionally to concrete type params
-                                                                        let mut concrete_elems: List<Type> = []
-                                                                        let mut ei = 0
-                                                                        for elem in elements {
-                                                                            match elem {
-                                                                                Type::TypeVar { .. } => {
-                                                                                    match concrete_type_params.get(ei) {
-                                                                                        some(ct) => { concrete_elems.push(ct) },
-                                                                                        none => { concrete_elems.push(elem) }
-                                                                                    }
-                                                                                    ei = ei + 1
-                                                                                },
-                                                                                _ => { concrete_elems.push(elem) }
-                                                                            }
-                                                                        }
-                                                                        element_type = Type::TupleType { elements: concrete_elems }
-                                                                    },
-                                                                    _ => {
-                                                                        // Other types (struct, etc.) — use as-is
-                                                                        element_type = item_assoc_ty
-                                                                    }
-                                                                }
-                                                            },
-                                                            none => {
-                                                                let _ = type_error(ctx.sink, E0301,
-                                                                    "Iterator impl for '${itn}' missing associated type 'Item'",
-                                                                    span, DiagnosticContext::OtherContext { detail: some("Iterator impl must define type Item") })
-                                                            }
-                                                        }
-                                                    },
-                                                    none => {
-                                                        let _ = type_error(ctx.sink, E0301,
-                                                            "Type '${itn}' (Iter of '${tn}') does not implement Iterator",
-                                                            span, DiagnosticContext::OtherContext { detail: some("Iter associated type must implement Iterator") })
-                                                    }
-                                                }
-                                            },
-                                            none => {
-                                                let _ = type_error(ctx.sink, E0301,
-                                                    "Cannot resolve iterator type for '${tn}'",
-                                                    span, DiagnosticContext::OtherContext { detail: some("Iter associated type could not be resolved") })
-                                            }
-                                        }
-                                    },
-                                    none => {
-                                        let _ = type_error(ctx.sink, E0301,
-                                            "Iterable impl for '${tn}' missing associated type 'Iter'",
-                                            span, DiagnosticContext::OtherContext { detail: some("Iterable impl must define type Iter") })
-                                    }
-                                }
-                            },
-                            none => {
-                                let _ = type_error(ctx.sink, E0301,
-                                    "for..in requires an iterable type (one that implements Iterable), got ${type_to_string(iter_type)}",
-                                    span, DiagnosticContext::OtherContext { detail: some("Type does not implement the Iterable trait. Implement 'Iterable' for custom iteration.") })
-                            }
-                        }
-                    },
-                    none => {
-                        let _ = type_error(ctx.sink, E0301,
-                            "for..in requires an iterable type, got ${type_to_string(iter_type)}",
-                            span, DiagnosticContext::OtherContext { detail: some("Primitive types are not iterable") })
-                    }
-                }
+            if !is_range {
+                return lower_protocol_for_in(
+                    ctx, binding, binding_span, destructure,
+                    iter_r, body, span
+                )
+            }
+            match iter_type {
+                Type::EnumType { type_params, .. } => {
+                    element_type = match type_params.first() { some(t) => t, none => INT }
+                },
+                _ => {}
             }
 
             ctx.env.push_scope()
@@ -687,8 +712,8 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                             def_id: match binding_scheme { some(bs) => bs.def_id, none => none },
                             destructure: hdestructure,
                             iterable: iter_r.hexpr, body: body_r.hexpr,
-                            iterable_type_name: iterable_type_name,
-                            iter_type_name: iter_type_name,
+                            iterable_type_name: none,
+                            iter_type_name: none,
                             span: span
                         },
                         subst: me.1,
@@ -793,56 +818,298 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
         },
         Stmt::IfLet { pattern, expr, then_block, else_block, span } => {
             let expr_r = infer_expr(ctx, expr, subst)
-            let mut s = expr_r.subst
-            let expr_type = apply_subst(s, hexpr_type(expr_r.hexpr))
-            let iflet_pattern = rewrite_bare_enum_bindings(ctx.env, pattern)
+            infer_if_let_from_result(
+                ctx, pattern, expr_r, then_block, else_block, span)
+        }
+    }
+}
 
-            ctx.env.push_scope()
-            let then_result = some({
-                s = bind_pattern(ctx, iflet_pattern, expr_type, s)
-                infer_block(ctx, then_block, some(s))
-            }) catch { _ => none }
-            ctx.env.pop_scope()
+fn infer_if_let_from_result(
+    mut ctx: InferCtx, pattern: Pattern, expr_r: InferResult,
+    then_block: Expr, else_block: Expr?, span: Span
+) -> StmtResult {
+    let mut s = expr_r.subst
+    let expr_type = apply_subst(s, hexpr_type(expr_r.hexpr))
+    let iflet_pattern = rewrite_bare_enum_bindings(ctx.env, pattern)
 
-            match then_result {
-                some(then_r) => {
-                    s = then_r.subst
-                    let mut combined = merge_effects(ctx.sink, ctx.env, expr_r.effects, then_r.effects, s, span)
-                    let mut combined_effects = combined.0
-                    s = combined.1
+    ctx.env.push_scope()
+    let then_result = some({
+        s = bind_pattern(ctx, iflet_pattern, expr_type, s)
+        infer_block(ctx, then_block, some(s))
+    }) catch { _ => none }
+    ctx.env.pop_scope()
 
-                    let mut else_hblock: HExpr? = none
-                    match else_block {
-                        some(eb) => {
-                            ctx.env.push_scope()
-                            let else_result = some(infer_block(ctx, eb, some(s))) catch { _ => none }
-                            ctx.env.pop_scope()
-                            match else_result {
-                                some(else_r) => {
-                                    s = else_r.subst
-                                    else_hblock = some(else_r.hexpr)
-                                    let me2 = merge_effects(ctx.sink, ctx.env, combined_effects, else_r.effects, s, span)
-                                    combined_effects = me2.0
-                                    s = me2.1
-                                },
-                                none => fail.raise(CompileError {})
-                            }
+    match then_result {
+        some(then_r) => {
+            s = then_r.subst
+            let mut combined = merge_effects(
+                ctx.sink, ctx.env, expr_r.effects, then_r.effects,
+                s, span)
+            let mut combined_effects = combined.0
+            s = combined.1
+
+            let mut else_hblock: HExpr? = none
+            match else_block {
+                some(eb) => {
+                    ctx.env.push_scope()
+                    let else_result = some(
+                        infer_block(ctx, eb, some(s))) catch { _ => none }
+                    ctx.env.pop_scope()
+                    match else_result {
+                        some(else_r) => {
+                            s = else_r.subst
+                            else_hblock = some(else_r.hexpr)
+                            let me2 = merge_effects(
+                                ctx.sink, ctx.env, combined_effects,
+                                else_r.effects, s, span)
+                            combined_effects = me2.0
+                            s = me2.1
                         },
-                        none => {}
-                    }
-
-                    StmtResult {
-                        hstmt: HStmt::IfLet {
-                            pattern: iflet_pattern, expr: expr_r.hexpr,
-                            then_block: then_r.hexpr, else_block: else_hblock, span: span
-                        },
-                        subst: s,
-                        effects: combined_effects
+                        none => fail.raise(CompileError {})
                     }
                 },
-                none => fail.raise(CompileError {})
+                none => {}
             }
+
+            StmtResult {
+                hstmt: HStmt::IfLet {
+                    pattern: iflet_pattern, expr: expr_r.hexpr,
+                    then_block: then_r.hexpr,
+                    else_block: else_hblock, span: span
+                },
+                subst: s,
+                effects: combined_effects
+            }
+        },
+        none => fail.raise(CompileError {})
+    }
+}
+
+fn lower_protocol_for_in(
+    mut ctx: InferCtx, binding: Str, binding_span: Span,
+    destructure: DestructureBinding?, iterable_result: InferResult,
+    body: Expr, span: Span
+) -> StmtResult {
+    let mut s = iterable_result.subst
+    let collection_type = apply_subst(s, hexpr_type(iterable_result.hexpr))
+
+    // The generated locals live in one ordinary lexical block. Catch only to
+    // guarantee that the synthetic scope is popped before propagating a
+    // declaration-level CompileError.
+    ctx.env.push_scope()
+    let lowered_result: StmtResult? = some({
+        let iterable_impl = require_for_protocol_impl(
+            ctx, collection_type, "Iterable", s, span)
+
+        let iterable_selection = select_for_protocol_method(
+            ctx, iterable_impl, "iter", span)
+        let iter_call_result = infer_method_call_from_receiver(
+            ctx, none, iterable_result, "iter", [], span,
+            some(iterable_selection))
+        s = iter_call_result.subst
+
+        let associated_iter_type = for_protocol_assoc_type(
+            ctx, iterable_impl, "iter", "Iter",
+            iter_call_result.hexpr, s, span)
+        let associated_item_type = for_protocol_assoc_type(
+            ctx, iterable_impl, "iter", "Item",
+            iter_call_result.hexpr, s, span)
+        let iter_notes: List<DiagnosticNote> = [
+            DiagnosticNote {
+                message: "Iterable::Iter is '${type_to_string(associated_iter_type)}'",
+                span: some(span)
+            },
+            DiagnosticNote {
+                message: "iter() returns '${type_to_string(apply_subst(s, hexpr_type(iter_call_result.hexpr)))}'",
+                span: some(span)
+            }
+        ]
+        s = unify_at_noted(
+            ctx.sink, ctx.env,
+            hexpr_type(iter_call_result.hexpr), associated_iter_type,
+            s, span, iter_notes)
+        let iterator_type = apply_subst(s, hexpr_type(iter_call_result.hexpr))
+        let iterator_impl = require_for_protocol_impl(
+            ctx, iterator_type, "Iterator", s, span)
+
+        let iterator_name = "__ring_for_iterator_${ctx.env.ids.next_def_id.to_str()}"
+        ctx.env.bind_mono(iterator_name, iterator_type)
+        let iterator_scheme = match ctx.env.lookup(iterator_name) {
+            some(scheme) => scheme,
+            none => panic("unreachable: lowered for iterator binding missing")
         }
+        match iterator_scheme.def_id {
+            some(did) => {
+                ctx.env.record_def_span(did, span)
+                ctx.env.scope.mutable_vars.insert(did)
+                ctx.var_lambda_depth.insert(did, ctx.lambda_depth)
+            },
+            none => {}
+        }
+        let iterator_stmt = HStmt::Var {
+            name: iterator_name, name_span: span,
+            def_id: iterator_scheme.def_id, ty: iterator_type,
+            init: iter_call_result.hexpr, span: span
+        }
+
+        let mut payload_pattern = Pattern::Binding {
+            name: binding, span: binding_span
+        }
+        let mut then_block = body
+        match destructure {
+            some(destr) => {
+                let payload_name = "__ring_for_payload_${ctx.env.ids.next_def_id.to_str()}"
+                payload_pattern = Pattern::Binding { name: payload_name, span: binding_span }
+
+                let mut tuple_patterns: List<Pattern> = []
+                let mut di = 0
+                while di < destr.names.len() {
+                    match (destr.names.get(di), destr.spans.get(di)) {
+                        (some(name), some(name_span)) => {
+                            tuple_patterns.push(Pattern::Binding {
+                                name: name, span: name_span
+                            })
+                        },
+                        (some(name), none) => {
+                            tuple_patterns.push(Pattern::Binding {
+                                name: name, span: binding_span
+                            })
+                        },
+                        _ => {}
+                    }
+                    di = di + 1
+                }
+                let destructure_stmt = Stmt::LetDestructure {
+                    pattern: Pattern::TuplePattern {
+                        elements: tuple_patterns, span: span
+                    },
+                    init: Expr::Ident {
+                        name: payload_name, qualifier: none, span: span
+                    },
+                    span: span
+                }
+                then_block = match then_block {
+                    Expr::Block { stmts, tail, span: body_span } => {
+                        let mut lowered_stmts: List<Stmt> = [destructure_stmt]
+                        for original_stmt in stmts {
+                            lowered_stmts.push(original_stmt)
+                        }
+                        Expr::Block {
+                            stmts: lowered_stmts, tail: tail, span: body_span
+                        }
+                    },
+                    _ => panic("unreachable: for-in body is not a block")
+                }
+            },
+            none => {}
+        }
+
+        let some_pattern = Pattern::Constructor {
+            name: "some", qualifier: some(BUILTIN_OPTION),
+            fields: [payload_pattern], span: span
+        }
+        let exhausted_block = Expr::Block {
+            stmts: [Stmt::Break { span: span }],
+            tail: none, span: span
+        }
+        ctx.env.push_scope()
+        ctx.loop_depth = ctx.loop_depth + 1
+        let while_candidate: StmtResult? = some({
+            let iterator_expr = Expr::Ident {
+                name: iterator_name, qualifier: none, span: span
+            }
+            let next_receiver = infer_expr(ctx, iterator_expr, s)
+            let next_selection = select_for_protocol_method(
+                ctx, iterator_impl, "next", span)
+            let next_call_result = infer_method_call_from_receiver(
+                ctx, some(iterator_expr), next_receiver,
+                "next", [], span, some(next_selection))
+            s = next_call_result.subst
+
+            let iterator_item_type = for_protocol_assoc_type(
+                ctx, iterator_impl, "next", "Item",
+                next_call_result.hexpr, s, span)
+            let next_expected = make_option_type(iterator_item_type)
+            let next_notes: List<DiagnosticNote> = [
+                DiagnosticNote {
+                    message: "Iterator::Item is '${type_to_string(iterator_item_type)}'",
+                    span: some(span)
+                },
+                DiagnosticNote {
+                    message: "next() returns '${type_to_string(apply_subst(s, hexpr_type(next_call_result.hexpr)))}'",
+                    span: some(span)
+                }
+            ]
+            s = unify_at_noted(
+                ctx.sink, ctx.env, hexpr_type(next_call_result.hexpr),
+                next_expected, s, span, next_notes)
+
+            let item_notes: List<DiagnosticNote> = [
+                DiagnosticNote {
+                    message: "Iterable::Item is '${type_to_string(apply_subst(s, associated_item_type))}'",
+                    span: some(span)
+                },
+                DiagnosticNote {
+                    message: "Iterator::Item is '${type_to_string(apply_subst(s, iterator_item_type))}'",
+                    span: some(span)
+                }
+            ]
+            s = unify_at_noted(
+                ctx.sink, ctx.env,
+                associated_item_type, iterator_item_type,
+                s, span, item_notes)
+
+            let checked_next = InferResult {
+                hexpr: next_call_result.hexpr,
+                subst: s, effects: next_call_result.effects
+            }
+            let branch_result = infer_if_let_from_result(
+                ctx, some_pattern, checked_next, then_block,
+                some(exhausted_block), span)
+            s = branch_result.subst
+            let loop_body = HExpr::Block {
+                stmts: [branch_result.hstmt], tail: none,
+                ty: UNIT, effects: branch_result.effects, span: span
+            }
+            StmtResult {
+                hstmt: HStmt::While {
+                    condition: HExpr::BoolLit {
+                        value: true, ty: BOOL,
+                        effects: EMPTY_ROW, span: span
+                    },
+                    body: loop_body, span: span
+                },
+                subst: s, effects: branch_result.effects
+            }
+        }) catch { _ => none }
+        ctx.loop_depth = ctx.loop_depth - 1
+        ctx.env.pop_scope()
+        let while_result = match while_candidate {
+            some(result) => result,
+            none => fail.raise(CompileError {})
+        }
+        s = while_result.subst
+
+        let mut block_effects = iter_call_result.effects
+        let combined = merge_effects(
+            ctx.sink, ctx.env, block_effects,
+            while_result.effects, s, span)
+        block_effects = combined.0
+        s = combined.1
+
+        let lowered_block = HExpr::Block {
+            stmts: [iterator_stmt, while_result.hstmt],
+            tail: none, ty: UNIT, effects: block_effects, span: span
+        }
+        StmtResult {
+            hstmt: HStmt::ExprStmt { expr: lowered_block, span: span },
+            subst: s, effects: block_effects
+        }
+    }) catch { _ => none }
+    ctx.env.pop_scope()
+    match lowered_result {
+        some(result) => result,
+        none => fail.raise(CompileError {})
     }
 }
 
@@ -1433,23 +1700,43 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
     }
 
     let recv_r = infer_expr(ctx, receiver, subst)
+    infer_method_call_from_receiver(
+        ctx, some(receiver), recv_r, method, args, span, none)
+}
+
+// Shared method-call inference after receiver evaluation. Protocol lowering
+// supplies an authoritative selection; ordinary source calls leave it absent
+// and use the existing name resolver below. In both cases argument inference,
+// unification, effects, dictionaries, and HIR construction remain identical.
+fn infer_method_call_from_receiver(
+    mut ctx: InferCtx, receiver_source: Expr?, recv_r: InferResult,
+    method: Str, args: List<Expr>, span: Span,
+    selection: MethodCallSelection?
+) -> InferResult {
     let mut s = recv_r.subst
     let mut effects = recv_r.effects
     let recv_type = apply_subst(s, hexpr_type(recv_r.hexpr))
 
     // Check receiver mutability for mut self methods
-    check_receiver_mutability(ctx, receiver, recv_type, method, span)
+    match receiver_source {
+        some(receiver) =>
+            check_receiver_mutability(ctx, receiver, recv_type, method, span),
+        none => {}
+    }
 
     // Inject mut<T> effect when calling mut method on a mut function parameter
     if is_mut_method_call(ctx, recv_type, method) {
-        match get_expr_def_id(ctx, receiver) {
-            some(did) => {
-                if ctx.env.scope.mut_param_defs.contains(did) {
-                    let mut_eff = Effect::MutEffect { state_type: recv_type }
-                    let me = merge_effects(ctx.sink, ctx.env, effects, effect_row([mut_eff]), s, span)
-                    effects = me.0
-                    s = me.1
-                }
+        match receiver_source {
+            some(receiver) => match get_expr_def_id(ctx, receiver) {
+                some(did) => {
+                    if ctx.env.scope.mut_param_defs.contains(did) {
+                        let mut_eff = Effect::MutEffect { state_type: recv_type }
+                        let me = merge_effects(ctx.sink, ctx.env, effects, effect_row([mut_eff]), s, span)
+                        effects = me.0
+                        s = me.1
+                    }
+                },
+                none => {}
             },
             none => {}
         }
@@ -1457,20 +1744,32 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
 
     let mut method_type: Type? = none
     let mut method_scheme: TypeScheme? = none
+    let mut dict_dispatch: DictDispatchInfo? = none
+
+    match selection {
+        some(selected) => {
+            method_type = selected.method_type
+            method_scheme = selected.method_scheme
+            dict_dispatch = selected.dict_dispatch
+        },
+        none => {}
+    }
 
     // Look up method in impl for struct/enum
-    match recv_type {
-        Type::StructType { name, .. } => {
-            let r = lookup_impl_method(ctx, name, method)
-            method_type = r.method_type
-            method_scheme = r.method_scheme
-        },
-        Type::EnumType { name, .. } => {
-            let r = lookup_impl_method(ctx, name, method)
-            method_type = r.method_type
-            method_scheme = r.method_scheme
-        },
-        _ => {}
+    if method_type.is_none() {
+        match recv_type {
+            Type::StructType { name, .. } => {
+                let r = lookup_impl_method(ctx, name, method)
+                method_type = r.method_type
+                method_scheme = r.method_scheme
+            },
+            Type::EnumType { name, .. } => {
+                let r = lookup_impl_method(ctx, name, method)
+                method_type = r.method_type
+                method_scheme = r.method_scheme
+            },
+            _ => {}
+        }
     }
 
     // Method lookup for primitive types
@@ -1496,7 +1795,6 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
     }
 
     // Check fn bounds for type variable receivers
-    let mut dict_dispatch: DictDispatchInfo? = none
     let recv_raw_type = hexpr_type(recv_r.hexpr)
     let recv_var_id = match recv_raw_type {
         Type::TypeVar { id, .. } => some(resolve_var_id(id, s)),

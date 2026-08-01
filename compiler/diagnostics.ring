@@ -94,23 +94,6 @@ pub fn new_collecting_sink() -> CollectingSink {
 }
 
 impl CollectingSink {
-    pub fn report(mut self, d: Diagnostic) {
-        let key = diag_key(d)
-        if !self.seen.contains_key(key) {
-            self.seen.insert(key, true)
-            self.items.push(d)
-        }
-    }
-
-    pub fn has_errors(self) -> Bool {
-        self.items.any(fn(d: Diagnostic) -> Bool {
-            match d.severity {
-                SevError => true,
-                _ => false
-            }
-        })
-    }
-
     pub fn diagnostics(self) -> List<Diagnostic> {
         self.items
     }

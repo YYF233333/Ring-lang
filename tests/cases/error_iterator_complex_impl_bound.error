@@ -1,0 +1,4 @@
+E0503
+Iteration protocol impl bound 'T: HasItem' uses nested type arguments or associated constraints
+nested impl predicates are not yet representable in ImplEntry
+!internal compiler error

@@ -1,0 +1,3 @@
+E0503
+Delegated impl bound 'Hash' is not satisfied by concrete owner
+!internal compiler error
