@@ -267,7 +267,7 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 发现者：Opus+DS
 
 
-### #221 tuple eq dispatch runtime crash [medium] [judgment] [open]
+### #221 tuple eq dispatch runtime crash [medium] [judgment] [doing]
 
 两个用例 runtime assertion 失败：`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。tuple 的 `==` 派发在共享层有误。
 
