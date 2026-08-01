@@ -1780,6 +1780,11 @@ fn emit_c_eq_raw(mut ctx: CCtx, lhs: Str, rhs: Str, ty: Type,
     match dispatch {
         TraitDispatch::Builtin => emit_c_builtin_eq_raw(ctx, lhs, rhs, ty),
         TraitDispatch::Direct { dict, extra_dicts } => {
+            // A parameterized Direct dispatch is resolved by constructing a
+            // fresh DICT_DYN wrapper.  It owns its method closures/envs and
+            // must die after the borrowed method call; plain Direct and Dict
+            // dispatches are static/borrowed and must never be dropped here.
+            let owns_dict_wrapper = extra_dicts.len() > 0
             let dict_ptr = resolve_c_dispatch_dict(
                 ctx, TraitDispatch::Direct { dict: dict, extra_dicts: extra_dicts }, some("Eq"))
             let cls = fresh_tmp(ctx)
@@ -1790,6 +1795,9 @@ fn emit_c_eq_raw(mut ctx: CCtx, lhs: Str, rhs: Str, ty: Type,
             // The dispatch result is internal to structural comparison.
             rt_use(ctx, "ring_drop", 1)
             c_emit(ctx, "ring_drop(${result});")
+            if owns_dict_wrapper {
+                c_emit(ctx, "ring_drop(${dict_ptr});")
+            }
             raw
         },
         TraitDispatch::Dict { param } => {

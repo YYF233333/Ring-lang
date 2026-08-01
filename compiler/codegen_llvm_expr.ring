@@ -979,6 +979,11 @@ fn emit_eq_dispatch_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef,
     match dispatch {
         TraitDispatch::Builtin => emit_builtin_eq_cmp(ctx, lhs, rhs, ty),
         TraitDispatch::Direct { dict, extra_dicts } => {
+            // Direct+extra materialises a fresh DICT_DYN wrapper.  The loaded
+            // method closure is only borrowed for this call, so the wrapper
+            // (and its closure/env graph) is released immediately afterwards.
+            // Empty-extra Direct and Dict-param dispatches remain borrowed.
+            let owns_dict_wrapper = extra_dicts.len() > 0
             let dict_ptr = resolve_dispatch_dict(ctx,
                 TraitDispatch::Direct { dict: dict, extra_dicts: extra_dicts },
                 some("Eq"))
@@ -991,6 +996,9 @@ fn emit_eq_dispatch_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef,
                 ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
             let drop_ty = get_rt_fn_type(ctx, "ring_drop")
             discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [result], ""))
+            if owns_dict_wrapper {
+                discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [dict_ptr], ""))
+            }
             cmp
         },
         TraitDispatch::Dict { param } => {
