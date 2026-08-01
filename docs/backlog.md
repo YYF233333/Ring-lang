@@ -403,7 +403,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 ### B-173 结构容器 Hash / Eq evidence 扩展：Option / tuple / List [feature] [P2] [M] [judgment] [queued]
 
-2026-07-31 B-107 merge review concern：`Option<T>`、tuple-as-key、`List<T>` 字段无 Hash evidence（`resolve_hash_field_action` 覆盖集不含；`resolve_dict_ref_for_type` 对 TupleType 走 builtin 名失败），fail-closed 正确（E0503 拒绝）但含这些字段的类型进不了 Map/Set。`4f6f186` 后续 wave 的结构化 tuple equality 将关闭 audit #221 的直接 `==` wrong-code；但 tuple 作为泛型 `T: Eq` 实参仍因缺少 `TupleType` DictRef 而被 E0503 拒绝，属于同一 capability gap。
+2026-07-31 B-107 merge review concern：`Option<T>`、tuple-as-key、`List<T>` 字段无 Hash evidence（`resolve_hash_field_action` 覆盖集不含；`resolve_dict_ref_for_type` 对 TupleType 走 builtin 名失败），fail-closed 正确（E0503 拒绝）但含这些字段的类型进不了 Map/Set。结构化 tuple equality wave 已关闭 audit #221 的直接 `==` wrong-code；但 tuple 作为泛型 `T: Eq` 实参仍因缺少 `TupleType` DictRef 而被 E0503 拒绝，属于同一 capability gap。
 
 - **修复方向**：为三类内建结构提供结构化 Hash evidence，并为 tuple 提供可传入泛型 `T: Eq` 的结构化 Eq DictRef；复用直接 tuple equality 的结构分解路径
 - **验收**：三类字段的 struct/enum 进 Map/Set 正反用例；tuple 的泛型 Eq 正负例、manual element Eq 与嵌套结构；Float 嵌套仍拒绝；双后端与 RC 门一致

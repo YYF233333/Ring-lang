@@ -490,8 +490,30 @@ pub fn is_primitive_ord(t: Type) -> Bool {
     }
 }
 
-pub fn is_tuple_type(t: Type) -> Bool {
-    match t { Type::TupleType { .. } => true, _ => false }
+// Resolve tuple Eq structurally while delegating every non-tuple leaf to the
+// normal trait resolver.  This is the single source of truth for the plan
+// consumed by dict lowering, closure-capture census, and both native backends.
+pub fn resolve_eq_dispatch(ctx: InferCtx, resolved: Type, subst: UnionFind,
+                           span: Span, op: Str) -> TraitDispatch {
+    match resolved {
+        Type::TupleType { elements } => {
+            let mut element_types: List<Type> = []
+            let mut element_dispatches: List<TraitDispatch> = []
+            for element in elements {
+                let element_type = apply_subst(subst, element)
+                element_types.push(element_type)
+                element_dispatches.push(resolve_eq_dispatch(
+                    ctx, element_type, subst, span, op))
+            }
+            TraitDispatch::Tuple {
+                element_types: element_types,
+                elements: element_dispatches
+            }
+        },
+        _ => resolve_trait_dispatch(
+            ctx, resolved, "Eq", E0307, subst, span, op,
+            is_primitive_eq(resolved)),
+    }
 }
 
 fn dispatch_from_dict_ref(dict_ref: DictRef) -> TraitDispatch {

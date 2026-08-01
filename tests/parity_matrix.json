@@ -757,22 +757,24 @@
       "reason": "Struct named-pattern fields, literals, nesting, bindings, and lexical scope isolation execute under both backends."
     },
     {
-      "feature_id": "gap.shared.tuple_eq",
-      "evidence": ["tests/cases/tuple_eq.ring"],
-      "oracle": "shared-failure-no-parity",
+      "feature_id": "backend.tuple_eq_dispatch",
+      "evidence": [
+        "tests/cases/tuple_eq.ring",
+        "tests/cases/tuple_eq_dispatch.ring",
+        "tests/cases/tuple_eq_wrapped_dict_rc.ring"
+      ],
+      "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends fail the same tuple equality assertion (audit #221)"
+      "status": "covered",
+      "reason": "Tuple equality recursively dispatches builtin and manual Eq evidence, preserves short-circuit order, and reclaims dynamic wrapped dictionaries under both backends."
     },
     {
-      "feature_id": "gap.shared.tuple_eq_struct",
+      "feature_id": "backend.tuple_eq_struct",
       "evidence": ["tests/cases/tuple_eq_struct.ring"],
-      "oracle": "shared-failure-no-parity",
+      "oracle": "handwritten-golden+dual-backend",
       "lane": ["e2e-llvm", "e2e-c", "e2e-diff"],
-      "status": "known-gap",
-      "gap_scope": "shared-positive",
-      "reason": "both backends fail the same structural tuple equality assertion (audit #221)"
+      "status": "covered",
+      "reason": "Tuple equality recursively compares struct elements through Eq evidence under both backends."
     },
     {
       "feature_id": "backend.frontend_tuple_oob",

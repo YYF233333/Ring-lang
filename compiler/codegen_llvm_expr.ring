@@ -857,6 +857,8 @@ fn resolve_dispatch_dict(mut ctx: LlvmCtx, dispatch: TraitDispatch, trait_name_h
             }
         },
         TraitDispatch::Builtin => LLVMConstPointerNull(ctx.ptr_type),
+        TraitDispatch::Tuple { .. } =>
+            panic("LLVM codegen: tuple dispatch must be consumed structurally"),
     }
 }
 
@@ -876,31 +878,163 @@ fn load_dict_method(mut ctx: LlvmCtx, dict_ptr: LLVMValueRef, slot: Int) -> LLVM
     LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "mc"))
 }
 
-// Eq dispatch: call the dict's eq closure (method slot 0) on (lhs, rhs).
-fn gen_eq_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> LLVMValueRef {
-    let lhs = gen_llvm_expr(ctx, left)
-    let rhs = gen_llvm_expr(ctx, right)
-    let dict_ptr = resolve_dispatch_dict(ctx, dispatch, some("Eq"))
-    let eq_closure = load_dict_method(ctx, dict_ptr, 0)
-    let result = gen_closure_call(ctx, eq_closure, [lhs, rhs])
-    match op {
-        BinOp::Neq => {
-            // B-080: inline untag
+fn emit_builtin_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef,
+                       rhs: LLVMValueRef, ty: Type) -> LLVMValueRef {
+    if is_int_type(ty) || is_bool_type(ty) || is_unit_type(ty) {
+        LLVMBuildICmp(ctx.builder, LLVM_INT_EQ,
+            unbox_int(ctx, lhs), unbox_int(ctx, rhs), fresh_name(ctx, "eqi"))
+    } else if is_float_type(ty) {
+        let unbox_fn = get_or_declare_runtime_fn(
+            ctx, "ring_unbox_float", [ctx.ptr_type], ctx.double_type)
+        let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_float")
+        let lhs_raw = LLVMBuildCall2(
+            ctx.builder, unbox_ty, unbox_fn, [lhs], fresh_name(ctx, "tfl"))
+        let rhs_raw = LLVMBuildCall2(
+            ctx.builder, unbox_ty, unbox_fn, [rhs], fresh_name(ctx, "tfr"))
+        LLVMBuildFCmp(ctx.builder, LLVM_REAL_OEQ,
+            lhs_raw, rhs_raw, fresh_name(ctx, "tfeq"))
+    } else if is_str_type(ty) {
+        let eq_fn = get_or_declare_runtime_fn(
+            ctx, "ring_str_eq", [ctx.ptr_type, ctx.ptr_type], ctx.i64_type)
+        let eq_ty = get_rt_fn_type(ctx, "ring_str_eq")
+        let raw = LLVMBuildCall2(
+            ctx.builder, eq_ty, eq_fn, [lhs, rhs], fresh_name(ctx, "tseq"))
+        LLVMBuildICmp(ctx.builder, LLVM_INT_NE, raw,
+            LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "tseq1"))
+    } else {
+        match ty {
+            Type::NeverType | Type::AnyType => LLVMBuildICmp(
+                ctx.builder, LLVM_INT_EQ, unbox_int(ctx, lhs), unbox_int(ctx, rhs),
+                fresh_name(ctx, "eqb")),
+            _ => panic("LLVM codegen: non-primitive Builtin in tuple Eq plan"),
+        }
+    }
+}
+
+fn emit_tuple_eq_dispatch_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef,
+                              rhs: LLVMValueRef, tuple_ty: Type,
+                              element_types: List<Type>,
+                              elements: List<TraitDispatch>) -> LLVMValueRef {
+    let tuple_arity = match tuple_ty {
+        Type::TupleType { elements: tuple_elements } => tuple_elements.len(),
+        _ => panic("LLVM codegen: tuple Eq plan applied to non-tuple type"),
+    }
+    if tuple_arity != element_types.len() || tuple_arity != elements.len() {
+        panic("LLVM codegen: tuple Eq plan/arity mismatch")
+    }
+    if tuple_arity == 0 {
+        return LLVMConstInt(ctx.i1_type, 1, 0)
+    }
+
+    let current_fn = match ctx.current_fn {
+        some(f) => f,
+        none => panic("LLVM codegen: tuple Eq outside function"),
+    }
+    let get_fn = get_or_declare_runtime_fn(
+        ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+    let get_ty = get_rt_fn_type(ctx, "ring_list_get")
+    let false_bb = LLVMAppendBasicBlockInContext(
+        ctx.context, current_fn, fresh_name(ctx, "tuple.false"))
+    let true_bb = LLVMAppendBasicBlockInContext(
+        ctx.context, current_fn, fresh_name(ctx, "tuple.true"))
+
+    for i in 0..tuple_arity {
+        let index = LLVMConstInt(ctx.i64_type, i, 0)
+        // ring_list_get is a borrow.  The tuple operands were evaluated once
+        // before entering this plan and no element is dup'd or dropped here.
+        let lhs_element = LLVMBuildCall2(
+            ctx.builder, get_ty, get_fn, [lhs, index], fresh_name(ctx, "tle"))
+        let rhs_element = LLVMBuildCall2(
+            ctx.builder, get_ty, get_fn, [rhs, index], fresh_name(ctx, "tre"))
+        let element_cmp = emit_eq_dispatch_cmp(
+            ctx, lhs_element, rhs_element, element_types[i], elements[i])
+        let next_bb = if i + 1 < tuple_arity {
+            LLVMAppendBasicBlockInContext(
+                ctx.context, current_fn, fresh_name(ctx, "tuple.next"))
+        } else {
+            true_bb
+        }
+        discard(LLVMBuildCondBr(ctx.builder, element_cmp, next_bb, false_bb))
+        LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+    }
+
+    let merge_bb = LLVMAppendBasicBlockInContext(
+        ctx.context, current_fn, fresh_name(ctx, "tuple.merge"))
+    let true_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+    LLVMPositionBuilderAtEnd(ctx.builder, false_bb)
+    let false_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    let result = LLVMBuildPhi(ctx.builder, ctx.i1_type, fresh_name(ctx, "tuple.eq"))
+    LLVMAddIncoming(result,
+        [LLVMConstInt(ctx.i1_type, 1, 0), LLVMConstInt(ctx.i1_type, 0, 0)],
+        [true_end, false_end])
+    result
+}
+
+fn emit_eq_dispatch_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef,
+                        rhs: LLVMValueRef, ty: Type,
+                        dispatch: TraitDispatch) -> LLVMValueRef {
+    match dispatch {
+        TraitDispatch::Builtin => emit_builtin_eq_cmp(ctx, lhs, rhs, ty),
+        TraitDispatch::Direct { dict, extra_dicts } => {
+            // Direct+extra materialises a fresh DICT_DYN wrapper.  The loaded
+            // method closure is only borrowed for this call, so the wrapper
+            // (and its closure/env graph) is released immediately afterwards.
+            // Empty-extra Direct and Dict-param dispatches remain borrowed.
+            let owns_dict_wrapper = extra_dicts.len() > 0
+            let dict_ptr = resolve_dispatch_dict(ctx,
+                TraitDispatch::Direct { dict: dict, extra_dicts: extra_dicts },
+                some("Eq"))
+            let eq_closure = load_dict_method(ctx, dict_ptr, 0)
+            let result = gen_closure_call(ctx, eq_closure, [lhs, rhs])
             let raw = unbox_int(ctx, result)
-            // B-104 D4: the eq closure's Bool box is INTERNAL on the Neq path —
-            // unboxed then replaced by a fresh negated box.  Drop it (the shim /
-            // Ring impl returns an OWNED fresh box; same family as the
-            // while-cond post-unbox drop).  B-080: ring_drop early-returns for
-            // tagged scalars, so this is a harmless no-op — kept for correctness
-            // if the dispatch path ever returns a boxed value.
-            let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, raw,
+                LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "deq1"))
+            let drop_fn = get_or_declare_runtime_fn(
+                ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
             let drop_ty = get_rt_fn_type(ctx, "ring_drop")
             discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [result], ""))
-            let one = LLVMConstInt(ctx.i64_type, 1, 0)
-            let neg = LLVMBuildSub(ctx.builder, one, raw, fresh_name(ctx, "neg"))
+            if owns_dict_wrapper {
+                discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [dict_ptr], ""))
+            }
+            cmp
+        },
+        TraitDispatch::Dict { param } => {
+            let dict_ptr = resolve_dispatch_dict(
+                ctx, TraitDispatch::Dict { param: param }, some("Eq"))
+            let eq_closure = load_dict_method(ctx, dict_ptr, 0)
+            let result = gen_closure_call(ctx, eq_closure, [lhs, rhs])
+            let raw = unbox_int(ctx, result)
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, raw,
+                LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "deq1"))
+            let drop_fn = get_or_declare_runtime_fn(
+                ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+            let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [result], ""))
+            cmp
+        },
+        TraitDispatch::Tuple { element_types, elements } =>
+            emit_tuple_eq_dispatch_cmp(
+                ctx, lhs, rhs, ty, element_types, elements),
+    }
+}
+
+// Eq dispatch: evaluate each operand once, then consume the HIR evidence plan.
+fn gen_eq_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> LLVMValueRef {
+    let operand_ty = hexpr_type(left)
+    let lhs = gen_llvm_expr(ctx, left)
+    let rhs = gen_llvm_expr(ctx, right)
+    let cmp = emit_eq_dispatch_cmp(ctx, lhs, rhs, operand_ty, dispatch)
+    let raw = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "eqext"))
+    match op {
+        BinOp::Neq => {
+            let neg = LLVMBuildSub(ctx.builder,
+                LLVMConstInt(ctx.i64_type, 1, 0), raw, fresh_name(ctx, "neq"))
             box_bool(ctx, neg)
         },
-        _ => result,
+        _ => box_bool(ctx, raw),
     }
 }
 
@@ -5136,6 +5270,11 @@ fn collect_dispatch_dict(ctx: LlvmCtx, dispatch: TraitDispatch?, params: List<HP
             TraitDispatch::Direct { dict, extra_dicts } => {
                 consider_capture_name(ctx, dict, none, params, captures)
                 for ed in extra_dicts { collect_dictref_names(ctx, ed, params, captures) }
+            },
+            TraitDispatch::Tuple { elements, .. } => {
+                for element in elements {
+                    collect_dispatch_dict(ctx, some(element), params, captures)
+                }
             },
             TraitDispatch::Builtin => {},
         },

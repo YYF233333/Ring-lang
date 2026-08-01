@@ -3,7 +3,7 @@ use types::{Type, Effect, EffectRow, StructField, RecordField,
 use ast::{Pattern, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HForInDestructure,
-    HLetDestructureBinding, ValueBindingKind,
+    HLetDestructureBinding, ValueBindingKind, TraitDispatch,
     hexpr_type, hexpr_effects, hexpr_span}
 use union_find::{UnionFind}
 use env::{apply_subst, apply_subst_row}
@@ -115,6 +115,29 @@ pub fn zonk_param(ctx: ZonkCtx, p: HParam) -> HParam {
     HParam { name: p.name, ty: zonk_type(ctx, p.ty), def_id: p.def_id, is_mutable: p.is_mutable }
 }
 
+fn zonk_dispatch(ctx: ZonkCtx, dispatch: TraitDispatch?) -> TraitDispatch? {
+    match dispatch {
+        some(TraitDispatch::Tuple { element_types, elements }) => {
+            let mut zonked_types: List<Type> = []
+            let mut zonked_elements: List<TraitDispatch> = []
+            for element_type in element_types {
+                zonked_types.push(zonk_type(ctx, element_type))
+            }
+            for element in elements {
+                match zonk_dispatch(ctx, some(element)) {
+                    some(zonked) => zonked_elements.push(zonked),
+                    none => panic("zonk: tuple dispatch element disappeared"),
+                }
+            }
+            some(TraitDispatch::Tuple {
+                element_types: zonked_types,
+                elements: zonked_elements
+            })
+        },
+        _ => dispatch,
+    }
+}
+
 pub fn zonk_block(ctx: ZonkCtx, block: HExpr) -> HExpr {
     match block {
         HExpr::Block { stmts, tail, ty, effects, span } => {
@@ -209,7 +232,7 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
         HExpr::DictConstruct { base_dict, trait_name, inner, .. } =>
             HExpr::DictConstruct { base_dict: base_dict, trait_name: trait_name, inner: inner, ty: z_ty, effects: z_eff, span: z_span },
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, .. } =>
-            HExpr::BinOp { op: op, left: zonk_expr(ctx, left), right: zonk_expr(ctx, right), eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch, ty: z_ty, effects: z_eff, span: z_span },
+            HExpr::BinOp { op: op, left: zonk_expr(ctx, left), right: zonk_expr(ctx, right), eq_dispatch: zonk_dispatch(ctx, eq_dispatch), ord_dispatch: zonk_dispatch(ctx, ord_dispatch), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::UnaryOp { op, operand, .. } =>
             HExpr::UnaryOp { op: op, operand: zonk_expr(ctx, operand), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::Call { callee, args, type_args, resolved_dicts, dict_dispatch, .. } =>

@@ -74,13 +74,6 @@ SHARED_POSITIVE_GAPS = {
         "both backends access-violate in the shared iterator/runtime path "
         "(B-163 Phase2 P2.1 probe 2026-07-27)"
     ),
-    "tests/cases/tuple_eq.ring": (
-        "both backends fail the same tuple equality assertion (audit #221)"
-    ),
-    "tests/cases/tuple_eq_struct.ring": (
-        "both backends fail the same structural tuple equality assertion "
-        "(audit #221)"
-    ),
 }
 
 # Positive cases whose `ring check` itself fails today.  Unlike the two maps

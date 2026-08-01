@@ -227,18 +227,6 @@ checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[
 发现者：Opus+DS
 
 
-### #221 tuple eq dispatch runtime crash [medium] [judgment] [doing]
-
-两个用例 runtime assertion 失败：`tuple_eq.ring`（"tuple eq same values"）、`tuple_eq_struct.ring`（"tuples with equal structs should be equal"）。tuple 的 `==` 派发在共享层有误。
-
-> **2026-07-12 差分证据（B-163 step 6 重评估）**：两用例在 C 后端**同构失败**（同 assertion）——缺陷在**共享层**（tuple `==` 派发），非 LLVM codegen。「LLVM 后端 codegen 问题」表述作废。
-
-> **2026-07-27 部分闭环**：`struct_match_pattern.ring` 的独立根因是 C/LLVM codegen 未检查 struct named-pattern 字段值，且 pattern/arm bindings 会污染后续分支；已由双后端字段递归检查、字段名映射和 lexical scope 恢复修复，并补 match / catch / if-let / nested / or-pattern 回归。该用例已移出本条。
-
-**SHARED_POSITIVE_GAPS**：`tests/cases/tuple_eq.ring`、`tests/cases/tuple_eq_struct.ring`。修好后移除。
-
-发现者：B-151 CI
-
 ### #257 verify_rc 对同名 local shadow 仍假定共享 alloca [medium] [judgment] [open]
 
 `verify_rc.ring` 的 shadow 检查仍假定同名 local 复用一个 alloca；当前 C/LLVM codegen 已为每个 lexical binding 分配独立存储并在离开 match / catch / if-let 分支时恢复外层名称。因此合法的 `let x = ...` 后再以 pattern binding shadow `x` 会被误报为 `uaf-shadow-mismatch` / `uaf-drop-borrow`，而双后端直接执行结果正确。
