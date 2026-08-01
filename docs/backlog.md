@@ -327,6 +327,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 **固定 probe matrix**：
 
 - `T: Show` + `fn(T) -> U with ?e` 的 callback 同时转发 dictionary 与 open effect tail；
+- `T: Iterable` 的 `T::Iter: Iterator` 嵌套 associated evidence，覆盖 `iter` / `next` dictionary、Item 一致性与跨模块转发；
 - default trait method 执行自定义 effect，default effect op 调用 trait method；
 - associated type 作为 effect op 的参数/返回值，含 owner-qualified 跨模块路径；
 - 外部创建 closure 进入 nested handler，覆盖 direct/indirect、泛型 HOF、递归/互递归与 re-export；
@@ -680,7 +681,7 @@ Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05
 
 Phase 1 完成；当前只做 parity/manual gate、LLVM 退役、dist-c 与 CI/bootstrap。清单见 plan，长期契约见 design §10.4。覆盖/gap/manual evidence 只看 parity matrix，不复制计数日志。
 
-先修 shared gap 并自动化 manual gate；C fixed point 已干净，剩余 LLVM 信号并入退役 review。LLVM 在完成前仍是 anchor/oracle，相关 audit 不提前删。顺序：parity/review → final tag → dist-c 固定点 → 删除 LLVM/旧 anchors → 恢复 CI。
+先修 shared gap 并自动化 manual gate；iterator 采用 inference-time 权威协议调用脱糖为普通 HIR，禁止双后端各自猜 evidence/RC。当前 concrete custom/builtin gap 在本项收口；抽象 `T: Iterable` 的嵌套 associated dictionary evidence 明确并入 B-169，不以 type-name/位置替换伪造支持。C fixed point 已干净，剩余 LLVM 信号并入退役 review。LLVM 在完成前仍是 anchor/oracle，相关 audit 不提前删。顺序：parity/review → final tag → dist-c 固定点 → 删除 LLVM/旧 anchors → 恢复 CI。
 
 **验收**：matrix 无 shared/未解释 gap；C 全套/self-host 固定；tag 可恢复；main 无 LLVM-C/addon/link/旧 dist；完成 C-only bookkeeping 后删除 plan 与本项。
 
