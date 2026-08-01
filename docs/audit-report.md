@@ -18,6 +18,8 @@
 
 > **2026-07-31 补充观测（B-107 merge 收官轮，merged 编译器）**：单轮 3 AV——`adversarial_dispatch_option_and_then`、`adversarial_effect_multi_delegate`、`generic_ord_dispatch`，全部 dict/dispatch 族聚集（B-107 动过 dict evidence 面），高于基线 ~1/轮但单轮样本不足定论；B-107 worktree 干净 ×3 的 AV 用例（effect/range/catch/reexport 族）无此聚集。#265 修复后的全量轮继续记录：若 dict 族聚集复现，优先用 ASan gating 跑该三用例。
 
+> **2026-08-01 takeover 补充观测（#266/#259 merged 编译器）**：聚合轮在 LLVM golden 的 `closure_capture_nonloop` 出现唯一一次无诊断 `0xC0000005`，随后同用例隔离 ×3 全绿；其余在外层 30 分钟限额前完成的 e2e / golden / RC / self-compile 前两轮累计 1338 pass / 7 contract skip，未见 dict 族聚集。信号与本条既有随机、复跑即过基线一致，原始失败保留，不以整轮重跑抹除。
+
 发现者：Repository Steward main 基线 ×3 定量
 
 ### #267 Unit-return effect op 的 arm 值在 perform 点必然泄漏（EffectOp 保守不 drop 家族）[low] [judgment] [open]
@@ -27,16 +29,6 @@
 **修复方向**：EffectOp 结果在 Unit 消费位补 drop（需与 handler evidence 生命周期协调）；或并入 #217 的统一临时值 drop 方案。回归：`handler_unit_op_arm_discard.ring` 已锁行为，泄漏侧待 RC sweep 覆盖（该 fixture 在 tests/cases/ 非 llvm/，不进 rc lane）。
 
 发现者：#265 独立 review
-
-### #266 expression merge 静默擦除冲突的 fail payload，使 catch 类型依赖源码顺序 [critical] [judgment] [doing]
-
-2026-08-01 takeover 复核确认：公开 effect 规范要求 `fail<T> ~ fail<U>` 时统一 `T/U`，且实现注释明确采用 single-fail-effect design；当前 `merge_effects` 却只对同名 custom effect 执行硬参数统一。两个分支分别产生 `fail<Str>` / `fail<Int>` 时，后一 payload 的统一错误被 best-effort 路径吞掉，随后 `row_merge` 按 kind 去重并静默删除它。
-
-仅交换分支顺序即可让同一显式 `with {fail<Str>}` 程序在“接受 / E0301”之间变化；无显式 effect 注解时，`catch` 绑定值也会随分支顺序被静态认成 `Str` 或 `Int`。这会让安全源码跨越错误的 payload 类型边界，属于类型健全性回归，不是契约空白。历史 #114 已要求合并 fail payload；本条曾在 `ce75122` 立案，后续删除时没有对应修复、证伪或 duplicate mapping，现恢复接管。
-
-**修复约束**：对同 kind `FailEffect × FailEffect` 恢复硬 `unify_effect_params` 与 E0301/E0302；保留 `mut<T>` 多实例并存语义和 #265。回归至少锁定两种分支顺序、同 payload / TypeVar 正例及 `mut_row_multi_instance.ring`。
-
-发现者：takeover root 复核 + 独立 skeptic
 
 ### #262 derived Hash/Eq 泛型嵌套字段每次调用现场构造/回收动态 wrapped dict [medium] [judgment] [open]
 
@@ -59,19 +51,6 @@
 2026-07-31 B-107 merge review（b973859）发现两处防御性静默，与公理④「失真必须响」相悖：① `emit_struct_hash_fn`（LLVM/C 同型）对 field name 查不到时 `if field_idx >= 0` 静默跳过该字段——「Eq 区分、hash 相同」的静默失真（同型旧模式在 Eq/Ord 也存在）；② enum hash 的 default 分支（未知 tag = 内存损坏时）两后端静默返回 `DERIVED_HASH_SEED` 而非 panic。**修复方向**：两处统一 fail-loud（panic）；顺带排查 Eq/Ord 同型位置。另记录：`map_set_for_each` golden 弱化为 order-independent 总长（Set 迭代序 unspecified 口径），跨后端一致性由 `derive_hash_set` hash 值 golden 兜底——已接受，无行动项。
 
 发现者：B-107 merge 独立 review
-
-### #259 inline mod 短类型别名泄漏使顶层显式注解发生 registration/check 身份分裂 [critical] [judgment] [doing]
-
-2026-07-29 B-107 HOF 门禁实锤：文件先声明 raw `extern type Item`，后有 inline mod re-export 普通 `origin::Item`，顶层 `keep_raw(value: Item) -> Item` 会先注册为 `(raw Item) -> raw Item`，最终却导出成 `(raw Item) -> origin::Item`。若调用方把 `ring_raw_alloc` 的无 RC header 指针传入该函数，HIR 与公开 scheme 对 nominal identity 的分歧可使 Perceus/codegen 对 raw 指针执行 `ring_dup` / `ring_drop`，存在越界 header 读写和内存破坏风险。
-
-首次污染链：`infer_register.ring::register_fn_common` 在 registration 阶段正确解析 raw/raw；`infer_decl.ring::check_mod_decl` 调用 `resolve_mod_uses` 后不恢复 inline mod 的短类型别名，令 `types.structs["Item"]` 指向普通 nominal；随后 `check_fn_decl` 二次解析显式参数/返回注解为 normal/normal。`rebind_fn_type` 对参数保留 registration skeleton，却直接用 check-time return 生成 `mapped_ret`，于是发布 raw/normal；`exports.ring` 只转发该已污染 scheme，并非首次污染点。
-
-**修复约束**：显式类型注解必须在同一 lexical type context 下绑定一次并保持 exact nominal identity，或让 inline mod 的短类型别名按 lexical scope 恢复。禁止只让 rebind return 保留 registration type：那会掩盖 scheme 分裂，但 HIR 参数、返回与函数体此前已按错误 normal identity 检查。验收至少覆盖 raw extern / 普通 struct 同叶、inline re-export 位于顶层函数前后、直接调用与一等函数值、C/LLVM/diff 以及 raw alloc/dealloc 路径的 RC 文本/运行检查。
-
-发现者：B-107 HOF implementation + independent review
-
-> **2026-07-31 B-107 Unit 3 merge 后注记**：Unit 3 的 delta journal frame 进出（value + 七类 type-like alias 恢复）与 `ModuleImplFact` 导出通道可能已修复本条的污染链；`inline_pub_use_namespaces` fixture 部分覆盖该场景但未含 raw extern type 同叶形态。下一 wave（C′ 主体，同在 resolver/frame 域）必须先按本条原始场景构造精确复现：已修则补回归 fixture 后关闭，未修则按修复约束实施。不得未验证即关闭。
-
 
 ## Runtime
 

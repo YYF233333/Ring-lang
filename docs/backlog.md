@@ -399,14 +399,14 @@ Unit 3 已抽出 `ResolvedNamespacePlan`；本 spec 自含。
 
 discovery 每 top/inline Fn best-effort 一次，只携带 AST/index、canonical import、owner/origin、Ident census 与 exact edges；所有 ctx state 丢弃。fresh authoritative 独立注册/derive/seed，按图每 Fn 一次，Test 延后；module frame 完整恢复全部 namespace/ctor/mut metadata。范围不扩到 ConstGetter、default body、Impl、外部 module 或 impl/mutual SCC。
 
-G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.default_value 进入 census/edge。验收覆盖 alias/re-export/default/HOF/shadow/pattern、check-count=1、layout/capability、W0001=0，并先复核 audit #259 原场景。
+G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.default_value 进入 census/edge。验收覆盖 alias/re-export/default/HOF/shadow/pattern、check-count=1、layout/capability、W0001=0。audit #259 原场景已在 `4f6f186` 确认由 Unit 3 delta journal 修复并补齐正负回归，finding 已关闭。
 
-### B-173 derive Hash 覆盖面扩展：Option / tuple / List 字段 [feature] [P2] [M] [judgment] [queued]
+### B-173 结构容器 Hash / Eq evidence 扩展：Option / tuple / List [feature] [P2] [M] [judgment] [queued]
 
-2026-07-31 B-107 merge review concern：`Option<T>`、tuple-as-key、`List<T>` 字段无 Hash evidence（`resolve_hash_field_action` 覆盖集不含；`resolve_dict_ref_for_type` 对 TupleType 走 builtin 名失败），fail-closed 正确（E0503 拒绝）但含这些字段的类型进不了 Map/Set。与 audit #221（tuple eq dispatch crash）同族。
+2026-07-31 B-107 merge review concern：`Option<T>`、tuple-as-key、`List<T>` 字段无 Hash evidence（`resolve_hash_field_action` 覆盖集不含；`resolve_dict_ref_for_type` 对 TupleType 走 builtin 名失败），fail-closed 正确（E0503 拒绝）但含这些字段的类型进不了 Map/Set。`4f6f186` 后续 wave 的结构化 tuple equality 将关闭 audit #221 的直接 `==` wrong-code；但 tuple 作为泛型 `T: Eq` 实参仍因缺少 `TupleType` DictRef 而被 E0503 拒绝，属于同一 capability gap。
 
-- **修复方向**：为三类内建结构提供结构化 Hash evidence，与 #221 的 tuple eq 统一结构分解处理
-- **验收**：三类字段的 struct/enum 进 Map/Set 正反用例；Float 嵌套仍拒绝；与 #221 修复共享 tuple 分解路径
+- **修复方向**：为三类内建结构提供结构化 Hash evidence，并为 tuple 提供可传入泛型 `T: Eq` 的结构化 Eq DictRef；复用直接 tuple equality 的结构分解路径
+- **验收**：三类字段的 struct/enum 进 Map/Set 正反用例；tuple 的泛型 Eq 正负例、manual element Eq 与嵌套结构；Float 嵌套仍拒绝；双后端与 RC 门一致
 ### B-133 UTF-8 字节串模型落地 [feature] [P3] [L] [judgment] [queued]
 
 真值为 design §1.7.1：默认 Str API 使用 UTF-8 byte 单位；code point/grapheme 用显式 API。统一 len/index/slice/iteration、literal、StringBuilder、FFI/std 边界与 fail-loud 诊断，保持 binary-safe/NUL ABI/RC；planning 时按 C-only main 定文件。
