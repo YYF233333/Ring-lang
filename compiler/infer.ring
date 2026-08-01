@@ -122,8 +122,7 @@ fn hstmt_contains_bounded_callable_value(ctx: InferCtx, stmt: HStmt) -> Bool {
         },
         HStmt::Break { .. } => false,
         HStmt::Continue { .. } => false,
-        HStmt::Drop { .. } => false,
-        HStmt::Dup { .. } => false
+        HStmt::Drop { .. } => false
     }
 }
 

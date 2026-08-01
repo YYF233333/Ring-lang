@@ -119,20 +119,7 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
                     eprintln("[rc-warn] Drop: variable '${name}' not found in named_values")
                 },
             }
-        },
-        HStmt::Dup { name, .. } => {
-            match ctx.named_values.get(name) {
-                some(var_ptr) => {
-                    let val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, fresh_name(ctx, "dup_val"))
-                    let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
-                    let dup_ty = get_rt_fn_type(ctx, "ring_dup")
-                    discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""))
-                },
-                none => {
-                    eprintln("[rc-warn] Dup: variable '${name}' not found in named_values")
-                },
-            }
-        },
+        }
     }
 }
 

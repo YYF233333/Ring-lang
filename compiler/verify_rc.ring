@@ -1226,17 +1226,7 @@ fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
         HStmt::Drop { name, span, .. } => {
             v_drop(name, span, ctx)
             false
-        },
-        HStmt::Dup { name, span, .. } => {
-            // Legacy statement-level dup (unused by the current pass): a read.
-            let idx = v_lookup(ctx, name)
-            if idx >= 0 {
-                if ctx.kinds[idx] == K_OWNED && ctx.states[idx] != S_LIVE {
-                    v_report(ctx, "uaf-use-after-drop", true, "Dup of '${name}' after drop/move", span)
-                }
-            }
-            false
-        },
+        }
     }
 }
 

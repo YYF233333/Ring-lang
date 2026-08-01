@@ -321,9 +321,8 @@ pub enum HStmt {
     LetDestructure { pattern: Pattern, bindings: List<HLetDestructureBinding>, init: HExpr, span: Span },
     IfLet { pattern: Pattern, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
 
-    // Perceus RC: explicit reference counting ops (inserted by RC pass for --target=llvm only)
-    Drop { name: Str, ty: Type, span: Span },
-    Dup { name: Str, ty: Type, span: Span }
+    // Perceus RC: explicit reference counting op (inserted by RC pass for --target=llvm only)
+    Drop { name: Str, ty: Type, span: Span }
 }
 
 pub struct HStructField {

@@ -335,7 +335,6 @@ fn al_stmt(s: HStmt) -> HStmt {
                 then_block: al_expr(then_block), else_block: new_else, span: span }
         },
         // RC ops are inserted by perceus (after this pass) — never present.
-        HStmt::Drop { name, ty, span } => HStmt::Drop { name: name, ty: ty, span: span },
-        HStmt::Dup { name, ty, span } => HStmt::Dup { name: name, ty: ty, span: span },
+        HStmt::Drop { name, ty, span } => HStmt::Drop { name: name, ty: ty, span: span }
     }
 }

@@ -946,7 +946,6 @@ fn check_moves_stmt(stmt: HStmt, mut consumed: Map<Str, Span>, drop_types: Set<S
                 none => {}
             }
         },
-        HStmt::Drop { .. } => {},
-        HStmt::Dup { .. } => {},
+        HStmt::Drop { .. } => {}
     }
 }
