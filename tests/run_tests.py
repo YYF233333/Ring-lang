@@ -1359,25 +1359,9 @@ class CProbeEvent:
 
 @dataclass(frozen=True)
 class CProbeProgram:
-    """The sole evaluated truth consumed by semantic and RC contracts."""
+    """The sole evaluated truth consumed by the exact body template."""
 
     events: Tuple[CProbeEvent, ...]
-    final_origins: Tuple[Tuple[str, str], ...]
-
-
-@dataclass(frozen=True)
-class CProbeCallContract:
-    callee: str
-    arg_roles: Tuple[str, ...]
-    result_role: str
-
-
-@dataclass(frozen=True)
-class CProbeContract:
-    calls: Tuple[CProbeCallContract, ...]
-    locals: Tuple[Tuple[str, str], ...]
-    return_role: str
-    rc: Tuple[Tuple[str, str], ...]
 
 
 C_PROBE_CALL_ARITIES = {
@@ -1387,37 +1371,85 @@ C_PROBE_CALL_ARITIES = {
 }
 C_PROBE_VALUE_ROOT = "parameter:r_value"
 C_PROBE_UNIT_ROOT = "constant:RING_UNIT"
-C_PROBE_CONTRACTS = {
-    "ring_structural_raw_identity": CProbeContract(
-        calls=(), locals=(), return_role="value", rc=()),
-    "ring_structural_owned_identity": CProbeContract(
-        calls=(), locals=(), return_role="value",
-        rc=(("ring_dup", "value"), ("ring_dup", "value"),
-            ("ring_drop", "value"))),
-    "ring_structural_raw_option": CProbeContract(
-        calls=(CProbeCallContract(
-            "ring_Option_some", ("value",), "option"),),
-        locals=(("r_wrapped", "option"),), return_role="unit", rc=()),
-    "ring_structural_owned_option": CProbeContract(
-        calls=(CProbeCallContract(
-            "ring_Option_some", ("value",), "option"),),
-        locals=(("r_wrapped", "option"),), return_role="unit",
-        rc=(("ring_dup", "value"), ("ring_drop", "option"))),
-    "ring_structural_raw_list": CProbeContract(
-        calls=(
-            CProbeCallContract("ring_list_new", (), "list"),
-            CProbeCallContract(
-                "ring_List_push", ("list", "value"), "push"),
-        ),
-        locals=(("r_values", "list"),), return_role="unit", rc=()),
-    "ring_structural_owned_list": CProbeContract(
-        calls=(
-            CProbeCallContract("ring_list_new", (), "list"),
-            CProbeCallContract(
-                "ring_List_push", ("list", "value"), "push"),
-        ),
-        locals=(("r_values", "list"),), return_role="unit",
-        rc=(("ring_drop", "list"),)),
+# Intentionally lock the complete alpha-normalized lowering.  Independent
+# semantic/RC summaries admitted use-after-drop reorderings in these probes.
+C_PROBE_TEMPLATES = {
+    "ring_structural_raw_identity": (
+        ("declare", "v0"),
+        ("declare", "v1"),
+        ("declare", "v2"),
+        ("alias", "v0", "$value"),
+        ("alias", "v1", "v0"),
+        ("alias", "v2", "v1"),
+        ("return", "v2"),
+    ),
+    "ring_structural_owned_identity": (
+        ("declare", "v0"),
+        ("declare", "v1"),
+        ("declare", "v2"),
+        ("declare", "v3"),
+        ("declare", "v4"),
+        ("alias", "v0", "$value"),
+        ("rc", "ring_dup", "v0"),
+        ("alias", "v1", "v0"),
+        ("alias", "v2", "v1"),
+        ("rc", "ring_dup", "v2"),
+        ("alias", "v3", "v2"),
+        ("rc", "ring_drop", "v1"),
+        ("alias", "v4", "v3"),
+        ("return", "v4"),
+    ),
+    "ring_structural_raw_option": (
+        ("declare", "v0"),
+        ("declare", "v1"),
+        ("declare", "v2"),
+        ("alias", "v0", "$value"),
+        ("call", "v1", "ring_Option_some", "v0"),
+        ("alias", "v2", "v1"),
+        ("return", "$unit"),
+    ),
+    "ring_structural_owned_option": (
+        ("declare", "v0"),
+        ("declare", "v1"),
+        ("declare", "v2"),
+        ("alias", "v0", "$value"),
+        ("rc", "ring_dup", "v0"),
+        ("call", "v1", "ring_Option_some", "v0"),
+        ("alias", "v2", "v1"),
+        ("rc", "ring_drop", "v2"),
+        ("return", "$unit"),
+    ),
+    "ring_structural_raw_list": (
+        ("declare", "v0"),
+        ("declare", "v1"),
+        ("declare", "v2"),
+        ("declare", "v3"),
+        ("declare", "v4"),
+        ("call", "v0", "ring_list_new"),
+        ("alias", "v1", "v0"),
+        ("alias", "v2", "$value"),
+        ("alias", "v3", "v1"),
+        ("call", "v4", "ring_List_push", "v3", "v2"),
+        ("return", "$unit"),
+    ),
+    "ring_structural_owned_list": (
+        ("declare", "v0"),
+        ("declare", "v1"),
+        ("declare", "v2"),
+        ("declare", "v3"),
+        ("declare", "v4"),
+        ("declare", "v5"),
+        ("declare", "v6"),
+        ("call", "v0", "ring_list_new"),
+        ("alias", "v1", "v0"),
+        ("alias", "v2", "$value"),
+        ("alias", "v3", "v1"),
+        ("call", "v4", "ring_List_push", "v3", "v2"),
+        ("alias", "v5", "$unit"),
+        ("rc", "ring_drop", "v1"),
+        ("alias", "v6", "v5"),
+        ("return", "v6"),
+    ),
 }
 
 
@@ -1632,77 +1664,93 @@ def evaluate_c_probe_statements(
 
     if errors:
         return None, errors
-    return CProbeProgram(
-        tuple(events), tuple(sorted(origins.items()))), []
+    return CProbeProgram(tuple(events)), []
 
 
-def c_probe_contract_errors(
+def canonical_c_probe_events(
+    symbol: str,
+    program: CProbeProgram,
+) -> Tuple[Tuple[Tuple[str, ...], ...], List[str]]:
+    """Alpha-normalize locals while preserving every statement and operand."""
+    errors: List[str] = []
+    locals_by_name: dict[str, str] = {}
+    normalized: List[Tuple[str, ...]] = []
+
+    def identifier(name: str, offset: int) -> str:
+        if name == "r_value":
+            return "$value"
+        if name == "RING_UNIT":
+            return "$unit"
+        local = locals_by_name.get(name)
+        if local is None:
+            errors.append(
+                f"{symbol}: cannot canonicalize identifier {name} at "
+                f"offset {offset}")
+            return f"$invalid:{name}"
+        return local
+
+    for event in program.events:
+        statement = event.statement
+        if statement.kind == "declare":
+            target = statement.target or ""
+            canonical = f"v{len(locals_by_name)}"
+            if target in locals_by_name:
+                errors.append(
+                    f"{symbol}: cannot canonicalize duplicate local {target}")
+            locals_by_name[target] = canonical
+            normalized.append(("declare", canonical))
+            continue
+
+        target = (
+            identifier(statement.target, statement.offset)
+            if statement.target is not None else None)
+        args = tuple(
+            identifier(arg, statement.offset) for arg in statement.args)
+        if statement.kind == "alias":
+            normalized.append(("alias", target or "$invalid", *args))
+        elif statement.kind == "call":
+            normalized.append((
+                "call", target or "$invalid", statement.callee or "", *args))
+        elif statement.kind == "rc":
+            normalized.append(("rc", statement.callee or "", *args))
+        elif statement.kind == "return":
+            normalized.append(("return", *args))
+        else:
+            errors.append(
+                f"{symbol}: cannot canonicalize event kind {statement.kind}")
+    return tuple(normalized), errors
+
+
+def c_probe_template_errors(
     symbol: str,
     program: CProbeProgram,
 ) -> List[str]:
-    """Check semantic and RC invariants against the same evaluated events."""
-    contract = C_PROBE_CONTRACTS.get(symbol)
-    if contract is None:
-        return [f"{symbol}: no finite-grammar probe contract"]
-    errors: List[str] = []
-    roles = {
-        "value": C_PROBE_VALUE_ROOT,
-        "unit": C_PROBE_UNIT_ROOT,
-    }
-    call_events = [
-        event for event in program.events
-        if event.statement.kind == "call"]
-    if len(call_events) != len(contract.calls):
-        errors.append(
-            f"{symbol}: semantic call event count {len(call_events)} != "
-            f"{len(contract.calls)}")
-    for event, expected in zip(call_events, contract.calls):
-        if event.statement.callee != expected.callee:
-            errors.append(
-                f"{symbol}: semantic call {event.statement.callee} != "
-                f"{expected.callee}")
-        expected_args = tuple(roles[role] for role in expected.arg_roles)
-        if event.arg_origins != expected_args:
-            errors.append(
-                f"{symbol}: {expected.callee} argument origins "
-                f"{event.arg_origins} != {expected_args}")
-        roles[expected.result_role] = event.result_origin or "invalid:call"
-
-    final_origins = dict(program.final_origins)
-    for local, role in contract.locals:
-        expected_origin = roles.get(role)
-        if final_origins.get(local) != expected_origin:
-            errors.append(
-                f"{symbol}: local {local} origin "
-                f"{final_origins.get(local)!r} != role {role} "
-                f"({expected_origin!r})")
-
-    return_events = [
-        event for event in program.events
-        if event.statement.kind == "return"]
-    if len(return_events) == 1:
-        actual_return = return_events[0].arg_origins[0]
-        expected_return = roles.get(contract.return_role)
-        if actual_return != expected_return:
-            errors.append(
-                f"{symbol}: return origin {actual_return!r} != role "
-                f"{contract.return_role} ({expected_return!r})")
-
-    rc_events = [
-        event for event in program.events if event.statement.kind == "rc"]
-    actual_rc = tuple(
-        (event.statement.callee or "", event.arg_origins[0])
-        for event in rc_events)
-    expected_rc = tuple(
-        (callee, roles[role]) for callee, role in contract.rc)
-    if actual_rc != expected_rc:
-        errors.append(
-            f"{symbol}: RC event sequence {actual_rc} != {expected_rc}")
-    return errors
+    """Match the complete alpha-normalized body, including exact ordering."""
+    expected = C_PROBE_TEMPLATES.get(symbol)
+    if expected is None:
+        return [f"{symbol}: no canonical probe template"]
+    actual, errors = canonical_c_probe_events(symbol, program)
+    if errors:
+        return errors
+    if actual == expected:
+        return []
+    mismatch = next(
+        (index for index, pair in enumerate(zip(actual, expected))
+         if pair[0] != pair[1]),
+        min(len(actual), len(expected)),
+    )
+    actual_event = actual[mismatch] if mismatch < len(actual) else "<end>"
+    expected_event = (
+        expected[mismatch] if mismatch < len(expected) else "<end>")
+    return [
+        f"{symbol}: normalized event template mismatch at {mismatch}: "
+        f"{actual_event!r} != {expected_event!r} "
+        f"(actual/expected events {len(actual)}/{len(expected)})"
+    ]
 
 
 def validate_c_probe_body(symbol: str, c_body: str) -> List[str]:
-    """Parse, source-order evaluate, and contract-check one probe body."""
+    """Parse, source-order evaluate, and template-check one probe body."""
     statements, parse_errors = parse_c_probe_statements(symbol, c_body)
     if parse_errors:
         return parse_errors
@@ -1712,7 +1760,7 @@ def validate_c_probe_body(symbol: str, c_body: str) -> List[str]:
         return evaluation_errors
     if program is None:
         return [f"{symbol}: finite-grammar evaluator produced no program"]
-    return c_probe_contract_errors(symbol, program)
+    return c_probe_template_errors(symbol, program)
 
 
 C_PROBE_MUTATION_MATRIX = (
@@ -1724,7 +1772,7 @@ void* t3; void* r_decoy;
 t1 = r_value; r_decoy = RING_UNIT; ring_dup(r_decoy);
 r_local = t1; t2 = r_local; ring_dup(r_decoy); r_scope = t2;
 ring_drop(r_decoy); t3 = r_scope; return t3;""",
-        "RC event sequence",
+        "normalized event template mismatch",
     ),
     (
         "option-wrong-rc-roots",
@@ -1733,7 +1781,7 @@ ring_drop(r_decoy); t3 = r_scope; return t3;""",
 t1 = r_value; r_decoy = RING_UNIT; ring_dup(r_decoy);
 t2 = ring_Option_some(t1); r_wrapped = t2;
 ring_drop(r_decoy); return RING_UNIT;""",
-        "RC event sequence",
+        "normalized event template mismatch",
     ),
     (
         "list-wrong-drop-root",
@@ -1741,14 +1789,24 @@ ring_drop(r_decoy); return RING_UNIT;""",
         """void* t1; void* r_values; void* t2; void* t3; void* t4;
 t1 = ring_list_new(); r_values = t1; t2 = r_value; t3 = r_values;
 t4 = ring_List_push(t3, t2); ring_drop(r_value); return RING_UNIT;""",
-        "RC event sequence",
+        "normalized event template mismatch",
+    ),
+    (
+        "list-use-after-drop",
+        "ring_structural_owned_list",
+        """void* t1; void* r_values; void* t2; void* t3; void* t4;
+void* r_scope; void* t5;
+t1 = ring_list_new(); r_values = t1; t2 = r_value; t3 = r_values;
+ring_drop(r_values); t4 = ring_List_push(t3, t2);
+r_scope = RING_UNIT; t5 = r_scope; return t5;""",
+        "normalized event template mismatch",
     ),
     (
         "identity-wrong-return-root",
         "ring_structural_raw_identity",
         """void* t1; void* t2;
 t1 = r_value; t2 = RING_UNIT; return t2;""",
-        "return origin",
+        "normalized event template mismatch",
     ),
     (
         "option-wrong-payload-root",
@@ -1756,7 +1814,7 @@ t1 = r_value; t2 = RING_UNIT; return t2;""",
         """void* t1; void* t2; void* r_wrapped; void* r_decoy;
 r_decoy = RING_UNIT; t1 = r_decoy;
 t2 = ring_Option_some(t1); r_wrapped = t2; return RING_UNIT;""",
-        "argument origins",
+        "normalized event template mismatch",
     ),
     (
         "option-wrong-result-local",
@@ -1764,14 +1822,22 @@ t2 = ring_Option_some(t1); r_wrapped = t2; return RING_UNIT;""",
         """void* t1; void* t2; void* r_wrapped;
 t1 = r_value; ring_dup(t1); t2 = ring_Option_some(t1);
 r_wrapped = t1; ring_drop(t2); return RING_UNIT;""",
-        "local r_wrapped origin",
+        "normalized event template mismatch",
+    ),
+    (
+        "option-use-after-drop",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped;
+t1 = r_value; ring_dup(t1); t2 = ring_Option_some(t1);
+ring_drop(t2); r_wrapped = t2; return RING_UNIT;""",
+        "normalized event template mismatch",
     ),
     (
         "option-missing-constructor",
         "ring_structural_raw_option",
         """void* t1; void* r_wrapped;
 t1 = r_value; r_wrapped = t1; return RING_UNIT;""",
-        "semantic call event count",
+        "normalized event template mismatch",
     ),
     (
         "list-wrong-push-receiver",
@@ -1779,14 +1845,14 @@ t1 = r_value; r_wrapped = t1; return RING_UNIT;""",
         """void* t1; void* r_values; void* t2; void* t3;
 t1 = ring_list_new(); r_values = t1; t2 = r_value;
 t3 = ring_List_push(t2, t2); return RING_UNIT;""",
-        "argument origins",
+        "normalized event template mismatch",
     ),
     (
         "list-missing-push",
         "ring_structural_raw_list",
         """void* t1; void* r_values;
 t1 = ring_list_new(); r_values = t1; return RING_UNIT;""",
-        "semantic call event count",
+        "normalized event template mismatch",
     ),
     (
         "return-before-dead-rc",
@@ -2116,7 +2182,7 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
         errors.append("extern-handle --no-c-lines artifact contains #line")
 
     function_expectations = {
-        **{symbol: None for symbol in C_PROBE_CONTRACTS},
+        **{symbol: None for symbol in C_PROBE_TEMPLATES},
         "ring_drop_StructuralHolder": (0, 1),
     }
     bodies: dict[str, str] = {}
@@ -2130,7 +2196,7 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
             count_error = exact_rc_error(symbol, body, expected)
             if count_error:
                 errors.append(count_error)
-        if symbol in C_PROBE_CONTRACTS:
+        if symbol in C_PROBE_TEMPLATES:
             errors.extend(validate_c_probe_body(symbol, body))
 
     holder_body = bodies.get("ring_drop_StructuralHolder")
