@@ -13,6 +13,7 @@ Usage:
     python tests/run_tests.py --suite rc             # RC verify sweep
     python tests/run_tests.py --suite self-compile   # self-compile x3
     python tests/run_tests.py --suite diff           # dual-backend diff (opt-in)
+    python tests/run_tests.py --suite structural     # generated-C structural gates
     python tests/run_tests.py --suite parity         # static evidence matrix
     python tests/run_tests.py --backend=c            # compile via C backend
     python tests/run_tests.py --filter substr        # only cases matching substr
@@ -48,6 +49,35 @@ RUNTIME_CPP = REPO / "ring_runtime.cpp"
 RUNTIME_O = REPO / "ring_runtime.o"
 DIST_LLVM_DIR = REPO / "compiler" / "dist-llvm"
 PARITY_MATRIX = REPO / "tests" / "parity_matrix.json"
+STRUCTURAL_DIR = CASES_DIR / "structural"
+
+# Generated-C evidence owned by the structural suite.  This map is also the
+# parity contract: every fixture below must exist, every structural .ring file
+# must appear exactly once, and the matching matrix row must list the same set.
+C_LINE_BUILD_CASES = (
+    (
+        "single-file",
+        "tests/cases/structural/c_line_single.ring",
+        ("tests/cases/structural/c_line_single.ring",),
+    ),
+    (
+        "minimal-project",
+        "tests/cases/structural/c_line_project/main.ring",
+        (
+            "tests/cases/structural/c_line_project/main.ring",
+            "tests/cases/structural/c_line_project/probe.ring",
+        ),
+    ),
+)
+EXTERN_RC_FIXTURE = "tests/cases/structural/extern_handle_rc.ring"
+STRUCTURAL_ORACLE_FIXTURES = {
+    "backend.c_line_directives": tuple(
+        fixture
+        for _, _, fixtures in C_LINE_BUILD_CASES
+        for fixture in fixtures
+    ),
+    "backend.extern_handle_rc_structural": (EXTERN_RC_FIXTURE,),
+}
 
 # Subdirectories within tests/cases/ that also contain negative test cases.
 EXTRA_NEG_DIRS = ["negative", "errors"]
@@ -376,13 +406,16 @@ def case_expects_panic(ring_file: Path, expected_raw: str) -> bool:
 def ring_build(ring_exe: str, ring_file: str, *,
                out_dir: Optional[str] = None,
                target: str = "llvm",
+               extra_args: Optional[List[str]] = None,
                timeout: int = TIMEOUT_COMPILE) -> subprocess.CompletedProcess:
-    """Run ring.exe build <file> --target=<target> [--out-dir=<dir>]."""
+    """Run ring.exe build with an explicit target and optional extra flags."""
     cmd = [ring_exe, "build", ring_file, f"--target={target}"]
     if out_dir:
         # Use --out-dir=<path> (equals-sign) form; ring.exe CLI parser does
         # not accept --out-dir <path> as two separate arguments.
         cmd.append(f"--out-dir={out_dir}")
+    if extra_args:
+        cmd.extend(extra_args)
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           cwd=str(REPO))
 
@@ -916,6 +949,684 @@ def run_diff(ring_exe: str, clang_path: str, collector: ResultCollector, *,
 
 
 # ---------------------------------------------------------------------------
+# Generated-C structural suite (B-163 Phase 2 manual-gate automation)
+# ---------------------------------------------------------------------------
+
+C_LINE_MARKER_RE = re.compile(
+    r"\blet\s+(c_line_marker_[a-z][a-z0-9_]*)\b")
+C_LINE_DIRECTIVE_RE = re.compile(
+    r'#line[ \t]+(?P<line>[0-9]+)[ \t]+"'
+    r'(?P<path>(?:\\.|[^"\\])*)"[ \t]*')
+
+
+def structural_fixture_paths() -> set[str]:
+    """Return every .ring fixture owned by the structural suite."""
+    if not STRUCTURAL_DIR.is_dir():
+        return set()
+    return {
+        repo_relative(path)
+        for path in STRUCTURAL_DIR.rglob("*.ring")
+        if path.is_file()
+    }
+
+
+def ring_line_markers(path: Path) -> Tuple[List[Tuple[str, int]], Optional[str]]:
+    """Find real-code line markers, ignoring lookalikes in strings/comments."""
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [], f"cannot read {display_path(path)}: {exc}"
+    masked = mask_ring_strings_and_comments(source)
+    markers = []
+    for match in C_LINE_MARKER_RE.finditer(masked):
+        line = masked.count("\n", 0, match.start(1)) + 1
+        markers.append((match.group(1), line))
+    return markers, None
+
+
+EXTERN_FIXTURE_CONTRACTS = (
+    (
+        "raw extern type",
+        r"\bextern\s+type\s+StructuralRawHandle\b",
+    ),
+    (
+        "raw/owned holder field order",
+        r"\bstruct\s+StructuralHolder\s*\{\s*"
+        r"raw\s*:\s*StructuralRawHandle\s*,\s*owned\s*:\s*Str\s*\}",
+    ),
+    (
+        "raw/owned enum variant order",
+        r"\benum\s+StructuralChoice\s*\{\s*"
+        r"Raw\s*\(\s*StructuralRawHandle\s*\)\s*,\s*"
+        r"Owned\s*\(\s*Str\s*\)\s*\}",
+    ),
+    (
+        "raw identity parameter",
+        r"\bfn\s+structural_raw_identity\s*\(\s*"
+        r"value\s*:\s*StructuralRawHandle\s*\)",
+    ),
+    (
+        "owned identity parameter",
+        r"\bfn\s+structural_owned_identity\s*\(\s*"
+        r"value\s*:\s*Str\s*\)",
+    ),
+    (
+        "raw Option parameter",
+        r"\bfn\s+structural_raw_option\s*\(\s*"
+        r"value\s*:\s*StructuralRawHandle\s*\)",
+    ),
+    (
+        "owned Option parameter",
+        r"\bfn\s+structural_owned_option\s*\(\s*"
+        r"value\s*:\s*Str\s*\)",
+    ),
+    (
+        "raw List element",
+        r"\blet\s+mut\s+values\s*:\s*"
+        r"List\s*<\s*StructuralRawHandle\s*>",
+    ),
+    (
+        "owned List element",
+        r"\blet\s+mut\s+values\s*:\s*List\s*<\s*Str\s*>",
+    ),
+    (
+        "non-executing main",
+        r"\bfn\s+main\s*\(\s*\)\s*\{\s*\}",
+    ),
+)
+
+
+def structural_fixture_integrity_errors() -> List[str]:
+    """Enforce fixture-to-oracle closure before either runner consumes it."""
+    errors: List[str] = []
+    actual = structural_fixture_paths()
+    configured = [
+        fixture
+        for fixtures in STRUCTURAL_ORACLE_FIXTURES.values()
+        for fixture in fixtures
+    ]
+    configured_set = set(configured)
+
+    duplicates = sorted({path for path in configured if configured.count(path) > 1})
+    if duplicates:
+        errors.append(
+            "structural fixtures mapped to multiple oracles: "
+            + ", ".join(duplicates))
+    missing = sorted(configured_set - actual)
+    orphan = sorted(actual - configured_set)
+    if missing:
+        errors.append("structural oracle fixtures missing: " + ", ".join(missing))
+    if orphan:
+        errors.append("structural fixtures without oracle: " + ", ".join(orphan))
+
+    marker_ids: dict[str, str] = {}
+    for case_name, entry, fixtures in C_LINE_BUILD_CASES:
+        if entry not in fixtures:
+            errors.append(f"{case_name}: build entry is absent from fixture bundle")
+        case_markers: List[Tuple[str, int, str]] = []
+        for fixture in fixtures:
+            path = REPO / fixture
+            markers, error = ring_line_markers(path)
+            if error:
+                errors.append(error)
+                continue
+            case_markers.extend(
+                (marker_id, line, fixture) for marker_id, line in markers)
+        if len(case_markers) != 1:
+            errors.append(
+                f"{case_name}: expected exactly one real-code c_line_marker_ "
+                f"declaration across its fixture bundle, found {len(case_markers)}")
+            continue
+        marker_id, line, fixture = case_markers[0]
+        if marker_id in marker_ids:
+            errors.append(
+                f"duplicate structural marker id {marker_id}: "
+                f"{marker_ids[marker_id]} and {fixture}")
+        marker_ids[marker_id] = fixture
+        if line < 1:
+            errors.append(f"{fixture}: marker {marker_id} has invalid line {line}")
+
+    extern_path = REPO / EXTERN_RC_FIXTURE
+    try:
+        extern_source = extern_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        errors.append(f"cannot read {EXTERN_RC_FIXTURE}: {exc}")
+    else:
+        masked = mask_ring_strings_and_comments(extern_source)
+        for description, pattern in EXTERN_FIXTURE_CONTRACTS:
+            count = len(re.findall(pattern, masked))
+            if count != 1:
+                errors.append(
+                    f"{EXTERN_RC_FIXTURE}: {description} contract matched "
+                    f"{count} times (expected 1)")
+
+    return errors
+
+
+def mask_c_strings_and_comments(source: str) -> str:
+    """Blank C strings, character literals, and comments, preserving offsets."""
+    masked: List[str] = []
+    state = "code"
+    index = 0
+    while index < len(source):
+        char = source[index]
+        next_char = source[index + 1] if index + 1 < len(source) else ""
+
+        if state == "code":
+            if char == "/" and next_char == "/":
+                masked.extend([" ", " "])
+                index += 2
+                state = "line-comment"
+            elif char == "/" and next_char == "*":
+                masked.extend([" ", " "])
+                index += 2
+                state = "block-comment"
+            elif char == '"':
+                masked.append(" ")
+                index += 1
+                state = "string"
+            elif char == "'":
+                masked.append(" ")
+                index += 1
+                state = "char"
+            else:
+                masked.append(char)
+                index += 1
+            continue
+
+        if state == "line-comment":
+            if char == "\n":
+                masked.append("\n")
+                state = "code"
+            else:
+                masked.append(" ")
+            index += 1
+            continue
+
+        if state == "block-comment":
+            if char == "*" and next_char == "/":
+                masked.extend([" ", " "])
+                index += 2
+                state = "code"
+            else:
+                masked.append("\n" if char == "\n" else " ")
+                index += 1
+            continue
+
+        # String/character literal. Escapes keep both bytes inside the literal.
+        quote = '"' if state == "string" else "'"
+        if char == "\\" and next_char:
+            masked.append(" ")
+            masked.append("\n" if next_char == "\n" else " ")
+            index += 2
+        elif char == quote:
+            masked.append(" ")
+            index += 1
+            state = "code"
+        else:
+            masked.append("\n" if char == "\n" else " ")
+            index += 1
+
+    return "".join(masked)
+
+
+def matching_delimiter(masked: str, open_index: int,
+                       opening: str, closing: str) -> int:
+    """Return the matching delimiter index in already-masked C text."""
+    if open_index >= len(masked) or masked[open_index] != opening:
+        raise ValueError(f"expected {opening!r} at offset {open_index}")
+    depth = 0
+    for index in range(open_index, len(masked)):
+        char = masked[index]
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return index
+    raise ValueError(f"unclosed {opening!r} at offset {open_index}")
+
+
+def extract_c_function_body(c_source: str, symbol: str) -> Tuple[Optional[str], Optional[str]]:
+    """Extract one exact generated C function body using its definition symbol."""
+    masked = mask_c_strings_and_comments(c_source)
+    pattern = re.compile(
+        rf"(?m)^[ \t]*(?:static[ \t]+)?void[ \t]*\*?[ \t]+"
+        rf"{re.escape(symbol)}[ \t]*\([^;{{}}\n]*\)[ \t]*\{{")
+    matches = list(pattern.finditer(masked))
+    if len(matches) != 1:
+        return None, f"generated function {symbol} found {len(matches)} times"
+    open_index = masked.rfind("{", matches[0].start(), matches[0].end())
+    try:
+        close_index = matching_delimiter(masked, open_index, "{", "}")
+    except ValueError as exc:
+        return None, f"generated function {symbol}: {exc}"
+    return c_source[open_index + 1:close_index], None
+
+
+def extract_c_switch_cases(
+    function_body: str,
+) -> Tuple[dict[str, str], Optional[str]]:
+    """Extract top-level bodies from the sole switch in a generated function."""
+    masked = mask_c_strings_and_comments(function_body)
+    switches = list(re.finditer(r"\bswitch\s*\(", masked))
+    if len(switches) != 1:
+        return {}, f"expected one switch, found {len(switches)}"
+    paren_open = masked.find("(", switches[0].start(), switches[0].end())
+    try:
+        paren_close = matching_delimiter(masked, paren_open, "(", ")")
+    except ValueError as exc:
+        return {}, str(exc)
+    brace_open = paren_close + 1
+    while brace_open < len(masked) and masked[brace_open].isspace():
+        brace_open += 1
+    if brace_open >= len(masked) or masked[brace_open] != "{":
+        return {}, "switch has no braced body"
+    try:
+        brace_close = matching_delimiter(masked, brace_open, "{", "}")
+    except ValueError as exc:
+        return {}, str(exc)
+
+    inner_masked = masked[brace_open + 1:brace_close]
+    inner_source = function_body[brace_open + 1:brace_close]
+    labels: List[Tuple[str, int, int]] = []
+    depth = 0
+    index = 0
+    label_re = re.compile(r"(?:case\s+(-?[0-9]+)\s*|default\s*):")
+    while index < len(inner_masked):
+        char = inner_masked[index]
+        if char == "{":
+            depth += 1
+            index += 1
+            continue
+        if char == "}":
+            depth -= 1
+            index += 1
+            continue
+        if depth == 0:
+            match = label_re.match(inner_masked, index)
+            if match:
+                label = match.group(1) if match.group(1) is not None else "default"
+                labels.append((label, match.start(), match.end()))
+                index = match.end()
+                continue
+        index += 1
+
+    if not labels:
+        return {}, "switch contains no top-level case labels"
+    cases: dict[str, str] = {}
+    for label_index, (label, start, body_start) in enumerate(labels):
+        if label in cases:
+            return {}, f"duplicate switch label {label}"
+        body_end = (
+            labels[label_index + 1][1]
+            if label_index + 1 < len(labels)
+            else len(inner_source)
+        )
+        cases[label] = inner_source[body_start:body_end]
+    return cases, None
+
+
+def c_rc_counts(c_body: str) -> Tuple[int, int]:
+    """Return exact (ring_dup, ring_drop) call counts in a local C body."""
+    masked = mask_c_strings_and_comments(c_body)
+    return (
+        len(re.findall(r"\bring_dup\s*\(", masked)),
+        len(re.findall(r"\bring_drop\s*\(", masked)),
+    )
+
+
+def decode_c_path(encoded: str) -> str:
+    """Decode the limited C escapes emitted in generated #line paths."""
+    result: List[str] = []
+    escapes = {
+        "\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t",
+    }
+    index = 0
+    while index < len(encoded):
+        char = encoded[index]
+        if char != "\\":
+            result.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(encoded) or encoded[index + 1] not in escapes:
+            raise ValueError(f"unsupported C escape in #line path: {encoded!r}")
+        result.append(escapes[encoded[index + 1]])
+        index += 2
+    return "".join(result)
+
+
+def parse_c_line_directives(
+    c_source: str,
+) -> Tuple[List[Tuple[int, int, str]], List[str]]:
+    """Parse every directive-like line and require canonical column-0 syntax."""
+    directives: List[Tuple[int, int, str]] = []
+    errors: List[str] = []
+    offset = 0
+    for line_number, line in enumerate(c_source.splitlines(keepends=True), 1):
+        text = line.rstrip("\r\n")
+        if re.match(r"^[ \t]*#[ \t]*line\b", text):
+            match = C_LINE_DIRECTIVE_RE.fullmatch(text)
+            if not match:
+                errors.append(
+                    f"generated C line {line_number} has non-canonical #line: "
+                    f"{text[:120]!r}")
+            else:
+                try:
+                    path = decode_c_path(match.group("path"))
+                except ValueError as exc:
+                    errors.append(f"generated C line {line_number}: {exc}")
+                else:
+                    directives.append((offset, int(match.group("line")), path))
+        offset += len(line)
+    return directives, errors
+
+
+def normalized_newline_bytes(path: Path) -> bytes:
+    """Read bytes while normalizing only platform line endings."""
+    return path.read_bytes().replace(b"\r\n", b"\n")
+
+
+def without_c_line_directives(data: bytes) -> bytes:
+    """Remove canonical column-0 #line records from normalized generated C."""
+    return b"".join(
+        line for line in data.splitlines(keepends=True)
+        if not line.startswith(b"#line ")
+    )
+
+
+def build_c_artifacts_fresh(
+    ring_exe: str,
+    entry_text: str,
+    temp_root: Path,
+    *,
+    no_c_lines: bool,
+) -> Tuple[Optional[Path], Optional[Path], Optional[str]]:
+    """Build into a newly-created empty dir and require fresh .c/.o outputs."""
+    mode = "off" if no_c_lines else "default"
+    out_dir = Path(tempfile.mkdtemp(prefix=f"{mode}_", dir=str(temp_root)))
+    if any(out_dir.iterdir()):
+        return None, None, f"fresh output directory was not empty: {out_dir}"
+    entry = (REPO / entry_text).resolve()
+    extra_args = ["--no-c-lines"] if no_c_lines else None
+    try:
+        result = ring_build(
+            ring_exe, str(entry), out_dir=str(out_dir), target="c",
+            extra_args=extra_args)
+    except subprocess.TimeoutExpired:
+        return None, None, f"{mode} C build timed out for {entry_text}"
+    if result.returncode != 0:
+        output = norm(result.stderr or result.stdout or "")[:500]
+        return None, None, (
+            f"{mode} C build failed (exit {result.returncode}) for "
+            f"{entry_text}: {output}")
+
+    expected_c = out_dir / f"{entry.stem}.c"
+    expected_o = out_dir / f"{entry.stem}.o"
+    actual_c = sorted(path.resolve() for path in out_dir.rglob("*.c"))
+    actual_o = sorted(path.resolve() for path in out_dir.rglob("*.o"))
+    if actual_c != [expected_c.resolve()] or actual_o != [expected_o.resolve()]:
+        return None, None, (
+            f"{mode} C build emitted unexpected artifacts for {entry_text}: "
+            f".c={len(actual_c)}, .o={len(actual_o)}")
+    if expected_c.stat().st_size == 0 or expected_o.stat().st_size == 0:
+        return None, None, f"{mode} C build emitted an empty artifact for {entry_text}"
+    return expected_c, expected_o, None
+
+
+def validate_line_directive_pair(
+    default_c: Path,
+    off_c: Path,
+    marker_path: Path,
+    marker_id: str,
+    marker_line: int,
+) -> List[str]:
+    """Validate mapping, global disablement, and byte-equivalence modulo lines."""
+    errors: List[str] = []
+    try:
+        default_bytes = normalized_newline_bytes(default_c)
+        off_bytes = normalized_newline_bytes(off_c)
+        default_source = default_bytes.decode("utf-8")
+        off_source = off_bytes.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read generated C: {exc}"]
+
+    directives, parse_errors = parse_c_line_directives(default_source)
+    errors.extend(parse_errors)
+    if not directives:
+        errors.append("default generated C contains no canonical #line directives")
+
+    # Every non-synthetic directive must name an absolute, existing source and
+    # a line inside that source. The marker below proves exact statement-level
+    # mapping, rather than accepting a merely in-range number.
+    source_line_counts: dict[str, int] = {}
+    for _, line, path_text in directives:
+        if path_text == "<perceus>":
+            if line != 0:
+                errors.append(f"synthetic <perceus> directive uses line {line}")
+            continue
+        source_path = Path(path_text)
+        if not source_path.is_absolute():
+            errors.append(f"#line path is not absolute: {path_text}")
+            continue
+        if path_text not in source_line_counts:
+            try:
+                source_line_counts[path_text] = len(
+                    source_path.read_text(encoding="utf-8").splitlines())
+            except (OSError, UnicodeError) as exc:
+                errors.append(f"#line source cannot be read: {path_text}: {exc}")
+                continue
+        if line < 1 or line > source_line_counts[path_text]:
+            errors.append(
+                f"#line {line} is outside source {path_text} "
+                f"(1..{source_line_counts[path_text]})")
+
+    off_directives, off_parse_errors = parse_c_line_directives(off_source)
+    errors.extend(off_parse_errors)
+    if off_directives or re.search(r"(?m)^[ \t]*#[ \t]*line\b", off_source):
+        errors.append("--no-c-lines generated C still contains a #line directive")
+
+    masked_c = mask_c_strings_and_comments(default_source)
+    assignment_re = re.compile(
+        rf"(?m)^[ \t]*r_{re.escape(marker_id)}[ \t]*=")
+    assignments = list(assignment_re.finditer(masked_c))
+    if len(assignments) != 1:
+        errors.append(
+            f"generated marker assignment r_{marker_id} found "
+            f"{len(assignments)} times")
+    else:
+        prior = [directive for directive in directives
+                 if directive[0] < assignments[0].start()]
+        if not prior:
+            errors.append(f"marker {marker_id} has no preceding #line directive")
+        else:
+            _, actual_line, actual_path = prior[-1]
+            expected_path = str(marker_path.resolve())
+            if actual_line != marker_line or actual_path != expected_path:
+                errors.append(
+                    f"marker {marker_id} maps to {actual_path}:{actual_line}, "
+                    f"expected {expected_path}:{marker_line}")
+
+    if without_c_line_directives(default_bytes) != off_bytes:
+        errors.append(
+            "default generated C after removing #line records differs from "
+            "--no-c-lines output")
+    return errors
+
+
+def run_c_line_oracle(
+    ring_exe: str,
+    temp_root: Path,
+    entry: str,
+    fixtures: Tuple[str, ...],
+) -> List[str]:
+    """Build one line-directive fixture in both modes and compare artifacts."""
+    markers: List[Tuple[Path, str, int]] = []
+    for fixture in fixtures:
+        path = REPO / fixture
+        found, error = ring_line_markers(path)
+        if error:
+            return [error]
+        markers.extend((path, marker_id, line) for marker_id, line in found)
+    if len(markers) != 1:
+        return [f"{entry}: expected one real-code marker, found {len(markers)}"]
+
+    default_c, _, error = build_c_artifacts_fresh(
+        ring_exe, entry, temp_root, no_c_lines=False)
+    if error:
+        return [error]
+    off_c, _, error = build_c_artifacts_fresh(
+        ring_exe, entry, temp_root, no_c_lines=True)
+    if error:
+        return [error]
+    marker_path, marker_id, marker_line = markers[0]
+    return validate_line_directive_pair(
+        default_c, off_c, marker_path, marker_id, marker_line)
+
+
+def exact_rc_error(symbol: str, body: str,
+                   expected: Tuple[int, int]) -> Optional[str]:
+    actual = c_rc_counts(body)
+    if actual != expected:
+        return (
+            f"{symbol}: expected ring_dup/ring_drop {expected[0]}/{expected[1]}, "
+            f"found {actual[0]}/{actual[1]}")
+    return None
+
+
+def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
+    """Inspect local generated-C bodies without executing any raw handle."""
+    errors: List[str] = []
+    c_path, _, error = build_c_artifacts_fresh(
+        ring_exe, EXTERN_RC_FIXTURE, temp_root, no_c_lines=True)
+    if error:
+        return [error]
+    try:
+        c_source = c_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read generated extern-handle C: {exc}"]
+    if re.search(r"(?m)^[ \t]*#[ \t]*line\b", c_source):
+        errors.append("extern-handle --no-c-lines artifact contains #line")
+
+    function_expectations = {
+        "ring_structural_raw_identity": (0, 0),
+        "ring_structural_owned_identity": (1, 1),
+        "ring_structural_raw_option": (0, 0),
+        "ring_structural_owned_option": (1, 1),
+        "ring_structural_raw_list": (0, 0),
+        "ring_structural_owned_list": (0, 1),
+        "ring_drop_StructuralHolder": (0, 1),
+    }
+    bodies: dict[str, str] = {}
+    for symbol, expected in function_expectations.items():
+        body, extract_error = extract_c_function_body(c_source, symbol)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        bodies[symbol] = body
+        count_error = exact_rc_error(symbol, body, expected)
+        if count_error:
+            errors.append(count_error)
+
+    holder_body = bodies.get("ring_drop_StructuralHolder")
+    if holder_body is not None:
+        masked_holder = mask_c_strings_and_comments(holder_body)
+        holder_slots = re.findall(
+            r"\bring_drop\s*\(\s*\(\(void\s*\*\s*\*\)p\)"
+            r"\s*\[\s*([0-9]+)\s*\]\s*\)",
+            masked_holder,
+        )
+        if holder_slots != ["1"]:
+            errors.append(
+                "ring_drop_StructuralHolder must drop exactly owned slot 1; "
+                f"found slots {holder_slots}")
+
+    choice_body, extract_error = extract_c_function_body(
+        c_source, "ring_drop_StructuralChoice")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        count_error = exact_rc_error(
+            "ring_drop_StructuralChoice", choice_body, (0, 1))
+        if count_error:
+            errors.append(count_error)
+        cases, case_error = extract_c_switch_cases(choice_body)
+        if case_error:
+            errors.append(f"ring_drop_StructuralChoice: {case_error}")
+        elif set(cases) != {"0", "1", "default"}:
+            errors.append(
+                "ring_drop_StructuralChoice labels differ from "
+                f"0/1/default: {sorted(cases)}")
+        else:
+            for label, expected in (("0", (0, 0)), ("1", (0, 1)),
+                                    ("default", (0, 0))):
+                count_error = exact_rc_error(
+                    f"ring_drop_StructuralChoice case {label}",
+                    cases[label], expected)
+                if count_error:
+                    errors.append(count_error)
+            masked_owned = mask_c_strings_and_comments(cases["1"])
+            owned_slots = re.findall(
+                r"\bring_drop\s*\(\s*\(\(void\s*\*\s*\*\)p\)"
+                r"\s*\[\s*([0-9]+)\s*\]\s*\)",
+                masked_owned,
+            )
+            if owned_slots != ["1"]:
+                errors.append(
+                    "StructuralChoice::Owned must drop exactly payload slot 1; "
+                    f"found slots {owned_slots}")
+
+    return errors
+
+
+def run_structural(ring_exe: str, collector: ResultCollector, *,
+                   name_filter: Optional[str] = None) -> None:
+    """Run generated-C source-map and extern-handle ownership oracles."""
+    suite = "structural"
+    integrity_errors = structural_fixture_integrity_errors()
+    if integrity_errors:
+        for index, error in enumerate(integrity_errors, 1):
+            collector.add(TestResult(
+                TestResult.FAIL, suite, f"fixture validation {index}", error))
+        return
+
+    jobs = []
+    for case_name, entry, fixtures in C_LINE_BUILD_CASES:
+        feature_id = "backend.c_line_directives"
+        label = f"{feature_id}/{case_name}"
+        if (
+            matches_filter(label, name_filter)
+            or any(matches_filter(path, name_filter) for path in fixtures)
+        ):
+            jobs.append((label, "line", entry, fixtures))
+    feature_id = "backend.extern_handle_rc_structural"
+    if (
+        matches_filter(feature_id, name_filter)
+        or matches_filter(EXTERN_RC_FIXTURE, name_filter)
+    ):
+        jobs.append((feature_id, "extern", EXTERN_RC_FIXTURE, (EXTERN_RC_FIXTURE,)))
+    if name_filter and not jobs:
+        collector.add(TestResult(
+            TestResult.FAIL, suite, "filter",
+            f"no structural oracle or fixture matched {name_filter!r}"))
+        return
+
+    with tempfile.TemporaryDirectory(prefix="ring_structural_") as tmpdir:
+        temp_root = Path(tmpdir)
+        for label, kind, entry, fixtures in jobs:
+            if kind == "line":
+                errors = run_c_line_oracle(
+                    ring_exe, temp_root, entry, fixtures)
+            else:
+                errors = run_extern_rc_oracle(ring_exe, temp_root)
+            if errors:
+                collector.add(TestResult(
+                    TestResult.FAIL, suite, label, "; ".join(errors)))
+            else:
+                collector.add(TestResult(TestResult.PASS, suite, label))
+
+
+# ---------------------------------------------------------------------------
 # Parity evidence matrix suite
 # ---------------------------------------------------------------------------
 
@@ -925,10 +1636,10 @@ PARITY_LANES = {
     "llvm-golden", "c-golden", "llvm-diff",
     "native-llvm", "native-c", "native-diff",
     "module-llvm", "module-c", "module-diff",
-    "check", "self-compile-c", "manual-source",
+    "check", "self-compile-c", "c-structural", "manual-source",
 }
 POSITIVE_PARITY_LANES = PARITY_LANES - {
-    "check", "self-compile-c", "manual-source",
+    "check", "self-compile-c", "c-structural", "manual-source",
 }
 PARITY_GAP_TABLES = {
     "llvm-backend": LLVM_BACKEND_GAPS,
@@ -960,6 +1671,7 @@ def parity_lane_members() -> dict[str, set[str]]:
     native = {repo_relative(path) for path in native_paths}
     modules = {repo_relative(path) for path in module_paths}
     checks = {repo_relative(path) for path in check_paths + module_check_paths}
+    structural = structural_fixture_paths()
 
     return {
         "e2e-llvm": e2e,
@@ -976,6 +1688,7 @@ def parity_lane_members() -> dict[str, set[str]]:
         "module-diff": modules,
         "check": checks,
         "self-compile-c": {"compiler/main.ring"},
+        "c-structural": structural,
     }
 
 
@@ -1165,6 +1878,7 @@ def expected_covered_lanes(
 ) -> Optional[set[str]]:
     """Return the complete executable bundle required for covered evidence."""
     bundles = [
+        ("c-structural", {"c-structural"}),
         ("llvm-golden", {"llvm-golden", "c-golden", "llvm-diff"}),
         ("e2e-llvm", {"e2e-llvm", "e2e-c", "e2e-diff"}),
         ("native-llvm", {"native-llvm", "native-c", "native-diff"}),
@@ -1204,6 +1918,7 @@ def validate_parity_matrix(
         return [], errors + ["features must be a list"]
 
     members = parity_lane_members()
+    errors.extend(structural_fixture_integrity_errors())
     if not C_BACKEND_SUPPORTS_MODULES:
         errors.append(
             "C project/module lanes are disabled but matrix evidence requires them"
@@ -1363,14 +2078,16 @@ def validate_parity_matrix(
                 if (
                     feature_id.startswith(
                         ("HExpr.", "HStmt.", "HDecl.", "Pattern."))
-                    and required_bundle in ({"check"}, {"self-compile-c"})
+                    and required_bundle in (
+                        {"check"}, {"self-compile-c"}, {"c-structural"})
                 ):
                     errors.append(
                         f"{label}: HIR/Pattern covered evidence requires a "
                         "dual-backend executable bundle"
                     )
                 if (
-                    required_bundle in ({"check"}, {"self-compile-c"})
+                    required_bundle in (
+                        {"check"}, {"self-compile-c"}, {"c-structural"})
                     and not feature_id.startswith("backend.")
                 ):
                     errors.append(
@@ -1388,7 +2105,7 @@ def validate_parity_matrix(
                     continue
                 if lane == "check":
                     companion = evidence_path.with_suffix(".error")
-                elif lane == "self-compile-c":
+                elif lane in {"self-compile-c", "c-structural"}:
                     companion = None
                 else:
                     companion = evidence_path.with_suffix(".expected")
@@ -1444,6 +2161,57 @@ def validate_parity_matrix(
             errors.append(f"{label}: gap_scope is only valid for known-gap")
 
         valid_rows.append(row)
+
+    # Structural fixtures and matrix rows form a closed two-way contract. A
+    # newly added fixture, a deleted dependency, or an unrelated row claiming
+    # this lane must all fail parity validation instead of silently weakening
+    # the generated-C oracle.
+    expected_structural = {
+        feature_id: set(fixtures)
+        for feature_id, fixtures in STRUCTURAL_ORACLE_FIXTURES.items()
+    }
+    actual_structural: dict[str, set[str]] = {}
+    structural_paths = structural_fixture_paths()
+    for row in valid_rows:
+        feature_id = row.get("feature_id")
+        evidence = row.get("evidence")
+        lanes = row.get("lane")
+        if not isinstance(evidence, list) or not isinstance(lanes, list):
+            continue
+        evidence_set = set(evidence)
+        if "c-structural" in lanes:
+            if row.get("status") != "covered":
+                errors.append(
+                    f"{feature_id}: c-structural evidence must be covered")
+            actual_structural[feature_id] = evidence_set
+        elif evidence_set & structural_paths:
+            errors.append(
+                f"{feature_id}: structural fixture evidence requires the "
+                "c-structural lane")
+
+    missing_features = sorted(set(expected_structural) - set(actual_structural))
+    extra_features = sorted(set(actual_structural) - set(expected_structural))
+    if missing_features:
+        errors.append(
+            "c-structural oracle rows missing from matrix: "
+            + ", ".join(missing_features))
+    if extra_features:
+        errors.append(
+            "orphan c-structural matrix rows: " + ", ".join(extra_features))
+    for feature_id in sorted(set(expected_structural) & set(actual_structural)):
+        if actual_structural[feature_id] != expected_structural[feature_id]:
+            missing_evidence = sorted(
+                expected_structural[feature_id] - actual_structural[feature_id])
+            orphan_evidence = sorted(
+                actual_structural[feature_id] - expected_structural[feature_id])
+            details = []
+            if missing_evidence:
+                details.append("missing " + ", ".join(missing_evidence))
+            if orphan_evidence:
+                details.append("orphan " + ", ".join(orphan_evidence))
+            errors.append(
+                f"{feature_id}: fixture/matrix evidence mismatch "
+                f"({'; '.join(details)})")
 
     # Every runner gap is present exactly once, and the matrix has no orphan gap.
     for scope, table in valid_gap_tables.items():
@@ -1690,7 +2458,9 @@ def print_summary(collector: ResultCollector) -> None:
     print("=== Summary ===")
     summary = collector.summary()
 
-    for suite_name in ["e2e", "llvm", "diff", "rc", "self-compile", "parity"]:
+    for suite_name in [
+        "e2e", "llvm", "diff", "rc", "self-compile", "structural", "parity",
+    ]:
         if suite_name not in summary:
             continue
         s = summary[suite_name]
@@ -1716,7 +2486,9 @@ def main() -> int:
         description="Ring-lang Python test runner (B-151 P2)")
     parser.add_argument(
         "--suite",
-        choices=["e2e", "llvm", "rc", "self-compile", "diff", "parity"],
+        choices=[
+            "e2e", "llvm", "rc", "self-compile", "diff", "structural", "parity",
+        ],
         action="append", dest="suites",
         help="Test suite(s) to run. Omit for all (diff is opt-in only).")
     parser.add_argument(
@@ -1735,7 +2507,9 @@ def main() -> int:
     warn_if_stale_root_exe()
 
     # diff is opt-in: never part of the default all-suites run.
-    suites = args.suites or ["e2e", "llvm", "rc", "self-compile", "parity"]
+    suites = args.suites or [
+        "e2e", "llvm", "rc", "self-compile", "structural", "parity",
+    ]
 
     if args.update_golden and args.backend != "llvm":
         # Golden snapshots are the oracle; only the LLVM backend may write them.
@@ -1744,10 +2518,11 @@ def main() -> int:
 
     # --- Tool discovery ---
     needs_ring = any(
-        suite in suites for suite in ["e2e", "llvm", "diff", "rc", "self-compile"]
+        suite in suites
+        for suite in ["e2e", "llvm", "diff", "rc", "self-compile", "structural"]
     )
     needs_clang = (
-        any(s in suites for s in ["e2e", "llvm", "diff"])
+        any(s in suites for s in ["e2e", "llvm", "diff", "structural"])
         or ("self-compile" in suites and args.backend == "c")
     )
     clang_path = find_clang() if needs_clang else None
@@ -1802,6 +2577,9 @@ def main() -> int:
     if "self-compile" in suites:
         run_self_compile(ring_exe, collector, backend=args.backend,
                          name_filter=args.name_filter)
+
+    if "structural" in suites:
+        run_structural(ring_exe, collector, name_filter=args.name_filter)
 
     if "parity" in suites:
         run_parity(collector, name_filter=args.name_filter)
