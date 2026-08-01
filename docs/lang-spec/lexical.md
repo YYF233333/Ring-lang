@@ -23,14 +23,14 @@ foo(x, y) // 一个表达式：函数调用
 
 ## 关键字
 
-以下 37 个标识符是保留关键字：
+以下 36 个标识符是保留关键字：
 
 ```
-fn     let    var    mut     const   struct  enum    match
-impl   effect handle with    if      else    catch   test
-return for    in     pub     where   true    false   trait
-try    while  break  continue loop   use     as      extern
-mod    super  sig    requires
+fn     let    mut    const   struct  enum    match   impl
+effect handle with   if      else    catch   test    return
+for    in     pub    where   true    false   trait   try
+while  break  continue loop  use     as      extern  mod
+super  sig    requires unsafe
 ```
 
 注意：`type`、`delegate`、`self` 不是关键字——它们是标识符，在特定上下文中被 Parser 特殊解析。`try` 是保留关键字，使用时产生编译错误。
@@ -44,8 +44,8 @@ mod    super  sig    requires
 | 算术 | `+`  `-`  `*`  `/`  `%` |
 | 比较 | `==`  `!=`  `<`  `>`  `<=`  `>=` |
 | 逻辑 | `&&`  `\|\|`  `!` |
-| 赋值 | `=`  `+=`  `-=` |
-| 管道 | `\|` |
+| 赋值 | `=`  `+=`  `-=`  `*=`  `/=`  `%=` |
+| Or-Pattern 分隔 | `\|` |
 | 范围 | `..`  `..=` |
 | 访问 | `.`  `::` |
 | 可选 | `?` |
@@ -123,10 +123,11 @@ StringLit    ::= '"' ⟨string-char⟩* '"'
 ### 原始字符串字面量
 
 ```
-RawStringLit ::= 'r#"' ⟨除 '"#' 外的任意字符⟩* '"#'
+RawStringLit ::= 'r"'  ⟨除 '"' 外的任意字符⟩* '"'
+               | 'r#"' ⟨除 '"#' 外的任意字符⟩* '"#'
 ```
 
-不处理转义。内容原样保留。
+两种形式都不处理转义或插值，并允许跨行。`r"..."` 不能包含双引号；需要双引号时使用单层 hash delimiter `r#"..."#`。当前语法不接受更多层 hash。
 
 ### 字符串插值
 

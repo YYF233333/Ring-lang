@@ -37,18 +37,15 @@ use parser::{Token, parse, Lexer}
 use parser
 ```
 
-导入模块作为命名空间。通过 `parser::Token` 访问。
-
-> **注意**：当前实现中，`use module_name` 将所有 pub 符号直接导入当前作用域，不支持命名空间访问（`module::symbol`）或 `as` 别名。命名空间导入为未来特性。
+当前实现把 `parser` 的所有 `pub` 符号直接导入当前作用域。该形式不会创建可通过 `parser::Token` 访问的模块值。
 
 ### 重命名导入
 
 ```ring
-use parser as p
 use parser::{Token as T}
 ```
 
-模块别名或符号别名。
+命名导入可以用 `as` 创建局部别名。整模块 `use parser as p` 当前不受支持。
 
 ### 嵌套路径
 
@@ -230,11 +227,8 @@ mod io_layer requires {io} {
 
 - 检查覆盖模块内所有顶层函数和 impl 方法（包括 delegate 生成的实现）
 - 纯函数（无 effect）在任何 `requires` 集合中都合法——开放的 effect row 尾部不会被误判
-- ~~`mut<T>` marker effect 也受 capability 限制~~——`mut<T>` 已移除（design.md §7.9）。`mod requires {}` 仍可限制其他 effect；mutation 控制改由参数推断 + 别名追踪（§7.4）承载
-
-### 命名空间化
-
-Inline `mod` 块的声明在编译时添加模块前缀。例如 `mod shapes { fn area() }` 中的 `area` 在 JS 中生成为 `shapes$area`。嵌套模块使用 `::` 分隔：`outer::inner::greet` 生成为 `outer$inner$greet`。
+- `mut<T>` marker effect 参与 capability 检查；`requires {}` 禁止修改参数或捕获状态等会让 mutation effect 逃逸的操作，局部 `let mut` 仍保持局部
+- `unsafe` 同时要求 `unsafe { ... }` discharge 与包含 `unsafe` 的模块许可
 
 ## `sig` 接口声明
 
@@ -272,43 +266,16 @@ sig Serializable {
 2. 拓扑排序（Kahn 算法）确定编译顺序
 3. 按序处理每个模块：
    a. Parse → AST
-   b. Check → HIR（注入依赖模块的 ModuleExports）
-   c. Codegen → JS（命名空间化）
-4. 拼接为单文件 JS bundle 输出
+   b. 在依赖模块的公开接口环境中 Check → HIR
+   c. 合并为保持模块身份的程序级 HIR
+4. 将程序级 HIR 交给选定 target lowering；目标文件表示与链接策略不属于模块语义
 ```
 
 ### 循环依赖
 
 循环依赖在拓扑排序阶段检测，报 E0704 错误。
 
-### 命名空间化
-
-多文件模式下，每个模块的顶层声明添加 `module$` 前缀：
-
-```
-parser.ring 中的 fn parse()  →  JS 中的 function parser$parse()
-parser.ring 中的 struct Token  →  JS 中的 class parser$Token
-```
-
-跨模块引用通过 `imports_map` 解析为正确的前缀名。
-
-内置类型（Option、List 等）和运行时函数不加前缀。`extern fn` 声明保留原始 JS 函数名。
-
-## ModuleExports
-
-每个编译完成的模块产生一个 `ModuleExports` 记录：
-
-```
-ModuleExports {
-  types: Map<string, TypeDef>           // struct/enum/extern type
-  values: Map<string, TypeScheme>       // 函数、常量
-  trait_impls: TraitImpl[]              // trait 实现
-  re_exports: Map<string, ...>          // pub use 再导出
-  extern_values: Set<string>            // extern fn（不加模块前缀）
-}
-```
-
-下游模块的 checker 通过 `inject_module_exports` 将这些信息注入类型环境。
+模块与声明的名义身份包含完整模块路径。不同模块中同名的 struct、enum、函数或 trait 不会因为叶名称相同而合并；具体目标符号编码由后端决定。
 
 ## 错误码
 
@@ -328,4 +295,4 @@ ModuleExports {
 - 不支持 first-class modules
 - 不支持 `mod : SigName` 一致性检查（`sig` 仅做类型注册，不验证模块是否满足签名）
 - 不支持跨文件相对路径（`super::`/`self::` 仅在 inline `mod` 块内可用）
-- 跨文件跳转定义和查找引用在 LSP 中尚未实现（hover 和类型检查已支持跨模块）
+- LSP 当前不可用，因此跨文件跳转、引用查找与 hover 尚无受支持入口

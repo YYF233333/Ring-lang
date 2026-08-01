@@ -35,7 +35,10 @@ DeclKind     ::= FnDecl
 ### 函数声明
 
 ```ebnf
-FnDecl       ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr ('with' '{' EffectExpr (',' EffectExpr)* '}')?)? Block
+FnDecl       ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? EffectAnnotation? Block
+
+EffectAnnotation ::= 'with' EffectSet
+EffectSet     ::= '{' (EffectExpr (',' EffectExpr)* ','?)? '}'
 
 Params       ::= (Param (',' Param)* ','?)?
 Param        ::= 'mut'? Ident (':' TypeExpr)?
@@ -79,7 +82,7 @@ ImplTarget   ::= Ident TypeArgs?
                | Ident 'for' Ident TypeArgs?
 
 ImplMember   ::= 'pub'? FnDecl
-               | 'pub'? 'extern' 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)?
+               | 'pub'? 'extern' 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? EffectAnnotation?
                | 'delegate' Ident ':' Ident (',' Ident)*
                | 'pub'? AssocTypeDecl
 ```
@@ -93,7 +96,7 @@ TraitDecl    ::= 'trait' Ident TypeParams? (':' TypeBound ('+' TypeBound)*)? '{'
 
 TraitMember  ::= TraitMethod | AssocTypeDecl
 
-TraitMethod  ::= 'pub'? 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? Block?
+TraitMethod  ::= 'pub'? 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? EffectAnnotation? Block?
 
 AssocTypeDecl ::= 'pub'? 'type' Ident (':' TypeBound ('+' TypeBound)*)? ('=' TypeExpr)?
 ```
@@ -108,12 +111,12 @@ EffectDecl   ::= 'effect' Ident TypeParams? '{' EffectOp* '}'
 EffectOp     ::= 'fn' Ident '(' Params ')' '->' TypeExpr (Block | ';' | ',')?
 ```
 
-当 `EffectOp` 带有 `Block` 时，该 block 作为默认 handler body。全部 op 都有默认 handler 的 effect 可省略 `handle...with`，编译器自动注入 evidence；显式 `handle` 可覆盖默认。
+当 `EffectOp` 带有 `Block` 时，该 block 作为默认 handler body。全部 op 都有默认 handler 的 effect 可省略 `handle...with`；显式 `handle` 可覆盖默认。
 
 ### Effect Alias 声明
 
 ```ebnf
-EffectAliasDecl ::= 'pub'? 'effect' 'alias' Ident TypeParams? '=' '{' EffectExpr (',' EffectExpr)* '}'
+EffectAliasDecl ::= 'effect' 'alias' Ident TypeParams? '=' EffectSet
 ```
 
 Effect alias 是 effect 集合的语法糖，如 `effect alias IO = {io, fail<Str>}`。支持泛型参数、循环检测和 `pub` 模块导出。
@@ -123,11 +126,11 @@ Effect alias 是 effect 集合的语法糖，如 `effect alias IO = {io, fail<St
 ```ebnf
 ExternDecl   ::= 'extern' ExternKind
 
-ExternKind   ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)?   (* extern 函数 *)
+ExternKind   ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? EffectAnnotation?  (* extern 函数 *)
                | 'type' Ident TypeParams?                                  (* opaque 类型 *)
 ```
 
-`extern fn` 声明一个 JavaScript 实现的函数。`extern type` 声明一个表示不透明的 opaque 类型。
+`extern fn` 声明由目标环境提供实现的函数，类型检查以声明签名为准。`extern type` 声明不公开结构的 opaque 类型；具体 ABI 与表示不属于语言语法规范。
 
 ### 类型别名
 
@@ -152,7 +155,7 @@ TestDecl     ::= 'test' StringLit Block
 ### Mod 块声明
 
 ```ebnf
-ModDecl      ::= 'pub'? 'mod' Ident ('requires' '{' EffectExpr (',' EffectExpr)* '}')? '{' UseDecl* Decl* '}'
+ModDecl      ::= 'mod' Ident ('requires' EffectSet)? '{' UseDecl* Decl* '}'
 ```
 
 内联模块块，支持嵌套（`mod a { mod b { ... } }`）。`requires` 子句限制模块内可用的 effect capability。模块内可包含 `use` 声明和任意声明。
@@ -162,7 +165,7 @@ ModDecl      ::= 'pub'? 'mod' Ident ('requires' '{' EffectExpr (',' EffectExpr)*
 ```ebnf
 SigDecl      ::= 'sig' Ident '{' SigMember* '}'
 
-SigMember    ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? ('with' '{' EffectExpr (',' EffectExpr)* '}')?
+SigMember    ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? EffectAnnotation?
 ```
 
 接口签名声明，定义模块的类型接口。
@@ -191,7 +194,7 @@ TypeExpr     ::= NamedType
 
 NamedType    ::= Ident TypeArgs? '?'?
 
-FnType       ::= 'fn' '(' TypeExprList? ')' '->' TypeExpr ('with' '{' EffectExpr (',' EffectExpr)* '}')?
+FnType       ::= 'fn' '(' TypeExprList? ')' '->' TypeExpr EffectAnnotation?
 
 TupleType    ::= '(' TypeExpr ',' TypeExprList ')'
 
@@ -221,17 +224,20 @@ TypeArgs     ::= '<' TypeExpr (',' TypeExpr)* '>'
 ### Effect 表达式
 
 ```ebnf
-EffectExpr   ::= Ident ('::' Ident)* TypeArgs?
+EffectExpr   ::= EffectName TypeArgs?
+
+EffectName   ::= Ident ('::' Ident)*
+               | 'mut'
+               | 'unsafe'
 ```
 
-Effect 表达式用于 effect 标注、effect alias 和 `requires` 子句中。支持限定路径（如 `mod::effect`）和类型参数（如 `fail<Str>`）。（`mut<T>` 已移除——design.md §7.9。）
+Effect 表达式用于 effect 标注、effect alias 和 `requires` 子句中。支持限定路径（如 `mod::effect`）和类型参数（如 `fail<Str>`、`mut<List<Int>>`）；裸 `mut` 表示 fresh marker 实例。语义见 [Effect 系统](effects.md)。
 
 ## 语句
 
 ```ebnf
 Stmt         ::= LetStmt
                | LetMutStmt
-               | VarStmt
                | LetDestructStmt
                | IfLetStmt
                | ReturnStmt
@@ -249,11 +255,10 @@ Stmt         ::= LetStmt
 ```ebnf
 LetStmt          ::= 'let' Ident (':' TypeExpr)? '=' Expr ';'?
 LetMutStmt       ::= 'let' 'mut' Ident (':' TypeExpr)? '=' Expr ';'?
-VarStmt          ::= 'var' Ident (':' TypeExpr)? '=' Expr ';'?
 LetDestructStmt  ::= 'let' TuplePattern '=' Expr ';'?
 ```
 
-`let` 绑定不可变（重赋值报 E0205 错误）。`let mut` 和 `var` 绑定可变（两种形式等价，`let mut` 是推荐写法）。
+`let` 绑定不可变（重赋值报 E0205 错误）。`let mut` 创建可变绑定。
 
 ### 控制流语句
 
@@ -278,11 +283,11 @@ ReturnStmt   ::= 'return' Expr? ';'?
 ### 赋值和表达式语句
 
 ```ebnf
-AssignStmt   ::= Expr ('=' | '+=' | '-=') Expr ';'?
+AssignStmt   ::= Expr ('=' | '+=' | '-=' | '*=' | '/=' | '%=') Expr ';'?
 ExprStmt     ::= Expr ';'?
 ```
 
-赋值目标必须是可变的（`var`/`let mut` 绑定、struct 字段等）。
+赋值目标必须是可变的（`let mut` 绑定、可变参数或其字段等）。
 
 ## 表达式
 
@@ -293,6 +298,14 @@ Block        ::= '{' Stmt* Expr? '}'
 ```
 
 块包含零个或多个语句，后跟可选的尾部表达式（无分号）。块的值是尾部表达式的值；无尾部表达式时为 `Unit`。
+
+`unsafe` discharge block 也是表达式：
+
+```ebnf
+UnsafeExpr   ::= 'unsafe' Block
+```
+
+它只消除 block 内显式产生的 `unsafe` effect，并受模块级 `requires {unsafe}` 许可约束。
 
 ### 基本表达式
 
@@ -310,6 +323,7 @@ PrimaryExpr  ::= IntLit | FloatLit | StringLit | RawStringLit
                | MatchExpr
                | HandleExpr
                | LambdaExpr
+               | UnsafeExpr
                | UnaryExpr
 
 QualifiedVariant ::= UpperIdent '::' Ident ArgList?
@@ -358,7 +372,9 @@ IfExpr       ::= 'if' Expr Block ('else' (IfExpr | Block))?
 ```ebnf
 MatchExpr    ::= 'match' Expr '{' MatchArm* '}'
 
-MatchArm     ::= Pattern Guard? '=>' Expr ','?
+MatchArm     ::= OrPattern Guard? '=>' Expr ','?
+
+OrPattern    ::= Pattern ('|' Pattern)*
 
 Guard        ::= 'if' Expr
 ```
@@ -437,7 +453,7 @@ UnaryExpr    ::= '-' Expr              (* 数值取反 *)
 ## 模式
 
 ```ebnf
-Pattern      ::= SinglePattern ('|' SinglePattern)*
+Pattern      ::= SinglePattern
 
 SinglePattern ::= '_'                                      (* 通配符 *)
                | IntLit | FloatLit | StringLit | BoolLit  (* 字面量 *)
@@ -455,7 +471,7 @@ PatList      ::= Pattern (',' Pattern)* ','?
 NamedPat     ::= Ident (':' Pattern)? ','?
 ```
 
-当 `Pattern` 包含 `|` 分隔的多个 `SinglePattern` 时，形成 Or-Pattern（如 `A | B => expr`）。Or-Pattern 支持 enum 变体、字面量、构造器和绑定变量，穷尽性检查正确处理。
+`|` 只在 match/catch arm 的最外层 `OrPattern` 中分隔备选模式（如 `A | B => expr`）；它不是通用二元或管道运算符。每个备选可以是 enum 变体、字面量、构造器或绑定模式，且必须绑定相同的变量集合。嵌套位置（如 tuple 或构造器字段）不会自行解析 `|`。
 
 与零字段 enum 变体同名的绑定模式会被重分类为构造器模式。命名构造器模式支持字段 punning（`{ x }` ≡ `{ x: x }`）和部分匹配（`..` 忽略其余字段）。
 

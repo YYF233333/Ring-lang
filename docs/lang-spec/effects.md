@@ -1,246 +1,188 @@
 # Effect 系统
 
-Ring 的 effect 系统基于 effect row（来自 Koka），通过 evidence passing 编译到 JavaScript。Effect 追踪函数可能执行的副作用，并由类型系统强制执行。
+Ring 用 effect row 描述计算可能发生的副作用。函数声明通常省略 effect 标注并由编译器推断；显式 `with { ... }` 是约束和文档，不改变函数体的实际语义。
 
 ## Effect 种类
 
-| Effect | 描述 | 操作 |
-|--------|------|------|
-| `io` | I/O 副作用 | `read(path: Str) -> Str`、`write(path: Str, data: Str) -> Unit` |
-| `fail<E>` | 可恢复错误 | `raise(error: E) -> Never` |
-| ~~`mut<T>`~~ | ~~可变性追踪~~ | **已移除**（2026-06-24 design.md §7.9）——mutation 由参数推断 `x: mut T` + 闭包捕获列表承载 |
-| 自定义 | 用户定义 effect | 用户定义的操作 |
+| Effect | 语义 |
+|--------|------|
+| `io` | 外部 I/O |
+| `fail<E>` | 携带 `E` 的可恢复、abortive failure |
+| `mut<T>` | 修改类型为 `T` 的非局部状态；无操作的 marker effect |
+| `unsafe` | 编译器无法验证的底层操作；需要显式 discharge |
+| 自定义 effect | 由 `effect` 声明的一组操作 |
 
-### 内置 Effect
+`io`、`fail`、`mut` 和 `unsafe` 是编译器识别的内建 effect。自定义 effect 通过其声明名称和类型参数标识。
 
-`io` 和 `fail` 是内置的——编译器直接理解它们的语义。自定义 effect 通过 `effect` 声明引入。（`mut<T>` marker effect 已移除——见 design.md §7.9。）
-
-### 自定义 Effect 声明
+## 自定义 Effect
 
 ```ring
 effect Logger {
     fn log(msg: Str) -> Unit;
 }
+
+fn write_log(msg: Str) -> Unit with {Logger} {
+    Logger.log(msg)
+}
 ```
 
-声明一个 effect 及其操作。操作签名定义参数和返回类型。
+操作签名规定参数、返回类型和调用时产生的 effect。操作通过 `EffectName.operation(...)` 调用。
 
-### Default Effect Handler
+### Default handler
 
-Effect 操作可以带有默认实现（body）。当一个 effect 的所有操作都有默认实现时，可以直接调用操作而无需 `handle...with`，编译器自动注入 evidence。显式 `handle...with` 可覆盖默认实现。
+操作可以带默认 body：
 
 ```ring
 effect Logger {
     fn log(msg: Str) -> Unit {
-        print(msg)   // 默认实现
+        print(msg)
     }
-}
-
-// 可以直接调用，无需 handle...with
-fn main() {
-    Logger.log("hello")
-}
-
-// 显式 handle 覆盖默认
-let result = handle {
-    Logger.log("hello")
-    42
-} with {
-    Logger.log(msg) => eprintln(msg),
 }
 ```
 
-AST 中 `EffectOpDecl` 的 `body: Expr?` 字段存储默认实现。`body` 为 `none` 时操作无默认 handler，必须通过 `handle...with` 提供。
+只有当一个 effect 的所有操作都有默认 body 时，调用方才能省略显式 `handle ... with`。显式 handler 总能覆盖默认实现。默认 body 本身的 effect 继续向调用方传播。
 
-### Effect Alias
+### Effect alias
 
-`effect alias` 定义 effect 集合的别名，简化常用 effect 组合的标注：
+`effect alias` 给一组 effect 命名：
 
 ```ring
 effect alias IO = {io, fail<Str>}
-
-// 等价于 fn read_config() -> Config with {io, fail<Str>}
-fn read_config() -> Config with IO {
-    // ...
-}
-```
-
-支持泛型参数：
-
-```ring
 effect alias Fallible<E> = {fail<E>}
 ```
 
-特性：
-- 编译器执行循环检测，禁止 alias 间的循环引用
-- 支持 `pub` 导出，跨模块使用
-- 展开发生在类型检查阶段，对 codegen 透明
+Alias 可泛型化、可 `pub` 导出，并在类型检查前递归展开；循环 alias 被拒绝。
 
-### ~~`mut<T>` Marker Effect~~（已移除）
+## `mut<T>` Marker Effect
 
-> **2026-06-24 移除**（design.md §7.9）。`mut<T>` marker effect 从 effect 系统移除。Mutation 可见性改由参数推断（lv2 `x: mut T`）+ 闭包捕获列表（lv2 `[mut counter]`）承载。Effect 行只追踪 io / fail / async 等计算效果。
->
-> 移除理由：(1) 参数位 mutation 与 `mut<T>` effect 信息完全重叠；(2) `mut<Int>` 类型级粒度太粗，用户想知道"修改了哪个变量"；(3) 闭包捕获列表比 effect 更精确。
+`mut<T>` 是当前 mutation 可见性机制的一部分，并保留在 effect row 中。
+
+- 修改函数自己的局部 `let mut` 绑定不会让 `mut` 逃逸到函数签名；
+- 通过 `mut` 参数修改调用方状态，或修改闭包捕获的外部可变状态，会注入相应的 `mut<T>`；
+- 调用要求可变 receiver 的方法仍需可变绑定；effect 不替代这项检查；
+- `mod requires { ... }` 会检查逃逸的 `mut<T>`，因此 `requires {}` 的纯模块不能修改外部状态。
+
+`mut<T>` 是**多实例 marker**。同一 row 可以同时包含 `mut<Int>` 与 `mut<Str>`，它们不得因为都叫 `mut` 而被统一成一个实例。裸标注 `with {mut}` 每次实例化时引入 fresh 状态类型，例如：
+
+```ring
+fn update_int(c: Cell<Int>) -> Unit with {mut<Int>} {
+    c.set(c.get() + 1)
+}
+
+fn update_generic(c: Cell<Int>) -> Unit with {mut} {
+    c.set(c.get() + 1)
+}
+```
+
+## `unsafe` Effect
+
+`unsafe` 标记编译器不能验证其内存安全前提的操作。它像其他 effect 一样进入函数签名并向调用方传播，但不能由普通 `handle` 或 `catch` 消除；唯一的 discharge 形式是词法 `unsafe { ... }` block。
+
+```ring
+mod raw_buffer requires {unsafe} {
+    fn first(ptr: Ptr<Int>) -> Int {
+        unsafe { ptr.read() }
+    }
+}
+```
+
+`unsafe { ... }` 只从 block 的 row 中移除显式 `unsafe`，其中产生的 `io`、`fail<E>`、`mut<T>` 或自定义 effect 仍会传播。模块必须以 `requires {unsafe}` 授权才能写 discharge block；该许可本身不消除 effect，也不证明 block 内的不变量。预加载的 raw pointer 操作见 [标准库](stdlib.md#ptrt-与-unsafe-原语)。
 
 ## Effect Row
 
-```
-EffectRow = { e₁, e₂, ..., eₙ }          (* 封闭 row *)
-EffectRow = { e₁, e₂, ..., eₙ, ..α }     (* 开放 row，带尾变量 α *)
+```text
+EffectRow = { e₁, e₂, ..., eₙ }          // 封闭 row
+EffectRow = { e₁, e₂, ..., eₙ, ..α }     // 开放 row
 ```
 
-- **封闭 row**：恰好包含列出的 effect
-- **开放 row**：至少包含列出的 effect，其余由尾变量 `α` 捕获
+- 封闭 row 恰好包含列出的 effect；
+- 开放 row 至少包含列出的 effect，其余由尾变量 `α` 捕获；
+- `{}` 表示纯计算。
 
-Effect row 附加在函数类型上。一个类型为 `(Int) -> Str / { io }` 的函数执行 `io` effect。类型为 `(Int) -> Int / {}` 的函数是纯函数。
+规范中的函数类型可写成 `(T₁, ..., Tₙ) -> R / ε`。源码中的函数类型用 `fn(T₁, ..., Tₙ) -> R with { ... }` 表示显式 row；函数类型省略 `with` 时具有开放尾，支持 effect 多态。
+
+### Identity 与合并
+
+合并两个 row 时：
+
+1. `io` 与 `io` 是同一实例；
+2. `unsafe` 与 `unsafe` 是同一实例；
+3. `fail<T>` 与 `fail<U>` 匹配时统一 payload 类型；
+4. 同名自定义 effect 只对应一份 evidence，其类型参数必须统一；
+5. `mut<T>` 按完整状态类型区分，可在同一 row 保留多个实例；
+6. 未匹配 effect 只能进入开放尾；封闭侧不接受额外 effect。
+
+两个不同的开放尾都带未匹配项时，row unification 创建共享 fresh 尾并分别保留对侧的未匹配项。该规则使 HOF 可以传播调用者尚未知晓的 effect，而不会把它们静默丢弃。
 
 ## Effect 传播
 
-Effect 通过表达式自动传播：
+Effect 按求值组合：
 
 | 表达式 | 结果 effect |
-|--------|------------|
-| 标识符 | `{}` |
-| 二元运算 | `ε₁ ∪ ε₂`（操作数的 effect 合并） |
-| 函数调用 | `εf ∪ ε_args`（被调函数 + 参数的 effect） |
-| 方法调用 | `ε_recv ∪ εm ∪ ε_args` |
-| 块 | 所有语句的 effect 顺序合并 |
-| Match | 所有分支 effect 的并集 |
-| If-else | 所有分支 effect 的并集 |
-| Lambda | 捕获在 FnType.effects 中（lambda 本身无 effect） |
+|--------|-------------|
+| 字面量、标识符 | `{}` |
+| 运算、参数列表、block | 已求值子表达式的 row 合并 |
+| 函数调用 | callee row 与参数求值 row 合并 |
+| 方法调用 | receiver、方法和参数 row 合并 |
+| `if` / `match` | 条件或 scrutinee 与所有分支 row 合并 |
+| Lambda | body row 存入函数类型；创建 lambda 本身是纯的 |
 
-### Effect 合并（Row Merge）
-
-```
-merge(ε₁, ε₂):
-  1. 按 identity 去重（io ~ io, custom(f) ~ custom(f)）
-  2. fail<T> ~ fail<U>：在 unification 中统一 T 和 U
-  3. 两边都有尾变量时按 row unification 求解
-```
+函数声明没有 `with` 时，编译器以函数体推断出的 row 为准。显式封闭 row 若漏掉函数体实际使用的 effect，编译失败。
 
 ## Effect 消除
 
-两种机制从 effect row 中移除 effect：
+### `catch`
 
-### `catch` — 错误处理
-
-`catch` 使用 match-arm 风格语法捕获 `fail` effect：
+`catch` 捕获左侧计算的 `fail<E>`，并用 match-arm 语法处理 payload：
 
 ```ring
-let x = risky() catch {
-    MyError(e) => handle(e),
-    OtherError(msg) => default_from(msg),
+let value = risky() catch {
+    Missing(name) => default_for(name),
+    Invalid(msg) => repair(msg),
 }
 ```
 
-`catch` 总是消除 `fail` effect——它是完整的捕获点。catch arms 经过穷尽性检查：如果 arms 未覆盖所有可能的错误类型，编译器报 E0601 错误。
+`catch` 是完整捕获点，arms 对 `E` 做穷尽性检查；未覆盖时报 E0601。要部分处理，需在 arm 中显式重新 `fail.raise`。被捕获计算的 `fail<E>` 被消除，但 handler arm 新产生或重新抛出的 failure 向外传播。
 
-```ring
-// 使用通配符处理所有错误
-let y = risky() catch {
-    SpecificError(e) => recover(e),
-    _ => default_value,
-}
-```
+`try` 是保留关键字，不是错误处理语法；应使用 `catch`。
 
-内部用模式匹配分派错误类型。需要部分处理时在 catch 内部 match + re-raise（显式）。
-
-> **注意：** `try` 是保留关键字，使用时产生编译错误（E0101），提示使用 `catch` 替代。
-
-### `handle...with` — Effect Handler
+### `handle ... with`
 
 ```ring
 let result = handle {
-    logger.log("hello")
+    Logger.log("hello")
     42
 } with {
     Logger.log(msg) => print(msg),
 }
 ```
 
-Handler 拦截 effect 操作。被处理的 effect 从 body 的 effect row 中移除。
-
-## Effect Row Unification
-
-```
-unify_effect_rows(ε₁, ε₂):
-
-第 1 步：应用当前替换
-  ε₁' = apply_to_effect_row(subst, ε₁)
-  ε₂' = apply_to_effect_row(subst, ε₂)
-
-第 2 步：按 identity 匹配 effect
-  对 ε₁' 中每个 effect e₁：
-    在 ε₂' 中查找匹配的 effect e₂（相同 kind 和自定义名称）
-    找到：统一参数，标记为已匹配
-    未找到：加入 a_unmatched
-
-  同理处理 ε₂' → b_unmatched
-
-第 3 步：验证未匹配 effect
-  如果 a_unmatched 非空且 ε₂' 无尾变量 → Error（纯上下文中不允许的 effect）
-  如果 b_unmatched 非空且 ε₁' 无尾变量 → Error
-
-第 4 步：求解尾变量
-  两边都有尾变量（α, β）：
-    α = β：无约束
-    α ≠ β，两边都有未匹配项：
-      创建 fresh γ
-      绑定 α ↦ { b_unmatched, ..γ }
-      绑定 β ↦ { a_unmatched, ..γ }
-    α ≠ β，一边无未匹配项：
-      将无未匹配项的尾绑定到另一个尾
-
-  一边或两边封闭：
-    有未匹配 effect 在封闭侧 → Error
-    无未匹配：将开放尾绑定到另一侧的尾
-```
-
-## HOF Effect 多态
-
-高阶函数（如 `List.map`、`List.filter`）的回调参数使用 effect row 变量：
-
-```
-List.map<T, U, ?ε>: (List<T>, (T) -> U / ?ε) -> List<U> / ?ε
-```
-
-effect 尾变量 `?ε` 允许回调具有任意 effect，这些 effect 自动传播到外层调用结果。
+Handler 在词法范围内提供所列操作。被显式处理的 effect label 从 body row 中消除；开放尾中未知的 effect 原样传播。Handler arm 自己产生的 effect 也向外传播。
 
 ## Handler 语义
 
-### Tail-resumptive（非 abort）
+### Tail-resumptive 操作
 
-```ring
-handle { io.read("input.txt") } with {
-    io.read(path) => "mocked-data",
-}
+非 abort 操作是 tail-resumptive：arm 的结果作为该操作调用的返回值，计算随后继续。Arm 结果必须与操作返回类型兼容；返回 `Unit` 的操作位于语句语义位置，arm 的值被丢弃。`Never` 作为 bottom 可用于任何返回位置。
+
+Ring 不支持显式 `resume`、post-resume 代码或 multi-shot continuation。
+
+### Abortive failure
+
+`fail.raise(error)` 不恢复原计算。捕获它的 arm 恰好执行一次，arm 结果替换整个 `handle` / `catch` 表达式。处理当前 failure 时，对应 handler 已失活，因此 arm 内再次 `fail.raise` 会逃向外层 handler。
+
+## HOF Effect 多态
+
+高阶函数的 callback row 使用开放尾。以 `List.map` 的规范形状为例：
+
+```text
+map : (List<T>, (T) -> U / ?ε) -> List<U> / ?ε
 ```
 
-Handler 的返回值作为操作的结果，计算继续。适用于 `io` 和自定义 effect。
+回调的 `io`、`fail`、`mut<T>` 或自定义 effect 都通过 `?ε` 传播到 HOF 调用；HOF 不得假装回调是纯函数。精确标准库声明以 [`std/*.ring`](../../std/) 为准。
 
-### Abort
+## 当前限制
 
-```ring
-handle { fail.raise("error"); 0 } with {
-    fail.raise(e) => -1,
-}
-```
-
-`fail.raise` 具有 abort 语义：handler 的返回值成为整个 `handle` 表达式的结果，原始计算被丢弃。
-
-### 限制
-
-- 不支持 post-resume handler（resume 后继续执行额外代码）
-- 需要 delimited continuation 的完整代数 effect 尚未实现
-
-## Evidence Passing 编译模型
-
-Effect 编译为 evidence 参数传递：
-
-1. 每个 effect 对应一个 evidence 参数 `__ring_ev_{effect_name}`
-2. Effect 操作编译为 evidence 方法调用：`io.read(x)` → `__ring_ev_io.read(x)`
-3. Handler 构造 evidence 对象并传递给 body
-4. 参数按 effect 名字母序排列
-5. 顶层 `main()` 自动注入真实 evidence（io → fs，fail → throw）
-
-详细翻译规则见 [JS 翻译](codegen.md)。
+- Handler 仅支持 tail-resumptive 操作和 abortive failure；
+- 不支持 post-resume 或多次 resume；
+- Full algebraic effects 不在当前实现范围内。
