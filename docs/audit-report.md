@@ -28,6 +28,16 @@
 
 发现者：#265 独立 review
 
+### #266 expression merge 静默擦除冲突的 fail payload，使 catch 类型依赖源码顺序 [critical] [judgment] [doing]
+
+2026-08-01 takeover 复核确认：公开 effect 规范要求 `fail<T> ~ fail<U>` 时统一 `T/U`，且实现注释明确采用 single-fail-effect design；当前 `merge_effects` 却只对同名 custom effect 执行硬参数统一。两个分支分别产生 `fail<Str>` / `fail<Int>` 时，后一 payload 的统一错误被 best-effort 路径吞掉，随后 `row_merge` 按 kind 去重并静默删除它。
+
+仅交换分支顺序即可让同一显式 `with {fail<Str>}` 程序在“接受 / E0301”之间变化；无显式 effect 注解时，`catch` 绑定值也会随分支顺序被静态认成 `Str` 或 `Int`。这会让安全源码跨越错误的 payload 类型边界，属于类型健全性回归，不是契约空白。历史 #114 已要求合并 fail payload；本条曾在 `ce75122` 立案，后续删除时没有对应修复、证伪或 duplicate mapping，现恢复接管。
+
+**修复约束**：对同 kind `FailEffect × FailEffect` 恢复硬 `unify_effect_params` 与 E0301/E0302；保留 `mut<T>` 多实例并存语义和 #265。回归至少锁定两种分支顺序、同 payload / TypeVar 正例及 `mut_row_multi_instance.ring`。
+
+发现者：takeover root 复核 + 独立 skeptic
+
 ### #262 derived Hash/Eq 泛型嵌套字段每次调用现场构造/回收动态 wrapped dict [medium] [judgment] [open]
 
 2026-07-31 B-107 merge review（b973859）发现：`Outer<T>` 的嵌套泛型字段（如 `Inner<Inner<T>>`）每次 `hash()`/`eq()` 都经 `resolve_derived_extra_dicts` 现场构造 dynamic wrapped dict（dict+closure+env 三次 alloc/method slot）再 drop（`emit_dict_hash_call`/`emit_c_derived_dict_call`，双后端同型）。Map/Set 探测是热路径——探测一次 = 每层泛型字段一轮 alloc/free。`dict_lower.ring:36-38` 注释自认只 memoise 全 static wrapper。功能正确（128 轮循环测试验证），纯 perf。
