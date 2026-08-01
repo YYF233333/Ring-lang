@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -1335,275 +1336,550 @@ def c_rc_counts(c_body: str) -> Tuple[int, int]:
     )
 
 
-def c_local_aliases(c_body: str) -> Tuple[dict[str, str], List[str]]:
-    """Collect single-assignment local aliases from one generated C body."""
-    masked = mask_c_strings_and_comments(c_body)
-    aliases: dict[str, str] = {}
+@dataclass(frozen=True)
+class CProbeStatement:
+    """One statement in the deliberately tiny generated-C probe grammar."""
+
+    kind: str
+    offset: int
+    text: str
+    target: Optional[str] = None
+    callee: Optional[str] = None
+    args: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CProbeEvent:
+    """A probe statement with identifier origins frozen at its execution point."""
+
+    statement: CProbeStatement
+    arg_origins: Tuple[str, ...] = ()
+    result_origin: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CProbeProgram:
+    """The sole evaluated truth consumed by semantic and RC contracts."""
+
+    events: Tuple[CProbeEvent, ...]
+    final_origins: Tuple[Tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class CProbeCallContract:
+    callee: str
+    arg_roles: Tuple[str, ...]
+    result_role: str
+
+
+@dataclass(frozen=True)
+class CProbeContract:
+    calls: Tuple[CProbeCallContract, ...]
+    locals: Tuple[Tuple[str, str], ...]
+    return_role: str
+    rc: Tuple[Tuple[str, str], ...]
+
+
+C_PROBE_CALL_ARITIES = {
+    "ring_Option_some": 1,
+    "ring_list_new": 0,
+    "ring_List_push": 2,
+}
+C_PROBE_VALUE_ROOT = "parameter:r_value"
+C_PROBE_UNIT_ROOT = "constant:RING_UNIT"
+C_PROBE_CONTRACTS = {
+    "ring_structural_raw_identity": CProbeContract(
+        calls=(), locals=(), return_role="value", rc=()),
+    "ring_structural_owned_identity": CProbeContract(
+        calls=(), locals=(), return_role="value",
+        rc=(("ring_dup", "value"), ("ring_dup", "value"),
+            ("ring_drop", "value"))),
+    "ring_structural_raw_option": CProbeContract(
+        calls=(CProbeCallContract(
+            "ring_Option_some", ("value",), "option"),),
+        locals=(("r_wrapped", "option"),), return_role="unit", rc=()),
+    "ring_structural_owned_option": CProbeContract(
+        calls=(CProbeCallContract(
+            "ring_Option_some", ("value",), "option"),),
+        locals=(("r_wrapped", "option"),), return_role="unit",
+        rc=(("ring_dup", "value"), ("ring_drop", "option"))),
+    "ring_structural_raw_list": CProbeContract(
+        calls=(
+            CProbeCallContract("ring_list_new", (), "list"),
+            CProbeCallContract(
+                "ring_List_push", ("list", "value"), "push"),
+        ),
+        locals=(("r_values", "list"),), return_role="unit", rc=()),
+    "ring_structural_owned_list": CProbeContract(
+        calls=(
+            CProbeCallContract("ring_list_new", (), "list"),
+            CProbeCallContract(
+                "ring_List_push", ("list", "value"), "push"),
+        ),
+        locals=(("r_values", "list"),), return_role="unit",
+        rc=(("ring_drop", "list"),)),
+}
+
+
+def c_probe_lexical_errors(symbol: str, c_body: str) -> List[str]:
+    """Fail closed before applying the six probes' finite statement grammar."""
     errors: List[str] = []
-    assignment_re = re.compile(
-        r"(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"
-        r"([^;\n]+)[ \t]*;")
-    assigned = set()
-    for match in assignment_re.finditer(masked):
-        target, rhs = match.groups()
-        if target in assigned:
-            errors.append(f"generated local {target} has multiple assignments")
-        assigned.add(target)
-        source = rhs.strip()
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", source):
-            aliases[target] = source
-    return aliases, errors
-
-
-def trace_c_alias(name: str, aliases: dict[str, str]) -> Tuple[str, Optional[str]]:
-    """Follow a generated C local alias chain to its unique origin."""
-    seen = set()
-    current = name
-    while current in aliases:
-        if current in seen:
-            return current, f"generated alias cycle reaches {current}"
-        seen.add(current)
-        current = aliases[current]
-    return current, None
-
-
-def c_assigned_calls(
-    c_body: str,
-    callee: str,
-) -> List[Tuple[str, List[str]]]:
-    """Return simple `target = callee(identifier, ...)` calls in one body."""
-    masked = mask_c_strings_and_comments(c_body)
-    call_re = re.compile(
-        rf"(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"
-        rf"{re.escape(callee)}[ \t]*\(([^;\n()]*)\)[ \t]*;")
-    calls = []
-    for match in call_re.finditer(masked):
-        args_text = match.group(2).strip()
-        args = [] if not args_text else [arg.strip() for arg in args_text.split(",")]
-        calls.append((match.group(1), args))
-    return calls
-
-
-def c_straight_line_errors(symbol: str, c_body: str) -> List[str]:
-    """Require the dedicated probe body to have one final reachable return."""
-    errors: List[str] = []
-    masked = mask_c_strings_and_comments(c_body)
+    for marker, description in (
+        ("//", "line comment"),
+        ("/*", "block comment"),
+        ("*/", "block-comment terminator"),
+    ):
+        if marker in c_body:
+            errors.append(f"{symbol}: {description} is outside finite grammar")
+    if '"' in c_body:
+        errors.append(f"{symbol}: string literal is outside finite grammar")
+    if "'" in c_body:
+        errors.append(f"{symbol}: character literal is outside finite grammar")
+    if re.search(r"\\\r?\n", c_body):
+        errors.append(
+            f"{symbol}: backslash-newline splice is outside finite grammar")
+    if re.search(r"(?m)^[ \t]*#", c_body):
+        errors.append(
+            f"{symbol}: preprocessor directive is outside finite grammar")
+    if "{" in c_body or "}" in c_body:
+        errors.append(f"{symbol}: nested block is outside finite grammar")
     controls = sorted(set(re.findall(
         r"\b(?:goto|if|switch|for|while|do|break|continue|case|default)\b",
-        masked)))
+        c_body)))
     if controls:
         errors.append(
-            f"{symbol}: unexpected control flow in straight-line probe: "
+            f"{symbol}: control flow is outside finite grammar: "
             f"{', '.join(controls)}")
-    if "{" in masked or "}" in masked:
-        errors.append(f"{symbol}: unexpected nested block in straight-line probe")
-    for operator in ("?", "&&", "||"):
-        if operator in masked:
-            errors.append(
-                f"{symbol}: unexpected conditional operator {operator!r} "
-                "in straight-line probe")
-    allowed_calls = {
-        "ring_dup", "ring_drop", "ring_Option_some",
-        "ring_list_new", "ring_List_push",
-    }
-    call_names = set(re.findall(
-        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", masked))
-    unexpected_calls = sorted(call_names - allowed_calls)
-    if unexpected_calls:
-        errors.append(
-            f"{symbol}: unexpected call(s) in straight-line probe: "
-            f"{', '.join(unexpected_calls)}")
-
-    return_tokens = list(re.finditer(r"\breturn\b", masked))
-    return_stmts = list(re.finditer(r"\breturn\b[^;{}]*;", masked))
-    if len(return_tokens) != 1 or len(return_stmts) != 1:
-        errors.append(
-            f"{symbol}: expected exactly one complete return statement, found "
-            f"{len(return_tokens)} return token(s) and "
-            f"{len(return_stmts)} statement(s)")
-    elif masked[return_stmts[0].end():].strip():
-        errors.append(
-            f"{symbol}: return is not the final executable statement")
     return errors
 
 
-def c_unary_call_operands(
+def parse_c_probe_statements(
+    symbol: str,
     c_body: str,
-    callee: str,
-) -> Tuple[List[Tuple[str, int]], List[str]]:
-    """Parse every local unary call and require one identifier operand."""
-    masked = mask_c_strings_and_comments(c_body)
-    operands: List[Tuple[str, int]] = []
-    errors: List[str] = []
-    for match in re.finditer(rf"\b{re.escape(callee)}\s*\(", masked):
-        open_index = masked.find("(", match.start(), match.end())
-        try:
-            close_index = matching_delimiter(masked, open_index, "(", ")")
-        except ValueError as exc:
-            errors.append(f"{callee}: {exc}")
+) -> Tuple[List[CProbeStatement], List[str]]:
+    """Fully consume a body using only the accepted straight-line grammar."""
+    errors = c_probe_lexical_errors(symbol, c_body)
+    if errors:
+        return [], errors
+
+    ident = r"[A-Za-z_][A-Za-z0-9_]*"
+    statements: List[CProbeStatement] = []
+    cursor = 0
+    for terminator in re.finditer(r";", c_body):
+        segment = c_body[cursor:terminator.start()]
+        leading = len(segment) - len(segment.lstrip())
+        offset = cursor + leading
+        text = segment.strip()
+        cursor = terminator.end()
+        if not text:
+            errors.append(f"{symbol}: empty statement is outside finite grammar")
             continue
-        operand = masked[open_index + 1:close_index].strip()
-        cursor = close_index + 1
-        while cursor < len(masked) and masked[cursor].isspace():
-            cursor += 1
-        if cursor >= len(masked) or masked[cursor] != ";":
-            errors.append(f"{callee}: call is not a standalone statement")
+
+        declaration = re.fullmatch(rf"void\s*\*\s*({ident})", text)
+        if declaration:
+            statements.append(CProbeStatement(
+                "declare", offset, text, target=declaration.group(1)))
             continue
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", operand) is None:
-            errors.append(
-                f"{callee}: expected one local identifier operand, got "
-                f"{operand[:80]!r}")
+
+        assigned_call = re.fullmatch(
+            rf"({ident})\s*=\s*({ident})\s*\(([^()]*)\)", text)
+        if assigned_call:
+            target, callee, args_text = assigned_call.groups()
+            args = (
+                tuple(arg.strip() for arg in args_text.split(","))
+                if args_text.strip() else ())
+            if callee not in C_PROBE_CALL_ARITIES:
+                errors.append(
+                    f"{symbol}: assigned call {callee} is outside finite grammar")
+                continue
+            if any(re.fullmatch(ident, arg) is None for arg in args):
+                errors.append(
+                    f"{symbol}: {callee} arguments are outside finite grammar")
+                continue
+            expected_arity = C_PROBE_CALL_ARITIES[callee]
+            if len(args) != expected_arity:
+                errors.append(
+                    f"{symbol}: {callee} arity {len(args)} != "
+                    f"{expected_arity}")
+                continue
+            statements.append(CProbeStatement(
+                "call", offset, text, target=target, callee=callee,
+                args=args))
             continue
-        operands.append((operand, match.start()))
-    return operands, errors
 
+        alias = re.fullmatch(rf"({ident})\s*=\s*({ident})", text)
+        if alias:
+            statements.append(CProbeStatement(
+                "alias", offset, text, target=alias.group(1),
+                args=(alias.group(2),)))
+            continue
 
-def generated_c_rc_operand_errors(symbol: str, c_body: str) -> List[str]:
-    """Require exact dup/drop object roots, not merely matching call counts."""
-    errors: List[str] = []
-    _, alias_errors = c_local_aliases(c_body)
-    errors.extend(f"{symbol}: {error}" for error in alias_errors)
+        standalone_call = re.fullmatch(
+            rf"({ident})\s*\(([^()]*)\)", text)
+        if standalone_call:
+            callee, args_text = standalone_call.groups()
+            args = (
+                tuple(arg.strip() for arg in args_text.split(","))
+                if args_text.strip() else ())
+            if callee not in {"ring_dup", "ring_drop"}:
+                errors.append(
+                    f"{symbol}: standalone call {callee} is outside "
+                    "finite grammar")
+                continue
+            if len(args) != 1 or re.fullmatch(ident, args[0]) is None:
+                errors.append(
+                    f"{symbol}: {callee} requires one identifier operand")
+                continue
+            statements.append(CProbeStatement(
+                "rc", offset, text, callee=callee, args=args))
+            continue
 
-    def roots(operands: List[Tuple[str, int]]) -> List[str]:
-        result = []
-        for operand, call_offset in operands:
-            # Only aliases established before the call may justify its object
-            # identity; a later assignment must not retroactively make an
-            # uninitialized/dead operand look correct.
-            aliases_before, scoped_errors = c_local_aliases(
-                c_body[:call_offset])
-            errors.extend(f"{symbol}: {error}" for error in scoped_errors)
-            root, trace_error = trace_c_alias(operand, aliases_before)
-            if trace_error:
-                errors.append(f"{symbol}: {trace_error}")
-            else:
-                result.append(root)
-        return result
+        returned = re.fullmatch(rf"return\s+({ident})", text)
+        if returned:
+            statements.append(CProbeStatement(
+                "return", offset, text, args=(returned.group(1),)))
+            continue
 
-    dup_operands, dup_parse_errors = c_unary_call_operands(c_body, "ring_dup")
-    drop_operands, drop_parse_errors = c_unary_call_operands(c_body, "ring_drop")
-    errors.extend(f"{symbol}: {error}" for error in dup_parse_errors)
-    errors.extend(f"{symbol}: {error}" for error in drop_parse_errors)
-    actual_dup_roots = roots(dup_operands)
-    actual_drop_roots = roots(drop_operands)
-
-    expected_dup_roots: List[str]
-    expected_drop_roots: List[str]
-    if symbol in {
-        "ring_structural_raw_identity",
-        "ring_structural_raw_option",
-        "ring_structural_raw_list",
-    }:
-        expected_dup_roots = []
-        expected_drop_roots = []
-    elif symbol == "ring_structural_owned_identity":
-        expected_dup_roots = ["r_value", "r_value"]
-        expected_drop_roots = ["r_value"]
-    elif symbol == "ring_structural_owned_option":
-        option_calls = c_assigned_calls(c_body, "ring_Option_some")
-        if len(option_calls) != 1:
-            errors.append(
-                f"{symbol}: cannot derive owned Option result root from "
-                f"{len(option_calls)} constructor calls")
-            return errors
-        expected_dup_roots = ["r_value"]
-        expected_drop_roots = [option_calls[0][0]]
-    elif symbol == "ring_structural_owned_list":
-        constructors = c_assigned_calls(c_body, "ring_list_new")
-        if len(constructors) != 1:
-            errors.append(
-                f"{symbol}: cannot derive owned List root from "
-                f"{len(constructors)} constructors")
-            return errors
-        expected_dup_roots = []
-        expected_drop_roots = [constructors[0][0]]
-    else:
-        return [f"{symbol}: no RC operand contract"]
-
-    if sorted(actual_dup_roots) != sorted(expected_dup_roots):
         errors.append(
-            f"{symbol}: ring_dup roots {actual_dup_roots} != "
-            f"{expected_dup_roots}")
-    if sorted(actual_drop_roots) != sorted(expected_drop_roots):
+            f"{symbol}: statement is outside finite grammar: {text[:100]!r}")
+
+    if c_body[cursor:].strip():
         errors.append(
-            f"{symbol}: ring_drop roots {actual_drop_roots} != "
-            f"{expected_drop_roots}")
+            f"{symbol}: unterminated text is outside finite grammar: "
+            f"{c_body[cursor:].strip()[:100]!r}")
+    if not statements and not errors:
+        errors.append(f"{symbol}: finite grammar parsed no statements")
+    return statements, errors
+
+
+def evaluate_c_probe_statements(
+    symbol: str,
+    statements: List[CProbeStatement],
+) -> Tuple[Optional[CProbeProgram], List[str]]:
+    """Freeze every identifier's origin once, in source execution order."""
+    errors: List[str] = []
+    declared = set()
+    assigned = set()
+    origins = {
+        "r_value": C_PROBE_VALUE_ROOT,
+        "RING_UNIT": C_PROBE_UNIT_ROOT,
+    }
+    events: List[CProbeEvent] = []
+    executable_seen = False
+
+    def resolve(name: str, offset: int) -> str:
+        if name in origins:
+            return origins[name]
+        if name in declared:
+            errors.append(
+                f"{symbol}: {name} used before initialization at offset "
+                f"{offset}")
+        else:
+            errors.append(
+                f"{symbol}: undeclared identifier {name} used at offset "
+                f"{offset}")
+        return f"invalid:{name}@{offset}"
+
+    def assign(target: str, origin: str, offset: int) -> None:
+        if target not in declared:
+            errors.append(
+                f"{symbol}: assignment target {target} was not declared at "
+                f"offset {offset}")
+        if target in assigned:
+            errors.append(
+                f"{symbol}: assignment target {target} assigned more than once")
+            return
+        assigned.add(target)
+        origins[target] = origin
+
+    for statement in statements:
+        if statement.kind == "declare":
+            target = statement.target or ""
+            if executable_seen:
+                errors.append(
+                    f"{symbol}: declaration {target} follows executable code")
+            if target in declared or target in origins:
+                errors.append(f"{symbol}: duplicate declaration {target}")
+            declared.add(target)
+            events.append(CProbeEvent(statement))
+            continue
+
+        executable_seen = True
+        arg_origins = tuple(
+            resolve(arg, statement.offset) for arg in statement.args)
+        if statement.kind == "alias":
+            result_origin = arg_origins[0]
+            assign(statement.target or "", result_origin, statement.offset)
+            events.append(CProbeEvent(
+                statement, arg_origins, result_origin))
+        elif statement.kind == "call":
+            result_origin = (
+                f"call:{statement.offset}:{statement.callee}")
+            assign(statement.target or "", result_origin, statement.offset)
+            events.append(CProbeEvent(
+                statement, arg_origins, result_origin))
+        else:
+            events.append(CProbeEvent(statement, arg_origins))
+
+    return_events = [
+        event for event in events if event.statement.kind == "return"]
+    if len(return_events) != 1:
+        errors.append(
+            f"{symbol}: expected exactly one return event, found "
+            f"{len(return_events)}")
+    elif not events or events[-1].statement.kind != "return":
+        errors.append(f"{symbol}: return event is not the final statement")
+
+    if errors:
+        return None, errors
+    return CProbeProgram(
+        tuple(events), tuple(sorted(origins.items()))), []
+
+
+def c_probe_contract_errors(
+    symbol: str,
+    program: CProbeProgram,
+) -> List[str]:
+    """Check semantic and RC invariants against the same evaluated events."""
+    contract = C_PROBE_CONTRACTS.get(symbol)
+    if contract is None:
+        return [f"{symbol}: no finite-grammar probe contract"]
+    errors: List[str] = []
+    roles = {
+        "value": C_PROBE_VALUE_ROOT,
+        "unit": C_PROBE_UNIT_ROOT,
+    }
+    call_events = [
+        event for event in program.events
+        if event.statement.kind == "call"]
+    if len(call_events) != len(contract.calls):
+        errors.append(
+            f"{symbol}: semantic call event count {len(call_events)} != "
+            f"{len(contract.calls)}")
+    for event, expected in zip(call_events, contract.calls):
+        if event.statement.callee != expected.callee:
+            errors.append(
+                f"{symbol}: semantic call {event.statement.callee} != "
+                f"{expected.callee}")
+        expected_args = tuple(roles[role] for role in expected.arg_roles)
+        if event.arg_origins != expected_args:
+            errors.append(
+                f"{symbol}: {expected.callee} argument origins "
+                f"{event.arg_origins} != {expected_args}")
+        roles[expected.result_role] = event.result_origin or "invalid:call"
+
+    final_origins = dict(program.final_origins)
+    for local, role in contract.locals:
+        expected_origin = roles.get(role)
+        if final_origins.get(local) != expected_origin:
+            errors.append(
+                f"{symbol}: local {local} origin "
+                f"{final_origins.get(local)!r} != role {role} "
+                f"({expected_origin!r})")
+
+    return_events = [
+        event for event in program.events
+        if event.statement.kind == "return"]
+    if len(return_events) == 1:
+        actual_return = return_events[0].arg_origins[0]
+        expected_return = roles.get(contract.return_role)
+        if actual_return != expected_return:
+            errors.append(
+                f"{symbol}: return origin {actual_return!r} != role "
+                f"{contract.return_role} ({expected_return!r})")
+
+    rc_events = [
+        event for event in program.events if event.statement.kind == "rc"]
+    actual_rc = tuple(
+        (event.statement.callee or "", event.arg_origins[0])
+        for event in rc_events)
+    expected_rc = tuple(
+        (callee, roles[role]) for callee, role in contract.rc)
+    if actual_rc != expected_rc:
+        errors.append(
+            f"{symbol}: RC event sequence {actual_rc} != {expected_rc}")
     return errors
 
 
-def generated_c_dataflow_errors(symbol: str, c_body: str) -> List[str]:
-    """Anchor each RC probe to its real operation and parameter dataflow."""
+def validate_c_probe_body(symbol: str, c_body: str) -> List[str]:
+    """Parse, source-order evaluate, and contract-check one probe body."""
+    statements, parse_errors = parse_c_probe_statements(symbol, c_body)
+    if parse_errors:
+        return parse_errors
+    program, evaluation_errors = evaluate_c_probe_statements(
+        symbol, statements)
+    if evaluation_errors:
+        return evaluation_errors
+    if program is None:
+        return [f"{symbol}: finite-grammar evaluator produced no program"]
+    return c_probe_contract_errors(symbol, program)
+
+
+C_PROBE_MUTATION_MATRIX = (
+    (
+        "identity-wrong-rc-roots",
+        "ring_structural_owned_identity",
+        """void* t1; void* r_local; void* t2; void* r_scope;
+void* t3; void* r_decoy;
+t1 = r_value; r_decoy = RING_UNIT; ring_dup(r_decoy);
+r_local = t1; t2 = r_local; ring_dup(r_decoy); r_scope = t2;
+ring_drop(r_decoy); t3 = r_scope; return t3;""",
+        "RC event sequence",
+    ),
+    (
+        "option-wrong-rc-roots",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped; void* r_decoy;
+t1 = r_value; r_decoy = RING_UNIT; ring_dup(r_decoy);
+t2 = ring_Option_some(t1); r_wrapped = t2;
+ring_drop(r_decoy); return RING_UNIT;""",
+        "RC event sequence",
+    ),
+    (
+        "list-wrong-drop-root",
+        "ring_structural_owned_list",
+        """void* t1; void* r_values; void* t2; void* t3; void* t4;
+t1 = ring_list_new(); r_values = t1; t2 = r_value; t3 = r_values;
+t4 = ring_List_push(t3, t2); ring_drop(r_value); return RING_UNIT;""",
+        "RC event sequence",
+    ),
+    (
+        "identity-wrong-return-root",
+        "ring_structural_raw_identity",
+        """void* t1; void* t2;
+t1 = r_value; t2 = RING_UNIT; return t2;""",
+        "return origin",
+    ),
+    (
+        "option-wrong-payload-root",
+        "ring_structural_raw_option",
+        """void* t1; void* t2; void* r_wrapped; void* r_decoy;
+r_decoy = RING_UNIT; t1 = r_decoy;
+t2 = ring_Option_some(t1); r_wrapped = t2; return RING_UNIT;""",
+        "argument origins",
+    ),
+    (
+        "option-wrong-result-local",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped;
+t1 = r_value; ring_dup(t1); t2 = ring_Option_some(t1);
+r_wrapped = t1; ring_drop(t2); return RING_UNIT;""",
+        "local r_wrapped origin",
+    ),
+    (
+        "option-missing-constructor",
+        "ring_structural_raw_option",
+        """void* t1; void* r_wrapped;
+t1 = r_value; r_wrapped = t1; return RING_UNIT;""",
+        "semantic call event count",
+    ),
+    (
+        "list-wrong-push-receiver",
+        "ring_structural_raw_list",
+        """void* t1; void* r_values; void* t2; void* t3;
+t1 = ring_list_new(); r_values = t1; t2 = r_value;
+t3 = ring_List_push(t2, t2); return RING_UNIT;""",
+        "argument origins",
+    ),
+    (
+        "list-missing-push",
+        "ring_structural_raw_list",
+        """void* t1; void* r_values;
+t1 = ring_list_new(); r_values = t1; return RING_UNIT;""",
+        "semantic call event count",
+    ),
+    (
+        "return-before-dead-rc",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped;
+t1 = r_value; ring_dup(t1); t2 = ring_Option_some(t1);
+r_wrapped = t2; return RING_UNIT; ring_drop(r_wrapped);""",
+        "return event is not the final statement",
+    ),
+    (
+        "conditional-rc",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped;
+t1 = r_value; ring_dup(t1); t2 = ring_Option_some(t1);
+r_wrapped = t2; if (r_value) { ring_drop(r_wrapped); }
+return RING_UNIT;""",
+        "control flow is outside finite grammar",
+    ),
+    (
+        "aborting-extra-call",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped;
+t1 = r_value; ring_dup(t1); t2 = ring_Option_some(t1);
+r_wrapped = t2; ring_drop(r_wrapped); ring_panic(r_wrapped);
+return RING_UNIT;""",
+        "standalone call ring_panic is outside finite grammar",
+    ),
+    (
+        "late-rc-alias",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped; void* r_late;
+t1 = r_value; ring_dup(r_late); t2 = ring_Option_some(t1);
+r_wrapped = t2; ring_drop(r_wrapped); r_late = r_value;
+return RING_UNIT;""",
+        "r_late used before initialization",
+    ),
+    (
+        "future-payload-alias",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped; void* r_late;
+t1 = r_late; ring_dup(r_value); t2 = ring_Option_some(t1);
+r_wrapped = t2; ring_drop(r_wrapped); r_late = r_value;
+return RING_UNIT;""",
+        "r_late used before initialization",
+    ),
+    (
+        "future-result-alias",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped;
+t1 = r_value; ring_dup(t1); r_wrapped = t2;
+t2 = ring_Option_some(t1); ring_drop(r_wrapped);
+return RING_UNIT;""",
+        "t2 used before initialization",
+    ),
+    (
+        "preprocessor-hidden-probe",
+        "ring_structural_owned_option",
+        """void* t1; void* t2; void* r_wrapped;
+#ifdef RING_NEVER_DEFINED
+t1 = r_value; ring_dup(t1); t2 = ring_Option_some(t1);
+r_wrapped = t2; ring_drop(r_wrapped);
+#endif
+return RING_UNIT;""",
+        "preprocessor directive is outside finite grammar",
+    ),
+    (
+        "line-spliced-comment-hidden-probe",
+        "ring_structural_owned_option",
+        "void* t1; void* t2; void* r_wrapped;\n"
+        "// hidden probe \\\n"
+        "t1 = r_value; \\\n"
+        "ring_dup(t1); \\\n"
+        "t2 = ring_Option_some(t1); \\\n"
+        "r_wrapped = t2; \\\n"
+        "ring_drop(r_wrapped);\n"
+        "return RING_UNIT;",
+        "backslash-newline splice is outside finite grammar",
+    ),
+)
+
+
+def c_probe_mutation_matrix_errors() -> List[str]:
+    """Keep every accepted Argument counterexample permanently rejected."""
     errors: List[str] = []
-    aliases, alias_errors = c_local_aliases(c_body)
-    errors.extend(f"{symbol}: {error}" for error in alias_errors)
-
-    def origin(name: str) -> Optional[str]:
-        traced, trace_error = trace_c_alias(name, aliases)
-        if trace_error:
-            errors.append(f"{symbol}: {trace_error}")
-            return None
-        return traced
-
-    if symbol.endswith("_identity"):
-        returns = re.findall(
-            r"(?m)^[ \t]*return[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*;",
-            mask_c_strings_and_comments(c_body),
-        )
-        if len(returns) != 1:
+    for name, symbol, body, expected_fragment in C_PROBE_MUTATION_MATRIX:
+        mutation_errors = validate_c_probe_body(symbol, body)
+        if not mutation_errors:
+            errors.append(f"mutation {name} was accepted")
+            continue
+        if not any(expected_fragment in error for error in mutation_errors):
             errors.append(
-                f"{symbol}: expected one local return, found {len(returns)}")
-        elif origin(returns[0]) != "r_value":
-            errors.append(
-                f"{symbol}: returned value does not trace to parameter r_value")
-        return errors
-
-    if symbol.endswith("_option"):
-        calls = c_assigned_calls(c_body, "ring_Option_some")
-        if len(calls) != 1:
-            errors.append(
-                f"{symbol}: ring_Option_some assignment found {len(calls)} times")
-            return errors
-        result, args = calls[0]
-        if len(args) != 1 or origin(args[0]) != "r_value":
-            errors.append(
-                f"{symbol}: Option payload does not trace to parameter r_value")
-        if origin("r_wrapped") != result:
-            errors.append(
-                f"{symbol}: r_wrapped does not trace to ring_Option_some result")
-        return errors
-
-    if symbol.endswith("_list"):
-        constructors = c_assigned_calls(c_body, "ring_list_new")
-        pushes = c_assigned_calls(c_body, "ring_List_push")
-        if len(constructors) != 1:
-            errors.append(
-                f"{symbol}: ring_list_new assignment found "
-                f"{len(constructors)} times")
-        if len(pushes) != 1:
-            errors.append(
-                f"{symbol}: ring_List_push assignment found {len(pushes)} times")
-        if len(constructors) != 1 or len(pushes) != 1:
-            return errors
-        constructor_result, constructor_args = constructors[0]
-        if constructor_args:
-            errors.append(f"{symbol}: ring_list_new unexpectedly has arguments")
-        if origin("r_values") != constructor_result:
-            errors.append(
-                f"{symbol}: r_values does not trace to ring_list_new result")
-        _, push_args = pushes[0]
-        if len(push_args) != 2:
-            errors.append(
-                f"{symbol}: ring_List_push has {len(push_args)} args, expected 2")
-        else:
-            if origin(push_args[0]) != constructor_result:
-                errors.append(
-                    f"{symbol}: List receiver does not trace to ring_list_new")
-            if origin(push_args[1]) != "r_value":
-                errors.append(
-                    f"{symbol}: pushed value does not trace to parameter r_value")
-        return errors
-
-    errors.append(f"{symbol}: no generated-C dataflow contract")
+                f"mutation {name} missed {expected_fragment!r}: "
+                f"{' | '.join(mutation_errors)}")
     return errors
 
 
@@ -1827,7 +2103,7 @@ def exact_rc_error(symbol: str, body: str,
 
 def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
     """Inspect local generated-C bodies without executing any raw handle."""
-    errors: List[str] = []
+    errors = c_probe_mutation_matrix_errors()
     c_path, _, error = build_c_artifacts_fresh(
         ring_exe, EXTERN_RC_FIXTURE, temp_root, no_c_lines=True)
     if error:
@@ -1840,12 +2116,7 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
         errors.append("extern-handle --no-c-lines artifact contains #line")
 
     function_expectations = {
-        "ring_structural_raw_identity": (0, 0),
-        "ring_structural_owned_identity": (2, 1),
-        "ring_structural_raw_option": (0, 0),
-        "ring_structural_owned_option": (1, 1),
-        "ring_structural_raw_list": (0, 0),
-        "ring_structural_owned_list": (0, 1),
+        **{symbol: None for symbol in C_PROBE_CONTRACTS},
         "ring_drop_StructuralHolder": (0, 1),
     }
     bodies: dict[str, str] = {}
@@ -1855,13 +2126,12 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
             errors.append(extract_error)
             continue
         bodies[symbol] = body
-        count_error = exact_rc_error(symbol, body, expected)
-        if count_error:
-            errors.append(count_error)
-        if symbol.startswith("ring_structural_"):
-            errors.extend(c_straight_line_errors(symbol, body))
-            errors.extend(generated_c_dataflow_errors(symbol, body))
-            errors.extend(generated_c_rc_operand_errors(symbol, body))
+        if expected is not None:
+            count_error = exact_rc_error(symbol, body, expected)
+            if count_error:
+                errors.append(count_error)
+        if symbol in C_PROBE_CONTRACTS:
+            errors.extend(validate_c_probe_body(symbol, body))
 
     holder_body = bodies.get("ring_drop_StructuralHolder")
     if holder_body is not None:
