@@ -32,8 +32,8 @@ use exhaustive::{check_exhaustive}
 use infer_helpers::{MethodLookupResult, StmtResult,
     is_value_type, cancel_local_mut_effects, resolve_var_id,
     check_assign_target_mutable, find_root_expr, get_assign_target_root_def_id, get_hexpr_root_type,
-    infer_ident, infer_numeric_op, is_primitive_eq, is_primitive_ord, is_tuple_type,
-    resolve_trait_dispatch,
+    infer_ident, infer_numeric_op, is_primitive_ord,
+    resolve_trait_dispatch, resolve_eq_dispatch,
     is_bounded_direct_callable_ident, resolve_callee_metadata,
     check_expr_is_let_def, get_expr_def_id, is_mut_method_call, check_receiver_mutability,
     lookup_impl_method, lookup_trait_method,
@@ -1161,9 +1161,8 @@ fn infer_bin_op(mut ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
             result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            let is_builtin = is_primitive_eq(resolved) || is_tuple_type(resolved)
             let op_sym = match op { BinOp::Eq => "==", _ => "!=" }
-            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307, s, span, op_sym, is_builtin))
+            eq_dispatch = some(resolve_eq_dispatch(ctx, resolved, s, span, op_sym))
         },
         BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)

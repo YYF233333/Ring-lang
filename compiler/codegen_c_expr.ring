@@ -1170,6 +1170,11 @@ fn collect_c_dispatch_dict(ctx: CCtx, dispatch: TraitDispatch?, params: List<HPa
                 consider_c_capture_name(ctx, dict, none, params, captures)
                 for ed in extra_dicts { collect_c_dictref_names(ctx, ed, params, captures) }
             },
+            TraitDispatch::Tuple { elements, .. } => {
+                for element in elements {
+                    collect_c_dispatch_dict(ctx, some(element), params, captures)
+                }
+            },
             TraitDispatch::Builtin => {},
         },
         none => {},
@@ -1710,30 +1715,111 @@ fn resolve_c_dispatch_dict(mut ctx: CCtx, dispatch: TraitDispatch, trait_name_hi
             }
         },
         TraitDispatch::Builtin => "RING_UNIT",
+        TraitDispatch::Tuple { .. } =>
+            panic("C codegen: tuple dispatch must be consumed structurally"),
     }
 }
 
-fn gen_c_eq_dispatch(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
-    let lhs = gen_c_expr(ctx, left)
-    let rhs = gen_c_expr(ctx, right)
-    let dict_ptr = resolve_c_dispatch_dict(ctx, dispatch, some("Eq"))
-    let cls = fresh_tmp(ctx)
-    c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")  // eq = slot 0
-    let result = gen_c_closure_call(ctx, cls, [lhs, rhs])
-    match op {
-        BinOp::Neq => {
-            // The eq closure's Bool box is INTERNAL on the Neq path: unbox,
-            // drop (no-op for tagged scalars — kept for correctness), negate.
+fn emit_c_builtin_eq_raw(mut ctx: CCtx, lhs: Str, rhs: Str, ty: Type) -> Str {
+    let raw = fresh_i64(ctx)
+    if is_int_type(ty) || is_bool_type(ty) || is_unit_type(ty) {
+        c_emit(ctx, "${raw} = RING_UNTAG(${lhs}) == RING_UNTAG(${rhs});")
+    } else if is_float_type(ty) {
+        rt_use(ctx, "ring_unbox_float", 1)
+        c_emit(ctx, "${raw} = ring_unbox_float(${lhs}) == ring_unbox_float(${rhs});")
+    } else if is_str_type(ty) {
+        rt_use(ctx, "ring_str_eq", 2)
+        c_emit(ctx, "${raw} = ring_str_eq(${lhs}, ${rhs});")
+    } else {
+        match ty {
+            // Preserve the existing identity semantics of the builtin
+            // Unit/Never/Any leaves. Never is unreachable in a well-typed
+            // running program; Any uses the same tagged-word comparison as
+            // the old BinOp fallback.
+            Type::NeverType | Type::AnyType =>
+                c_emit(ctx, "${raw} = RING_UNTAG(${lhs}) == RING_UNTAG(${rhs});"),
+            _ => panic("C codegen: non-primitive Builtin in tuple Eq plan"),
+        }
+    }
+    raw
+}
+
+fn emit_c_tuple_eq_raw(mut ctx: CCtx, lhs: Str, rhs: Str, tuple_ty: Type,
+                       element_types: List<Type>, elements: List<TraitDispatch>) -> Str {
+    let tuple_arity = match tuple_ty {
+        Type::TupleType { elements: tuple_elements } => tuple_elements.len(),
+        _ => panic("C codegen: tuple Eq plan applied to non-tuple type"),
+    }
+    if tuple_arity != element_types.len() || tuple_arity != elements.len() {
+        panic("C codegen: tuple Eq plan/arity mismatch")
+    }
+
+    let result = fresh_i64(ctx)
+    c_emit(ctx, "${result} = 1;")
+    rt_use(ctx, "ring_list_get", 2)
+    for i in 0..tuple_arity {
+        // A statement-level guard gives strict left-to-right short circuiting.
+        // Both tuple operands were materialised once by gen_c_eq_dispatch.
+        c_emit(ctx, "if (${result}) {")
+        ctx.indent = ctx.indent + 1
+        let lhs_element = fresh_tmp(ctx)
+        let rhs_element = fresh_tmp(ctx)
+        c_emit(ctx, "${lhs_element} = ring_list_get(${lhs}, ${i});")
+        c_emit(ctx, "${rhs_element} = ring_list_get(${rhs}, ${i});")
+        let element_result = emit_c_eq_raw(
+            ctx, lhs_element, rhs_element, element_types[i], elements[i])
+        c_emit(ctx, "${result} = ${element_result};")
+        ctx.indent = ctx.indent - 1
+        c_emit(ctx, "}")
+    }
+    result
+}
+
+fn emit_c_eq_raw(mut ctx: CCtx, lhs: Str, rhs: Str, ty: Type,
+                 dispatch: TraitDispatch) -> Str {
+    match dispatch {
+        TraitDispatch::Builtin => emit_c_builtin_eq_raw(ctx, lhs, rhs, ty),
+        TraitDispatch::Direct { dict, extra_dicts } => {
+            let dict_ptr = resolve_c_dispatch_dict(
+                ctx, TraitDispatch::Direct { dict: dict, extra_dicts: extra_dicts }, some("Eq"))
+            let cls = fresh_tmp(ctx)
+            c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")
+            let result = gen_c_closure_call(ctx, cls, [lhs, rhs])
+            let raw = fresh_i64(ctx)
+            c_emit(ctx, "${raw} = RING_UNTAG(${result});")
+            // The dispatch result is internal to structural comparison.
+            rt_use(ctx, "ring_drop", 1)
+            c_emit(ctx, "ring_drop(${result});")
+            raw
+        },
+        TraitDispatch::Dict { param } => {
+            let dict_ptr = resolve_c_dispatch_dict(
+                ctx, TraitDispatch::Dict { param: param }, some("Eq"))
+            let cls = fresh_tmp(ctx)
+            c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")
+            let result = gen_c_closure_call(ctx, cls, [lhs, rhs])
             let raw = fresh_i64(ctx)
             c_emit(ctx, "${raw} = RING_UNTAG(${result});")
             rt_use(ctx, "ring_drop", 1)
             c_emit(ctx, "ring_drop(${result});")
-            let t = fresh_tmp(ctx)
-            c_emit(ctx, "${t} = RING_BOOL(1 - ${raw});")
-            t
+            raw
         },
-        _ => result,
+        TraitDispatch::Tuple { element_types, elements } =>
+            emit_c_tuple_eq_raw(ctx, lhs, rhs, ty, element_types, elements),
     }
+}
+
+fn gen_c_eq_dispatch(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
+    let operand_ty = hexpr_type(left)
+    let lhs = gen_c_expr(ctx, left)
+    let rhs = gen_c_expr(ctx, right)
+    let raw = emit_c_eq_raw(ctx, lhs, rhs, operand_ty, dispatch)
+    let result = fresh_tmp(ctx)
+    match op {
+        BinOp::Neq => c_emit(ctx, "${result} = RING_BOOL(1 - ${raw});"),
+        _ => c_emit(ctx, "${result} = RING_BOOL(${raw});"),
+    }
+    result
 }
 
 fn gen_c_ord_dispatch(mut ctx: CCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {

@@ -299,6 +299,19 @@ fn dl_dispatch(d: TraitDispatch?, mut defs: List<HDictDef>, mut seen: Set<Str>) 
                 for ed in extra_dicts { new_extra.push(dl_ref_static_only(ed, defs, seen)) }
                 some(TraitDispatch::Direct { dict: dict, extra_dicts: new_extra })
             },
+            TraitDispatch::Tuple { element_types, elements } => {
+                let mut lowered_elements: List<TraitDispatch> = []
+                for element in elements {
+                    match dl_dispatch(some(element), defs, seen) {
+                        some(lowered) => lowered_elements.push(lowered),
+                        none => panic("dict_lower: tuple dispatch element disappeared"),
+                    }
+                }
+                some(TraitDispatch::Tuple {
+                    element_types: element_types,
+                    elements: lowered_elements
+                })
+            },
             _ => some(td),
         },
         none => none,

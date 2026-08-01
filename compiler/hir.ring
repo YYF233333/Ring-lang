@@ -202,7 +202,12 @@ pub fn dict_instance_name(base_dict: Str, inner: List<Str>) -> Str {
 pub enum TraitDispatch {
     Builtin,
     Direct { dict: Str, extra_dicts: List<DictRef> },
-    Dict { param: Str }
+    Dict { param: Str },
+    // Tuple equality is structural, but every element still follows the
+    // ordinary Eq resolver (builtin, direct impl, or an in-scope dictionary).
+    // Keeping that resolved evidence in HIR makes both backends consumers of
+    // one authoritative plan instead of re-deriving trait rules in codegen.
+    Tuple { element_types: List<Type>, elements: List<TraitDispatch> }
 }
 
 pub struct DictDispatchInfo {
