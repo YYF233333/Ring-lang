@@ -20,6 +20,8 @@
 
 > **2026-08-01 takeover 补充观测（#266/#259 merged 编译器）**：聚合轮在 LLVM golden 的 `closure_capture_nonloop` 出现唯一一次无诊断 `0xC0000005`，随后同用例隔离 ×3 全绿；其余在外层 30 分钟限额前完成的 e2e / golden / RC / self-compile 前两轮累计 1338 pass / 7 contract skip，未见 dict 族聚集。信号与本条既有随机、复跑即过基线一致，原始失败保留，不以整轮重跑抹除。
 
+> **2026-08-01 tuple/structural merge 补充观测**：完整轮唯一失败为 LLVM golden `trait_default_method.ring` 无诊断 `0xC0000005`，隔离 ×3 全绿；全轮其余 1438 pass / 8 contract skip，self-compile 三代一致，未见 tuple/structural 或 dict 族聚集。原始失败与日志保留，不以隔离复跑替代全轮结论。
+
 发现者：Repository Steward main 基线 ×3 定量
 
 ### #267 Unit-return effect op 的 arm 值在 perform 点必然泄漏（EffectOp 保守不 drop 家族）[low] [judgment] [open]
