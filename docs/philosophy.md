@@ -1,6 +1,6 @@
 # Ring-lang 设计哲学
 
-不信任程序员的 native 编程语言。编译器是最终权威——不信任你，但也不要求你自证清白；它自己做功课（全推断），查到问题了来找你。写起来像 Python（lv0 零标注），编译器看到 Rust 级别的类型与副作用信息。语义内核 = Rust − borrow checker − 标注负担 + 代数效果 + 可判定推断。主战场：CLI / 服务端 / 系统编程——编译器自身（自举，35k 行级）是第一个生产负载。编译到 LLVM native；JS/V8 为 bootstrap 后端，native 落地后归档。
+不信任程序员的 native 编程语言。编译器是最终权威——不信任你，但也不要求你自证清白；它自己做功课（全推断），查到问题了来找你。写起来像 Python（lv0 零标注），编译器看到 Rust 级别的类型与副作用信息。语义内核 = Rust − borrow checker − 标注负担 + 代数效果 + 可判定推断。主战场：CLI / 服务端 / 系统编程——编译器自身是第一个生产负载。当前 C11/LLVM 双后端迁移不改变这些语言公理；后端状态以 CLAUDE.md 为准。
 
 ## 出发点（2026-06-12 成文，2026-06-24 重构——原始动机从"agent 验证瓶颈"回溯到"程序员不可信"）
 
@@ -57,7 +57,7 @@
 
 Bidirectional + constraint solving + effect inference。写代码的体验接近 Python，编译器内部看到完整类型+效果信息。标注由 formatter 按配置等级自动生成维护，人只控制详细度。
 
-推论：**标注是文档，不是语义**（Gradual Guarantee 编译期变体——加标注不改变编译行为，标注过时只产生 warning，编译器永远从代码推断真值。见 lang-design.md §2.4）。
+推论：**标注是文档，不是语义**（Gradual Guarantee 编译期变体——加标注不改变编译行为，标注过时只产生 warning，编译器永远从代码推断真值。见 design.md §3.2.3）。
 
 与 ④「失真必须响」的仲裁（2026-06-12 D-3）：过时标注 = 作者（人或 LLM）意图与编译器真值的失真，对 LLM 尤甚——它的错误理解被白纸黑字记录，是免费的错误检测信号。裁决：**agent profile 下 warnings 即 errors**（CI gate 将 W 类升级为 must-fix），失真在 agent 回路照样响；人类交互场景保留 warning，gradual guarantee 不破。标注语义化（硬错误）被否决——毁 formatter 自动维护与重构自由。
 
@@ -86,14 +86,14 @@ Bidirectional + constraint solving + effect inference。写代码的体验接近
 **Drop 时机消歧 + as-if 条款（2026-06-12 D-1 拍板，实现细则见 design.md §7.11）**：原文「scope 退出/最后使用处」的「/」违反本条自身——两个不同程序点必须择一。裁决：**语义统一 scope-end**；引擎在**可证不可观测**时允许提前 drop（as-if），充分条件 = 该类型无用户 `Drop` impl **且**不被任何 `Weak<T>` 指向（两者均类型级可判定，Type-DAG）。`Weak.upgrade()` 使 drop 时机可观测（提前 drop 把 `some` 变 `none`），故 Weak 目标类型与带 Drop 类型钉死 scope-end；热路径纯数据（List/Str/Option…）满足条件，L3 last-use drop / FBIP 重用（B-079）的优化空间由此保留且不违反「优化不可观测」（④ 推论）。诚实记账：级联 drop（释放大结构）是确定性的单点停顿——确定性 ≠ 有界延迟，可由不可观测的惰性 drop 队列缓解（同吃 as-if 条款）。
 
 **GC 取舍记录（2026-06-12 分析定案——放弃 GC 的真实理由，旧理由"GC 停顿"不成立）**：
-- **语义层费用 GC 省不掉**：公理 2/4 独立强迫 ownership 语义——无别名追踪的引用语义使 aliasing bug 类对无人回路永久开放；Drop/RAII 强迫 move-only 类型存在。即便换 GC 引擎，所有权的用户面几乎原样保留，省下的只有引擎层。（2026-06-24 更新：`mut<S>` effect 已移除，mutation 安全改由别名追踪 + 参数推断承载，见 design.md §7。）
+- **语义层费用 GC 省不掉**：公理 2/4 独立强迫 ownership 语义——无别名追踪的引用语义使 aliasing bug 类对无人回路永久开放；Drop/RAII 强迫 move-only 类型存在。即便换 GC 引擎，所有权的用户面几乎原样保留，省下的只有引擎层。Mutation 同时由别名/参数/捕获信息与多实例 `mut<T>` effect 建模，见 design.md §7.9。
 - **引擎层四收益**：① 无 runtime——C ABI FFI 零摩擦、二进制小、WASM/嵌入式/GPU（远期场景，正典清单见上 ④）路径不堵死（2026-06-12 升格为公理⑦）；② 内存占用 = live set（GC 需 2-3× heap headroom，agent 并行 ×N 进程放大）；③ Perceus 特有——FBIP 原地复用、garbage-free 定理、D2 静态 verifier（"编译期证明 0 泄露"GC 给不了）；④ 竞争位——AI-native 同辈（Mojo/MoonBit/Zero）全选 ownership/no-GC；GC 化 = 进 Go/TS"够用就行"修罗场（效果推断差异化最弱处），no-GC 打的是"Rust 人体工学"这个公认无解痛点。
 - **不可逆性不对称（最硬一条）**：GC→确定性 retrofit 史上无成功案例（D 的 @nogc 残废、finalizer ≠ destructor）；RC→GC 级人体工学 = 当前设计纲领且已基本兑现（所有权仅 5 浮现点、全部 fail-safe）。要错就错在 no-GC 这边。
 - **可证伪锚点**：B-089 re-measure = Ring 首个 RC vs GC footprint 实测（native RC plateau vs V8 自编译基线）；若完整 RC 不优于 V8，此账重算。
 
 ### 7. 场景不可堵死（层 1 · 硬约束）
 
-对 ④ 具名场景集的部署路径，设计决策不得不可逆地堵死。当前兑现形式：LLVM native、零强制 runtime、C ABI FFI。与 ⑤⑥ 同为当场可检验——「这个设计需要强制 runtime 吗」是今天即可裁定的架构事实，无需等测量。不可逆性是本条成立的根基：堵死是单向门（与 ⑥ GC 记录的「不可逆性不对称」同一逻辑）。
+对 ④ 具名场景集的部署路径，设计决策不得不可逆地堵死。当前兑现形式：native、零强制 runtime、C ABI FFI；C11/LLVM 只是迁移期的实现信道。与 ⑤⑥ 同为当场可检验——「这个设计需要强制 runtime 吗」是今天即可裁定的架构事实，无需等测量。不可逆性是本条成立的根基：堵死是单向门（与 ⑥ GC 记录的「不可逆性不对称」同一逻辑）。
 
 实例：⑥ GC 取舍记录的引擎收益①（runtime-free → WASM/嵌入式/GPU 路径不堵死）即本条在该仲裁中的出场；B-007/B-116 选 evidence-passing async effect 而非 GC 续体 runtime 调度器——绿色线程对 agent 可能更友好（层 2 议题），但堵死嵌入式/GPU/零摩擦 FFI（层 1 否决）。2026-06-12 自 ⑥ 的 GC 记录升格成文。
 
@@ -243,6 +243,6 @@ TS 要读完实现才知道函数会抛什么异常。Ring 的模块签名包含
 | 命名 | snake_case，ALL_CAPS 常量 |
 | 不可变 | 默认不可变，`let mut` 显式声明可变 |
 | 数据结构 | struct + enum + trait，不造 class 层级 |
-| 内存 | Perceus RC + ownership 推断（无 borrow checker），零标注负担；bootstrap JS 后端暂用 V8 GC |
+| 内存 | Perceus RC + ownership 推断（无 borrow checker），零标注负担；无 GC |
 | 注释 | `//` 单行（无块注释），默认不写注释 |
-| 编译目标 | LLVM native（推进中）；JS/V8 为 bootstrap 后端，LLVM 落地后归档 |
+| 编译目标 | native；迁移期 C11/LLVM 双信道，最终后端策略见 design.md §10.4 |

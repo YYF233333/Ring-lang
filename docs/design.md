@@ -8,7 +8,7 @@
 
 1. **推断一切** — 类型 + effect + 可变性 + 所有权，全推断。写代码的体验接近 Python，编译器内部看到完整类型+效果+所有权信息。标注由 formatter 按配置等级自动生成，人只控制详细度。Rust 的安全性不应以标注负担为代价。
 2. **追踪一切** — 签名即完整行为契约。函数的副作用（IO、失败、可变、异步）全部由 effect system 在类型层追踪。LLM 和人都能从签名读出全部副作用，无需查看实现。
-3. **语义驱动性能** — LLVM 后端 + effect purity / linearity 信息直接转化为编译优化（bounds check 消除、RC 省略、纯函数重排/并行化）。前两个支柱产生的类型信息是优化燃料——这是 C++/Rust 编译器做不到或需要手动标注才能做到的。
+3. **语义驱动性能** — 在 HIR 消费 effect purity / linearity 信息，再通过 native 后端实现 bounds check 消除、RC 省略、纯函数重排/并行化。前两个支柱产生的类型信息是优化燃料，而不是绑定某个 codegen 的 metadata。
 
 **实验赌注**：Refinement types（类型附带值级谓词，Z3 集成编译器）。成了在第三支柱上再加一层（refinement proof → 消除运行时检查，消灭 `unsafe`），不成前三个支柱自洽。
 
@@ -189,7 +189,7 @@ greet(Company { ... })    // ✓ 单态化为 greet__Company
 - 无匹配 trait → 显示具体调用类型的 union：`fn greet(person: User | Company) -> Str`（使用 1.1b union type 语法）
 - pub fn → 不适用（已禁止 row poly）
 
-**实现时序**：当前 `RecordType` + row unification 实现保留，LLVM 后端阶段重构为单态化 pass。
+**实现时序**：当前 `RecordType` + row unification 实现保留；公开边界收口与单态化 pass 按 backlog 排期，在共享 HIR 完成。
 
 ### 1.5 错误的生命周期模型
 
@@ -299,20 +299,20 @@ get()  // 3
 
 编译器检测到 `counter` 被闭包捕获且为 `let mut`，自动 box 为 `{ value: 0 }`。闭包和外层作用域共享同一个 box。用户写的是直觉代码，编译器干脏活。
 
-**Mutation 追踪（2026-06-24 更新）**：`mut<S>` marker effect 已移除（见 §7.9）。Mutation 可见性由参数推断（lv2 `x: mut T`）+ 闭包捕获列表（lv2 `[mut counter]`）承载。Effect 行只追踪 io / fail / async。
+**Mutation 追踪**：`mut<T>` 是可多实例 marker effect（见 §7.9）；参数位 `x: mut T` 与闭包捕获列表 `[mut counter]` 则分别标明被修改的参数和绑定，三者不能互相替代。
 
 **自动 box 规则**（不变）：
 
 | 场景 | 是否 box | 理由 |
 |------|---------|------|
-| `let mut x` 纯局部使用 | 不 box（JS `let`） | 局部 mutation 不是 side effect |
+| `let mut x` 纯局部使用 | 不 box | 局部 mutation 不是 side effect |
 | `let mut x` 被闭包捕获 | 自动 box | 共享 mutation 需要间接 |
 | `mut` 参数传递 | 调用方 box | 修改外部状态需要间接 |
 | struct 字段修改（`let mut s; s.f = v`） | 不 box | 局部持有的 struct 修改是局部行为 |
 
-**不再需要 `Cell<T>` / `Ref<T>` 等包装类型。** 所有可变性通过 `let mut` + `mut` 参数 + 编译器自动 box 处理。词汇量：一个关键字 `mut`。
+普通局部、可变参数和闭包捕获不要求用户手写包装；编译器按上表自动选择直接存储或 box。当前内建 `Cell<T>` 仍是显式共享状态值，也是 `mut<T>` marker effect 的标准载体；它不替代 `let mut`，也不能被文档写成已消除。`Ref<T>` 不作为另一套公开 mutation 模型。
 
-**闭包内的 `return` 语义**：闭包内的 `return` 返回闭包本身，不影响外层函数。这与 Rust/Kotlin 一致，与 Ruby/Smalltalk 不同。当闭包作为 HOF 回调传入时（如 `list.map(fn(x) { return x * 2 })`），`return` 仅影响该回调。当前编译器通过 IIFE 实现 block expression；当检测到 block/if/match 表达式包含 `return` 时，改用临时变量方案（inline emit + 赋值），避免 IIFE 截获 return（B-022 修复）。
+**闭包内的 `return` 语义**：闭包内的 `return` 返回闭包本身，不影响外层函数。这与 Rust/Kotlin 一致，与 Ruby/Smalltalk 不同。作为 HOF 回调时（如 `list.map(fn(x) { return x * 2 })`），`return` 也只影响该回调；所有后端必须保持 B-022 回归，不让 block lowering 改写控制目标。
 
 ### 1.6b 类型系统特性交互矩阵（2026-05-24 确定）
 
@@ -395,7 +395,7 @@ Or-pattern 合并的 GADT 变体必须携带兼容的类型等式。`Lit(n) | Ad
 
 **Auto-Boxing × Linear（透明）**
 
-Auto-boxing（`mut` 参数的 `{value: x}` 包装）是 codegen 实现细节，对 linearity checker 透明。Linearity check 在 HIR 层完成，auto-boxing 在 codegen 层完成，两层不交叉。LLVM 后端 `mut` 参数直接传指针，不需要 boxing。但**被闭包写穿捕获的 `let mut` 局部**（`boxed_vars`，checker 标记 def_id）在 LLVM 后端会 auto-box 成一个单槽堆 cell（`RING_TYPEID_CELL`，`{ ptr value }`），镜像 JS 后端的 `{value: ...}`：外层作用域和闭包 env 共享同一 cell 指针，读/写走 `cell.value`，从而实现写穿（B-091）。Perceus 对 boxed cell 的赋值**不**插入旧值 Drop——写只覆写 `cell.value`，不消费共享的 cell 指针，否则每次写都会 `ring_drop` 一个外层和闭包仍持有的 cell（确定性 UAF）。cell 指针本身按普通 owned 堆值参与 RC（捕获点 dup、作用域末 drop / 工厂场景 move 进闭包）。
+Auto-boxing 是 codegen 实现细节，对 HIR linearity checker 透明。被闭包写穿捕获的 `let mut` 局部（`boxed_vars`，checker 标记 def_id）必须降低为外层作用域与 closure env 共享的单槽 cell；读写都指向同一 cell，具体 ABI 由当前后端实现。赋值只替换 cell 内容，不能消费仍被外层/closure 持有的 cell 指针；cell 本身按普通 owned 堆值参与 RC（捕获点 dup、作用域末 drop，或 move 进返回 closure）。该不变量由 B-091 回归钉住。
 
 **delegate × Associated Types（自动继承）**
 
@@ -443,246 +443,30 @@ Ring 语言的语义规范与后端无关。JS 后端已归档（B-100 Phase 2�
 
 #### 尾调用优化（2026-05-24 决策）
 
-编译器自动检测，无新语法。尾位置 + 无 Drop + 签名匹配 → 保证 TCO（debug/release 都做）。自递归转循环（编译器变换），互递归/间接尾调用用 LLVM `musttail`。间接尾调用模式（tail-call interpreter）自动支持。
+编译器自动检测，无新语法。尾位置 + 无 Drop + 签名匹配 → 保证 TCO（debug/release 都做）。自递归转循环；互递归/间接尾调用由后端使用受保证的 tail-call 机制或 trampoline 实现，不能把优化器“碰巧消除”当作语义保证。
 
 | 维度 | Ring 语义 | 备注 |
 |------|----------|------|
-| **整数范围** | 各类型固定宽度（I64 = ±2^63，I32 = ±2^31 等） | JS 后端（已归档）I64 受限于 ±2^53 |
-| **整数溢出** | Debug panic / Release 二补数回绕 | Rust 模型。JS 后端（已归档）静默溢出为 float |
-| **浮点精度** | F64 = IEEE 754 double，F32 = IEEE 754 single | JS 后端（已归档）只有 F64 |
-| **字符串编码** | UTF-8 字节串（Rust 模型，§1.7.1 拍板） | JS 后端（已归档）内部 UTF-16 |
+| **整数范围** | 各类型固定宽度（I64 = ±2^63，I32 = ±2^31 等） | 与 host 整数宽度无关 |
+| **整数溢出** | Debug panic / Release 二补数回绕 | 后端必须避免 C signed-overflow UB |
+| **浮点精度** | F64 = IEEE 754 double，F32 = IEEE 754 single | 后端保持显式宽度 |
+| **字符串编码** | UTF-8 字节串（§1.7.1） | embedded NUL 合法，ABI 携带长度 |
 | **`str[i]`** | 第 i 个字节（返回单字节 `Str`），越界 panic | code point 级访问用 `.chars()` 迭代器 |
 | **`str.len()`** | 字节数，O(1) | code point 数用 `.char_count()`，O(n) |
 | **数组越界** | panic | 安全访问用 `.get(i)` 返回 `Option<T>`。已是当前行为 |
-| **整数除零** | panic | JS 后端（已归档）返回 Infinity |
-| **栈溢出** | 实现定义的 panic 或 abort | LLVM 用 stack guard page，JS 有 RangeError。不保证所有平台均可捕获 |
+| **整数除零** | panic | 所有 native lane 一致 |
+| **栈溢出** | 实现定义的 panic 或 abort | 不保证所有平台均可捕获 |
 
-#### 1.7.1 字符串编码模型（B-131 design-probe，2026-06-15）
+#### 1.7.1 字符串编码模型
 
-**状态：已拍板选 A（UTF-8 字节串），2026-06-15 用户确认。实现 = B-133。**
+**公开契约**：`Str` 是 UTF-8 字节串。默认长度、索引、切片和容量以 byte 为单位；Unicode scalar/code point、grapheme 等操作必须使用名称明确的独立 API，不能让同一个 `len` 或 `slice` 随上下文改变单位。
 
-上表（1.7）第 5-6 行当前写的是「UTF-8 编码、code point 级 `len`/`index`」，即 A+B 混合体——内部存储 UTF-8（A 的选择），但公开 API 按 code point 计数（B 的选择）。这是自相矛盾的：要么承受 B 的 O(n) index 代价并把语义完全兑现，要么选 A 的字节级 API 并获得 O(1) 性能。两条路都不走 = 留一个「设计文档写了但两个后端都没实现」的空头支票。本节分析两个候选并给出推荐。
+- 字符串常量与 C ABI 传递必须携带显式长度；内部可额外保留尾随 NUL，但 NUL 不属于值。
+- byte 索引/切片必须做边界检查；需要 code point 语义时先验证 UTF-8 边界并返回显式 iterator/结果。
+- `StringBuilder`、split/join/replace 与容器 bridge 均按 binary-safe 字节契约实现。
+- 公开 API 的单位写入名称、签名或文档；禁止依赖 host 字符编码、C `strlen` 或某个后端的内部表示推断语义。
 
-##### 现状审计：两后端的实际行为
-
-**LLVM 后端（`ring_runtime.cpp`，std::string = UTF-8 字节序列）：**
-
-| 函数 | 行为 | 语义单位 |
-|------|------|---------|
-| `ring_str_len` (L650) | `std::string::size()` → **字节数** | 字节 |
-| `ring_str_get` (L671) | `(*str)[(size_t)idx]`，取单字节构造 `std::string(1, byte)` → **字节级索引** | 字节 |
-| `ring_str_char_at` (L2319) | 同 `ring_str_get`，`std::string(1, (*str)[idx])` → **字节级** | 字节 |
-| `ring_str_char_code_at` (L2398) | `(unsigned char)(*str)[idx]` → **字节值** | 字节 |
-| `ring_str_slice` (L683) | `str->substr(start, end-start)` → **字节级切片** | 字节 |
-| `ring_str_index_of` (L2329) | `std::string::find()` → **字节偏移** | 字节 |
-| `ring_str_last_index_of` (L2339) | `std::string::rfind()` → **字节偏移** | 字节 |
-| `ring_str_split` (L715) | 空分隔符时逐字节拆分 `str->size()` 个元素 | 字节 |
-| `ring_str_contains` (L697) | `std::string::find()` → 字节匹配（对 valid UTF-8 子串正确） | 不受影响 |
-| `ring_str_starts_with` (L701) | `str->compare(0, pre->size(), *pre)` → 字节匹配（正确） | 不受影响 |
-| `ring_str_ends_with` (L708) | 同上，字节匹配（正确） | 不受影响 |
-| `ring_str_replace` (L754) | `std::string::find()` + `replace` → 字节匹配替换（对 valid UTF-8 正确） | 不受影响 |
-| `ring_str_pad_start/end` (L2353/2371) | 以 `str->size()`（字节数）判断长度 | 字节 |
-| `ring_str_to_upper/lower` (L2299/2309) | 逐字节 `toupper`/`tolower` — **仅 ASCII 正确**，多字节 UTF-8 破坏 | 字节（bug） |
-| `ring_str_trim*` (L2262-2297) | ASCII 空白字符集 — 对 UTF-8 BOM/全角空格不处理 | 不受影响（仅 ASCII 空白） |
-
-**JS 后端（已归档）（`compiler/runtime.ring`，JS string = UTF-16 码元序列）：**
-
-| 函数 | 行为 | 语义单位 |
-|------|------|---------|
-| `Str_len` (L51) | `self.length` → **UTF-16 码元数** | 码元 |
-| `Str_char_at` (L61) | `self[i]` → **UTF-16 码元级索引**（surrogate pair 被拆成两个字符） | 码元 |
-| `Str_char_code_at` (L67) | `self.charCodeAt(i)` → **UTF-16 码元值** | 码元 |
-| `Str_index_of` (L62) | `self.indexOf(s)` → **UTF-16 码元偏移** | 码元 |
-| `Str_slice` (L55) | `self.slice(start, end)` → **UTF-16 码元级切片** | 码元 |
-| `Str_split` (L60) | `self.split(sep)` — 空字符串分隔符产出 UTF-16 码元数组 | 码元 |
-| `Str_pad_start/end` (L64-65) | `padStart`/`padEnd` → 码元级 | 码元 |
-| `Str_to_upper/lower` (L57-58) | `toUpperCase`/`toLowerCase` → **Unicode 感知**（JS 引擎实现 ICU 级别） | 正确 |
-
-**发散总结**：对 ASCII 字符串，两后端行为一致（1 byte = 1 UTF-16 码元 = 1 code point）。对非 ASCII：
-- `"你好".len()` → LLVM: 6（字节）；JS: 2（码元，碰巧 = code point）
-- `"😀".len()` → LLVM: 4（字节）；JS: 2（码元 ≠ 1 code point）
-- `"你好".char_at(0)` → LLVM: `some("\xe4")`（UTF-8 首字节，破碎）；JS: `some("你")`（正确）
-- `"😀".char_at(0)` → LLVM: `some("\xf0")`（破碎）；JS: `some("\ud83d")`（high surrogate，也破碎）
-
-**两个后端对非 ASCII 字符串都不完全正确**——LLVM 按字节，JS 按 UTF-16 码元，design.md 写的 code point 级语义两边都没实现。
-
-##### 候选 A：UTF-8 字节串（Rust/Go/Koka 模型）
-
-**定义**：`Str` 内部表示 = UTF-8 字节序列。`len` 返回字节数。`str[i]` 返回第 i 个字节（或编译错误/改名）。按 code point 操作通过显式 API 提供。
-
-**API 设计**：
-
-```
-impl Str {
-    // 字节级（O(1)，零开销）
-    fn len(self) -> Int              // 字节数
-    fn byte_at(self, i: Int) -> Int  // 第 i 字节值（0-255），越界 panic
-    fn slice(self, start: Int, end: Int) -> Str  // 字节级切片，非边界时 panic 或 fail
-
-    // Code point 级（O(n)，显式成本）
-    fn chars(self) -> Iterator<Str>  // 迭代 code point（每个为 1-char Str）
-    fn char_count(self) -> Int       // code point 数，O(n)
-    fn char_at(self, i: Int) -> Option<Str>  // 第 i 个 code point，O(n)
-
-    // 子串操作（UTF-8 安全，O(n)，因为操作对象本身是 valid UTF-8）
-    fn contains(self, s: Str) -> Bool       // 不受编码影响
-    fn starts_with(self, s: Str) -> Bool    // 不受编码影响
-    fn ends_with(self, s: Str) -> Bool      // 不受编码影响
-    fn index_of(self, s: Str) -> Option<Int>  // 返回字节偏移
-    fn split(self, sep: Str) -> List<Str>     // UTF-8 安全（按子串匹配）
-    fn replace(self, old: Str, new: Str) -> Str  // UTF-8 安全
-}
-```
-
-**优势**：
-1. **公理⑥（确定性资源语义）**：O(1) `len`/`slice` = 确定性性能成本，无隐藏 O(n) 操作。字节级操作的性能模型对 agent 完全透明——不存在「看起来 O(1) 实际 O(n)」的隐形陷阱
-2. **公理⑦（场景不可堵死）**：系统编程需要字节级控制（协议解析、二进制格式、文件 I/O 的 BOM 处理）。纯 code point 模型做这些需要 escape hatch（`ByteStr` 或 `as_bytes()`），增加一种类型违反公理⑧
-3. **竞品共识**：Rust/Go/Koka/Zig/C++ 全选 UTF-8 字节串。系统编程语言中只有 Swift 选了 grapheme cluster 级（且为此付出了 String 操作普遍 O(n) 的代价）。Python 模型在 CPython 内部其实也是 UTF-8（PEP 393 flexible string representation），code point 级 API 是抽象层的代价
-4. **LLVM 后端几乎就绪**：`ring_runtime.cpp` 当前的全部实现已经是字节级，选 A 只需修 3 个函数（`to_upper`/`to_lower` 的 ASCII-only bug + `char_at`/`char_code_at` 语义澄清）+ 新增 `chars()`/`char_count()` 迭代器
-5. **公理⑨（语法借用）**：Rust 的 `.len()` = 字节数、`.chars()` 迭代 code points 对 LLM 是最强先验——Rust 字符串是 LLM 训练数据里最高频的 UTF-8 字节串 API
-
-**劣势**：
-1. **字节级 `slice` 可在多字节字符中间切断**，产出 invalid UTF-8 → panic/fail 或静默乱码。Rust 用 `&str[range]` panic 解决，Go 允许静默产出 `\xfffd`。Ring 的选择：**非 code-point 边界切片 → panic**（与 Rust 一致，公理④ 失真必须响）
-2. **`split("")` 逐字节拆分**对非 ASCII 不直觉——但空分隔符语义本身就是边缘情况，可改为「空分隔符 = 按 code point 拆分」作为例外
-3. **LLM 写 CJK 字符串处理代码时**，`"你好".len() == 6` 而非 2 可能不直觉。但实测 LLM 对 Rust 字符串的这一特性已完全适应（训练数据中 Rust 使用量远超 Ring）
-
-##### 候选 B：Unicode code point 序列（Python 模型）
-
-**定义**：`Str` 对外行为 = Unicode code point 序列。`len` 返回 code point 数。`str[i]` 返回第 i 个 code point。内部可以是 UTF-8 但 API 完全隐藏字节细节。
-
-**实现成本**：
-1. **`len` = O(n)**：每次调用需遍历 UTF-8 计算 code point 数。或维护冗余的 code point 计数字段（+8 bytes/string，内存 + 每次拼接/切片需更新）
-2. **`char_at(i)` = O(n)**：从头遍历跳过 i 个 code points。或维护 offset 索引表（O(1) 查询 + O(n) 构建 + 内存 = 每字符串 ~4 bytes/code point 的辅助数组）
-3. **`slice(start, end)` = O(n)**：先找到 start/end 对应的字节偏移，再 `substr`
-4. **`index_of` 返回 code point 偏移 = O(n)**：找到字节偏移后需回溯计算 code point 数
-
-**性能影响估算（自编译场景）**：编译器自身 ~35k 行 Ring，是全 ASCII（标识符/关键字/运算符）。自编译的所有 `str.len()` 调用（源码读取、token 比较、字符串拼接检查等）从 O(1) 退化为 O(n)。影响程度取决于字符串操作频率——编译器是字符串密集型程序（lexer 逐字符扫描、parser 构建 AST 字符串、codegen 拼接输出），估计 2-5x 性能退化。对于 ~20s 自编译来说退化为 ~40-100s——不可接受。
-
-**需要补充 `ByteStr` 类型**：系统编程场景（协议解析、二进制 I/O）无法用 code point 级 API 完成，需引入 `ByteStr` 或 `Bytes` 类型 + 相互转换 API。这违反公理⑧（一种事两种写法——字符串处理有两种类型可选）。
-
-**优势**：
-1. 对 LLM 直觉友好：`"你好".len() == 2`、`"hello".len() == 5` 符合自然语言理解
-2. Python 模型是 LLM 训练数据最高频的字符串 API——LLM 对 `len()` = 字符数的先验最强
-3. 不可能意外切断多字节字符——API 在 code point 边界上操作 by construction
-
-**劣势**：
-1. **性能模型不透明**（违反⑥的精神——「可从代码推导」的扩展含义：O(1) 写法实际 O(n) = 隐性成本）
-2. **需要 `ByteStr` 补位**（违反⑧）
-3. **Python 的 O(1) 假象**：CPython 3.12+ 内部用 compact UTF-8 存储，`.encode()` 才触发 UTF-8→UTF-8（实际 no-op），但 `s[i]` 是 O(1)（PEP 393 通过 kind flag + latin1/UCS2/UCS4 表示达成）。Ring 没有这个实现——native 用 `std::string` UTF-8 存储，做 O(1) code point index 需要重新设计字符串内部表示（如 UTF-32 存储 = 4x 内存，或 PEP 393 式 flexible representation = 巨大复杂度）
-4. **编译器自身吃 dog food**：自编译是性能关键路径，O(n) `len` 不可承受
-
-##### 竞品对比
-
-| 语言 | 内部表示 | `len()` | `s[i]` | 子串搜索 | 系统编程 |
-|------|---------|---------|--------|---------|---------|
-| **Rust** | UTF-8 | 字节数 O(1) | `as_bytes()[i]` / `.chars().nth(i)` O(n) | 字节偏移 | 完全支持 |
-| **Go** | UTF-8 | 字节数 O(1) | 字节 / `for range` 迭代 rune | 字节偏移 | 完全支持 |
-| **Koka** | UTF-8 | 字节数 O(1) | `.head()`/`.tail()` | 内部实现 | 函数式，不面向系统编程 |
-| **Zig** | UTF-8 | 字节数 O(1) | 字节 / `std.unicode.utf8Decode` | 字节偏移 | 完全支持 |
-| **Python** | Flexible (PEP 393) | code point O(1) | code point O(1) | code point 偏移 | 不面向系统编程 |
-| **Swift** | UTF-8 (5.0+) | grapheme cluster O(n) | grapheme O(n) | grapheme 偏移 | 受限 |
-| **JS** | UTF-16 | 码元数 O(1) | 码元 O(1) | 码元偏移 | 不面向系统编程 |
-
-系统编程语言（Rust/Go/Zig/C++）无一例外选 UTF-8 字节级 API。code point 级 API 只出现在不面向系统编程的语言中（Python/JS）。Swift 是唯一的例外（grapheme 级），但 String 的 O(n) 特性是 Swift 社区长期抱怨点。
-
-##### Grapheme cluster 考量
-
-无论选 A 或 B，code point 级 API 对 emoji 组合字符（`"👨‍👩‍👧‍👦"` = 7 code points = 25 bytes = 1 grapheme cluster）都不完美。方案：
-- 不作为 `Str` 内置方法——grapheme cluster 分割需要 Unicode 规范表数据（ICU 级别），与公理⑦（零强制 runtime）冲突
-- 提供 `std/unicode` 库模块（opt-in），包含 `graphemes(s: Str) -> Iterator<Str>`
-- 这与 Rust（`unicode-segmentation` crate）、Go（`golang.org/x/text`）策略一致
-
-##### 推荐：A（UTF-8 字节串）
-
-权重分析：
-
-| 判据 | A (UTF-8 字节) | B (code point) | 权重 |
-|------|---------------|----------------|------|
-| 公理⑥ 确定性 | O(1) len/index，性能可推导 | O(n) 隐藏成本 | A 赢，高 |
-| 公理⑦ 场景不堵死 | 原生支持系统编程 | 需 ByteStr 补位 | A 赢，高 |
-| 公理⑧ 一种写法 | Str 一种类型 | Str + ByteStr 两种 | A 赢，中 |
-| 公理⑨ 语法借用 | Rust 模型（LLM 强先验） | Python 模型（LLM 也熟） | 微 A |
-| 公理① LLM 友好 | `len` = 字节数不直觉 | `len` = 字符数直觉 | B 赢，中 |
-| 实现成本 | LLVM 后端已 90% 就绪 | 两后端都需大改 | A 赢，高 |
-| 自编译性能 | 无退化 | 2-5x 退化 | A 赢，高 |
-
-A 在 5/7 判据胜出（其中 3 个高权重），B 只在 LLM 直觉性一项有明确优势。**推荐选 A**。
-
-##### 否决 B 的理由
-
-1. **性能不可承受**：Ring 编译器自身是 dog food——O(n) `len` 对 ~35k 行全 ASCII 编译器无性能影响，但**语义规范不能只为 ASCII 优化**。一旦标准库或用户代码处理 CJK/emoji 文本，O(n) `len` 在循环中成为二次复杂度来源
-2. **引入第二种字符串类型**：`ByteStr` 违反公理⑧。Rust 有 `&[u8]` vs `&str` 的区分，但 Rust 的 `&str` 本身就是字节级 `len`——两种类型是数据类型层面的区分（valid UTF-8 vs arbitrary bytes），不是 API 语义层面的区分
-3. **不可逆性不对称**（镜像公理⑥的 GC 取舍逻辑）：选 B 后退回 A = breaking change（所有依赖 `len` = code point 数的代码需改写）。选 A 后需要 B 的便利 = 加 `.char_count()` 方法（additive，不 breaking）
-4. **设计文档当前写的 code point 语义两个后端都没实现**——选 B 需要两个后端同时大改，选 A 只需少量 LLVM 修补（JS 后端已归档）
-
-##### 迁移影响清单（选 A 时）
-
-**1. design.md 本表（§1.7）修正**：
-
-| 行 | 当前 | 改为 |
-|----|------|------|
-| 字符串编码 | UTF-8 | UTF-8（不变） |
-| `str[i]` | 第 i 个 Unicode code point | 第 i 个字节（返回单字节 `Str`），越界 panic |
-| `str.len()` | Unicode code point 数 | 字节数。另提供 `.char_count()` 返回 code point 数 |
-
-**2. `std/str.ring` API 变更**：
-
-| 方法 | 当前签名 | 变更 |
-|------|---------|------|
-| `len` | `fn len(self) -> Int` | 语义澄清为字节数（签名不变，文档改） |
-| `char_at` | `fn char_at(self, i: Int) -> Option<Str>` | 语义改为第 i 字节。**或改名为 `byte_at`**，另加 code point 级 `char_at` 通过 `chars()` 迭代器 |
-| `char_code_at` | `fn char_code_at(self, i: Int) -> Option<Int>` | 语义改为第 i 字节值（0-255）。**或改名为 `byte_at`** 返回 `Int` |
-| `index_of` | `fn index_of(self, s: Str) -> Option<Int>` | 语义澄清返回字节偏移（两后端已是如此） |
-| `slice` | `fn slice(self, start: Int, end: Int) -> Str` | 语义澄清为字节级切片。**新增：非 code-point 边界 → panic** |
-| `pad_start`/`pad_end` | 按当前长度判断 | 语义澄清为字节级长度 |
-| 新增 `char_count` | — | `fn char_count(self) -> Int`，O(n) 返回 code point 数 |
-| 新增 `chars` | — | `fn chars(self) -> List<Str>`（或 `Iterator<Str>`），迭代 code points |
-| 新增 `byte_len` | — | 不需要——`len` 已经是字节数。若需语义明确可加 alias |
-| 新增 `is_valid_utf8` | — | 暂不需要——所有 `Str` 保证 valid UTF-8 by construction |
-
-**3. `ring_runtime.cpp` 修复清单**：
-
-| 函数 | 问题 | 修复 |
-|------|------|------|
-| `ring_str_to_upper` (L2299) | 逐字节 `toupper`，破坏多字节 UTF-8 | 改用 ICU 或实现 ASCII-only 语义（非 ASCII 字节原样保留） |
-| `ring_str_to_lower` (L2309) | 同上 | 同上 |
-| `ring_str_split` (L715) | 空分隔符逐字节拆分 | 改为逐 code point 拆分（唯一的 code-point 级例外，匹配用户直觉） |
-| `ring_str_slice` (L683) | 无 UTF-8 边界检查 | 加 validity check：`start`/`end` 非 code-point 边界 → panic |
-| `ring_str_char_at` (L2319) | 名称暗示 "char" 但返回单字节 | 改名为 `ring_str_byte_at` 或改为 code-point 级（设计选择见上） |
-| 新增 `ring_str_char_count` | — | 遍历 UTF-8 计算 code point 数 |
-| 新增 `ring_str_chars` | — | 返回 code point 列表 |
-
-**4. `compiler/runtime.ring`（JS 后端，已归档）修正**：
-
-| 函数 | 问题 | 修复 |
-|------|------|------|
-| `Str_len` (L51) | `self.length` = UTF-16 码元数 | 改为 `new TextEncoder().encode(self).length`（UTF-8 字节数） |
-| `Str_char_at` (L61) | `self[i]` = UTF-16 码元级 | 改为字节级（`TextEncoder` + 索引 `Uint8Array`） |
-| `Str_char_code_at` (L67) | `charCodeAt` = UTF-16 码元值 | 改为字节值 |
-| `Str_index_of` (L62) | `indexOf` = UTF-16 码元偏移 | 改为字节偏移（`TextEncoder` 计算） |
-| `Str_slice` (L55) | `self.slice` = UTF-16 码元级 | 改为字节级（encode → slice → decode） |
-| `Str_pad_start/end` (L64-65) | UTF-16 码元级长度 | 改为字节级长度 |
-| `__ring_str_index` (L125) | `s.length` = UTF-16 码元数 | 改为字节级 |
-| 新增 `Str_char_count` | — | `[...self].length`（spread = code point 迭代） |
-| 新增 `Str_chars` | — | `[...self]`（spread = code point 数组） |
-
-**5. 编译器自身（`compiler/*.ring`）的影响**：编译器全 ASCII 源码处理，`len`/`slice`/`index_of` 语义不变。**零改动**。唯一注意：读取非 ASCII 源文件（Ring 支持 UTF-8 源码、字符串字面量中可包含 CJK/emoji）的 lexer 用字节索引——当前实现已是字节级，与选 A 天然一致。
-
-**6. llvm_diff 测试**：新增非 ASCII 字符串用例（CJK + emoji），断言两后端一致。这是 B-131 的直接验收门。
-
-##### 分阶段实施建议
-
-| 阶段 | 内容 | 依赖 | 估计量 |
-|------|------|------|--------|
-| P0 | 修正 design.md §1.7 表格（本节完成后） + 更新 CLAUDE.md 已知限制 | 无 | S |
-| P1 | 修 `ring_str_to_upper`/`to_lower` 的 ASCII-only bug | 无 | S |
-| P2 | 新增 `char_count()`/`chars()` 到 `std/str.ring` + 两后端实现 | 无 | M |
-| P3 | ~~JS 后端 `Str_len` 等改为字节语义~~（JS 后端已归档）+ `ring_str_slice` 加 UTF-8 边界检查 | P2（先有替代 API） | L |
-| P4 | `char_at`/`char_code_at` 命名决策 + 实施 | P2 | M |
-| P5 | 新增 llvm_diff 非 ASCII 测试用例（CJK + emoji + mixed） | P3 | M |
-| P6 | `split("")` 改为 code-point 级拆分 | P2 | S |
-
-注意：P3 中 JS 后端语义修正已随 B-100 Phase 2 归档不再需要。`ring_str_slice` UTF-8 边界检查仍待实现。
+当前实现仍有未完全对齐本契约的路径，由 backlog B-133 跟踪。实现状态、迁移清单和逐后端差异不写入本节；活动验收只看 B-133，完成过程由 Git 保存。
 
 ---
 
@@ -708,8 +492,7 @@ effect async {
     fn await<T>(f: Future<T>) -> T
 }
 
-// mut<S> effect 已移除（2026-06-24，见 §7.9）
-// mutation 可见性改由参数推断（x: mut T）+ 闭包捕获列表承载
+// mut<T> 是可多实例 marker effect；参数位 x: mut T 与闭包捕获是另一层 mutation 可见性
 ```
 
 ### 2.2 Default Handler（默认处理器）
@@ -764,7 +547,7 @@ Default handler body 可以使用：
 
 不允许使用无默认 handler 的自定义 effect（会产生无法解析的依赖）。编译器对 default handler 间的依赖做拓扑排序，检测循环时报编译错误。
 
-⚠️ 设计已确定（2026-05-22），尚未实现。
+Default handler、部分覆盖、依赖排序与循环诊断均已实现；具体语法和诊断以语言规范与回归测试为准。
 
 ### 2.3 Effect 推断
 
@@ -894,24 +677,7 @@ handle {
 
 这是 C 方案的 sound 过渡边界，不是最终语言语义。B-163 完成 LLVM 后端退役、`dist-c` 与 CI 稳定后，B-167 将改为 **A：调用点动态 evidence ABI**；届时外部创建的 callback 也由调用点内层 handler 截获。C → A 是可观测的语义升级，必须作为 breaking change 发布并以迁移测试锁定。
 
-> **Phase 3 目标：full algebraic effect**（post-resume handler，需要 delimited continuation）：
->
-> ```
-> // 未实现：handler body 调用 resume 后继续执行额外代码
-> fn retry<T, E>(times: Int, action: fn() -> T with {fail<E>}) -> T with {fail<E>} {
->     var attempts = 0
->     loop {
->         handle {
->             return action()
->         } with {
->             fail(e) => {
->                 attempts += 1
->                 if attempts >= times { raise(e) }
->             }
->         }
->     }
-> }
-> ```
+> **边界**：Ring 不计划实现 post-resume / multi-resume Full Algebraic Effects。现行公开模型固定为 tail-resumptive + abort；需要并发挂起的场景由 async 设计单独建模。
 
 ### 2.7 Effect 冒泡可见性
 
@@ -1393,7 +1159,7 @@ pub use config
 
 ## 7. 资源管理模型（2026-06-24 重新设计）
 
-> **2026-06-24 重新设计**：从需求出发重新审视——RAII + 自动内存管理 + borrow 传参 + 可变性 + 性能优化。目标 = Rust 的语义模型（ownership + move + borrow + Drop/RAII），底层用 Perceus RC 代替 borrow checker 兑现。旧设计（§7 pre-2026-06-24）的四通道总账、COW 三支柱、`mut<S>` effect、`&T`/`&mut T` 二等类型等框架已废弃，替代方案见本节。旧设计的实现记录（B-098/B-104 的 clone-all-escape / total drop pass / verify_rc 等）仍为当前 Perceus 实现的真值，见 §7.10。历史全文见 git history。
+> **资源模型边界**：目标是 ownership + move + borrow + Drop/RAII，底层由 Perceus RC 兑现而不暴露 lifetime/borrow 类型。旧四通道总账、COW 三支柱和 `&T`/`&mut T` 二等类型等方案已废弃；现行 RC 契约见 §7.10–§7.11，历史过程只查 Git。
 
 ### 7.1 设计目标
 
@@ -1610,16 +1376,17 @@ let inc = fn() [mut counter: Int, name: Str] { ... }
 
 **可变捕获豁免别名规则**：闭包的 mut 捕获创建共享可变绑定（原变量和闭包双方均可修改），不适用 §7.4 的别名失效规则——这是共享可变的 explicit opt-in。lv2 捕获列表 `[mut counter]` 标明。
 
-### 7.9 `mut<S>` effect 移除
+### 7.9 `mut<T>` marker effect
 
-**决策（2026-06-24）**：`mut<S>` marker effect 从 effect 系统中移除。
+`mut<T>` 是 effect row 中的参数化 marker，用于记录当前计算触及的可变状态类型。它采用**多实例**语义：`mut<Int>` 与 `mut<Str>` 可以同时存在；bare `{mut}` 每次实例化为新的 marker，不能按普通同名 custom effect 强行合并 payload。
 
-**理由**：
-1. 参数位 mutation 由编译器推断并标注在参数上（`x: mut T`），与 `mut<T>` effect 完全重叠
-2. `mut<Int>` 等类型级 effect 粒度太粗——用户想知道"修改了哪个变量"，不是"修改了某个 Int"
-3. 闭包捕获的 mutation 可见性由 lv2 捕获列表 `[mut counter]` 承载，比 effect 更精确
+它与另外两种 mutation 信息互补而不互相替代：
 
-**effect 行简化**：只追踪 io / fail / async 等计算效果。mutation 的可见性由参数推断（lv2 `mut` 标注）+ 闭包捕获列表承载。
+- 参数位 `x: mut T`：调用会修改哪个参数；
+- 闭包捕获 `[mut counter]`：闭包共享修改哪个绑定；
+- effect row `mut<T>`：计算能力/effect 多态中的 mutation marker。
+
+局部 `let mut` 的纯局部变化在函数边界由 `cancel_local_mut_effects` 取消；range iterator 等真正携带 marker 的调用仍会传播。模块 capability、effect alias 与 handler 只按现行 effect-row 规则处理，不能依据旧“已移除”叙述丢弃它。
 
 ### 7.10 Perceus RC 实现模型
 
@@ -1652,147 +1419,14 @@ let inc = fn() [mut counter: Int, name: Str] { ... }
 
 > **实现细节记录**：L0–L4 的完整实现过程（clone-all-escape 模型、B-103 return-mode 分类、B-104 D1–D9 nine-pass 演进、verify_rc 静态检查、Type-DAG RC 试错等）见 git history（2026-06-04 至 2026-06-16 的 design.md 版本）。
 
-### 7.11 与旧设计的差异总结（2026-06-24）
+### 7.11 RC 正确性边界
 
-| 旧设计（§7 pre-2026-06-24） | 新设计 | 变更理由 |
-|---|---|---|
-| `let x = y` = move（B-110） | 非 Drop = rc+1 共享，Drop = auto-move | 减少标注负担，多数场景不需要 move |
-| `&T` / `&mut T` 二等类型 | 不需要 | rc+1 代替零成本引用，消除二等类型复杂度 |
-| `mut<S>` effect | 移除 | 与参数推断重叠，粒度不足 |
-| COW 三支柱 / 四通道总账 | 不需要 | 不再试图让 RC 表现得像静态所有权 |
-| `mut` = 可变引用 + rebind | `let mut` = rebind only，`x: mut T` = mutation | 位置区分含义，概念分离 |
-| `mut x: T` 参数语法糖 | `x: mut T`（mut 在类型前） | 与 `let mut x`（mut 在名称前）视觉区分 |
-| Drop 手写 move | Drop auto-move（推断） | 推断为王，lv2 展示 |
-
-> 旧设计的四通道总账（RC 与 Rust 静态 drop 的等价论证）、COW 三支柱（性能可预测性）、COW 不可观测原则等框架已不适用——新设计不追求让 RC 表现得像静态所有权，而是直接以 RC 为基座设计语义。旧实现记录（clone-all-escape、B-104 D1–D9）仍为 Perceus 实现真值。历史全文见 git history。
-
----
-
-> **以下为已归档的旧 §7.10–§7.11 实现记录锚点，供 git history 检索**。
-
-<details><summary>旧 §7.10–§7.11 实现记录（已归档，点击展开）</summary>
-
-**关键性质（2026-06-04 订正，#134 证伪原断言）**：原设计假设「L0 owned-everywhere 单独即可解锁全自举，无硬前置」——**错误**。owned-everywhere 对「循环内条件 move」（如 `register_impl_method` 的 `self_type` 在 for 循环里被条件 `push`）是 **double-free（崩溃，非泄漏）**：branch-balancing 给未消费分支强插 `drop`，单值多次 free；Perceus 三套循环机制（pre-loop single-dup / 闭包 per-iteration seeding / branch-balancing）均不覆盖此缝。逐点 always-own sweep 修了 7 处推进 2400×（chk 144→347K）后仍残留同类崩点，本质 = 每个循环/条件 move 需深层 Perceus 手术、站点未知。**结论**：借用推断引擎（L1 的 B-098）被提前到 native-working **之前**——borrow-default 不要求每路径消费 → 未消费分支不再插 spurious drop，从根上消除整类崩溃。L1 用户面（B-068）+ L2 仍是叠加层。
-
-**L0 架构决策**：
-- **对象头**：每个堆对象 offset 0 为 `{rc: u32, typeid: u32}`，dup/drop 类型无关（读 `*(u32*)ptr` 加减）。
-- **drop dispatch**：per-type drop 函数 + typeid 全局派发表；内建类型 runtime 手写，用户 struct/enum 由 codegen 生成 `drop_T`（Koka 风格 per-type drop/scan）。
-- **IR**：HIR 扩展显式 `Drop`/dup 节点（RC 行为可 dump/测试），仅 `--target=llvm` pass 产出，JS 路径跳过。
-- **算法**：反向 liveness + branch-balancing，翻译 Koka Perceus（POPL'21）`⟦·⟧`。
-- **范围边界**：L0 不处理 abort 路径 drop（longjmp 跳过 = 泄漏，非 UAF，安全；留 L2 drop-aware unwind）；不处理循环引用（树/DAG 自举无环；`Weak<T>` 在 L2）。
-- **闭包 capture 所有权（2026-06-03）**：capture 进 env 有两种所有权语义——**owned capture**（gen_lambda 普通闭包；perceus 对 non-last-use 发 dup、last-use move-in，env 死时**该** drop）与 **borrowed capture**（catch/handle 闭包为让分支平衡 `Drop` 能执行而捕入，所有权不在 env，由 arm 内的显式 `Drop` 释放，env 死时**不该** drop）。当前 env struct 复用 closure typeid（7），`drop_closure` 只 drop slot[1] → 捕获 ≥2 时泄漏 + 误递归。落地分两步：**C 增量（#130，B-084）**先给普通闭包 env 独立 typeid + per-env `drop_env_T` 释放 owned captures，catch/handle 闭包显式排除（维持现状泄漏，本就如此，因 `ring_try` 不 drop 闭包）；**A 波（B-096）**再正式建模 borrowed capture（不进 env 或标 no-drop）+ `ring_try` 后 drop body/catch 闭包。差分测试抓 double-free（crash）抓不到泄漏 → owned-capture drop 可验证安全，遗留 catch 泄漏不退化。
-
-**Ring 相对 Koka 的简化**：effect 仅 tail-resumptive + abort（无 multi-resume）→ 无 reified continuation 复制问题，handler 的 RC 退化为普通作用域 backward liveness。
-
-### 7.11 L1 借用推断引擎实现模型（B-098，2026-06-04 确定）
-
-§7.2–7.8 定义**用户面 borrow 语义**（`x:T` 默认借用、move 推断规则、逃逸约束），§7.10 L1 行给出高层方向。本节定义 B-098 的 **IR 级实现模型**——用户面语义不变，本节只定「RC 行为如何落到 HIR/codegen」。
-
-**为何 spec 字面模型不完整**：§7.10 L1 原述「读取默认 borrow、escape-clone、scope-end-drop」未指明 escape-clone 的 IR 承载层。`HStmt::Dup{name}` / `HStmt::Drop{name}` 只能按**名**操作（codegen 查 `named_values` alloca）。撤销 always-own 读取 dup 后，非 Ident 逃逸（`list.push(parser.tokens)`、`return node.children` 等 FieldAccess/IndexExpr）的值**没有名字**，perceus 无法对其发 name-level Dup → 该值成纯 borrow → 持有它的 aggregate 与存入它的容器双 drop → **double-free（崩溃）**。故需一个**按值**的 clone 原语。
-
-**实现模型 = clone-all-escape（保守版，正确性优先，无崩无泄漏）**：
-
-1. **读取 borrow**：撤销 always-own 读取 dup——`gen_field_access`、`ring_list_get`/`_opt`、`map_get(_opt)`、`map_int_get(_opt)` 等返回容器**内元素指针**的读取**不 dup**（borrow）。**例外：owned-容器构造器（`map_values`/`map_entries`/`map_keys` 等）不是读取**——完整结论与函数清单见下「实现订正 #1」（2026-06-04 worker [决策] 订正，此处不重复）。
-
-2. **逃逸点 clone-or-move**（区分依据 = 逃逸值是否有**独立 owner**）：
-   - **有独立 owner → clone**：Ident 绑定（绑定仍持有，scope 末 drop）、FieldAccess/IndexExpr/容器读取结果（aggregate 仍持有）。
-   - **fresh 临时值 → move**（无独立 owner，sink 成唯一 owner，clone 会泄漏）：函数调用结果、字面量、struct/variant 构造。
-   - 逃逸点 = 容器 push/insert、struct/variant 字段存储、list/tuple 元素存储、return/尾位置、绑定到更长 scope 的 let、逃逸闭包捕获。
-
-3. **值层 clone IR = `HExpr::Clone{inner}`**：perceus 判定逃逸值为「有独立 owner」时把表达式包成 `Clone{inner}`；codegen lower 成 eval inner → `ring_dup(结果)` → 返回结果。携带标准 HExpr 元数据（type 取自 inner）。Ident 逃逸亦统一走 `HExpr::Clone`（或现有 statement-level `HStmt::Dup`，两者对 Ident 等价）。
-
-4. **scope-end-drop-once**：每个 owned local 绑定在 scope 末 drop **恰好一次**；return 路径在 clone 返回值后 drop 所有 live locals。**无 per-path branch-balancing**。
-
-5. **所有参数 borrow**：callee **永不 drop 参数**（撤销 `transform_fn_body` 无条件 param drop）。参数逃逸时 clone（调用方保留所有权）。§7.3 的 move-参数推断是**纯优化**，B-098 **不做**（留后续）。**推论（B-140 实证，2026-06-24）：函数不得直接返回 RC-managed 参数值**——`is_droppable_init(Call)=true` 把 Call 结果当 owned 插 scope-end Drop，返回借用参数会导致 caller 过度释放（UAF）。no-op 路径必须构造新节点（tagged pointer 除外，ring_drop 跳过）。
-
-6. **无 last-use→move 优化**（留 L3 reuse）：连 last-use 的 Ident 逃逸也 clone（再 scope-end drop）。代价是 churn，但**比 always-own 少 dup**（读取 ≫ 逃逸）、**无泄漏**。
-
-**Drop 时机语义（2026-06-12 D-1 拍板，公理⑥消歧）**：上表 4 的 scope-end **即语义本身，不是临时实现**。last-use drop / FBIP 重用（L3，B-079）的合法性来自 **as-if 条款**——仅当该类型**无用户 Drop impl 且不被任何 `Weak<T>` 指向**（类型级可判定）时，引擎可提前 drop；否则钉死 scope-end。约束来源：`Weak.upgrade()` 使 drop 时机可观测（提前 drop 会把 `some` 变 `none`），用户 Drop impl 的副作用时机同理。**B-104 D3 的 `Weak<T>` 按 scope-end 语义落地**。仲裁记录见附录「公理仲裁决策表」。
-
-**为何从根消除 #134**：逃逸 **clone 而非 consume** → 绑定/参数**永不被按路径消费** → 不存在每路径消费不平衡 → branch-balancing 整个不需要 → 未消费分支不再插 spurious drop → 循环内条件逃逸不再 double-free。`self_type` 验证：`resolve_impl_self_type` 创建 rc=1 → self 迭代 push 处 `Clone`（rc 1→2，list 存入）→ 非 self 迭代不碰（else 无 spurious drop）→ 循环末 scope drop 一次（rc 2→1，list 留 1）。无 double-free 无泄漏，不依赖循环/分支嵌套层数。
-
-**闭包捕获边界（B-098 vs B-096）**：B-098 把**所有闭包捕获保守当 owned**——捕获处 clone，env 死时 drop（复用 B-084 已落地的独立 typeid + per-env `drop_env_T`）。leak-free + crash-free（绑定 rc=1 → 捕获 clone → rc=2 → env drop → rc=1 → 绑定 scope-end drop → 0，配平）。B-098 **不碰** catch/handle 闭包、`ring_try` drop、borrowed-capture 优化——这些归 **B-096**（在 B-098 之上做 sync-闭包 borrowed-capture 优化 + `ring_try` 后 drop body/catch 闭包 + guard-false 边 + Range/dict `drop_T` + evidence struct）。
-
-**范围边界**：B-098 **仅引擎**。用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则）= B-068（§7.2–7.8，deferred，不阻塞 native）。abort 路径 drop = B-002（§7.10 范围边界，longjmp 跳过 = 泄漏非 UAF，安全）。闭包 RC 收口 = B-096。
-
-**内存**：clone-all-escape 的 dup 次数 < always-own（读取远多于逃逸），预期满足 G-a 内存门（带 RC native 自编译峰值 << 25.9GB）。
-
-**实现订正（2026-06-04，B-098 落地）**：字面模型对**树形 owner**成立；编译器自身的 HIR / inference 是**共享图（DAG）**，落地时两处必要收紧（均保守、crash-free）：
-1. **owned-container 构造器 ≠ read-borrow**：`map.values()` / `map.entries()` / `.get()`（`ring_map_values` / `ring_map_entries` / `ring_list_get_opt` / `ring_map_get_opt` / `ring_map_int_get_opt`）新建 owned 容器（List / Option）并把元素 dup 进去——这 dup 是「逃逸进容器=clone」的运行时内联，**保留**。只有**直接返回元素指针**的读取（`ring_list_get` / `ring_map_get` / `ring_map_int_get`，供 IndexExpr / for-in / tuple-field / `m[k]`）+ `gen_field_access` struct 投影撤销 dup（borrow）。`.unwrap` / `.to_fail` / `.unwrap_or_else` 返回 Option 载荷借用 → owner-bearing（逃逸 clone）。
-2. **`let x = <Call 结果>` 保守不 drop**：callee 可能返回与共享状态别名的值（`InferResult.subst` 别名线程化 `UnionFind`；pass-through HIR 节点），故 scope-end drop 仅对 init 为 **fresh 构造器或 owner-bearing（→Clone）** 的绑定发出；Call/EffectOp/BinOp/控制流结果绑定**不 drop**（泄漏，crash-free）。**（已订正：本条保守机制被 B-103 return-mode 分类 + B-104 D1 取代——owned-call 结果现已正确 drop，见下 R-clean 段与 ⭐ 完整 Perceus RC 段。）**闭包捕获在 `gen_lambda` **构造时** dup（env 取得自己的 owned 引用，`drop_closure_env` 释放），非 body 内 clone。
-3. **enum 变体构造器的 call 语法 = 所有权 sink（B-101，2026-06-05）**：`some(x)` / `ok(v)` / `err(e)` / 用户 `Variant(payload)` 写成 **call 语法**时 lower 成 `HExpr::Call`（callee = 变体 JS 名 `${Enum}_${variant}` 的 Ident），运行时 `ring_enum_some` / 变体构造 **按所有权存指针、不 dup**——与 `StructLit` / `NamedVariantConstruct` 字面量字段存储同构。故 perceus 把这类 call 的**全部值参数当逃逸（sink）位置**：owner-bearing 参数 escape-clone（`is_variant_constructor_call`，判据 = callee 是 bare Ident 且 `resolved_name` 以结果 EnumType 的 `${name}_` 开头）。**漏 clone → 参数 scope-end-drop 释放新 enum 持有的载荷 → native UAF**（prelude loader 的 `match find_std_dir() { some(std_dir) => … }`：`std_dir` 载荷被提前释放 → 整个 std prelude 静默加载失败）。安全不对称同 `sink_arg_indices`：假阳=多 clone（泄漏），假阴=UAF，故偏向 inclusion。回归 `tests/cases/llvm/variant_ctor_owned_arg.ring`（旧 `option_methods.ring` 只用字面量载荷 `some("alice")`，从不触发本 bug）。
-
-**Type-DAG RC 试错结论（2026-06-05→06-07；缩编 2026-06-12，四条死路过程全文见 git history + backlog B-102 归档块）**：Wave A native 实证首版落地的根因 = `ring_dup` 浅 +1 vs `drop_T` 深递归 + `apply_subst` 故意共享子结构 → over-free DAG 共享子树。A1 never-drop（永不回收、线性爬 15GB）、A2 intern 两版（never-drop 下零内存收益 / 非-interned 仍无界泄漏）、通用 Call arm 保守不 drop（瞬态不回收）四条路先后失败。**现行真值 = R-clean pure Perceus RC：撤 A1/A2 全套 hook，Type 回 clone-all-escape（git `27fe62d`，见下段）；intern 留作后续纯性能优化。** 日后重启 intern 的三条硬约束（本轮实证，活约束）：key 逐字对齐 `types_equal`（FnType effects 有序、Record/EffectRow 无序集先排序，不复用有损 `type_to_string`）；含未解析 TypeVar 不入表（未绑定 var 会原样穿出 apply_subst）；Struct/Enum 不可 nominal-shallow key（apply_subst 不代换 variants/fields 而 exhaustive 结构化读 → stale payload 健全性洞）。
-
-**存活修复（非试错、现行机制，B-102 Phase 1，git `1a6b1d7`）**：perceus `rc_block_inner` owned 集改**增量可见**（绑定只从 `let` 起进 visible_owned，新 `stmt_droppable_locals`）+ runtime `ring_list_extend` 元素 escape-dup——终结「codegen 同名 local 共享 function-entry alloca → 该名未构造的分支被整块 scope-drop over-free」的多层 UAF 链（`resolve_type_expr` 读 freed `TypeExpr` / owned 别名污染 sibling 分支 / extend 共享元素双释放），ASan-clean ×3。
-
-**R-clean 落地 + B-103 return-mode 分类（2026-06-07/11，git `27fe62d`；缩编 2026-06-12，过程见 git）**：撤 A1/A2 + Type 回 clone-all-escape——dup-on-share 由 clone-all-escape 自动盖全（apply_subst 透传 + intra-node 共享走字段 escape→`HExpr::Clone`），native real_program ×3 ASan-clean。G-a 当时 gate 在「缺函数 return-mode（owned vs borrowed）知识」（贯穿 B-098/B-101/B-102 的「fresh vs alias」根问题）→ **B-103 完整 return-mode 分类（✅ 2026-06-11）**：runtime ~170 函数全量分类表（FRESH/BORROW/SCALAR/NULL-NEVER）落 perceus.ring，`is_droppable_init` 据此正确回收 owned-call 结果、不误 drop borrow。
-
-**G-a 归因终订 + 升里程碑（2026-06-07）**：alloc/free 计数器实测 **88% 分配从不释放**——**内存墙 = incomplete Perceus RC（中间临时从不 drop）+ 标量 uniform-boxing，非 Type-DAG over-free** → B-104 升里程碑开专门 session（四波演进过程见 backlog B-104「里程碑化」归档摘要，最终形态见下段）。
-
-**⭐ 完整 Perceus RC = total drop pass + 静态 leak verifier（2026-06-09 确定，G-a 真解，取代「标记指针 = 真解」，先读本段）**：
-
-B-104 四波（W1/W2/W3a/W4）+ 两个 range-loop 修复（counter `15b5318` / bound `40ebf23`）**证伪了** 2026-06-08「精确-RC 已尽、INT 残留 = irreducible 存活装箱、G-a 交棒标记指针」的判断——range-loop 修复把 INT leak **47.8%→1.6% plateau**，证明 INT 残留是 precise-RC 没盖到的 **loop-var 临时**（一修就掉），非 irreducible。重测后墙主体 **74.5% 是非标量临时**（STR 24% / OPTION 22% / CLOSURE 17% / TUPLE 8%）+ BOOL 19%；标记指针（B-080）只消 ~21%（BOOL+INT）、**非墙驱动 → 「标记指针 = G-a 真解」被数据推翻**。
-
-**根因（用户诊断准确）= clone-all-escape 只实现半套 Perceus**：只 drop named let-绑定 + 逃逸，**不 drop 中间临时、不做 backward-liveness**。wave 式按语法位置一个个补临时**无完整性不变量** = "哪里漏堵哪里"的 debug 心态打地鼠，永远不知道补完没有，只能跑 self-compile 看 OOM。
-
-**真解 = 把 Perceus 做完整（garbage-free by construction）**：Perceus 论文（Koka POPL'21）的 garbage-free 定理——完整算法下对象在**不可达瞬间精确释放一次** → 0 泄露 + 0 UAF。漏的是"半套实现"，不是 RC 解决不了。三件事收口（D1/D2/D3，2026-06-09 用户拍板）：
-
-1. **完整 return-mode 驱动的 total drop pass（D1，取代 wave；✅ 2026-06-11/12 落地，Stage 1-3）**：地基 = **B-103 完整 return-mode 分类**（owned vs borrowed-of-param，每个 call/builtin 叶子；提前为硬前置——total pass 的 drop 决策全靠它）。规则 = 每个 **fresh-owned 临时**（子表达式产 owned 且父节点借用/丢弃它）在 last-use 后 drop，**统一覆盖所有子表达式位置**（arg / scrutinee / condition / receiver / subexpr / control-flow-init），不再一波一个位置。**为何不重蹈 #134**：临时天然**单次使用**（被父节点用恰一次）→ "何时 drop"是 **per-subexpr 局部判定**（父消费/逃逸→不 drop；父借用/丢弃→用完即 drop），给定 B-103 分类即确定，**不需要** owned-everywhere 的 per-path 消费平衡（#134 的来源）。W1/W2/W3a/W4 是本 pass 的**前身**（手工按位置版）→ 收编为统一算法，不废弃已验证的安全性。
-
-2. **静态 leak verifier（D2，"保证 0 泄露"的机制；✅ 2026-06-12 落地 = `verify_rc.ring` + `--verify-rc` 挂 npm test，编译器 self-verify 0 errors + 1292 文档化豁免，上线即抓出 RC pass 3 个潜伏漏洞）**：post-RC HIR 上的线性检查器——断言**每个 owned 值恰好被消费一次**（逃逸 / return / drop 三选一）+ **每个 drop 目标非 borrow**。通过 = **编译期证明** 0 泄露 + 0 UAF（不靠跑 self-compile 看 OOM）；不通过 = 编译器直接指出"第 X 行临时 owned 但无人消费"。翻译 Perceus 论文的 well-formedness judgment，挂进 `npm test`（`--verify-rc` 模式）→ 让 0 泄露被**强制**而非祈祷；同时是 total pass 重写的**编译期 UAF 安全网**（比裸跑 ASan 早，正面回应曾被 owned-everywhere double-free 烧过的风险）。这是"debug 心态"与"完整功能"的分界线。
-
-3. **"0 泄露"的精确范围（D3）= 无环 0 泄露 + 环用 `Weak<T>`（承 §7.9）**：RC 物理收不了环 → Ring 答案是 `Weak<T>`（§7.9 已定案，不引入 cycle collector）。"0 泄露" = 无环数据**字面 0** + 环由程序员用 `Weak<T>` 打破（Swift / Rust `Rc` / Koka 同级标准保证）。自举工作负载（HIR 树/DAG，无环，§7.10 已确认）→ **字面意义的 0 泄露**。
-
-**D1 实现不变量（Stage 2 落地，2026-06-11——扩展 rc_block_inner / total pass 时必须保持）**：
-
-- **dropping-block tail-escape 不变量**（`rc_block_inner`）：凡发出 scope-end drops 的 block，其 tail 一律按 escape 处理——RC 把 tail 重写为 `let __rc_scope_N = <owned tail>` + Ident，hoist 的 tail 值存活到 drops **之后**才被父节点消费，故 borrow tail（直接借用，或经控制流 arm tail 借用本 block 将 drop 的 local）必然悬垂。任何「tail 借用本 block 将 drop 的 local」形态都是 UAF 类。该不变量修复了 W2 起即存在的 ASan 实证 UAF（cond-block 内材料化 scrutinee 在 block 末 drop，match arm 刚返回其 solely-owned payload 投影 → unbox 读 freed）。代价 = borrow 位 dropping-block 的 owner-bearing tail 多一个 dup（有界、crash-free 方向）。
-- **unknown-ownership 守卫**：静态类型为 TypeVar / ErrorType 的值**不材料化、不 drop**（ownership 未知，drop 是赌博）——audit #149（未标注 fn 返回过度泛化 → TypeVar）洞的 RC 侧防线，ASan 双向实证（pre-guard UAF / post-guard EXIT 0）。checker 根修归 #149，守卫在根修后仍保留（防御纵深）。
-
-**标记指针（B-080）降级**：从「G-a 真解」降为后续 **peak/perf 优化**（消 ~21% BOOL+INT 装箱 churn + 标量分配，**非泄漏驱动**）；condition-result Bool box 由 total pass drop（precise RC），BOOL 装箱本身的 churn 留 B-080。**G-a 经 B-104 完整 RC 达成，不依赖 B-080。**
-
-**dict evidence HIR 一等化（#151 根治，2026-06-12 拍板，实现 = B-104 D4）**：
-
-D1/D2 收口后 re-measure（2026-06-12）显示 G-a 后两门未达，最大单一泄漏类（residual 28%~38%）= **audit #151：LLVM 后端在调用点执行时 fresh 合成 trait dict**——泛型 Eq 派发恰泄 1 TUPLE + 2 CLOSURE + 1 dict 名 STR/次（5-probe 实证），单态 `xs.contains()` 同中。结构性原因：**dispatch 决策（`DictRef`/`TraitDispatch`，hir.ring:22-31）早已 HIR 可见，但 dict 值的构造与生命周期在 codegen 层合成**——HIR/ANF/D1/D2 永远盖不到，只能当 verifier 豁免类。JS 后端同名 dict = 模块级单例 const → per-execution fresh 是 LLVM 后端独有偏离。
-
-**拍板 = 三案中 (c) HIR 一等 evidence，吸收 (b) 单例语义（静态单例 + 动态局部混合形态）**，否决 (a) per-use drop（codegen 内手工配对面大 + churn 不消，自编译 ~1.27 亿对 malloc/free 留热路径）与纯 (b) codegen 级缓存（解决泄漏与 churn 但 dict 仍 HIR 不可见，豁免类永存）：
-
-- **静态 dict（Simple + inner 全静态的 Wrapped）= HIR 模块级单例实体**：使用点 = borrow 引用（不 Clone / 不 Drop / 不入 owned），两后端从同一 HIR 实体 lower——JS emit 模块级 const（现状不变，结构对齐），LLVM emit module 级 global + 使用点单 load。churn 与 TUPLE/CLOSURE/STR 三类泄漏一次全消。
-- **动态 dict（inner 含动态 dict 参数的 Wrapped）= HIR 局部 evidence 构造表达式**：owned，D1 普通规则 drop、D2 verifier 正常记账——(b) 覆盖不了的残留在 (c) 下也被正确收口，verifier 的 #151 豁免类整类消失。
-- **有界性论证（与 R-clean 否 Type intern 不冲突）**：Type 随推断步无界新生，故 intern/never-drop 是死路；dict 集 = 程序文本的静态属性（#impl × #trait + builtin 组合，小常数）→ 单例真等价于安全 intern。单例建议 dedicated never-drop typeid 作纵深（stray drop 变 no-op）。
-- **范围边界**：只一等化 dict 的构造与生命周期；**不重构 evidence 参数传递机制**（`TraitDispatch::Dict{param}` / dict 实参线程化已工作，不动）。Ord cmp 结果 INT box（`gen_ord_dispatch_llvm` unbox 后不 drop，while-cond box 同家族）是独立 codegen 缺口，随 D4 一并补。
-
-**D5 归因后收口：none/const 单例化 + And/Or lower（2026-06-12 拍板，实现 = B-104 D6/D7）**：
-
-D4 后 residual 220.1M@2.382B 经 D5 全量定量归因（box-profile 校准 99.9~100.1%），三类真泄漏占 84%：**And/Or-cond 双臂 box ≈69M**（31%，top-2 源行占 87.5%）、**`none` 构造 ≈64M**（29%，`ring_Option_none` live=born=100% vs `some` 0.09%——JS frozen 单例 / LLVM per-eval fresh，#151 dict 同构偏离）、**const-getter/字面量重物化 ≈51M**（23%，`HDecl::Const` lower 成 zero-arg fn 每访问 fresh，JS = 模块级 const，又一 #151 同构）。#152 runtime HOF 泄漏类自编译份额 0.008% → 对 G-a 零杠杆，降级用户面收口项（脱离 G-a 关键路径，与 B-121 同档）。
-
-- **D6 = none + const Str 单例化先行**（≈115M = 52% residual，低风险快兑现）：有界性论证与 dict 同构——none 是 nullary ctor 单值、const 集 = 程序文本静态属性，单例真等价于安全 intern（与 R-clean 否 Type intern 不冲突——Type 随推断步无界新生）；直接复用 D4 基建（lazy memoised getter + dedicated never-drop typeid 纵深 + perceus borrow 语义 + verifier 零新增豁免）。JS 后端已是单例形态——行为不变、结构对齐。
-- **D7 = And/Or lower 成 if-else**（量最大单类、RC 模式改动有 D2-#3 UAF 前科 → 殿后）：checker 末端 pass（仿 dict_lower 先例，两后端同源）lower `a && b` → `if a { b } else { false }`、`a || b` → `if a { true } else { b }`——短路语义天然保持，臂变普通 block → D1 materialization + D2 verifier 统一覆盖整类（**含臂内子表达式 owned 临时**，D5 实证同漏）；既有 And/Or RC 特判（W3a 非 blanket-true 分析、D2-#3 visible-owned 门、D1 保守保留清单 And/Or 行）随 lower 退役。**否决 (a) cond 位 post-unbox drop 扩展**：只 drop 臂 box 本身、臂内临时仍在覆盖外（半套），且 And/Or 与 if-else 同语义应同一 RC 路径（⑧）。
-- 三类全落地理论 residual ≈36M（≈1.5%，plateau 形态）→ D7 后 **G-a 三门重验**。
-
-**门① 残余归因先行（D8，2026-06-13 拍板 = 方案 A，承 D7 三门重验）**：
-
-D7 后 G-a 三门：③自编译**首次完整跑通**（exit 0，~10.42B allocs）✅ + ②peak ~10.6GB << 25.9GB ✅ + **①live plateau ✗**。门①未达的精确形态：full self-compile 全程 live 55.6M@2.38B → 185.2M@10.42B，leak% 2.3%→1.8% 单调递减、亚线性、非 plateau；爬升几乎全在 STR 101.9M（字面量/interp）+ SB 47.3M（type_to_string/interp 机器）+ Type 22.7M（D5 已判偏合法存活）= 171.9M/185.2M。**关键签名**：live 涨 3.33× / allocs 涨 4.38×（亚线性）+ leak% 单调递减 = "有界泄漏 + 合法存活增长"，而非 per-iteration 无界泄漏（后者 leak% 持平/上升）。**未归因前无法判定门①是"还差一个收口"还是"判据对持有全程序 HIR 的编译器本就误设"**。
-
-**拍板（方案 A，否决 B 直接当 leak 收口 STR/SB、否决 C 直接重定义门① 收 G-a）= 归因先行**：复刻 D5「先归因再动手」纪律——对 STR/SB/Type 爬升类做 reachable-from-roots 切分（box-profile 站点采样扩成"活根可达 vs 孤儿"判定），定量回桌后分叉（不预批任一支）：
-- **孤儿主导** → 真 RC 漏点（候选 type_to_string 瞬态 map-key / interp SB / const-getter 残余）→ 收口（D9），继续逼近 plateau。
-- **合法持有主导** → 门①「绝对 plateau」对持有全程序 HIR 的编译器是误设判据 → 重定义门① = 「leak% 有界/→0 + verifier 全绿 + 无 per-iteration 无界类」（现状已满足），收 G-a。
-
-实现 = B-104 D8（measurement-only，不动 RC 语义）。
-
-**门① 收尾（D9，2026-06-13 拍板 = 收口路线 + 判据 refine，承 D8 归因）**：
-
-D8 归因（measurement-only，仪表 git `7d0d10f`，diff 仅 ring_runtime.cpp 未碰 RC）切分终点 ~185M live：**孤儿泄漏 62-65% 主导（非工作集）**，单点高度收敛 `compiler/types.ring:361 type_to_string`——SB ~47M=100% 纯泄漏（插值 StringBuilder 中间临时从不 drop）、Type ~22.7M≈98.7% 泄漏（`Type::UnitType` 叶子构造）、STR ~101M 混合（~85% 合法 churn + 头部 type_to_string 站点 ~45-50M 泄漏）；其余 ~35% 合法工作集（已回收 STR churn + Type/TokenKind plateau）。
-
-**拍板（否决 D8-C「只重定义门① 不修」——残余是真孤儿漏非工作集）= D9 收口 + 门① 判据 refine，两者并存**：
-- **D9 收口（实现，= B-104 D9）**：Part 1 = interp / `.map().join()` 字符串构建临时收口（codegen 合成、HIR/D1 不可见的 SB + 中间 String，#151 dict / D6 none/const 同类，SB 100% live==born 从不 drop）——**codegen-drop 是首选/原则 garbage-free 修法**（D9 worker 实测推翻原「codegen-drop 留豁免类」premise：interp SB 是 codegen 合成、从不进 HIR，codegen-drop 零新增 verifier 豁免——属 verify_rc 头注「codegen-level boundary」第 4 类，同 while-cond box drop / Set-iter list drop / range-loop bound drop；HIR-first 对 interp 反而不成比例——SB 构建过程过于普遍、lower 成 HIR 改动面大且 JS 后端 template literal 可读性退化、LLVM 端无收益，2026-06-13 用户拍 A 否决 B/C）。Part 2 ✅ = `Type::UnitType` 单例化（D6 none 同构，done `70db1ef`）。
-- **门① 判据 refine**：合法工作集（~35% residual）随被编译程序大小增长（编译器持有全程序 HIR/符号表至 codegen 结束）→ **「绝对 live plateau」对全程序编译器物理不成立、是误设判据**。门① 最终判据改为 **「孤儿类（SB/UnitType/interp-STR）→ ~0 + leak% → ~0/有界 + verifier 全绿 + 无 per-iteration 无界类」**，于 D9 re-verify 施加。**falsifiability 不减**——D8 即以此判据抓出 62-65% 真孤儿漏（= 公理⑥「RC 足够、无需 GC」claim 的可证伪锚点有牙）；refine 是把公理⑥ B-089 falsifiability 锚点「native RC plateau vs V8」中 "plateau" 的操作定义精确化，非移动球门。
-
-**✅ G-a 三门通过（2026-06-13 用户拍板，B-104 done）**：
-
-D9 两 part 落地后 re-measure @2.382B：leak 88%→1.2%（live 27.96M），SB 12.02M→**0**（−100%），STR 28.16M→21.10M（−25.1%）。门① refined 判据逐条：孤儿类→~0（SB=0 / Type 22.7M→0.3M / interp-STR 由 Part 1 codegen-drop 闭合）✅ + leak% 1.2% 递减有界 ✅ + verifier 全绿（self-verify 0 errors）✅ + 无 per-iteration 无界类 ✅。门② peak 10.6GB << 25.9GB ✅。门③ 自编译跑通 exit 0 ~10.42B ✅。**三门全达，B-104 完整 Perceus RC 里程碑完成**（leak 88%→1.2%@2.382B，D1-D9 九个落地棒）。解锁 B-089 native 终验 + B-122 SCC 拓扑序。Capstone 全强度 ASan 自编译（`quarantine_size_mb=256:malloc_context_size=12`）2026-06-13 启动，验证结果追记。
-
-</details>
+- Drop 的公开时机是 scope-end；只有类型无用户 Drop 且不被 `Weak<T>` 指向时，后端才可按 as-if 提前释放。
+- Perceus 以 owner/borrow/escape 分类插入 clone/drop；函数参数默认 borrow，逃逸值取得独立所有权。
+- total drop pass 覆盖 named value 与中间 fresh-owned 临时；post-RC HIR 必须通过 `verify_rc` 的 LEAK/UAF/BALANCE 检查。
+- trait/effect evidence 的构造和生命周期必须在共享 HIR 可见；后端不得私自合成 verifier 看不见的 owned 图。
+- 无环数据要求精确回收；环通过 `Weak<T>` 显式打破，不引入 cycle collector。
+- 旧 clone-all-escape 试错、D1–D9 逐轮测量、分配计数和 commit 过程只保存在 Git；它们不是当前设计契约。
 
 ### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
 
@@ -1806,7 +1440,7 @@ D9 两 part 落地后 re-measure @2.382B：leak 88%→1.2%（live 27.96M），SB
 
 栏 C 的可信度由栏 B 背书：「X 不在安全区」的回答是「去 unsafe 区」，与 Rust 同构——撤销旧「Ring 用类型系统消除 unsafe 的需求」立场（原 backlog「不做的控制力」表）。
 
-**形态 = `unsafe` effect**（承 lang-design.md §6.3「用户责任，系统不保证」）：unsafe 原语操作产生 `unsafe` effect，签名可见、自动冒泡。不可被普通 handler 处理——唯一消除方式是 discharge。
+**形态 = `unsafe` effect**：unsafe 原语操作产生 `unsafe` effect，签名可见、自动冒泡。不可被普通 handler 处理——唯一消除方式是 discharge。
 
 **Discharge 模型 = 两级，关键字与 Rust 一致（2026-06-11 用户拍板）**：
 - **模块级 = 许可**：`mod name requires {unsafe}`（复用 mod capability 语法）——未声明的模块内不可使用 unsafe 原语；
@@ -1846,7 +1480,7 @@ buffer 内的值 = RC 世界之外、所有权由封装作者人工记账。拆�
 
 **相对 Rust 的三处简化（明确不做）**：① 无 `MaybeUninit`——Rust 需要它是因为 safe 区要能持有未初始化值，Ring 的未初始化内存只活在 Ptr 后面、永不以值形态进安全区，「read 前已 init」即签字内容；② 无泛型 `transmute`——99% 用例 = 指针 reinterpret（走 cast）+ 标量 bits 互转（具体 intrinsic 按需提供），最危险的门开最窄；③ v1 无 volatile/atomic——§8 并发定型后随 B-007 系再议。
 
-**extern fn 边界 = 声明处签字**：extern fn 声明要求所在模块 `requires {unsafe}`，声明 = 签字「签名忠实于 C 实现」，调用点 safe（与现状 std 全部 extern 调用兼容；Rust 2024 `unsafe extern` 同方向）。**`extern type` 与 `Ptr<T>` 并存两层**：extern type = 不透明句柄（不可 deref/offset，持有传递天然 safe——LLVM FFI 91 fn 即此层）；`Ptr<T>` = 可算术可解引用的真指针。大量 FFI 永远停留在句柄层，分层本身是缩小 unsafe 面的杠杆。
+**extern fn 边界 = 声明处签字**：extern fn 声明要求所在模块 `requires {unsafe}`，声明 = 签字「签名忠实于 C 实现」，调用点 safe（与现状 std extern 调用兼容；Rust 2024 `unsafe extern` 同方向）。**`extern type` 与 `Ptr<T>` 并存两层**：extern type = 不透明句柄（不可 deref/offset，持有传递天然 safe）；`Ptr<T>` = 可算术可解引用的真指针。大量 FFI 永远停留在句柄层，分层本身是缩小 unsafe 面的杠杆。
 
 **跨界移交 = per-type 三件套，不做泛型 `addr_of`**：泛型「对任意安全值取指针」把引擎私有的值表示（box 布局/unboxing/单例化——B-104 D4 dict、D6 none/const 均在动）变成可观测 API，「优化不可观测」被堵死。跨界走容器显式 API：`List<T>::from_raw_parts(p, len, cap)`（移交进 RC 世界）/ `list.into_raw_parts()`（移交出，consume）/ `list.as_ptr()`（borrow 性质，指针有效期 ≤ 宿主存活 = 签字内容）；Str 同构。FFI 调用保活无需新机制（实参 borrow 语义已覆盖）。
 
@@ -1939,7 +1573,7 @@ fn test_fetch() {
 }
 ```
 
-**实现策略**：Generator-based。async 函数编译为 JS `function*`，handler 作为 driver 驱动 generator。默认 handler 异步驱动（外层 await yield 出的 Promise），自定义 handler 可同步驱动（直接传 mock 值）。模块导出自动包装为 JS `async function`。
+**实现策略尚未拍板**。公开语义固定为 effect + structured scope；native lowering 由 B-116 比较状态机、continuation/evidence 等候选后再写入本节，退役后端不约束选型。
 
 **结构化并发**：spawn 必须在 `scope { }` 内。scope 结束等待所有子任务；scope 提前退出取消未完成子任务。
 
@@ -1963,21 +1597,32 @@ fn producer_consumer() with {async} {
 
 GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信息生成语义 map → 关联硬件计数器（CUPTI/NSight），自动报告"哪个 effect scope memory-bound + 为什么"。三层：编译期标注（零开销）→ 硬件计数器关联 → 编译期性能预测。开发阶段可用 effect handler 插桩做 trace（有扰动）。
 
-**前置**：LLVM NVPTX/AMDGPU target + GPU 内存 effect 建模 + 固定数组（B-070）+ CUPTI 集成。**差异化**：Rust GPU / Mojo / Futhark 无 effect 建模；NSight 无源码语义。
+**前置**：经 Argument 选定的 GPU codegen/toolchain + GPU 内存 effect 建模 + 固定数组（B-070）+ 硬件计数器集成。**差异化**：用 effect/type 语义关联源码与硬件事件，而不是绑定某个已退役 CPU 后端。
 
 ---
 
 ## 10. 实现策略
 
-> JS 后端翻译映射（§10.1–10.3）已归档至 git history（B-100 Phase 2，commit `5df6c99`）。
+> 已退役后端的 §10.1–10.3 映射已删除；需要时从 Git 历史查阅。
 
 ### 10.4 后端策略
 
-**当前为 B-163 迁移期双后端。** JS 后端已归档（B-100 Phase 2，commit `5df6c99`），dist/ JS 编译产出冻结作 stage 0 回退。C11 后端 Phase 1 steps 1–9 已完成，支持单文件、project/module 与 self-host；Phase 2 parity 认证完成前，LLVM 后端继续作为 native 默认、bootstrap anchor 与差分 oracle。既定终态是切换到 C 源码发射并归档 LLVM-C 后端，具体 gate 以 `docs/plan-c-backend.md` 为准。
+**当前状态**：B-163 迁移期采用 LLVM/C11 双后端。C 后端已支持单文件、project/module 与 self-host；Phase 2 parity gate 完成前，LLVM 仍是默认 native、bootstrap anchor 与差分 oracle。JS 后端已归档，`compiler/dist/` 只作冻结回退锚。
 
-**C11 后端**：codegen 用 Ring 编写，发射 C11 后调用 clang；与 LLVM 后端共享前端、HIR、Perceus 与 runtime ABI。当前迁移状态与 parity matrix 见 B-163。
+**C11 主路径的长期契约**：
 
-**LLVM 后端（迁移期 anchor/oracle）**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。codegen 用 Ring 编写、调用 LLVM-C API。Bootstrap 阶段经 N-API addon（`compiler/llvm-addon/`，不入仓库）；自举后直接 C ABI。**值表示**：uniform boxing（`ptr`），Int/Bool 用低位 tagged pointer（B-080，codegen inline shl/or/ashr）。Float 留 boxed。**Runtime**：`ring_runtime.cpp`（约 3200 行 C++ STL wrapper），`extern "C"` 暴露；**RIIR 已拍定全部自己实现**。最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 §7.12。**fail/catch**：`setjmp`/`longjmp`；**tail-resumptive effect**：evidence passing（hybrid，详见 backlog B-090）。
+- 发射标准 C11 单翻译单元，调用 clang；不依赖 clang 私有语法，保留 gcc/MSVC 作为去相关验证信道。
+- 值表示、typeid、closure、dictionary、effect evidence 与 runtime ABI 由共享 HIR 契约决定；后端不得按类型叶名、字符串或声明顺序自行猜测。
+- 字符串常量携带显式长度并保持 binary-safe；`#line` 默认开启，生成 C 与 bootstrap 固定点要求字节确定。
+- 整数算术使用显式 wrap/除零规则，避免 C signed-overflow UB；Float 比较保持既定 ordered NaN 语义。
+- match/catch 按源码 arm 顺序，穷尽失败 fail loud；Drop、cleanup 与 evidence 生命周期在嵌套函数边界隔离，并由共享 RC/verifier 契约审计。
+- 编译器进程只生成文本并调用外部编译器，不恢复 LLVM-C 式进程内 FFI/IR builder 信道。
+
+**B-163 退役顺序**：先关闭 parity/manual gate，创建 `llvm-c-backend-final` tag，独立验证 `dist-c` 构建与文本固定点，再从 main 删除 LLVM 后端及旧 `dist/`、`dist-llvm/`，最后恢复 CI bootstrap。活动清单只保存在 `docs/plan-c-backend.md` 与 B-163。
+
+**未来 LLVM target 重启门**：只有代表性负载证明 C 不可表达的性能瓶颈、Ring 级调试信息刚需，或目标平台缺少成熟 C 工具链时才重新立项。届时 C 后端永久保留为 reference/stage-0，LLVM 只能是第二信道，并且只发文本 `.ll`，不得恢复进程内 LLVM-C FFI。
+
+**信任阶梯**：确定性 C + 工具链指纹 → clang/gcc/MSVC 交叉差分 → 按需 Diverse Double-Compiling → 远期朴素信任种子后端。自有机器码后端若实施，只能作为可审计的第三信道/DDC 种子，不进入生产工具链，也不做性能优化。
 
 ### 10.5 FFI 设计
 
@@ -2065,13 +1710,13 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 > **用类型系统最大化前馈控制的覆盖面，用自动测试补全反馈控制，直到闭环足够紧密，人可以退出回路。**
 
-"安全特性优先于性能特性"的判断等价于：**先把控制器造好，再提升被控对象的性能。** 反过来做（先上 LLVM/JIT 追求性能）等于给一个没有控制器的系统加大油门。
+"安全特性优先于性能特性"的判断等价于：**先把控制器造好，再提升被控对象的性能。** 反过来先扩张 JIT/优化边界，等于给没有控制器的系统加大油门。
 
 ---
 
 ## 12. 性能优化策略
 
-> JS/V8 时代的详细性能分析（generator 开销 / V8 去优化 / GC 压力等）已归档至 git history（`design.md@ts-compiler-final`）。当前优化策略以 LLVM native 后端为中心，见 §14.6 双层优化架构 + backlog 性能优化节。
+当前优化策略以 backend-neutral HIR/Perceus → C11/clang 为主，见 §14.6 与 backlog 性能优化节；退役实现的性能分析只留 Git 历史。
 
 ## 13. 竞品与行业定位
 
@@ -2087,7 +1732,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 ## 14. 企业级性能路线
 
-核心研究问题已被 Koka 等项目解决。JS 后端已归档（B-100）。
+核心研究问题已有 Koka 等参考实现；Ring 仍需用自身 workload 与当前 native 路径验证。
 
 ### 14.1 Koka 的启示
 
@@ -2117,10 +1762,10 @@ native 是唯一产品编译目标，codegen 当前为 LLVM/C11 迁移期双轨�
 | Release + PGO | 上面 + profile 驱动的热路径单态化 | 两次编译 | 很好 |
 | JIT（远期） | 运行时 tiered compilation | — | 最佳 |
 
-**与 Rust 的根本差异**：Rust 全量单态化导致编译膨胀。Ring 初始方案是 uniform boxing（B-011 决策），只有值类型必须单态化（实例有限，膨胀可控），引用类型共享代码。这从架构上避免了 Rust 的编译性能问题。
+**与 Rust 的根本差异**：Ring 只要求值类型单态化，引用类型默认共享代码；能否显著降低编译膨胀必须由 B-105 与性能基线验证，不能只凭架构推断。
 
 **编译性能额外措施（按需实现）**：
-- Debug 快速后端（Cranelift）：B-011 codegen 预留后端抽象接口
+- Debug 快速路径：只有实测证明 clang 路径不足后才单独选型，不预设 Cranelift 或其他永久依赖
 - 增量编译：函数级增量，effect row 签名 = 精确依赖边界
 - HIR 缓存：依赖包首次编译后缓存 type-checked HIR
 - 并行编译：模块间 codegen 完全并行（check 完成后签名固定）
@@ -2137,63 +1782,34 @@ native 是唯一产品编译目标，codegen 当前为 LLVM/C11 迁移期双轨�
 - **Kotlin**：JVM → LLVM native，与 Swift 性能差距 ~15%
 - **Koka**：已达到 C 的 75-85%，纯研究院项目
 
-### 14.6 后端中立的双层优化架构（2026-07-28 澄清）
+### 14.6 后端中立的双层优化架构
 
-Ring 的静态信息（effect、linearity、refinement、purity）必须先在后端中立层消费；LLVM 或 clang 只能继续利用其中可降为标准属性/结构的子集。优化架构因此分两层：
+effect、linearity、refinement 与 purity 必须先在 HIR 消费；C/clang 或未来后端只能继续利用可安全降为标准属性、`assume` 或受控代码形态的子集。
 
-```
-HIR（完整 type + effect + linearity 信息）
-  │
-  ├─ Ring 优化 pass（HIR 层，利用 LLVM 表达不了的信息）
-  │   ├─ 纯函数重排 / 并行化（effect 证明无副作用 → 安全重排）
-  │   ├─ Perceus 重用分析（RC=1 → 原地修改，不分配新对象）
-  │   ├─ Refinement 驱动的 bounds check 消除（Z3 证明 → 删运行时检查）
-  │   ├─ 闭包内联 / 特化（已知 trait impl → 消除 dict 间接调用）
-  │   └─ Dead effect 消除（handle 掉的 effect → 对应 evidence 代码全删）
-  │
-  ▼
-后端分流
-  ├─ C11（属性/受控代码形态）→ clang 优化 → 机器码〔既定主路径〕
-  └─ LLVM IR（属性/metadata）→ LLVM pass → 机器码〔迁移期 oracle〕
+```text
+HIR 契约 → Ring passes（RC/reuse、bounds、specialize、dead effect）
+         → C11 受控形态/属性 → clang → native
 ```
 
-**LLVM oracle / 未来可选 LLVM target 能直接消费的 Ring 信息**：
+| 静态事实 | Ring 层责任 | 下游可选提示 |
+|---|---|---|
+| 无 effect / 只读 | 证明重排与消除合法 | pure/readonly 属性 |
+| refinement range | 决定检查能否删除 | range assumption |
+| move 后唯一所有权 | 维持恰好消费一次 | alias/escape hint |
+| 穷尽 match | fail-loud 并删除死分支 | unreachable |
+| 尾调用保证 | 选择 loop/trampoline/受保证机制 | target tail-call hint |
 
-| Ring 信息 | LLVM 属性/metadata | 优化器用途 |
-|-----------|-------------------|-----------|
-| 纯函数（无 effect） | `readnone` | CSE、DCE、LICM、可并行化 |
-| 只读函数 | `readonly` | 同上，允许重排 |
-| mut 参数只改自己 | `argmemonly` | 别名分析改善 |
-| 非空类型（默认非空） | `nonnull` | 消除 null 检查 |
-| 值范围（refinement） | `!range` metadata / `llvm.assume` | 消除 bounds check |
-| 穷尽 match | default → `unreachable` | 消除死分支 |
-| move 后唯一所有权 | `noalias` | **杀手级**——允许 store forwarding、向量化 |
-| 不 fail 的函数 | `nounwind` + `willreturn` | 更激进的 DCE 和重排 |
-| 尾调用 | `musttail` | 保证 TCO |
-
-**LLVM 表达不了、需要 Ring 自己处理的**：
-- Effect 组合语义（LLVM 只有粗粒度 readonly/readnone）
-- 任意 refinement 谓词（`!range` 只能表达整数区间）
-- Perceus RC 重用分析（LLVM 不理解 RC 语义）
-- 纯函数间的可交换性/可并行性（LLVM auto-parallelization 几乎不可用）
-- Linear type 的"恰好消费一次"约束
-
-**后端映射要求**：下列 LLVM 属性只描述 LLVM lane；C11 主路径必须给出等价的 C attribute、受控代码形态或“无等价表达、已在 HIR 处理”的显式映射，不得因迁移静默丢失语义优化机会。LLVM lane 的直接映射包括：
-- 每个函数检查 effect row：无 effect → `readnone`；只有 fail → 不标 readnone（可能 longjmp）；有 io/mut → 不标
-- 每个参数检查类型：非 Option → `nonnull`
-- 每个函数检查 fail 可能性：不 raise → `nounwind`
-
-这些信息 HIR 里全有（每个 HExpr 带 Type + EffectRow），不需要额外分析。
+后端没有等价提示时，正确性和语义优化仍在 HIR 完成；不得为追求 downstream 优化重新复制 effect、RC 或类型推理。
 
 ---
 
 ## 15. 编译器实现
 
-**自举里程碑（2026-05-21）**：编译器从 TypeScript 完全翻译为 Ring，编译到 JS 运行于 V8。TS 原始实现归档于 git tag `ts-compiler-final`。**现状（2026-07-28）**：LLVM native 后端、Perceus RC pass 与静态 RC verifier 已落地；B-100 Phase 2 已归档 JS 后端。B-163 C 后端 Phase 1 steps 1–9 已完成，C 单文件/project/self-host 与 C 文本固定点已闭合；Phase 2 parity 认证进行中，因此 LLVM 仍是默认/anchor/oracle，尚未切换 dist-c 或恢复 CI bootstrap。
+编译器已用 Ring 自举；前端、Perceus RC 与静态 verifier 共享，当前 C/LLVM 迁移状态与退役顺序只以 §10.4、CLAUDE 和 B-163 为准。历史 TypeScript/JS 翻译过程与里程碑留在 Git/tag，不在设计真值重复维护。
 
 **Koka 作为参考实现**：Effect 推断（`InferEffect.hs`）和 evidence passing（`Evidence.hs`）的算法翻译自 Koka 编译器（MIT 许可）。Perceus 引用计数已翻译其 POPL'21 实现落地（§7.11）。
 
-**自举叙事价值**：Ring-lang 的编译器用 Ring-lang 写，由 Claude vibe-coded——同时证明语言能构建复杂系统、LLM 能高效使用。
+自举证明 Ring 能承载自身编译器；LLM 开发效率主张必须由 B-111 的对照实验验证。
 
 ---
 
@@ -2204,7 +1820,7 @@ HIR（完整 type + effect + linearity 信息）
 | Effect 系统统一所有副作用 | 编译器实现极其复杂 |
 | Refinement types 编码业务规则 | 静态验证有极限，部分退化为运行时检查 |
 | 全推断 + formatter 维护标注 | 类型错误信息可能难以理解 |
-| LLVM native 后端 + Perceus RC | 编译器自身是运行时依赖（self-hosting） |
+| C11 native 主路径 + Perceus RC | 编译器与 runtime 自身进入信任/自举链 |
 | Row poly + OOP 手感 | 与现有 class-based 生态互操作需要 extern 声明 |
 | Const generics + refinement 组合 | 约束求解可能不可判定，需要保守边界 |
 | LLM 友好的严格编译器 | 首次编译通过率可能低于 TS |
@@ -2219,113 +1835,19 @@ HIR（完整 type + effect + linearity 信息）
 | 2026-06-12 | 体系结构：平铺六条无优先序 → 冲突无法仲裁（D-2） | 三层结构（0 目标 / 1 约束 / 2 策略）+ 四条仲裁规则 + 修宪程序；④ 改写为「无人回路 × 全场景」（全场景 = 量词非第二目标）；⑦「场景不可堵死」自 ⑥ GC 记录升格成文；编号永不重排 | 元决策 | B-111（层 0 判据的测量仪） |
 | 2026-06-12 | GC vs ⑥：no-GC 是否站得住（所有权讨论引发重审） | 维持 ⑥：语义层费用引擎无关（②④ 独立强迫 move 语义）+ 不可逆性不对称 + ⑦ 场景路径；性能（GC 停顿）明确不是理由。全文 dossier 见 philosophy.md ⑥ | 规则 3（修宪程序，首例） | B-089 re-measure：native RC plateau vs V8 自编译基线 |
 | 2026-06-12 | 优化可观测性：引擎优化（COW/reuse/unboxing）vs 用户可见语义 | 优化不可观测原则（④ 推论，philosophy.md 成文）：引擎优化绝不改变可观测语义；§7.12 安全区表「见决策表」指此条 | ④ 推论成文 | — |
-| 2026-06-12 | Drop 时机（D-1）：⑥ 原文「scope 退出/最后使用处」二点歧义违反 ⑥ 自身；`Weak.upgrade()` 使时机可观测 → 与「优化不可观测」（④ 推论）+ L3/FBIP（B-079）预定相撞，gates B-104 D3 | 语义 = scope-end + as-if 条款：引擎仅对「无用户 Drop impl 且非 Weak 目标」类型（类型级可判定）允许提前 drop；B-104 D3 Weak 按 scope-end 落地；⑥「无 GC 停顿」改「无不可预期停顿」（级联 drop 诚实记账）。细则 §7.11 | ⑥ 自身消歧（约束内修正，非修宪） | llvm_diff：Weak/Drop 用例在 L3 reuse 启用前后输出一致 |
+| 2026-06-12 | Drop 时机（D-1）：⑥ 原文「scope 退出/最后使用处」二点歧义违反 ⑥ 自身；`Weak.upgrade()` 使时机可观测 → 与「优化不可观测」（④ 推论）+ L3/FBIP（B-079）预定相撞，gates B-104 D3 | 语义 = scope-end + as-if 条款：引擎仅对「无用户 Drop impl 且非 Weak 目标」类型（类型级可判定）允许提前 drop；B-104 D3 Weak 按 scope-end 落地；⑥「无 GC 停顿」改「无不可预期停顿」（级联 drop 诚实记账）。细则 §7.11 | ⑥ 自身消歧（约束内修正，非修宪） | Weak/Drop 用例在 reuse 启用前后输出一致，走当前 C/native gate |
 | 2026-06-12 | ③ 推论「标注非语义」vs ④「失真必须响」（D-3）：过时标注 = 意图与真值的失真，却只 warning | agent profile 下 warnings 即 errors（CI gate 升级 W 类为 must-fix）；人类场景保留 warning，gradual guarantee 不破；标注语义化否决（毁 formatter 自动维护） | 规则 2（策略间，层 0 判据） | B-111 可测：标注漂移引发的 agent 迭代轮数差 |
 | 2026-06-12 | ① 无判定程序、无否决记录，与 GADT/refinement 路线图潜在互蹭（D-4） | 重写为可判定标准：lv0 常见用例零标注可用 + 推断失败错误可被 LLM 单轮修复；B-033/B-001 评审以此投票 | 元决策 | B-033/B-001 评审实际使用该标准 |
 | 2026-06-12 | ⑤ 做实（D-5）：HM 最坏指数与「耗时可预期」字面冲突；B-001 SMT 半可判定预定碰撞；trait instance 终止性未证 | 推断 fuel/深度上限、超限=编译错误（B-119）；B-001 spec 补具名可判定片段条款（QF_LIA 类，超出=要求 runtime check）；trait 终止性审计（B-119） | ⑤ 自身做实（约束内修正） | B-119 验收 |
 | 2026-06-12 | 公理名单与实战否决记录错位 + 性能地位空白（D-6） | ⑧「一种事一种写法」⑨「语法借用」自「语法原则」升格为层 2 公理；性能成文为非公理工程目标（让位全部公理，受 ⑥⑦ 间接保护，优先级锚点=层 0 判据） | 元决策 | — |
 | 2026-06-12 | ② 可见性载体失真（D-8）：「IDE 幽灵标注」对主受众 LLM 无效（agent 读源码文本/编译器输出，LSP 亦不存在） | 主载体改写 = formatter 物化标注 + 模块签名 + `--error-format=llm`；IDE 为人类适配层（B-016）；formatter 等级系统待优先级专题讨论；io 效果粒度记 lang-design §10 待议 | 规则 2 | — |
 | 2026-06-12 | B-111 优先级（D-7）：层 0 判据（公理④「LLM 写 Ring 优于 TS」）至今零测量、缺测量仪 | B-111 P2→P1，地位等价公理⑥的 B-089 锚点；只改优先级不动排程（B-104 里程碑照旧先行）。条目见 backlog B-111 | 规则 2（层 0 判据） | B-111 验收 |
-| 2026-06-15 | 字符串编码模型：code point API（设计文档）vs 两后端实际行为（LLVM 字节 / JS UTF-16 码元）全面失真 | 选 A（UTF-8 字节串 Rust 模型）：`len`=字节数 O(1)、`chars()`/`char_count()` 提供 code point 级 API；否决 B（code point）理由=O(n) len 自编译 2-5x 退化 + 需 ByteStr 补位违反⑧。§1.7 表格已修正。实现 = B-133 | ⑥⑦⑧（5/7 判据 A 胜出） | B-133 P5：非 ASCII llvm_diff 两后端一致 |
+| 2026-06-15 | 字符串编码模型：code point API 与既有后端行为失真 | 选 A（UTF-8 字节串）：`len`=字节数 O(1)、`chars()`/`char_count()` 提供 code point API；否决 B（code point）理由=O(n) len + 需 ByteStr 补位违反⑧。§1.7 已修正，实现归 B-133 | ⑥⑦⑧（5/7 判据 A 胜出） | B-133 按 backlog 的 C/native、Unicode 与 FFI gate 验收 |
 | 2026-06-24 | 层 0 重构：④ 原名「无人回路 × 全场景」绑定 LLM 叙事——核心 claim 应比 agent 窗口更根本 | ④ 改名「不信任程序员 · 编译器是最终权威」；「无人回路 × 全场景」降为渐近表达；出发点从「agent 验证瓶颈」回溯到「程序员不可信是永恒事实」（C/Rust/Ring 三角定位）；LLM-first 降格为推论；核心赌注分两层 | 元决策 | — |
 
-## 附录：实现状态（持续更新；建表 2026-05-24）
+## 状态真值
 
-### 已落地的设计决策
-
-| 设计点 | 决策 | 理由 |
-|--------|------|------|
-| Effect handler 语义 | tail-resumptive + abort（full AE 已取消） | evidence passing 天然支持 tail-resume；full AE 工程价值不足（95%+ 场景已覆盖），剩余用例用 async effect + bracket 解决 |
-| `or`/`try`/`?` 运算符 | 已移除，使用 `unwrap`/`to_fail`/`to_result()`/`catch` | 简化语法面，减少歧义 |
-| catch 语义 | 总是消除 fail effect；部分处理用 catch 内部 match + re-raise（显式） | 消除隐式行为（原设计中有/无 catch-all arm 决定不同类型行为），降低概念数 |
-| 错误模型 | 生命周期模型：fail effect 为主（诞生/流动），to_result 物化为数据（落地） | effect 是运动形态，Result 是静止形态；双模型各有地盘而非竞争 |
-| 可变性统一模型 | `var` → `let mut`，`Cell<T>` 消除，`mut` 为唯一可变关键字 | 局部 mutation 不 box 不追踪（非 side effect）；闭包捕获/mut 参数自动 box。~~`mut<T>` effect~~ 已移除（2026-06-24 §7.9），改为参数推断 `x: mut T` + 闭包捕获列表 |
-| `++` 拼接运算符 | 不实现，使用字符串插值 | "一种事一种写法"原则 |
-| Lambda 双向类型传播 | receiver 统一提前 + lambda 接受 expected param types | 支持 `==` 在嵌套 closure 中正确推断 |
-| fn 类型 effect 标注 | `fn(T) -> U with {io}` 语法，无标注时 open row | 支持 HOF callback 的 effect 多态 |
-| impl bounds | `impl<T: Eq> List { ... }` 语法 | 前置条件：Eq trait 约束迁移到 impl 方法 |
-| mod capability | `mod name requires {effects} { ... }` 语法 | 模块级 effect 限制，E0405 错误码 |
-| 多行字符串 | `"..."` 允许跨行，空白原样保留 | 减少字符串拼接需求 |
-| Raw string | `r"..."` 和 `r#"..."#`，无转义无插值 | 正则表达式/codegen 场景减少转义噪音 |
-| Effect 派发 hybrid（2026-06-03）| fail/abort → handler stack + setjmp（ambient）；tail-resumptive → evidence 值线程化（lexical）。两类绑定语义不同，同构 JS oracle | evidence 保留优化器可见性 + async 线程迁移安全 |
-| C-native abort/unwind 选型（2026-07-29） | **先证据、后拍板**：B-163 后先执行 B-168 P0/M 探针，中立比较编译器生成 cleanup stack + `setjmp`/`longjmp` 与显式 failure-status/continuation lowering；平台私有 unwind、C++ exception、重新依赖 LLVM 不进入候选。B-168 结论是 B-002 Phase 2、B-165 与 B-167 的共同前置 | LLVM `invoke`/`landingpad` 路径随后端退役失效；B-165 已实锤 longjmp 局部可见性缺口，B-167 又会改 closure/evidence ABI。先固定 failure/control ABI，避免三次补丁化重写并保留 C11 可移植与 RC 可审计性 |
-| effectful function value evidence 路线（2026-07-28，audit #258） | **先 C 后 A**：双后端阶段保留创建处词法 evidence，handler 只消除显式 label、绝不吞掉未知 open tail；LLVM 退役且 C bootstrap/CI 稳定后由 B-167 切到调用点动态 evidence ABI | C 先闭合 checker soundness 且避免同时改两套 closure ABI；代价是外部 callback 暂不能被内层 handler 动态截获。A 是最终高阶组合语义，C → A 明确按 breaking change 管理 |
-| abort handler arm 语义（2026-07-27，audit #251） | 捕获 `fail.raise(payload)` 后先退出当前 catch/evidence 作用域，再将 payload 绑定到 op 参数并恰好执行一次 arm body；arm body 结果即整个 `handle` 结果，无 resume。静态上 arm 结果类型必须与 handle body 结果统一，arm 自身 effects 合回外层；运行时 arm 内 re-raise 传播给外层 handler，普通 effect 与词法捕获照常生效 | 源码中的 handler body 必须有语义；否决把 checker 限制为恒等 body 的贫化方案。先退出当前 handler 可避免 re-raise 自捕获，并使 arm 的 effect 解析遵循外层词法环境 |
-| 类型系统代价分配 | 复杂度由 LLM 承担（编译器错误循环），收益由用户享受（零 runtime surprise） | LLM 不是人、编译器搏斗十轮也无所谓 |
-| Refinement × Ownership × Effects 交互 | 详见 1.6b 交互矩阵 | 三系统正交 + RAII（Drop trait）处理 Drop 值在所有路径的释放 |
-| Ownership 模型 | Rust 风格 RAII，无 borrow checker；`impl Drop` = 所有权约束入口；Drop 与 Clone 互斥；所有路径自动 drop | LLM 从 Rust 训练数据天然理解 move/drop/RAII；无 `linear` 关键字——少一个概念 |
-| 下标赋值语义 | 支持 `xs[i] = val` + bounds-check（方案 C） | 读写语义一致（越界都 panic）；LLVM 原生支持（JS 后端已归档）；Refinement Types 可消除已证明安全的 bounds-check |
-| ~~`mut<T>` 追踪粒度~~ | ~~参数级，不递归 field chain~~ | 已移除（2026-06-24 §7.9）——mutation 可见性改为参数推断 `x: mut T`（lv2）+ 闭包捕获列表 |
-| 扩展交互矩阵 | 详见 1.6b 扩展部分 | GADTs×Or-Pattern 禁不兼容约束合并；Refinement×mut 赋值点重新验证；Auto-Boxing×Ownership 透明；delegate 创建完整 trait impl 含关联类型；无 borrow checker（RC+Ownership+别名追踪+Drop 覆盖安全性，§7 2026-06-24 版） |
-| LLM 友好性三原则 | 详见设计公理后章节 | 借来的语法行为像原主；错误信息对 LLM 友好；高级特性分自动浮现/用户触发两条路径 |
-| GADTs 降优先级 | P3，LLVM 之后 | 编译器不需要；无下游依赖；用户侧高级特性 |
-| Iterator/Iterable 协议 | 双 trait：`Iterator { type Item; fn next(mut self) -> Item? }` + `Iterable { type Item; type Iter: Iterator; fn iter(self) -> Iter }` | `for..in` 脱糖为 `iter()` + `next()` 循环；Range 保留 C-style for 快速路径（builtin EnumType，无法 impl trait）；Iterator struct 使用 `mut self` 引用语义修改游标 |
-| LLVM 后端实现 | uniform boxing（`ptr`）+ Int/Bool tagged（B-080）+ `{fn_ptr,env_ptr}` 闭包 + setjmp/longjmp fail + 单 Module/单 .o + C++ STL runtime。详见 §10.4 | codegen 只写一次（Ring→LLVM-C），bootstrap 用 N-API addon（自举后废弃） |
-| Perceus 分层路线 | L0 RC核心(B-012) → L1 引擎(B-098) → L1 用户面(B-068,deferred) → L2 Drop/RAII+Weak(B-002) → L3 reuse(B-079) → L4 unboxing(B-080) | 可独立测试/merge 的序列 |
-| 完整 Perceus RC（2026-06-09，G-a 真解）| L0/L1 完整化 = total return-mode drop pass（drop 所有 fresh-owned 临时，地基 B-103）+ 静态 leak verifier（post-RC HIR 线性检查，编译期证明 owned 消费一次 + drop 非 borrow）；0 泄露 = 无环 by-construction（garbage-free 定理）+ 环用 Weak<T>（§7.9）。标记指针(B-080)降级为 peak/perf | 取代 wave 式打地鼠（无完整性不变量 = debug 心态）；数据订正墙主体 74.5% 是非标量临时、标记指针仅消 ~21% 非泄漏驱动；verifier 把 0 泄露从经验观察变可检查不变量 + 当 total pass 重写的编译期 UAF 安全网 |
-| Perceus L1 引擎提前（2026-06-04，#134 证伪 L0-only 自举）| 原断言「L0 owned-everywhere 单独解锁全自举、无硬前置」**错误**——对「循环内条件 move」是 double-free（崩溃非泄漏）。借用推断引擎（B-098）提前到 native-working 之前：borrow-default + escape-clone + scope-end-drop，撤销 always-own 读取补丁。仅引擎，用户面（move 语法/lv2/fmt/pub）留 B-068 deferred | branch-balancing 给未消费分支强插 drop → 单值多次 free；三套循环机制不覆盖此缝；逐点 always-own sweep 是站点未知的 whack-a-mole + 每个 move 需深层 Perceus 手术。borrow 不要求每路径消费 → 整类崩溃从根消除 |
-| Perceus L0 对象头 | 每堆对象 offset 0 `{rc:u32, typeid:u32}`；per-type drop 函数 + typeid 派发表 | dup/drop 类型无关；用户类型 drop 由 codegen 生成（Koka 风格 per-type drop/scan）|
-| Perceus L0 范围 | 不处理 abort 路径 drop（留 L2 drop-aware unwind）/ 循环引用（留 L2 Weak） | longjmp 跳过 drop = 泄漏非 UAF（安全）；自举走成功路径 + 树形数据无环；先解内存墙 |
-| Perceus dup/drop IR | HIR 显式 Drop/dup 节点 + 反向 liveness pass（仅 llvm） | RC 行为落 IR 可 dump/测试；翻译 Koka Perceus POPL'21 |
-| Perceus L1 实现模型 = clone-all-escape（2026-06-04，§7.11）| 读取 borrow；逃逸点对「有独立 owner 的值」（Ident/字段/元素/容器读取）clone、对 fresh 临时值 move；值层 clone = 新增 `HExpr::Clone{inner}`（codegen eval→ring_dup→返回）；owned 绑定 scope-end-drop 一次、**删 branch-balancing**；所有参数 borrow（callee 不 drop）；不做 last-use→move（留 L3）| `HStmt::Dup{name}` 只能按名 dup，非 Ident 逃逸无名 → 字面 perceus-escape-clone 会 double-free（崩溃）。逃逸 clone 而非 consume → 绑定永不按路径消费 → branch-balancing 不需要 → 整类循环条件 move double-free 从根消除。clone-all dup 次数 < always-own（读取≫逃逸）故内存更优。闭包保守全 owned，borrow 优化留 B-096 |
-| Perceus L0 闭包 capture 所有权（2026-06-03） | owned capture（普通闭包，env 死时 drop）vs borrowed capture（catch/handle 为平衡 Drop 捕入，env 死时不 drop）；#130 走 C 增量（普通闭包 env 独立 typeid + drop_env_T，catch/handle 排除），A 波（B-096）完整收口（borrowed 建模 + ring_try drop 闭包 + #4 guard-false + Range/dict drop_T） | env 复用 closure typeid 致 ≥2 captures 泄漏+误递归；#131 借 catch env 整体泄漏安全引入 borrowed capture，裸加 auto-drop 会 double-drop；差分抓 crash 不抓泄漏 → C 增量可验证安全 |
-| occurs_in/apply_subst 对 struct/enum fields 一致忽略（2026-06-03） | 维持现状（只处理 type_params，fields/variants 原样保留）= 正确 nominal 语义，非 bug；撤销 B-057（错误立项）；#108 标 wontfix；彻底统一留 #16 nominal 重构 | fields 自始至终是声明模板（apply_subst 原样保留 + 字段实例化走局部 inst_map 不写回 + type identity 只比 name+type_params），无限类型的环只能经 type_params 形成、已被 occurs check 覆盖；补 fields 遍历 → apply_subst 递归类型栈溢出 / occurs_in 误判模板 var |
-| LLVM evidence 表示 D1（2026-06-03 B-090）| `{fn_ptr, env}` 闭包 struct，slot = op 在 effect 声明里的顺序；共享 helper `effect_op_slot` 给 gen_handle_expr/gen_effect_op 共用 | 与 JS oracle（`{op: closure}`）语义同构 → parity 结构性；复用现有闭包表示；跨阶段契约进共享层符合约定。否决 effect-as-trait（搅入 supertrait/关联类型包袱）|
-| LLVM handler 闭包 RC D2（2026-06-03 B-090）| evidence struct + handler 闭包暂泄漏，drop 收口并入 B-096 A 波 | B-090 价值是 parity（差分可验），泄漏是正交问题且已有归宿；耦合大内存机 double-free 实测会让 P1 卡在 P3 后 |
-| B-090 范围分期 D3（2026-06-03）| core（B-090，L）= 单 effect multi-op tail-resumptive + 自然涵盖的 nesting；phase 2（B-097，P2）= custom-abort + default body(#72) + delegate(B-088#4) + nesting/multi-effect edge | 单 op 是玩具（真实 effect 都多 op）；custom-abort 需独立 setjmp 落点、default 需注入默认 evidence、delegate 是派发通后的扩展，均与核心机制不同 |
-| JS 后端归档策略 (Z)（2026-06-04，B-100）| 删 JS 前先**证明**两后端 feature 完全一致零 bug（parity 认证门：穷举覆盖矩阵 + 关 B-097/B-096 + 复数轮对抗 review，loop-until-dry），再 golden 快照保存量回归网，然后删 codegen.ring/JS runtime/addon。删除点 = 层 3 之前 | JS 后端是 LLVM codegen 的差分 oracle，简单删会摧毁它；但 oracle 价值 = 抓发散，parity 一旦被证明且 feature 集冻结，oracle 即用尽 → 删除无损。否决「层 3 后删」（async/unwind/refinement 要双实现，成本过高，且 JS 实现层 3 亦可能有 bug、oracle 非真值）|
-| A2 Type hash-cons 边界（2026-06-07，B-102 Phase 2）| 只在 `apply_subst` **5 个**复合 arm intern（Fn/Generic/Record/EffectRow/Tuple，**排除 Struct/Enum**），表塞 `UnionFind`（零线程化）；**含未解析 TypeVar 不入表**（`type_intern_key -> Str?`，订正旧述「输出已 resolve」）；key 逐字对齐 `types_equal`（Record/EffectRow 无序排序、**FnType effects 有序**、不复用有损 `type_to_string`）；O(1) 相等彩蛋解耦另立项 | apply_subst 每次重建 spine = 2.51亿洪流；intern 去重达 G-a（A1 never-drop 不去重仍 ~25.9GB）。**Struct/Enum 排除**：nominal-shallow key 不健全——apply_subst 不代换 variants/fields、exhaustive.ring 却结构化读，intern 任选缓存致 stale payload（回归 tuple_option_sugar）；否决代换 variants（爆栈，见 occurs_in/apply_subst 忽略 fields 一条）/deep key（违反 key==types_equal） |
-| 泛型 Map key（2026-06-07，B-107，P2）| 加 `Hash` trait + derive，runtime Map key 改 void* 经 Eq/Hash dict 派发（复用 `ring_get_builtin_dict`）| 类型层 `Map<K,V>` 全泛型但 runtime 只兑现 Str key（两后端，LLVM 具体化）= 类型系统说谎；bootstrap 编译器全 `Map<Str,..>` 故未暴露。镜像 Eq/Ord/Clone derive 机制；与 B-080 unboxing 协同 |
-| LLVM 增量编译 deferred（2026-06-07，B-105）| 维持单 Module/单 .o；增量（每 .ring→.o）deferred 至 native 成主工具链（B-099 后）+ 编译时间成实测痛点 | 当初为省跨模块符号解析；不阻塞 B-089/099/100。真难点 = 跨模块单态化（泛型实例 emit 何处，Rust/C++ 模板问题），非 link，具体方案真做时再 Discussion |
-| dict evidence HIR 一等化（2026-06-12，#151 根治，B-104 D4）| 三案取 (c) HIR 一等 evidence + 吸收 (b) 单例语义：静态 dict = HIR 模块级单例实体（使用点 borrow 引用，两后端同源 lower）、动态 wrapped = HIR 局部 evidence 构造值（owned，D1/D2 正常覆盖）；不动 evidence 参数传递机制 | dispatch 决策已 HIR 可见、唯 dict 构造在 codegen 合成（LLVM per-execution fresh = 对 JS 单例模型的偏离，residual 28~38% 最大泄漏类 + ~1.27 亿对 churn）；否决 (a) per-use drop（churn 不消 + codegen 内配对面大）与纯 (b) codegen 缓存（豁免类永存）；dict 集 = 程序文本静态属性有界小常数，与 R-clean 否 Type intern 不冲突（Type 无界新生）。详见 §7.11 |
-| 低层内存原语 = design-probe 前置（2026-06-07，B-106）| RIIR（runtime C++ STL→纯 Ring）立 design-probe 而非实现项：先决「Ring 是否/以何形式提供低层内存原语」| 纯 Ring 重写 vector/map/string 需裸内存操作，与哲学「不做裸指针/manual malloc」冲突；张力不解 RIIR 无从落地。候选：value types / region effect / 受控 unsafe / 维持 C FFI 永久退缩前线 |
-| native on-par 统一规划 = Level 1（2026-06-08）| 终点 = native 前端+JS 后端与 node 版对等（三门走 js 路径），**B-099（自产 .o / Node 消除 / JS 归档）= Level 2，本轮 out-of-scope**。剩余工作收编为 P0 诊断 → P1 标记指针（B-080）→ P2 三门（B-089），绕掉 B-104 后续碎波 + B-080 box-at-boundary 拆分（**2026-06-09 订正**：P1 标记指针降级、B-104 升里程碑为 G-a 真解，见上「完整 Perceus RC」行；P2 三门仍归 B-089）| 用户拍板「绕中间 milestone 直达 on-par」；碎波可绕但依赖序+验证关卡（每改一类位置 llvm_diff+ASan）不可绕，否则大改裸奔全崩无从二分 |
-| 标量表示 = 标记指针（2026-06-08，B-080 重定义）| Int/Bool 低位 tag，所有位置不进堆；取代 box-at-boundary/inline-A1。Float 暂留 box（2026-06-09 起优先级降级 peak/perf，表示方案本身仍有效）| box-at-boundary 工作树实测证伪：inline 标量字段后 `a1d @402M` INT=63.3M≈W4 基线，字段 box 拆了 INT 没降→残留 INT 在多态边界（List<Int>/Option<Int>/泛型/dict 槽），uniform void* 必须 box，RC 波/inline 都消不掉；精确-RC 四波回收非标量临时后 INT 纹丝不动。标记指针让标量哪都不进堆 = 唯一结构性解，patch treadmill 终结 |
-| Mutable aliasing 语义 = move 补完（2026-06-11，B-110）| 复合赋值/存字段/返回 = move（use-after-move 编译错误）；句法禁 `f(xs, mut xs)` 同 lvalue 借用/mut 重叠（无 borrow checker 唯一的洞）；`.clone()` = 独立副本，Perceus 以 dup+COW 实现（move 杜绝别名后不可观测） | 三真值源分裂（实现=引用语义、设计=move、Koka 血统=值语义+COW），且无任何测试锁定。B 胜出：迁移「响」（自举编译器依赖共享的站点变编译错误 = 迁移清单；值语义方案是静默行为变化）；不可变共享 clone = 免费 dup，编译器 HIR/Type 共享图无伤；公理 1（Rust 语法 Rust 行为）+ LLM 对 use-after-move 自修复能力最强；JS oracle 无 RC 表达不了 COW。否决引用语义追认（mut\<T\> 系统性失真、aliasing bug 类对无人回路永久开放）|
-| 定位语修订（2026-06-11，设计方向复盘）| 定位改「LLM-first native 语言」，主战场 CLI/服务端/系统编程；「面向大型多端应用 / 干掉 JS/TS」开篇退役（philosophy.md 已改写）；演进判据成文 = 把人类判断逐项移交编译期判定 | 实际演进与开工定位脱节：JS 后端定归档、WasmGC 已排除、系统域决策批（16 数值类型/@repr/[T;N]/Arc）+ Perceus/move 走向使真实对标从 TS 变为 MoonBit/Zero/Mojo；leak verifier（D2）是该判据被工程自发验证的实例 |
-| fold 空表 verbatim-init 修复方向（2026-06-11，audit #150）| runtime `ring_list_fold` 空表路径 `ring_dup(init)`（dup-on-share，B-103 ×9 同模式）+ `fold` 退役出 `is_arg_returning_call`（清空后 anf_arg 保守机制整个删除）| 空表 `return init;` 无 dup + caller scope-end drop = double-free（latent，全仓 19 处 fold init 全字面量零实存）；C ABI callee 借用实参约定下唯一不平衡点就是 verbatim 返回，runtime dup 一处即闭环；退役后 W1 实参材料化全覆盖、消掉最后一个分类特例 = 净简化非补丁。否决只补 dup 留分类（留死机制+保守泄漏面）与维持 latent（违背禁 temp fix 基线，D2 verifier 上线必报）|
-| COW 不可观测原则（2026-06-11，所有权讨论）| COW 仅为 Perceus 引擎内部优化（`.clone()` = O(1) dup + 写时拷），**语义层绝不暴露**：任何用户可观测的 COW 分叉（写副本却以为写原件）= 设计错误，必须以编译错误或官方原地写法承接。投影绑定写入（`let item = xs[i]; item.f = v` 类）判定为 B-110 必须堵的洞（堵法见 B-110 spec 增补，机制实现前核定）| 内置且语义可见的 COW 在主流语言罕见（多为应用级特性）；静默分叉是行为级 heisenbug，对无人回路致命（agent 从局部代码看不出写丢了）；与 B-110「迁移必须响」同一原则 |
-| unsafe 区域图景（2026-06-11，所有权讨论）| 三栏总账（安全区 / unsafe 区 / 明确不做）+ `unsafe` effect 形态 + 两级 discharge（`mod requires {unsafe}` 许可 + `unsafe {}` 块吸收，关键字与 Rust 一致）+ `ring audit unsafe` 审计面；裸指针不参与 RC（extern type 排除规则推广）；撤销旧「不做 unsafe 块 / 裸指针」立场。详见 §7.12，原语集细化归 B-106 | unsafe 是所有权张力的最终出处——栏 C「明确不做」的可信度由栏 B 兜底背书；effect 形态 = 签名可见自动追踪（Rust 隔离 + effect 追踪复合，竞品无）；discharge 点清单 = 全代码库人类审查面，接无人回路公理 |
-| unsafe 原语集 + `Ptr<T>` 拍定（2026-06-13，B-106 正文）| typed 单一 `Ptr<T>`（不分 const/mut）普通值、操作才 unsafe；原语 v1 = alloc/dealloc/read/write/offset(inbounds)/cast/copy/addr 互转（互转 safe）；read/write = 按位 move 不动 RC（Perceus 零特殊化，落 B-103 既有分类）；extern fn 声明处签字（调用点 safe，extern type 句柄层与 Ptr 并存）；跨界 per-type 三件套、不做泛型 addr_of；不做 MaybeUninit / 泛型 transmute / v1 volatile-atomic。详见 §7.12，实现 = B-125 | 操作锚点使安全封装成立（持有即感染则容器 struct 定义本身被感染）；泛型 addr_of 把引擎私有值表示变可观测 API、堵死「优化不可观测」；inbounds 换别名分析/向量化（容器热路径）；声明处签字 = 信任点真实位置（签名忠实性在声明不在调用）+ 与现状 std 兼容、Rust 2024 同方向 |
-| RIIR 边界 = 全部自己实现（2026-06-13，B-106 收尾）| 容器底层（vector/string/unordered_map）全部纯 Ring + `Ptr<T>` 重写，不保留 C++ STL 依赖。B-125（unsafe 原语）后立项 | 「系统语言标准库借 C++ = 玩具」——自包含 + 容器内部跑 Perceus reuse 是方向性收益，不需等实测数据才决定 |
-| RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（2026-06-30）| B-152 P5 完成后 runtime 从 `.cpp` 改为 `.c`（纯 C11）。保留：RC 核心（ring_alloc/dup/drop，自举循环依赖不可消除）+ boxing + IO/OS syscall wrapper + fail effect（setjmp/longjmp）+ Ptr 原语 + init。迁走：全部容器（Map/Set/StringBuilder/Str 操作/List HOF）+ primitive trait dict 工厂 + 诊断 profiling | native 语言 runtime 中不应有 C++ 成分；RC 核心留 C 因为 Ring 的 RC 系统无法管理自身的 RC 系统（鸡蛋问题）；IO/OS/setjmp 是 C ABI 边界天然留在 C |
-| 析构顺序 = 对齐 Rust（2026-06-13，B-002 确认）| 同 scope 逆序 / struct 字段声明序 / 容器元素序，两后端一致并入差分回归 | LLM 训练数据 Rust 最强、对齐 = 零学习负担；四通道之③从悬空→已定（§7.9 表已更新）|
-| G-b emit 排序确定化（2026-06-13，B-089 G-b）| codegen 所有依赖 Map 迭代的 emit 点改稳定序（名字典序等），使 native/node 产出字节一致。拍 (a) 排序确定化，否决 (b) 语义等价判定 | B-080 验收实锤：排序差异不只美观——native 产 JS 运行崩溃（`__ring_ev_fail` undefined，evidence 传递因序断裂）。(b) 不解决功能性 bug |
-| RC 性能立场 = 渐近零开销（2026-06-13）| RC 计数当前有代价 = 优化器成熟度问题非模型税：树状所有权（静态可证唯一）处计数全部可优化消除（borrow 推断/move/reuse/单例化/标记指针/drop specialization），计数只保留在真共享处——该场景 Rust 同付 Rc/Arc。结论 = 相对 Rust 渐近无性能损失，差距可测量（B-104 re-measure 即实践）。详见 §7.9 | Rust 零开销只覆盖树状（borrow checker 静态证唯一 → 无条件 drop）；Perceus 框架下 Rust 模式 = 计数恒为 1 的退化情形，Ring 在可证唯一处向其收敛；真共享处两语言成本同构，Ring 把 Rust 手写 Rc 的标注负担变默认自动（lv0 零标注交换）|
-| handle/try 内 return 语义（2026-06-25，#173）| return = "effect 没有触发，正常退出 handle 结构"，类比 Python try/finally 保证 cleanup 执行。codegen 负责在 emit_return 时检测 handle/try 上下文并先 emit cleanup（catch_pop + evidence_drops）再 ret | return 跳出 handle/try 是自然表达力需求（early return），但 cleanup 不可跳过——catch 帧栈和 evidence 必须正确释放。禁止 return（方案 A）过度限制表达力；codegen cleanup（方案 B）更符合 Python/Rust 的 scope 退出保证 |
-| RC 语义立场 = 与 Rust 四通道可观测等价（2026-06-13）| 语义模仿 Rust + RC 实现的全部可观测分叉收敛四通道：① Drop 副作用——「Drop 禁 Clone」+ B-110 move 使 Drop 类型恒计数 1、与 Rust 逐点一致（该规则实为 COW 不可观测承重墙，非仅「资源不可复制」）② identity——永不提供 ptr_eq/is 类算子（负面承诺，主动与 Rust `Rc::ptr_eq` 分叉）；audit #156 已关闭（contains/index_of 改 Eq trait 派发，2026-06-15）；Map key 残留归 B-107 ③ 析构顺序——已定 = 对齐 Rust（2026-06-13，§7.9 表已更新）④ drop 时机——D-1 as-if 已封。COW 定性 = 「clone = dup」的语义修复机制而非独立优化（rc=1 原地写 = FBIP 入口，RC 独有能力）。详见 §7.9 | 纯内存值无「何时 free」观测窗口 → RC vs 静态 drop 的分叉只能经 Drop 副作用/identity/顺序/时机四通道传播；逐通道封堵即「与 Rust 行为等价」的可枚举证明，与 unsafe discharge 清单同手法（暴露面有界可审计）|
-| `List.sort()` Ord bound + runtime 死代码清理（2026-06-15，B-130）| sort 从 `impl<T> List`（extern）移入 `impl<T: Ord> List`（Ring impl = `sort_by` + `<`/`>` 比较），同 contains/index_of 迁移模式。runtime 死代码（`ring_list_sort_default` / `ring_list_contains` / `ring_list_index_of`）一并清理。audit #156 关闭（Eq 侧已修），#159 并入 | 两后端均不正确（JS 用 JS `<` 对 struct 出垃圾、LLVM 按半地址排序）；所有自举 .sort() 调用为 List<Str>/List<Int>（均有 Ord），零迁移破坏 |
-| COW 性能可预测性 = 三支柱（2026-06-13）| ① 成本上界定理：COW ≤ eager 深拷贝，预算按语义成本、优化只省不加、无凭空悬崖且确定可复现 ② move 锚点：B-110 后「rc>1 且被写」仅源于显式 clone/Rc——每次分叉数据流上游必有词法锚点，Swift 隐式共享病根结构性不存在 ③ 工具层（待 B-110 写时分叉落地后立项）：`ring audit cow` 静态分叉面枚举 + debug 分叉归因 profiler（复用 RING_BOX_PROFILE 基建）+ fbip 式零分叉断言（Koka 血统）。详见 §7.9 | COW 经典软肋 = 归因漂移/非局部性/路径依赖（Swift 前车之鉴）；Swift 解药 isKnownUniquelyReferenced = 运行时唯一性查询 = identity 观测 API，被四通道之②封死——Ring 必须以「预算上界 + 结构锚点 + 可枚举工具」替代，与 unsafe/audit 同手法 |
-| Set 语义与性能契约分层（2026-07-27，B-163 P2.2） | 数学集合的等价关系只依赖 `Eq`；标准库 `Set<T>` 作为高性能具体容器，membership/变更/集合运算要求 `Hash + Eq`，用纯 Ring `Map<T, Unit>` 实现并承诺 expected O(1)。struct/enum 在结构化 Eq 路径上自动派生一致的 Hash；manual Eq 不触发结构化 auto-Hash。缺 Hash 不静默回退 List；Eq-only 容器若有需求另以 `LinearSet` 显式立项 | 只给 equality oracle 时负向 membership 最坏 Ω(n)，无法同时保留 Eq-only 与次线性通用实现。把 Hash 作为性能能力而非数学语义，既保持概念准确，也让复杂度从 API 约束可见；否决 optional-trait/specialization 自动分流（Ring 明确无 specialization，且会隐藏性能） |
-| C 后端切换后的 bootstrap 锚（2026-07-28，B-163 Phase 2） | `dist-c/` 是 main 唯一 stage 0；先创建 `llvm-c-backend-final` tag 保存最终 LLVM-C 后端、dist/ 与 dist-llvm/，再在 dist-c clean-clone 构建和文本固定点验证后从 main 删除 dist/、dist-llvm/。历史恢复只 checkout tag，不在 main 保留 legacy 副本或压缩包 | 旧 dist/ 停在 `0bd7822`、不能直接编 HEAD；dist-llvm/ 依赖已退役的 LLVM-C 信道。继续保留会制造三个“权威锚”并让 bootstrap 路径失真；tag 已提供逐字节可恢复历史，main 应只表达当前可信构建链 |
-| 公理体系 4→6 条 + GC 取舍成文（2026-06-12）| 新增公理 5「编译器必须终止」（可判定性成文，lang-design §11.7 放弃清单挂其下）+ 公理 6「确定性资源语义」（RC/move/Weak/unsafe 区的公理地基补全）；会话原则归推论（标注是文档→3；失真必须响/优化不可观测/审查面可枚举→4）；philosophy.md 为唯一真值源，本文件公理节改速记，CLAUDE.md/README 加速查指针；GC 取舍理由成文于公理 6（语义层费用 GC 省不掉 + 引擎层四收益 + 不可逆性不对称；「GC 停顿」不是理由；B-089 re-measure 为可证伪锚点）| 推导审计发现资源管理体系站在未成文承诺上——四公理字面下 GC 严格更优、推导不闭合；philosophy/design 公理全文双真值源已现漂移隐患 |
-
-### 幽灵功能（已解析但无语义效果）
-
-以下语法 Parser 接受但 Checker/Codegen 不处理，保留作为扩展点：
-
-| 功能 | 解析行为 | 激活时机 |
-|------|---------|----------|
-| `where` 精化子句 | 消费 tokens 后丢弃 | refinement types |
-| Supertrait | AST 字段存在，始终为空 | 后续 trait 增强 |
-| Resume 参数名 | AST/HIR 字段存在，无语法触达 | 已无计划（full AE 取消），可清理 |
-
-### 实现偏差备忘
-
-- **Enum 单元变体语法设计**：声明和模式匹配使用 `red()`（带空括号），构造使用 `red`（无括号裸名）。设计原因：声明时与命名字段变体区分；构造时单元变体是值非函数调用；模式匹配时区分于绑定变量
-- **比较运算符非结合性**：parser 拒绝 `a == b == c`，有意行为
-- **`+=`/`-=` 复合赋值**：支持
-- **`Str.replace` 全替换语义**：对应 JS `replaceAll`，替换所有匹配项
-- **单元素 `(expr)` 不是 tuple**：与 Rust/Python 一致
-- **Parser 换行感知**：`(` 跨行时不触发函数调用（防止 `42\n(...)` 被解析为调用）
-
-### 自举翻译中发现的语言限制
-
-> 自举翻译（TS 13K→Ring 14K 行，31 文件）中发现的限制，现行清单见 CLAUDE.md「已知限制」。已修复项（空列表推断、`List.set`）已删除。
-
-> 未实现特性优先级见 `backlog.md`。
-
----
+本文件只保存稳定设计。当前实现、依赖和验收分别以 `CLAUDE.md`、`docs/backlog.md`、`docs/audit-report.md` 与可执行测试为准；已完成里程碑、被否决方案和逐轮调查只查 Git。解析但无语义效果的“幽灵功能”必须进入活动 backlog/audit，不能在设计附录另建第二张看板。
 
 ## 一句话
 

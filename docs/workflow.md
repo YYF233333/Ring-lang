@@ -289,6 +289,7 @@ Steward 仅在以下情况结束当前自主运行：
 - 本文件是平台无关治理真值；
 - `.agents/skills/` 是 Codex adapter，`.claude/skills/` 是 Claude Code adapter；
 - provider-specific 工具调用不得复制到本文件；
+- adapter 只保留 provider 入口与不可绕过的有序门禁，不复制本文件的完整规则；
 - adapter 必须遵守持续推进、决策批处理、低噪声摘要和用户保留边界。
 
 修改 workflow、skills、看板 heading 或 `.codex/config.toml` 后运行：

@@ -1,247 +1,139 @@
 # CLAUDE.md
 
-## 语言约束
+## 语言与协作
 
-- **回复必须使用中文**：所有对话回复、解释、讨论一律用中文。技术术语（如 trait、effect、codegen、HIR 等）可保留英文，但整体行文必须是中文。代码和命令不受此限制。
+- 所有对话回复、解释和讨论使用中文；技术术语、代码和命令可保留英文。
+- 本文件是项目技术、构建和开发约定的入口。仓库授权、停止条件、看板和角色边界以 `docs/workflow.md` 为唯一真值。
+- 语言公理见 `docs/philosophy.md`，现行设计见 `docs/design.md`，用户语言规范见 `docs/lang-spec/`，活动工作见 `docs/backlog.md` 与 `docs/audit-report.md`。完成历史只查 Git。
 
 ## 项目概述
 
-Ring-lang：不信任程序员的 native 编程语言——编译器是最终权威，不是程序员。写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。代数 effect system + HM 类型推断 + trait 多态，编译器全推断，零标注负担。编译到 LLVM native。JS bootstrap 后端已归档（B-100）。
+Ring-lang 是一门 LLM-first native 编程语言：Python 风格表面语法，HM 类型推断、trait 多态、代数 effect 与确定性资源语义由编译器统一裁决。编译器已用 Ring 自举。
 
-编译器已自举（Ring 写 Ring），完整设计文档见 `docs/design.md`。
+当前处于 B-163 后端迁移期：C11 后端已完成 Phase 1，支持单文件、project/module 与 self-host；Phase 2 parity 认证完成前，LLVM 后端仍是默认 native、bootstrap anchor 与差分 oracle。JS codegen 已归档；`compiler/dist/` 只是冻结在 `0bd7822` 的 stage-0 回退锚，不能直接编译 HEAD。
 
-## 设计公理（速查，全文唯一真值源 = `docs/philosophy.md`，2026-06-12 重构为九条三层）
+## 技术状态
 
-**层 0 目标**：④ 不信任程序员 · 编译器是最终权威（渐近表达 = 无人回路 × 全场景；推论：失真必须响 / 优化不可观测 / 人类审查面可枚举 = unsafe discharge 清单）。**层 1 硬约束**：⑤ 编译器必须终止（可判定片段 + fuel，B-119）⑥ 确定性资源语义（Drop = scope-end 语义 + as-if 条款；RC 无 GC；环用 Weak）⑦ 场景不可堵死（native / 零强制 runtime / C ABI）。**层 2 策略**：① 类型即模型（可判定标准：lv0 零标注 + 错误单轮可修）② 效果即可见性（主载体 = formatter 标注 + 模块签名 + llm 错误格式）③ 推断为王（标注是文档不是语义；agent profile 下 warnings=errors）⑧ 一种事一种写法 ⑨ 语法借用。仲裁：策略让位约束；约束修订走修宪程序（dossier + 可证伪锚点）；记录入 design.md「公理仲裁决策表」。
-
-## 技术栈
-
-- **编译器**：Ring 自举。ring.exe 自编译（dist-llvm/ .o 冻结产出 + ring_runtime.cpp → clang 链接）；dist/（冻结 JS 产出）= stage 0 信任锚，但语言快照停在 `0bd7822`（2026-06-27）——只能编该代源码，回退到 HEAD 需链式重放（B-163 Phase 0 实测，2026-07-10）
-- **Runtime**：ring_runtime.cpp（~3200 行 C++ STL wrapper）→ RIIR 最终形态 = `ring_runtime.c` 纯 C ~400 行（RC 核心 + IO/OS + fail effect + Ptr 原语），详见 design.md §7.12
-- **双后端 codegen**：B-163 Phase 1 steps 1–9 已完成。LLVM 后端（codegen_llvm*.ring，LLVM-C 22 API）在 Phase 2 前仍是 native 默认与差分 oracle；C 后端（codegen_c*.ring）已支持单文件、project/module 与 self-host，发射 C11 后调用 clang
-- **测试**：Python test runner（`tests/run_tests.py`），零外部依赖
-- **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
-- **历史**：TS 原始实现归档于 git tag `ts-compiler-final`；JS codegen 后端归档于 `5df6c99`（B-100 Phase 2）
+- **前端**：Lexer → Parser → AST → Checker（HM + effects）→ HIR。
+- **资源管理**：Perceus RC pass 在 HIR 上插入 clone/drop；`verify_rc.ring` 检查 LEAK/UAF/BALANCE。RC 无 GC，环由 `Weak<T>` 方向处理。
+- **后端**：共享 HIR/Perceus/runtime ABI，分流到 C11 发射或 LLVM-C 发射。
+- **Runtime**：迁移期使用 `ring_runtime.cpp`；RIIR 终态是只保留 RC、IO/OS、fail 与 `Ptr` 原语的纯 C runtime。
+- **标准库**：List、Map、Set、StringBuilder 已是纯 Ring struct；底层 slot/buffer 原语经 C ABI bridge。Str 仍是内建 `Type::StrType`，RIIR Step 2 尚未完成。
+- **测试**：统一入口是 `tests/run_tests.py`，不再以 npm/Node harness 作为项目命令。
 
 ## 项目结构
 
-```
+```text
 Ring-lang/
-├── compiler/          编译器源码（*.ring）+ dist/（冻结的 JS 产出，stage 0 回退）+ dist-llvm/（.o 产出）
-│   ├── codegen_llvm*.ring LLVM native 后端（5 个模块，当前默认/oracle）
-│   ├── codegen_c*.ring    C11 源码后端（B-163 Phase 1 ✅，支持 project/module/self-host）
-│   └── llvm_ffi.ring      LLVM-C API 声明（91 extern fn + 13 extern type）
-├── ring_runtime.cpp   双后端共享的 C ABI runtime（~3200 行 C++ STL wrapper）
-├── std/               标准库（io/fs/path/process/str/num/list/map/set/result/iterator）
-├── tests/             E2E 测试用例 + 测试运行器
-├── examples/          示例程序
-├── editor/vscode/     VSCode 插件（语法高亮，LSP 暂不可用）
-└── docs/              设计文档、技术债清单、竞品分析（含 lang-design.md：语言面长期决策——数值类型/@repr/TCO/comptime/包管理等）
+├── compiler/              Ring 编译器源码；codegen_c* 与 codegen_llvm* 双后端
+│   ├── dist/              冻结 JS stage-0 回退锚
+│   └── dist-llvm/         当前 native bootstrap 对象产物
+├── std/                   纯 Ring 标准库与少量 C ABI 原语声明
+├── tests/                 Python runner、语义用例、golden、RC/parity matrix
+├── examples/              示例程序
+├── ring_runtime.cpp       迁移期共享 runtime
+└── docs/                  公理、设计、规范、工作流和活动看板
 ```
 
 ## 编译器管线
 
-```
-源码 (.ring) → Lexer → Parser → AST → Checker (HM + effects) → HIR → Perceus RC
-                                  ↓ (errors)                        ├→ Codegen C → .c → clang → .o → native binary
-                           DiagnosticSink                           └→ Codegen LLVM → .o → native binary
-                                  ↓
-                         format_human / format_llm
+```text
+源码 → Lexer → Parser → AST → Checker → HIR → Perceus RC
+                         │                    ├─ Codegen C → .c → clang → native
+                         └─ DiagnosticSink    └─ Codegen LLVM → .o → native
 ```
 
-- **AST**：忠实反映源码结构，所有节点带 Span
-- **HIR**：独立数据结构，每个表达式带推断的 Type + EffectRow，语法糖已展开
-- **DiagnosticSink**：Lexer/Parser/Checker 错误统一收集，支持多错误报告
-- HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
-- **Perceus RC pass**（`perceus.ring`）：HIR → [escape-clone/drop 插入] → RC 标注 HIR → Codegen LLVM。L1 借用引擎 clone-all-escape（Koka POPL'21）。post-RC HIR 经 `verify_rc.ring` 静态 LEAK/UAF/BALANCE 检查（随 npm test 强制）。见 design.md §7.11
+- AST 忠实表示源码并携带 Span；HIR 与 AST 独立，每个表达式携带推断的 Type 与 EffectRow。
+- Lexer/Parser/Checker 诊断统一进入 `DiagnosticSink`，支持 human/LLM 两种格式。
+- 跨阶段字符串、ctor、trait/effect slot 等契约放在 `hir.ring` 或专用共享模块；禁止两后端各自猜测。
+- 新增 AST/HIR 变体后必须处理所有穷尽 match；编译器会对遗漏 fail closed。
 
 ## 开发约定
 
-- 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
-- 编译器各阶段共享约定放 `hir.ring`（如 `variant_ctor_name`），不允许跨阶段硬编码字符串契约
-- **dist-llvm/ 重编**：修改编译器后用 ring.exe 重编：`.\ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm`，并提交更新后的 dist-llvm/ 文件。ring.exe 构建方式见「常用命令」。Worktree merge 后的 rebuild 必须 amend 进 merge commit。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist-llvm/ 编译新源码的产出可能有引用错误，需先用 worktree 的 dist-llvm/ 做中间 bootstrap 再 double bootstrap。dist/ 作 stage 0 信任锚（需 llvm_addon；语言快照停在 `0bd7822`，编不了 HEAD 源码——回退需链式重放，见 B-163 Phase 0）。
-- 注释语法 `//`，无 pipe 运算符，`.method()` 是唯一链式调用方式（`::` 模块路径和 `.method()` 方法调用是两个不互通的范畴，无 UFCS）
-- 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
-- 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）
-- 每个 PR 至少包含一个 e2e 测试，合入前必须通过 `python tests/run_tests.py`
-- **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁。Worktree agent 启动后必须立即 `git log --oneline -1` 验证 base commit。**每次任务完成后必须清理 stale worktree**：`git worktree remove -f -f <path>`。
-- **决策分级**：root 是 Repository Steward，可自主决定既有设计内的实现、维护、review、refactor、测试与内部架构取舍；遇多个工程方案时先做 Argument + 独立反驳，不再因“非 trivial”自动停机。语言公开语义、设计公理、安全保证、breaking API/ABI、新 P0/路线重排和不可逆外部动作仍由用户拍板。完整边界见 `docs/workflow.md`。
-- **持续推进**：单个 item 需要用户决策时转 `waiting-feedback` 并写简短决策包，Steward 立即补位其他可执行事项。只有所有实现、维护、review、refactor、Argument、audit 工作都耗尽或受同一全局阻塞时才停止。
-- **方向止损门**：同一修复方向连续两轮独立 review 都冒出新的 correctness blocker，或开始复制 resolver/type/effect/RC 等既有权威子系统时，必须冻结继续补丁与长门禁，按 `docs/workflow.md` §4.5 执行抽象方向审计；不得把不断扩张的反例链误当成“再补一个分支”。
-- **低噪声汇报**：用户摘要只给决策、结果、仓库健康与下一步；不得默认呈现 subagent 等待、命令执行状态、普通重试、原始日志和逐文件流水。
-- **禁止忽略问题**：不能以“推迟”“很难触发”等理由静默忽略。Steward 必须修复、记录进队列或形成用户保留决策包；不得把普通工程判断无谓上交用户。
-- **文档时效性**：修改编译器功能后同步更新 CLAUDE.md 和 docs/design.md。已完成的 review/plan/spec 文件应删除。
-- **禁止 temp fix**：修复应提升项目健壮性，不增加技术债，即使工作量更大。
-- bug fix 后如果问题典型，补充 regression test。
-- **runtime 编译必须 -O2**：`clang++ -c ring_runtime.cpp` 必须带 `-O2`（不是 -O0）。-O0 下自编译耗时翻倍，不可接受。
-- **日常批量 push**：本地工作持续 commit；只有验收需要远端 CI 或形成交付批次时由 Steward push，避免每个 commit 触发约 1h CI。release、公开发布与历史重写仍需用户决定。
+- 编译器源码为 `compiler/*.ring`，使用 snake_case；复杂算法注明 Koka 等上游来源。
+- 变更必须保持现有公开语义；禁止 temp fix、静默 skip 或降低验证门槛。典型 bug 补 e2e regression。
+- 每个实现变更至少有相称测试；合入前运行 `python tests/run_tests.py`。RC、ABI、bootstrap 或间歇性内存路径按对应 spec 要求重复运行。
+- 修改公开功能时同步更新设计/规范；活动 spec 只保存当前目标、约束和验收，完成过程留 Git。
+- worktree、review、Argument、决策边界与持续推进规则见 `docs/workflow.md`，不要在本文件复制治理协议。
+- `ring_runtime.cpp` 必须以 `-O2` 编译；`-O0` 不作为有效性能或自举门。
 
-## Repository Steward 模式
+### Bootstrap
 
-用户通常每天只回来看 2–3 次。root agent 代理本仓库的实现与维护，并在一个 active session 内持续执行：
+- 修改编译器后使用当前 `ring.exe` 重编 `compiler/main.ring`，并提交需要跟踪的 bootstrap 产物。
+- 数据结构级重构可能要求 double bootstrap；验证固定点后才算完成。
+- `compiler/dist/` 语言快照停在 `0bd7822`，回退到 HEAD 需按历史链式重放；不要把它当成当前 compiler CLI。
+- B-163 完成前 LLVM 仍是 anchor/oracle；LLVM、`dist/`、`dist-llvm/` 的删除顺序以 `docs/plan-c-backend.md` 当前 gate 为准。
 
-```text
-恢复持久状态 → 选最高价值无阻塞工作 → 实现/维护/重构
-→ 独立 review / Argument → 测试与 bootstrap → merge/bookkeeping
-→ 立即补位下一项
-```
+### RIIR bridge 所有权契约
 
-- `Discussion`、`Implementation`、`Maintenance`、`Review`、`Refactor`、`Argument`、`Audit` 是同一 Steward 的工作类型，不要求用户逐项触发。
-- 用户保留决定写入 `docs/worker_feedback.md`；该路径因历史引用保留，但只允许简短 `[决策]`、`[里程碑]`、`[全局阻塞]`，不是实现日志。
-- Audit 每轮仍固定 snapshot、对抗验证并停止该轮，但 Steward 可在高风险 milestone、信任边界变化或队列空档自主启动下一轮；audit 子流程结束后回到持续执行循环。同一 trigger/source SHA/lens 的完成状态写入专用 Git notes ledger，跨 session 不重复消费。
-- 详细授权、停止条件、决策包和用户摘要契约以 `docs/workflow.md` 为真值。
+List/Map/Set/StringBuilder 是 Ring struct；C bridge 只提供无法在安全 Ring 中表达的 raw-memory 操作。常用 slot 契约：
 
-## RIIR 实施指南（B-152 经验，适用于 P3 Map / P4 Set / P1 Step 2 Str）
+| 操作 | 所有权语义 |
+|---|---|
+| `ring_slot_read` | peek + dup；容器与调用方各持一份 |
+| `ring_slot_take` | move out，slot 清空，调用方接管 |
+| `ring_slot_write` | 写入空 slot，slot 接管传入值 |
+| `ring_slot_replace` | dup 新值后替换并 drop 旧值，支持 self-assignment |
+| `ring_slot_drop` | take + drop，释放 slot 所有权 |
 
-### 类型分类决定迁移路径
+- bridge 走普通 extern fallback；除非 ABI 确有特殊 lowering，不新增 `method_to_runtime` 或手工声明表。
+- List/Map/Option 的固定 runtime typeid 与 drop 路径必须和生成 struct drop 分工一致，禁止双 drop；Set/StringBuilder 按普通 Ring struct 处理。
+- 无字段 enum ctor 也会生成 fresh box；Perceus/move/verifier 必须按精确 ctor `DefId` 判定，不能按叶子拼写猜测。
+- HOF 中 range iterator 当前会引入 `mut` effect；局部 `let mut` 自身会由 `cancel_local_mut_effects` 在函数边界取消。
 
-| 类型 | 身份 | 迁移难度 | 已完成 |
-|------|------|---------|--------|
-| StringBuilder | `pub struct`（原 `pub extern type`） | 简单（P0 已验证） | ✅ P0 |
-| List | `pub struct`（原 `pub extern type`） | 中等 | ✅ P2 |
-| Map | `pub struct`（原 `pub extern type`） | 中等（同 List 模式） | ✅ P3 |
-| Set | `pub struct`（`Map<T, Unit>` wrapper） | 中等（复用 Map） | ✅ P4（B-107，2026-07-31） |
-| Str | `Type::StrType`（Type 枚举变体） | 困难（需改类型系统 26 处） | P1 Step 1 ✅，Step 2 排最后 |
-
-- **extern type**（List/Map/Set/StringBuilder）：走 structs map 的 `Type::StructType`，改为 `pub struct` 后 checker/codegen 自然走通
-- **内建类型**（Str/Int/Bool）：`resolve_named_type` 有硬编码短路，codegen 26+ 处特殊分支，必须逐一改
-
-### Bridge 函数模式（标准做法）
-
-C++ 端实现 slot 级操作，Ring 端声明为 `extern fn`，codegen 自动声明+调用（`fdab843` 修复后不再 panic）：
-
-```ring
-// std/list.ring（或 std/map.ring）
-extern fn ring_slot_read<T>(buf: Ptr<T>, idx: Int) -> T   // peek + dup
-extern fn ring_slot_take<T>(buf: Ptr<T>, idx: Int) -> T   // move out
-extern fn ring_slot_write<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
-extern fn ring_slot_replace<T>(buf: Ptr<T>, idx: Int, val: T) -> Unit
-extern fn ring_slot_drop<T>(buf: Ptr<T>, idx: Int) -> Unit  // take + ring_drop
-```
-
-- **不需要 `extern_fn_to_runtime` 映射**——codegen fallback 自动处理
-- **不需要 `declare_runtime_fns`**——codegen fallback 自动声明
-- **只需要** ring_runtime.cpp 中有对应 `extern "C"` 实现
-- 旧编译器（dist-llvm/）也能正常编译调用（codegen 修复后）
-
-### RC 语义（bridge 函数的 dup/drop 职责）
-
-| 操作 | 语义 | 用途 |
-|------|------|------|
-| `ring_slot_read` | peek + `ring_dup` | get/first/last/concat/clone（共享所有权） |
-| `ring_slot_take` | move out，slot 置 null | pop/shift/clear/drop（转移所有权） |
-| `ring_slot_write` | 直接写入 | 新 slot、push、构造（接管所有权；不得用于替换已有值） |
-| `ring_slot_replace` | dup 新值 → store → drop 旧值 | List.set / Map equal-key overwrite；借用式替换且 self-assignment 安全 |
-| `ring_slot_drop` | take + `ring_drop` | clear / remove / Drop impl（不得用作 replace 的前半步） |
-
-### 已知陷阱
-
-1. **Drop/Clone 冲突**（E0802）：Ring 禁止同时 `impl Drop` + `impl Clone`。内建容器（List/Map/Set）有编译器内建的 Clone，加 `impl Drop` 会触发 E0802。解法（2026-07-12 修正，B-163 step 7 核实）：容器 drop 由 **runtime 在固定 typeid 上原生处理**（drop_list/drop_map tid 4/5、drop_option tid 8），codegen 的 `emit_drop_functions` **skip 这些 typeid 不生成**（RingList/RingMapStruct 布局是 runtime 私有，per-field drop 会漏 slot buffer）；Set/StringBuilder 是 extern type 不进 struct_types。注意 Result 当前两侧都不处理 = 泄漏（audit #256）
-2. **HOF 方法内的 range iterator effect 传染**（2026-07-31 修订，与旧表述相反）：HOF 方法（for_each/map/filter 等）内用 `for i in 0..n` 会把 range iterator 的 `mut` effect 泄入 closure 参数的 effect row 造成 effect mismatch；正确写法是 `let mut i` + while 索引循环（局部 `let mut` 不泄漏，std/map.ring HOF 注释实证）
-3. **Effect 暴露**：C runtime 函数没有 effect 签名，Ring 方法有。迁移后调用者可能因新暴露的 effect 而编译失败。需检查 HOF 方法（map/filter/fold 等）的 effect 传播
-4. **Typeid 一致性**：用户定义的 struct 会被分配 user typeid（≥64），但 C runtime 的 drop/dup 使用固定 typeid（如 RING_TYPEID_LIST=4）。需在 codegen 中强制分配匹配的 typeid（`get_or_assign_typeid` 特殊化）
-5. **C++ bootstrap shim 生命周期**：只有当前跟踪的 bootstrap anchor 仍引用旧 runtime 符号时才保留 compatibility shim；新源码完成 fixed point、跟踪 anchor 不再引用后必须删除。B-152 P3 的 `ring_map_*` shim 已在 B-163 step 9 按此规则全部删除
-6. **sort_by 委托 C runtime**：原地排序用 Ring 实现效率低（无 break/continue），可委托 C 端的 `ring_list_sort_bridge` 桥接
-7. **Str 是内建类型**：`resolve_named_type("Str")` 在 `infer_ctx.ring:L1134` 短路返回 `Type::StrType`，绕过 structs map。P1 Step 2 需要删除此短路 + 改 26 处 StrType 引用
-8. **无字段 enum ctor 的所有权**：HIR 中它仍表示为 `Ident`，但 codegen 会分配新的 enum box，Perceus / move checker / RC verifier 必须按精确 ctor `DefId` 把它视为 fresh；不能按叶子拼写猜测（普通变量、const、函数和跨模块同名 shadow 都合法）。唯一例外是借用式内建 singleton `Option_none`
-
-## 测试策略
-
-- **E2E 语义测试**（`tests/cases/*.ring`）：语言规范的可执行版本，每个特性一个文件
-- **负面测试**（期望编译错误）：定义类型系统边界，含 pending 测试标记未来特性
-- **回归测试写 E2E 层**：不写 "第 X 行生成的代码应该是 Y"——codegen 实现可变
-- **度量语义覆盖**，不度量代码行覆盖
-- **Golden 回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例编译运行，断言输出与 `.expected` golden 快照一致。锁定历次 codegen/RC/effect-handler 修复——用例即规约，修复明细在 git history。需本地 clang，无则自动 skip。重新生成快照：`node --test ../tests/llvm_diff.test.mjs --update-golden`。**动 RC 的改动必须 ×3 跑全套**（间歇性堆损坏单跑约 1/3 命中，单跑假绿）。
-- **RC 静态 verifier 套件**（`tests/verify_rc.test.mjs`，随 `npm test`）：post-RC HIR 线性检查（LEAK/UAF/BALANCE 三判据）——self-verify 门（编译器自身 0 errors）+ llvm 用例 in-process sweep + 负面套件。见 design.md §7.11 D2
-- **Agent 测试纪律**：测试耗时长（E2E 含 LLVM 编译链接 ~2-3 分钟），agent 不得因 grep 遗漏反复重跑。规则：① 测试输出**完整重定向到临时文件**（`python tests/run_tests.py 2>&1 > test_output.txt`），后续从文件中 grep 分析，不丢失任何信息；② **结果无变动不重跑**——只有代码改动后才重跑测试，仅读代码/grep/分析阶段不触发测试；③ 编译失败先修再跑测试，不要"跑一下看看"
-
-## 已知限制
-
-### Effect / Codegen
-
-- **Handler 只支持 tail-resumptive + abort**：非 abort effect 的 handler 返回值即 resume 值，arm 结果必须匹配 operation return type，arm 自身 effects 向外传播；`Never` 按 bottom 兼容且不会绑定 fresh operation type；返回 `Unit` 的 operation 不约束 arm 结果（arm 值按语句位置语义丢弃，#265）。同名 custom effect label 的泛型实参按「一 label 一 evidence」在 row merge 时强制一致（#258）；`mut<T>` 是多实例 marker（`mut<Int>`/`mut<Str>` 合法共存，bare `{mut}` 实例化是新实例），不在此契约内（#265）。`fail.raise` 为 abort，捕获后当前 handler/evidence 先失活，abort arm 恰好执行一次并以其结果替换整个 `handle`，arm 内 re-raise 逃向外层。开放 HOF fail row 会按 payload 做精确约束；无法安全还原的 owner-qualified associated type 关系 fail-closed。当前双后端采用创建处词法 evidence：handler 只消除显式 custom label，未知 open tail 原样传播；调用点动态 evidence 留 B-167（LLVM 退役后 breaking upgrade）。Full AE（post-resume / multi-resume）不计划实现
-- **Trait dictionary dispatch 的 evidence 转发已基本修复**（#77），delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）。**Default trait method + custom effect 的 evidence 转发已修复**（B-139，2026-06-24）；**default trait methods 已支持**（B-141，2026-06-24）
-- **Effect 多态核心已修复**（B-159 ✅）：HOF closure effect 量化 + 传播。**残留**：`rebind_fn_type` 不查 `impl_methods` 映射（只查 scope stack），impl 方法的 body-inferred effects 不回写 scheme。prelude 不走 rebind 路径，修了会导致编译器自身大量 W0001。当前靠注册时共享 closure 参数 effect tail 绕过
-- **`catch` 总是消除 fail effect**：完整捕获点，catch arms 经穷尽性检查。需要部分处理时在 catch 内部 match + re-raise
-- **`unsafe` effect + `Ptr<T>` 已实现**（B-125 ✅）：`unsafe { expr }` discharge 块 + `mod requires {unsafe}` 两级许可 + `Ptr<T>` 内建类型（RC 排除）+ 原语集 v1（alloc/dealloc/read/take/write/offset/cast/addr/from_addr/ptr_copy）。`read` = peek+dup，`take` = move out。extern fn 声明处签字检查推迟（B-156，需文件级 `requires` 语法）
-- **Drop/RAII Phase 1 已实现**（B-002p1 ✅）：`impl Drop for T { fn drop(self) with {io} { ... } }`，scope-end 触发用户 drop → 字段递归 drop。Move checker：Drop 类型 `let y = x` 后使用 x → E0801。`impl Drop` 禁 `impl Clone`（E0802）、drop 禁 fail（E0803）。Phase 2（unwind + Weak）推迟到 RIIR 之后
-
-### 类型系统
-
-- Record row types 仅在参数位置使用（无匿名 record 字面量）
-- struct-field 位 `where` 只解析不验证（W0002）；参数位 `where` 未实现（硬 parse error E0103）；均归 B-001
-- 不支持 `dyn Trait` 动态分发、GATs
-- `pub` 可见性在单文件模式不强制（向后兼容）
-- 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证
-- `Map<K,V>` / `Set<T>` 要求 `K: Hash + Eq`；`derive Hash` 已自动派生（B-107 ✅ 2026-07-31）：struct 按字段声明序 combine，enum 先混入稳定 variant discriminator；manual Eq 阻断 auto-Hash（coherence）；Float 字段拒绝（E0503）；Option/tuple/List 字段暂无 Hash evidence（fail-closed，B-173）
-
-### 语法
-
-- 字符串无 `+` 拼接：用插值 `"${a}${b}"` 或 `join()`
-- `list[i]` / `map[key]` / `str[i]` 越界 panic，安全访问用 `.get()`
-- Struct literal 不能直接出现在 if/while/for/match 条件位置（`{` 歧义），需加括号或用变量
-
-### 基础设施
-
-- CI 已就位（B-151 ✅）：Python runner + ring.exe + clang，GitHub Actions Windows（check + test 两阶段）。C self-host 文本固定点已干净且确定；B-163 Phase 2 已启动 parity 认证，但 LLVM 仍是当前 anchor 且残留间歇执行信号，因此 bootstrap 保持禁用，待 gap 门闭合并切换 dist-c 后再恢复。Linux CI 待后续
-- 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
-- Checker 多错误恢复是 declaration 级（同一函数内停于首错）
-- LSP 暂不可用（TS 实现未移植）
-- **Impl 方法 effect 传播**：B-138 ✅ impl 内方法按 SCC 拓扑排序检查（callee 先于 caller），非环依赖的 effect 正确传播。**残留限制**：impl 内互递归方法（SCC 环，如 `parse_mod_block` ↔ `parse_decl`）仍有 effect 遗漏，与顶层 SCC（B-122）同一限制
-
-## 路线图
-
-**当前**：**B-163 C 后端迁移 Phase 1 ✅ / Phase 2 进行中**——steps 1–9 完成，C 单文件/project/self-host、C 文本固定点与 LLVM anchor 固定点均已闭合；Phase 2 P2.1 machine-readable parity matrix 与诚实 skip/gap 分流已落地，当前进入 P2.2 shared gap 修复与 manual gate 自动化（check-only gap 已清零）。认证完成前不退役 LLVM、不切换 dist-c、不恢复 CI bootstrap。测试状态以 Python runner 实跑为准，不在此记录具体计数。
-
-**后续**：先完成 B-163 Phase 2；B-152 RIIR std 的剩余 P1 Step 2 Str / P5 在整个 B-163 完成前保持暂停（P4 Set 已随 B-107 完成），之后恢复 → B-002p2 unwind 补全；再后续 B-110 别名追踪 → B-068 用户面。async/Refinement 在 RIIR 之后。
-
-**基础设施**：B-151 CI 重设计 ✅（Python runner + GitHub Actions Windows CI，零 Node 依赖）
-
-**遗留**：LSP 移植、技术债清理（见 `docs/audit-report.md`）
-
-## 常用命令
+## 测试与常用命令
 
 ```powershell
-# 构建 ring.exe（需 clang + LLVM）
+# 构建当前 ring.exe（迁移期需 clang + LLVM）
 clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
 clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-L<LLVM_LIB_DIR>" -lLLVM-C
 
-# 编译单文件为 native .o
+# 使用编译器
+.\ring.exe check examples/effects.ring
+.\ring.exe check --error-format=llm examples/effects.ring
 .\ring.exe build examples/hello.ring
 
-# 类型检查
-.\ring.exe check examples/effects.ring
-
-# LLM 格式错误输出
-.\ring.exe check --error-format=llm examples/effects.ring
-
-# E2E 测试（Python runner）
+# 测试
 python tests/run_tests.py --suite e2e
-
-# Golden 回归测试（需 clang）
 python tests/run_tests.py --suite llvm
-
-# RC verify
 python tests/run_tests.py --suite rc
-
-# 自编译 ×3
 python tests/run_tests.py --suite self-compile
-
-# 全量测试
 python tests/run_tests.py
-
-# 重新生成 golden 快照
 python tests/run_tests.py --update-golden
 
-# 重新编译编译器自身（dist-llvm/）
+# 重编当前 LLVM bootstrap 产物
 .\ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
 ```
 
-## ASan 跑法（两档，2026-06-11 定）
+测试输出需要后续分析时，完整重定向到临时文件；没有代码或测试数据变化时不要重复跑长套件。Golden 断言行为，不锁某行 codegen；RC 变更遵守当前 backlog/audit 项规定的重复门。
 
-ASan 对自编译（数十亿次分配，@2026-06-12 ~26 亿）默认参数会放大 ~100x（每次 malloc/free 抓 30 帧栈 + redzone + quarantine），半小时起步。分两档：
+## 当前语义与限制
 
-- **gating（内循环 / ×3 例行 / llvm_diff + real_program）**：`ASAN_OPTIONS=malloc_context_size=0:quarantine_size_mb=16:max_redzone=32:detect_leaks=0`（**已设为 User 级默认 env，新 shell 自动继承**；已在跑的旧 session 需内联设置）。检测面不变（立即 UAF/over-free 照抓），代价 = 报告无 alloc/free 栈 + 延迟 UAF 覆盖缩小。**ASan self-compile 不进内循环**——内循环 self-compile 用非 ASan + alloc/free 计数器 + 退出码（20s/轮）。
-- **capstone 终验（self-compile 全量 ASan，每个 milestone 一次，可过夜）**：必须显式覆盖回全强度 `$env:ASAN_OPTIONS='quarantine_size_mb=256:malloc_context_size=12'`。gating 抓到 bug 后对单用例用此档重跑拿完整 alloc/free 栈。
-- ring_asan 构建建议 `-fsanitize=address -O1 -fno-omit-frame-pointer`（-O0 下减速翻数倍）。
-- thrash 预警：31GB 物理内存，ASan self-compile 后段可能换页——CPU 掉零 + 磁盘狂转即杀，别等。
+- Handler 支持 tail-resumptive 与 abort，不计划实现 post-resume/multi-resume Full AE。
+- `mut<T>` 是可多实例共存的 marker effect；`mut<Int>` 与 `mut<Str>` 可同时存在。它不同于参数位 `x: mut T` 和闭包捕获列表。
+- `catch` 穷尽处理并消除对应 fail；需要部分处理时在 catch 内 match 后 re-raise。
+- `unsafe` effect 与 `Ptr<T>` 已实现；extern 声明处文件级 `requires {unsafe}` 留 B-156。
+- Drop/RAII Phase 1 已实现；C-native abort unwind 与 `Weak<T>` 依赖 B-168/B-002 Phase 2。
+- impl 内互递归方法的 effect 回写仍有限；活动问题见 backlog B-160。
+- Record row 只在参数位置；struct-field `where` 只解析不验证，参数位 `where` 尚不能解析。
+- 不支持 `dyn Trait`、GAT、first-class modules 或完整 module-signature conformance。
+- Map/Set key 要求 `Hash + Eq`；derive Hash 已覆盖基础 struct/enum，Option/tuple/List 字段覆盖留 B-173。
+- 字符串无 `+` 拼接；使用插值或 `join()`。索引越界 panic，安全访问使用 `.get()`。
+- LSP 尚未迁移。
+
+## 当前路线
+
+1. 完成 B-163 Phase 2：共享 gap、manual gate、dist-c 固定点、LLVM 退役与 bootstrap 恢复。
+2. 执行 B-168 failure/control ABI 探针与 B-169 evidence 融洽性探针。
+3. 恢复 B-152 剩余 Str RIIR/P5，再完成 B-002 Phase 2。
+4. 后续按 backlog 推进别名追踪、用户面、async/refinement 与工具链。
+
+具体状态、依赖和验收只看活动看板，不在本文件复制逐轮计数。
+
+## ASan
+
+- gating：`malloc_context_size=0:quarantine_size_mb=16:max_redzone=32:detect_leaks=0`
+- capstone：`quarantine_size_mb=256:malloc_context_size=12`
+- 建议构建：`-fsanitize=address -O1 -fno-omit-frame-pointer`
+
+每条命令显式设置所需 `ASAN_OPTIONS`，不要依赖用户级环境或机器规格。Gating 用于内循环，capstone 用于高风险里程碑；发现问题后对最小复现用 capstone 参数取得完整 alloc/free 栈。

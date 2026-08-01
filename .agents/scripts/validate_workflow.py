@@ -16,16 +16,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 
-BACKLOG_ACTIVE = re.compile(
-    r"\[(?:queued|planning|waiting-feedback|doing(?::[^\]]+)?)\]"
-)
 BACKLOG_HEADING = re.compile(
     r"^### B-\d{3} .+?\[(?:feature|design-align|refactor|bugfix|infra)\] "
     r"\[P[0-3]\] \[(?:S|M|L|XL)\] \[(?:mechanical|judgment)\] "
     r"\[(?:queued|planning|waiting-feedback|doing(?::[^\]]+)?)\]"
     r"(?: \[[^\]]+\])*$"
 )
-AUDIT_ACTIVE = re.compile(r"\[(?:open|doing)\]")
 AUDIT_HEADING = re.compile(
     r"^### #\d+ .+?\[(?:critical|medium|low)\] "
     r"\[(?:mechanical|judgment)\] \[(?:open|doing)\]"
@@ -342,8 +338,8 @@ AUDIT_EVIDENCE_CONTRACT = TextContract(
     ),
 )
 
-AUDIT_LEDGER_CONTRACT = TextContract(
-    "durable Audit ledger adapter",
+WORKFLOW_AUDIT_LEDGER_CONTRACT = TextContract(
+    "canonical Audit ledger workflow",
     (
         (".agents/scripts/audit_ledger.py",),
         ("refs/notes/ring-steward-audit-ledger",),
@@ -351,70 +347,59 @@ AUDIT_LEDGER_CONTRACT = TextContract(
         ("stable trigger/event id",),
         ("audited source SHA",),
         ("normalized lens set",),
-        ("Lens 是六项闭集",),
         ("rc-memory",),
         ("type-soundness",),
         ("backend-parity",),
         ("runtime-abi",),
         ("design-drift",),
         ("oracle-blind",),
-        ("排序、去重",),
-        ("动态 lens",),
-        ("日期 lens",),
-        ("未知 lens",),
-        ("exit 2",),
-        ("专项豁免子类放入 stable trigger/event id",),
-        ("first-round trigger",),
-        ("audit:round-2",),
-        ("audit:2",),
+        ("当前日期、随机 id、递增计数器",),
         ("evidence:commit:<full-sha>",),
-        ("真实 commit",),
-        ("不同于 audited source SHA",),
-        ("audited source 是 evidence commit 的 ancestor",),
+        ("不同于 audited source",),
+        ("audited source 是它的 ancestor",),
         ("refs/heads/*",),
         ("refs/remotes/*",),
         ("refs/tags/*",),
-        ("reachable durable ref",),
         ("refs/notes/*",),
         ("reflog",),
         ("object-only",),
         ("dangling commit",),
-        ("外部 finding / issue",),
-        ("durable evidence commit",),
-        ("相同 audited source SHA + normalized lens set",),
-        ("任一 record",),
-        ("不同 trigger",),
-        ("只有合法 anchored evidence event",),
-        ("risk:next-event",),
-        ("risk:post-fix-batch",),
-        ("新的 audited source SHA",),
-        ("真正不同的 normalized lens set",),
-        ("Session 恢复",),
         ("query",),
-        ("Round 开始",),
         ("check",),
-        ("同一 canonical key",),
         ("skip-recorded",),
-        ("Round 结束",),
+        ("exit 3",),
         ("record",),
         ("findings",),
         ("no-findings",),
-        ("当前日期",),
-        ("随机 id",),
-        ("note commit 不算 source snapshot 变化",),
-        ("新的 audited source SHA",),
-        ("不写 Steward Inbox",),
+        ("Git note commit 不改变 HEAD",),
+        ("不算新的 source snapshot",),
     ),
+)
+
+STEWARD_LEDGER_ADAPTER_CONTRACT = TextContract(
+    "Steward Audit ledger adapter",
     (
-        "用当前日期制造新 trigger",
-        "用随机 id 制造新 trigger",
-        "no-findings 不记录",
-        "note commit 视为新的 source snapshot",
-        "允许任意 lens",
-        "专项豁免新增 lens",
-        "动态 lens 形成新 key",
-        "stable trigger/event 才形成新 key",
+        ("docs/workflow.md",),
+        ("full-audit",),
+        (".agents/scripts/audit_ledger.py",),
+        ("不得绕过 ledger",),
     ),
+)
+
+FULL_AUDIT_LEDGER_ADAPTER_CONTRACT = TextContract(
+    "full-audit ledger adapter",
+    (
+        ("docs/workflow.md",),
+        (".agents/scripts/audit_ledger.py",),
+        ("query",),
+        ("check",),
+        ("skip-recorded",),
+        ("exit 3",),
+        ("record --outcome findings|no-findings",),
+        ("record 成功前 round 未闭环",),
+        ("只有共享 helper 可以写 ledger",),
+    ),
+    ordered=("query", "check", "record --outcome findings|no-findings"),
 )
 
 AUDIT_LEDGER_HELPER_CONTRACT = TextContract(
@@ -502,7 +487,7 @@ ROLE_CONTRACTS = {
             ("scoped",),
             ("blocker",),
             ("root",),
-            ("docs/workflow.md",),
+            ("先完整读取 AGENTS.md、CLAUDE.md 和 docs/workflow.md。",),
             ("不直接等待或请求用户", "不要直接等待或请求用户"),
             ("同一连续任务复用当前身份",),
         ),
@@ -516,6 +501,7 @@ ROLE_CONTRACTS = {
             ("Argument",),
             ("反证",),
             ("root",),
+            ("先完整读取 AGENTS.md、CLAUDE.md 和 docs/workflow.md。",),
             ("不直接等待或请求用户", "不要直接等待或请求用户"),
         ),
     ),
@@ -527,6 +513,7 @@ ROLE_CONTRACTS = {
             ("bounded Audit",),
             ("Argument",),
             ("root",),
+            ("先完整读取 AGENTS.md、CLAUDE.md 和 docs/workflow.md。",),
             ("不直接等待或请求用户", "不要直接等待或请求用户"),
         ),
     ),
@@ -538,6 +525,7 @@ ROLE_CONTRACTS = {
             ("refute",),
             ("verdict",),
             ("root",),
+            ("先完整读取 AGENTS.md、CLAUDE.md 和 docs/workflow.md。",),
             ("不直接等待或请求用户", "不要直接等待或请求用户"),
         ),
     ),
@@ -688,26 +676,39 @@ class WorkflowValidator:
         backlog = self.read_text("docs/backlog.md")
         if backlog is not None:
             for number, line in enumerate(backlog.splitlines(), start=1):
-                if line.startswith("### B-") and BACKLOG_ACTIVE.search(line):
+                if not line.startswith("### B-"):
+                    continue
+                if BACKLOG_HEADING.fullmatch(line):
                     backlog_count += 1
-                    if not BACKLOG_HEADING.fullmatch(line):
-                        self.errors.append(
-                            f"docs/backlog.md:{number}: invalid active "
-                            f"heading: {line}"
-                        )
+                else:
+                    self.errors.append(
+                        f"docs/backlog.md:{number}: invalid backlog "
+                        f"heading: {line}"
+                    )
 
         audit_count = 0
         audit = self.read_text("docs/audit-report.md")
         if audit is not None:
             for number, line in enumerate(audit.splitlines(), start=1):
-                if line.startswith("### #") and AUDIT_ACTIVE.search(line):
+                if not line.startswith("### #"):
+                    continue
+                if AUDIT_HEADING.fullmatch(line):
                     audit_count += 1
-                    if not AUDIT_HEADING.fullmatch(line):
-                        self.errors.append(
-                            f"docs/audit-report.md:{number}: invalid active "
-                            f"heading: {line}"
-                        )
+                else:
+                    self.errors.append(
+                        f"docs/audit-report.md:{number}: invalid audit "
+                        f"heading: {line}"
+                    )
         return backlog_count, audit_count
+
+    def validate_workflow_contract(self) -> None:
+        text = self.read_text("docs/workflow.md")
+        if text is None:
+            return
+        for error in check_text_contract(
+            text, WORKFLOW_AUDIT_LEDGER_CONTRACT
+        ):
+            self.errors.append(f"docs/workflow.md: {error}")
 
     def validate_skills(self) -> None:
         existing_paths: set[str] = set()
@@ -764,7 +765,7 @@ class WorkflowValidator:
                     ):
                         self.errors.append(f"{relative}: {error}")
                     for error in check_text_contract(
-                        text, AUDIT_LEDGER_CONTRACT
+                        text, STEWARD_LEDGER_ADAPTER_CONTRACT
                     ):
                         self.errors.append(f"{relative}: {error}")
                     if provider == ".agents":
@@ -783,7 +784,7 @@ class WorkflowValidator:
                     for contract in (
                         AUDIT_CONTRACT,
                         AUDIT_EVIDENCE_CONTRACT,
-                        AUDIT_LEDGER_CONTRACT,
+                        FULL_AUDIT_LEDGER_ADAPTER_CONTRACT,
                     ):
                         for error in check_text_contract(text, contract):
                             self.errors.append(f"{relative}: {error}")
@@ -870,6 +871,7 @@ class WorkflowValidator:
 
     def run(self) -> tuple[int, int]:
         backlog_count, audit_count = self.validate_headings()
+        self.validate_workflow_contract()
         self.validate_skills()
         self.validate_audit_ledger_helper()
         self.validate_codex_config()
@@ -898,6 +900,40 @@ def malformed_frontmatter_e2e_errors() -> list[str]:
 
         validator = WorkflowValidator(fixture_root)
         validator.validate_skills()
+        return validator.errors
+
+
+def invalid_heading_status_e2e_errors() -> list[str]:
+    """Ensure unknown lifecycle labels cannot hide from heading validation."""
+
+    with tempfile.TemporaryDirectory(
+        prefix="ring-workflow-heading-"
+    ) as temporary:
+        fixture_root = Path(temporary)
+        docs = fixture_root / "docs"
+        docs.mkdir()
+        (docs / "backlog.md").write_text(
+            "### B-999 stale [bugfix] [P2] [S] [mechanical] "
+            "[phase1-done]\n",
+            encoding="utf-8",
+        )
+        (docs / "audit-report.md").write_text(
+            "### #999 stale [low] [mechanical] [deferred]\n",
+            encoding="utf-8",
+        )
+
+        validator = WorkflowValidator(fixture_root)
+        backlog_count, audit_count = validator.validate_headings()
+        expected = ("invalid backlog heading", "invalid audit heading")
+        if (backlog_count, audit_count) != (0, 0) or not all(
+            any(fragment in error for error in validator.errors)
+            for fragment in expected
+        ):
+            return [
+                "custom heading status regression was not fully rejected: "
+                f"counts={(backlog_count, audit_count)!r}, "
+                f"errors={validator.errors!r}"
+            ]
         return validator.errors
 
 
@@ -1135,6 +1171,13 @@ def run_self_tests() -> list[str]:
             "missing opening frontmatter delimiter",
         )
     )
+    failures.extend(
+        deterministic_failure(
+            "unknown heading status end-to-end fixture",
+            invalid_heading_status_e2e_errors,
+            "invalid backlog heading",
+        )
+    )
 
     bad_waiting = GOOD_STEWARD_FIXTURE.replace(
         "单个 item 的 waiting-feedback 不是全局阻塞，必须立即补位。",
@@ -1341,7 +1384,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             "workflow validator self-test passed: "
-            "18 legacy/broken fixtures rejected deterministically; "
+            "19 legacy/broken fixtures rejected deterministically; "
             "2 durable-ledger regressions passed"
         )
         return 0
@@ -1369,7 +1412,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{backlog_count} active backlog items, "
         f"{audit_count} active audit items, "
         "2 steward adapters, 4 Codex roles, "
-        "18 negative fixtures, 2 durable-ledger regressions"
+        "19 negative fixtures, 2 durable-ledger regressions"
     )
     return 0
 

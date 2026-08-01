@@ -24,23 +24,13 @@ Steward 可在高风险 milestone、信任边界变化、修复批次后或队�
 
 ## Durable Audit ledger
 
-所有 provider 共用 `.agents/scripts/audit_ledger.py` 和专用 `refs/notes/ring-steward-audit-ledger`。Canonical key 只能由 stable trigger/event id + audited source SHA + normalized lens set 组成。
+完整 key、lens、trigger、evidence anchor 与 notes 规则只在 `docs/workflow.md` §6 维护；本 adapter 只规定不可漏的执行顺序，调用统一 helper `.agents/scripts/audit_ledger.py`：
 
-Lens 是六项闭集：`rc-memory`、`type-soundness`、`backend-parity`、`runtime-abi`、`design-drift`、`oracle-blind`；排序、去重后进入 key。动态 lens、日期 lens、序号后缀或未知 lens 必须由 helper 拒绝并 exit 2。专项豁免子类放入 stable trigger/event id，lens 仍限上述六项。
+1. 恢复 round 先执行 `query` 对账。
+2. finder fan-out 前执行 `check`；`skip-recorded` / exit 3 立即结束该 round，其他失败不得绕过。
+3. root 汇总结论后执行 `record --outcome findings|no-findings`；record 成功前 round 未闭环。
 
-普通 first-round trigger 必须稳定；`round`、`run`、`retry`、`attempt`、`counter` 或裸数字递增 suffix（如 `audit:round-2`、`audit:2`）一律 exit 2。可重开的 anchored evidence event 只允许 `evidence:commit:<full-sha>`。Helper 必须用 Git 验证 full SHA 是真实 commit、不同于 audited source SHA，且 audited source 是 evidence commit 的 ancestor；evidence commit 还必须由至少一个 `refs/heads/*`、`refs/remotes/*` 或 `refs/tags/*` reachable durable ref 包含。`refs/notes/*`、reflog 和纯 object-only 均排除，dangling commit 必须拒绝并 exit 2。外部 finding / issue 必须先落成基于 audited source 的 durable evidence commit，再使用该 commit SHA。
-
-1. Session 恢复时对拟恢复的 Audit key 执行 `query`。
-2. Round 开始前执行 `check`；同一 canonical key 已记录时 helper 返回 `skip-recorded`/exit 3。相同 audited source SHA + normalized lens set 已有任一 record 时，不同 trigger 只有合法 anchored evidence event 才能开始；普通 `risk:next-event` / `risk:post-fix-batch` exit 2。新的 audited source SHA 或真正不同的 normalized lens set 仍可使用普通 stable trigger。
-3. Round 结束时，无论结果是 findings 还是 no-findings，都执行 `record --outcome findings|no-findings`；record 成功前 round 未闭环。
-
-```powershell
-python .agents/scripts/audit_ledger.py --repo <repo> query --trigger-id <stable-id> --source-sha <sha> --lens <lens>
-python .agents/scripts/audit_ledger.py --repo <repo> check --trigger-id <stable-id> --source-sha <sha> --lens <lens>
-python .agents/scripts/audit_ledger.py --repo <repo> record --trigger-id <stable-id> --source-sha <sha> --lens <lens> --outcome <findings-or-no-findings>
-```
-
-禁止用当前日期、随机 id 或递增 counter 制造新 trigger 绕过防抖。Ledger note commit 不算 source snapshot 变化；同 scope 只能由合法 anchored evidence event 形成新 key。Ledger 是 repo-local 治理状态，不写 Steward Inbox，也不进入用户过程摘要。
+只有共享 helper 可以写 ledger；adapter 不重新解释 canonical key 或制造替代 trigger。
 
 ## Phase 0：固定本轮
 

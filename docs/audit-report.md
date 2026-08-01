@@ -85,16 +85,6 @@
 发现者：B-107 HOF implementation + independent review
 
 
-### #226 Map<Int>/Map<Str> + Set<Int>/Set<Str> 按 key 类型 ~700 行重复 [medium] [judgment] [open]
-
-> 2026-07-10 更新：Map 半已被 B-152 P3 消除（`ring_map_int_*` 现为单行 redirect 到统一 shim）。剩余 = Set 半（`RingSetInt` 仍是 `RingSet` 的独立 STL 实现，~250 行，ring_runtime.cpp:2079 起）。
-
-`ring_runtime.cpp`：Set<Int> 是 Set<Str> 的逐行拷贝（~250 行），逻辑相同仅 key 类型不同。修改 Set 行为需同步两份代码。
-
-**修复方向**：B-152 P4（Set RIIR，暂停中，B-163 后恢复）会整体消除——届时本条目随 P4 关单，不单独修。
-
-发现者：Opus
-
 ### #227 drop_closure_env / drop_dict / drop_evidence 三函数体完全相同 [medium] [mechanical] [open]
 
 `ring_runtime.cpp:3212-3276`：三个 drop 函数实现逐字节相同——读 count-prefixed 数组，逐 slot 调 ring_drop。每个约 8 行，总共 24 行做同一件事。
@@ -110,7 +100,6 @@
 **修复方向**：一个调用另一个即可。
 
 发现者：Opus
-
 ### #229 CHK/CHK_ARG 永久禁用宏 + 16 调用点死代码 [low] [mechanical] [open]
 
 `ring_runtime.cpp:565-566`：`CHK(name)` 和 `CHK_ARG(name, arg)` 定义为 `do {} while(0)`（注释 "retired after #134 hunt closed"），但 16 个调用点散布在 ring_list_*、ring_map_*、ring_print 等函数中。纯视觉噪音。
@@ -118,14 +107,6 @@
 **修复方向**：删除宏定义及全部 16 个调用点。
 
 发现者：DS
-
-### #230 ring_alloc + placement new 样板模式 55+ 处 [low] [mechanical] [open]
-
-`ring_runtime.cpp` 中约 55 处 `void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR); new (data) std::string(...)` 两行样板。List 类型约 21 处同理。
-
-**修复方向**：提取 `ring_new_str(...)` / `ring_new_list()` 内联帮助函数。注意 B-152 RIIR 会重写容器——可推迟。
-
-发现者：Opus
 
 ### #231 magic number 4096 用于 drop_table / never_drop_table [low] [mechanical] [open]
 
@@ -144,7 +125,7 @@
 发现者：DS
 
 
-## LLVM Codegen
+## Native codegen 与 RC
 
 ### #255 `impl Drop for <enum>` 的用户 drop 从不被调用（两后端一致的既有 gap）[critical] [judgment] [open]
 
@@ -297,15 +278,11 @@ block 表达式作为 if/match 条件（`if { let v = 5; v > 3 } { ... }`）和 
 
 发现者：B-151 CI（Python runner RC sweep 首次全量覆盖暴露）
 
-### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
+### #138 str-keyed 容器 clone 方法 dispatch 落 panic-stub [low] [judgment] [open] [latent]
 
-可移植性问题。
+str-keyed `Map.clone()` / `List.clone()` / `Set.clone()` 的方法语法仍缺共享 dispatch；直接调用对应 clone 函数可工作。只跟踪该残留，不保留已修复的 fold/filter/any/all 历史。
 
-### #138 Map/Set clone 方法语法在 native 落 panic-stub [low] [judgment] [open] [latent]
-
-**已修复（2026-06-25）**：Map.fold/Set.fold/Map.filter/Map.any/Map.map_values/Set.filter/Set.any/Set.all 全部实现 runtime + 映射。
-
-**残留（latent）**：str-keyed `Map.clone()` / `List.clone()` / `Set.clone()` 方法语法（int-keyed 有映射、str-keyed 落空；直呼 `map_clone(m)` 经 `ring_` fallback 正常）。发现者：B-103 Wave A。
+**修复方向**：让方法解析与普通函数调用消费同一 HIR/builtin identity；不得按 key 叶名在 C codegen 新增特判。补 int/str/user-keyed 正反回归。
 
 ---
 
@@ -319,14 +296,6 @@ block 表达式作为 if/match 条件（`if { let v = 5; v > 3 } { ... }`）和 
 若 ESM 导入问题已解决，应集中到 `llvm_ffi.ring` 统一声明。
 
 发现者：DS
-
-
-### #205 verify_rc 负面测试套件覆盖不全（22 类中 9 类仍缺专用测试）[low] [mechanical] [open]
-
-覆盖已从 3/22 扩展到 13/22（+10 个新用例）。剩余 9 类均为 fatal 类别，仅从 RC pass 回归触发（非源码 pattern），需要新 mutation 类型支持。
-
-发现者：DS
-
 
 
 ### #237 34+ 处 sort_by(compare_by_first) 缺 sorted_entries 工具函数 [low] [mechanical] [open]
@@ -360,30 +329,3 @@ block 表达式作为 if/match 条件（`if { let v = 5; v > 3 } { ... }`）和 
 **修复方向**：提取 `resolve_iterable_element_type` 函数，使用 early-return 风格扁平化嵌套。
 
 发现者：Opus
-
-### #192 andor_lower / dict_lower HIR walker 结构性重复 [medium] [judgment] [deferred]
-
-`andor_lower.ring:55-318` 和 `dict_lower.ring:65-431` 包含近乎相同的 HIR 结构遍历器。
-
-**推迟理由**（2026-06-25 Worker 评估）：andor_lower 无状态，dict_lower 穿线 3 个可变参数；24 个 expr arm 只有 2 个有差异；通用 visitor 需 ~150 行 trait 基础设施换 ~250 行节省，且编译器穷尽 match 已能 catch 新 variant 遗漏。投入/产出比不合算。
-
-发现者：Opus（前端审计）
-
-
-
-
-
----
-
-## 设计-实现差距（参考，已在 backlog 跟踪）
-
-> 以下为未实现特性的跟踪参考，不作为 Worker 任务源。实际实现由 backlog 对应条目驱动。
-
-| # | 设计功能 | Backlog 对应 | 状态 |
-|---|----------|--------------|------|
-| 36 | Refinement types (where 子句) | B-001 | 语法解析但语义忽略 |
-| 37 | ~~`mut<S>` 参数化 effect~~ | B-037 | ✅ 已实现 → **已移除**（2026-06-24 design.md §7.9；实现保留但 effect 语义废弃，mutation 改由参数推断承载） |
-| 38 | Post-resume handler / Full AE | 已取消 (B-009) | 不实现 |
-| 39 | `dyn Trait` 动态分发 | B-006 | 未实现 |
-| 40 | Supertrait 继承 | B-005 | ✅ 已实现 |
-| 41 | 关联类型 | B-004 | ✅ 已实现 |
