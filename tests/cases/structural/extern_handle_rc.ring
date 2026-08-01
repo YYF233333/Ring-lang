@@ -2,7 +2,6 @@
 // ever executed: the generated C is the oracle for foreign-handle RC exclusion.
 
 extern type StructuralRawHandle
-extern fn structural_make_raw_handle() -> StructuralRawHandle
 
 struct StructuralHolder {
     raw: StructuralRawHandle,
@@ -14,12 +13,14 @@ enum StructuralChoice {
     Owned(Str)
 }
 
-fn structural_raw_identity(value: StructuralRawHandle) {
+fn structural_raw_identity(value: StructuralRawHandle) -> StructuralRawHandle {
     let local = value
+    local
 }
 
-fn structural_owned_identity(value: Str) {
+fn structural_owned_identity(value: Str) -> Str {
     let local = value
+    local
 }
 
 fn structural_raw_option(value: StructuralRawHandle) {

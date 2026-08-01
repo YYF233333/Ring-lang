@@ -984,6 +984,26 @@ def ring_line_markers(path: Path) -> Tuple[List[Tuple[str, int]], Optional[str]]
     return markers, None
 
 
+def extract_ring_function_body(
+    source: str,
+    function_name: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Extract one named Ring fixture function body, ignoring decoy text."""
+    masked = mask_ring_strings_and_comments(source)
+    pattern = re.compile(
+        rf"\bfn\s+{re.escape(function_name)}\s*"
+        rf"\([^{{}}]*\)[^{{}}\n]*\{{")
+    matches = list(pattern.finditer(masked))
+    if len(matches) != 1:
+        return None, f"Ring function {function_name} found {len(matches)} times"
+    open_index = masked.rfind("{", matches[0].start(), matches[0].end())
+    try:
+        close_index = matching_delimiter(masked, open_index, "{", "}")
+    except ValueError as exc:
+        return None, f"Ring function {function_name}: {exc}"
+    return source[open_index + 1:close_index], None
+
+
 EXTERN_FIXTURE_CONTRACTS = (
     (
         "raw extern type",
@@ -1003,12 +1023,13 @@ EXTERN_FIXTURE_CONTRACTS = (
     (
         "raw identity parameter",
         r"\bfn\s+structural_raw_identity\s*\(\s*"
-        r"value\s*:\s*StructuralRawHandle\s*\)",
+        r"value\s*:\s*StructuralRawHandle\s*\)\s*->\s*"
+        r"StructuralRawHandle\b",
     ),
     (
         "owned identity parameter",
         r"\bfn\s+structural_owned_identity\s*\(\s*"
-        r"value\s*:\s*Str\s*\)",
+        r"value\s*:\s*Str\s*\)\s*->\s*Str\b",
     ),
     (
         "raw Option parameter",
@@ -1021,19 +1042,63 @@ EXTERN_FIXTURE_CONTRACTS = (
         r"value\s*:\s*Str\s*\)",
     ),
     (
-        "raw List element",
-        r"\blet\s+mut\s+values\s*:\s*"
-        r"List\s*<\s*StructuralRawHandle\s*>",
+        "raw List parameter",
+        r"\bfn\s+structural_raw_list\s*\(\s*"
+        r"value\s*:\s*StructuralRawHandle\s*\)",
     ),
     (
-        "owned List element",
-        r"\blet\s+mut\s+values\s*:\s*List\s*<\s*Str\s*>",
+        "owned List parameter",
+        r"\bfn\s+structural_owned_list\s*\(\s*"
+        r"value\s*:\s*Str\s*\)",
     ),
     (
         "non-executing main",
         r"\bfn\s+main\s*\(\s*\)\s*\{\s*\}",
     ),
 )
+
+EXTERN_FUNCTION_BODY_CONTRACTS = {
+    "structural_raw_identity": (
+        r"\A\s*let\s+local\s*=\s*value\s+local\s*\Z"),
+    "structural_owned_identity": (
+        r"\A\s*let\s+local\s*=\s*value\s+local\s*\Z"),
+    "structural_raw_option": (
+        r"\A\s*let\s+wrapped\s*=\s*some\s*\(\s*value\s*\)\s*\Z"),
+    "structural_owned_option": (
+        r"\A\s*let\s+wrapped\s*=\s*some\s*\(\s*value\s*\)\s*\Z"),
+    "structural_raw_list": (
+        r"\A\s*let\s+mut\s+values\s*:\s*"
+        r"List\s*<\s*StructuralRawHandle\s*>\s*=\s*\[\s*\]\s+"
+        r"values\s*\.\s*push\s*\(\s*value\s*\)\s*\Z"),
+    "structural_owned_list": (
+        r"\A\s*let\s+mut\s+values\s*:\s*"
+        r"List\s*<\s*Str\s*>\s*=\s*\[\s*\]\s+"
+        r"values\s*\.\s*push\s*\(\s*value\s*\)\s*\Z"),
+}
+
+
+def extern_fixture_source_errors(extern_source: str) -> List[str]:
+    """Validate that every named fixture body still performs its probe."""
+    errors: List[str] = []
+    masked = mask_ring_strings_and_comments(extern_source)
+    for description, pattern in EXTERN_FIXTURE_CONTRACTS:
+        count = len(re.findall(pattern, masked))
+        if count != 1:
+            errors.append(
+                f"{EXTERN_RC_FIXTURE}: {description} contract matched "
+                f"{count} times (expected 1)")
+    for function_name, body_pattern in EXTERN_FUNCTION_BODY_CONTRACTS.items():
+        body, extract_error = extract_ring_function_body(
+            extern_source, function_name)
+        if extract_error:
+            errors.append(f"{EXTERN_RC_FIXTURE}: {extract_error}")
+            continue
+        masked_body = mask_ring_strings_and_comments(body)
+        if re.fullmatch(body_pattern, masked_body) is None:
+            errors.append(
+                f"{EXTERN_RC_FIXTURE}: {function_name} body no longer "
+                "matches its exact structural probe")
+    return errors
 
 
 def structural_fixture_integrity_errors() -> List[str]:
@@ -1092,13 +1157,7 @@ def structural_fixture_integrity_errors() -> List[str]:
     except (OSError, UnicodeError) as exc:
         errors.append(f"cannot read {EXTERN_RC_FIXTURE}: {exc}")
     else:
-        masked = mask_ring_strings_and_comments(extern_source)
-        for description, pattern in EXTERN_FIXTURE_CONTRACTS:
-            count = len(re.findall(pattern, masked))
-            if count != 1:
-                errors.append(
-                    f"{EXTERN_RC_FIXTURE}: {description} contract matched "
-                    f"{count} times (expected 1)")
+        errors.extend(extern_fixture_source_errors(extern_source))
 
     return errors
 
@@ -1274,6 +1333,127 @@ def c_rc_counts(c_body: str) -> Tuple[int, int]:
         len(re.findall(r"\bring_dup\s*\(", masked)),
         len(re.findall(r"\bring_drop\s*\(", masked)),
     )
+
+
+def c_local_aliases(c_body: str) -> Tuple[dict[str, str], List[str]]:
+    """Collect simple local-to-local assignments from one generated C body."""
+    masked = mask_c_strings_and_comments(c_body)
+    aliases: dict[str, str] = {}
+    errors: List[str] = []
+    assignment_re = re.compile(
+        r"(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"
+        r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*;")
+    for match in assignment_re.finditer(masked):
+        target, source = match.groups()
+        if target in aliases:
+            errors.append(f"generated local {target} has multiple simple assignments")
+        aliases[target] = source
+    return aliases, errors
+
+
+def trace_c_alias(name: str, aliases: dict[str, str]) -> Tuple[str, Optional[str]]:
+    """Follow a generated C local alias chain to its unique origin."""
+    seen = set()
+    current = name
+    while current in aliases:
+        if current in seen:
+            return current, f"generated alias cycle reaches {current}"
+        seen.add(current)
+        current = aliases[current]
+    return current, None
+
+
+def c_assigned_calls(
+    c_body: str,
+    callee: str,
+) -> List[Tuple[str, List[str]]]:
+    """Return simple `target = callee(identifier, ...)` calls in one body."""
+    masked = mask_c_strings_and_comments(c_body)
+    call_re = re.compile(
+        rf"(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"
+        rf"{re.escape(callee)}[ \t]*\(([^;\n()]*)\)[ \t]*;")
+    calls = []
+    for match in call_re.finditer(masked):
+        args_text = match.group(2).strip()
+        args = [] if not args_text else [arg.strip() for arg in args_text.split(",")]
+        calls.append((match.group(1), args))
+    return calls
+
+
+def generated_c_dataflow_errors(symbol: str, c_body: str) -> List[str]:
+    """Anchor each RC probe to its real operation and parameter dataflow."""
+    errors: List[str] = []
+    aliases, alias_errors = c_local_aliases(c_body)
+    errors.extend(f"{symbol}: {error}" for error in alias_errors)
+
+    def origin(name: str) -> Optional[str]:
+        traced, trace_error = trace_c_alias(name, aliases)
+        if trace_error:
+            errors.append(f"{symbol}: {trace_error}")
+            return None
+        return traced
+
+    if symbol.endswith("_identity"):
+        returns = re.findall(
+            r"(?m)^[ \t]*return[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*;",
+            mask_c_strings_and_comments(c_body),
+        )
+        if len(returns) != 1:
+            errors.append(
+                f"{symbol}: expected one local return, found {len(returns)}")
+        elif origin(returns[0]) != "r_value":
+            errors.append(
+                f"{symbol}: returned value does not trace to parameter r_value")
+        return errors
+
+    if symbol.endswith("_option"):
+        calls = c_assigned_calls(c_body, "ring_Option_some")
+        if len(calls) != 1:
+            errors.append(
+                f"{symbol}: ring_Option_some assignment found {len(calls)} times")
+            return errors
+        result, args = calls[0]
+        if len(args) != 1 or origin(args[0]) != "r_value":
+            errors.append(
+                f"{symbol}: Option payload does not trace to parameter r_value")
+        if origin("r_wrapped") != result:
+            errors.append(
+                f"{symbol}: r_wrapped does not trace to ring_Option_some result")
+        return errors
+
+    if symbol.endswith("_list"):
+        constructors = c_assigned_calls(c_body, "ring_list_new")
+        pushes = c_assigned_calls(c_body, "ring_List_push")
+        if len(constructors) != 1:
+            errors.append(
+                f"{symbol}: ring_list_new assignment found "
+                f"{len(constructors)} times")
+        if len(pushes) != 1:
+            errors.append(
+                f"{symbol}: ring_List_push assignment found {len(pushes)} times")
+        if len(constructors) != 1 or len(pushes) != 1:
+            return errors
+        constructor_result, constructor_args = constructors[0]
+        if constructor_args:
+            errors.append(f"{symbol}: ring_list_new unexpectedly has arguments")
+        if origin("r_values") != constructor_result:
+            errors.append(
+                f"{symbol}: r_values does not trace to ring_list_new result")
+        _, push_args = pushes[0]
+        if len(push_args) != 2:
+            errors.append(
+                f"{symbol}: ring_List_push has {len(push_args)} args, expected 2")
+        else:
+            if origin(push_args[0]) != constructor_result:
+                errors.append(
+                    f"{symbol}: List receiver does not trace to ring_list_new")
+            if origin(push_args[1]) != "r_value":
+                errors.append(
+                    f"{symbol}: pushed value does not trace to parameter r_value")
+        return errors
+
+    errors.append(f"{symbol}: no generated-C dataflow contract")
+    return errors
 
 
 def decode_c_path(encoded: str) -> str:
@@ -1510,7 +1690,7 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
 
     function_expectations = {
         "ring_structural_raw_identity": (0, 0),
-        "ring_structural_owned_identity": (1, 1),
+        "ring_structural_owned_identity": (2, 1),
         "ring_structural_raw_option": (0, 0),
         "ring_structural_owned_option": (1, 1),
         "ring_structural_raw_list": (0, 0),
@@ -1527,6 +1707,8 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
         count_error = exact_rc_error(symbol, body, expected)
         if count_error:
             errors.append(count_error)
+        if symbol.startswith("ring_structural_"):
+            errors.extend(generated_c_dataflow_errors(symbol, body))
 
     holder_body = bodies.get("ring_drop_StructuralHolder")
     if holder_body is not None:
@@ -1605,12 +1787,6 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
         or matches_filter(EXTERN_RC_FIXTURE, name_filter)
     ):
         jobs.append((feature_id, "extern", EXTERN_RC_FIXTURE, (EXTERN_RC_FIXTURE,)))
-    if name_filter and not jobs:
-        collector.add(TestResult(
-            TestResult.FAIL, suite, "filter",
-            f"no structural oracle or fixture matched {name_filter!r}"))
-        return
-
     with tempfile.TemporaryDirectory(prefix="ring_structural_") as tmpdir:
         temp_root = Path(tmpdir)
         for label, kind, entry, fixtures in jobs:
@@ -2276,12 +2452,6 @@ def run_parity(collector: ResultCollector, *,
         if matches_filter(row["feature_id"], name_filter)
         or any(matches_filter(path, name_filter) for path in row["evidence"])
     ]
-    if name_filter and not selected:
-        collector.add(TestResult(
-            TestResult.FAIL, suite, "filter",
-            f"no feature_id or evidence matched {name_filter!r}"))
-        return
-
     for row in selected:
         detail = (
             f"{row['status']}; matrix/lane wiring only, semantic evidence "
@@ -2460,6 +2630,7 @@ def print_summary(collector: ResultCollector) -> None:
 
     for suite_name in [
         "e2e", "llvm", "diff", "rc", "self-compile", "structural", "parity",
+        "runner",
     ]:
         if suite_name not in summary:
             continue
@@ -2583,6 +2754,11 @@ def main() -> int:
 
     if "parity" in suites:
         run_parity(collector, name_filter=args.name_filter)
+
+    if args.name_filter and not collector.results:
+        collector.add(TestResult(
+            TestResult.FAIL, "runner", "filter",
+            f"no selected suite matched {args.name_filter!r}"))
 
     print_summary(collector)
     return 1 if collector.failures > 0 else 0
