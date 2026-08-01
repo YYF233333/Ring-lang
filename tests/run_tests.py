@@ -1336,18 +1336,22 @@ def c_rc_counts(c_body: str) -> Tuple[int, int]:
 
 
 def c_local_aliases(c_body: str) -> Tuple[dict[str, str], List[str]]:
-    """Collect simple local-to-local assignments from one generated C body."""
+    """Collect single-assignment local aliases from one generated C body."""
     masked = mask_c_strings_and_comments(c_body)
     aliases: dict[str, str] = {}
     errors: List[str] = []
     assignment_re = re.compile(
         r"(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"
-        r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*;")
+        r"([^;\n]+)[ \t]*;")
+    assigned = set()
     for match in assignment_re.finditer(masked):
-        target, source = match.groups()
-        if target in aliases:
-            errors.append(f"generated local {target} has multiple simple assignments")
-        aliases[target] = source
+        target, rhs = match.groups()
+        if target in assigned:
+            errors.append(f"generated local {target} has multiple assignments")
+        assigned.add(target)
+        source = rhs.strip()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", source):
+            aliases[target] = source
     return aliases, errors
 
 
@@ -1378,6 +1382,153 @@ def c_assigned_calls(
         args = [] if not args_text else [arg.strip() for arg in args_text.split(",")]
         calls.append((match.group(1), args))
     return calls
+
+
+def c_straight_line_errors(symbol: str, c_body: str) -> List[str]:
+    """Require the dedicated probe body to have one final reachable return."""
+    errors: List[str] = []
+    masked = mask_c_strings_and_comments(c_body)
+    controls = sorted(set(re.findall(
+        r"\b(?:goto|if|switch|for|while|do|break|continue|case|default)\b",
+        masked)))
+    if controls:
+        errors.append(
+            f"{symbol}: unexpected control flow in straight-line probe: "
+            f"{', '.join(controls)}")
+    if "{" in masked or "}" in masked:
+        errors.append(f"{symbol}: unexpected nested block in straight-line probe")
+    for operator in ("?", "&&", "||"):
+        if operator in masked:
+            errors.append(
+                f"{symbol}: unexpected conditional operator {operator!r} "
+                "in straight-line probe")
+    allowed_calls = {
+        "ring_dup", "ring_drop", "ring_Option_some",
+        "ring_list_new", "ring_List_push",
+    }
+    call_names = set(re.findall(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", masked))
+    unexpected_calls = sorted(call_names - allowed_calls)
+    if unexpected_calls:
+        errors.append(
+            f"{symbol}: unexpected call(s) in straight-line probe: "
+            f"{', '.join(unexpected_calls)}")
+
+    return_tokens = list(re.finditer(r"\breturn\b", masked))
+    return_stmts = list(re.finditer(r"\breturn\b[^;{}]*;", masked))
+    if len(return_tokens) != 1 or len(return_stmts) != 1:
+        errors.append(
+            f"{symbol}: expected exactly one complete return statement, found "
+            f"{len(return_tokens)} return token(s) and "
+            f"{len(return_stmts)} statement(s)")
+    elif masked[return_stmts[0].end():].strip():
+        errors.append(
+            f"{symbol}: return is not the final executable statement")
+    return errors
+
+
+def c_unary_call_operands(
+    c_body: str,
+    callee: str,
+) -> Tuple[List[Tuple[str, int]], List[str]]:
+    """Parse every local unary call and require one identifier operand."""
+    masked = mask_c_strings_and_comments(c_body)
+    operands: List[Tuple[str, int]] = []
+    errors: List[str] = []
+    for match in re.finditer(rf"\b{re.escape(callee)}\s*\(", masked):
+        open_index = masked.find("(", match.start(), match.end())
+        try:
+            close_index = matching_delimiter(masked, open_index, "(", ")")
+        except ValueError as exc:
+            errors.append(f"{callee}: {exc}")
+            continue
+        operand = masked[open_index + 1:close_index].strip()
+        cursor = close_index + 1
+        while cursor < len(masked) and masked[cursor].isspace():
+            cursor += 1
+        if cursor >= len(masked) or masked[cursor] != ";":
+            errors.append(f"{callee}: call is not a standalone statement")
+            continue
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", operand) is None:
+            errors.append(
+                f"{callee}: expected one local identifier operand, got "
+                f"{operand[:80]!r}")
+            continue
+        operands.append((operand, match.start()))
+    return operands, errors
+
+
+def generated_c_rc_operand_errors(symbol: str, c_body: str) -> List[str]:
+    """Require exact dup/drop object roots, not merely matching call counts."""
+    errors: List[str] = []
+    _, alias_errors = c_local_aliases(c_body)
+    errors.extend(f"{symbol}: {error}" for error in alias_errors)
+
+    def roots(operands: List[Tuple[str, int]]) -> List[str]:
+        result = []
+        for operand, call_offset in operands:
+            # Only aliases established before the call may justify its object
+            # identity; a later assignment must not retroactively make an
+            # uninitialized/dead operand look correct.
+            aliases_before, scoped_errors = c_local_aliases(
+                c_body[:call_offset])
+            errors.extend(f"{symbol}: {error}" for error in scoped_errors)
+            root, trace_error = trace_c_alias(operand, aliases_before)
+            if trace_error:
+                errors.append(f"{symbol}: {trace_error}")
+            else:
+                result.append(root)
+        return result
+
+    dup_operands, dup_parse_errors = c_unary_call_operands(c_body, "ring_dup")
+    drop_operands, drop_parse_errors = c_unary_call_operands(c_body, "ring_drop")
+    errors.extend(f"{symbol}: {error}" for error in dup_parse_errors)
+    errors.extend(f"{symbol}: {error}" for error in drop_parse_errors)
+    actual_dup_roots = roots(dup_operands)
+    actual_drop_roots = roots(drop_operands)
+
+    expected_dup_roots: List[str]
+    expected_drop_roots: List[str]
+    if symbol in {
+        "ring_structural_raw_identity",
+        "ring_structural_raw_option",
+        "ring_structural_raw_list",
+    }:
+        expected_dup_roots = []
+        expected_drop_roots = []
+    elif symbol == "ring_structural_owned_identity":
+        expected_dup_roots = ["r_value", "r_value"]
+        expected_drop_roots = ["r_value"]
+    elif symbol == "ring_structural_owned_option":
+        option_calls = c_assigned_calls(c_body, "ring_Option_some")
+        if len(option_calls) != 1:
+            errors.append(
+                f"{symbol}: cannot derive owned Option result root from "
+                f"{len(option_calls)} constructor calls")
+            return errors
+        expected_dup_roots = ["r_value"]
+        expected_drop_roots = [option_calls[0][0]]
+    elif symbol == "ring_structural_owned_list":
+        constructors = c_assigned_calls(c_body, "ring_list_new")
+        if len(constructors) != 1:
+            errors.append(
+                f"{symbol}: cannot derive owned List root from "
+                f"{len(constructors)} constructors")
+            return errors
+        expected_dup_roots = []
+        expected_drop_roots = [constructors[0][0]]
+    else:
+        return [f"{symbol}: no RC operand contract"]
+
+    if sorted(actual_dup_roots) != sorted(expected_dup_roots):
+        errors.append(
+            f"{symbol}: ring_dup roots {actual_dup_roots} != "
+            f"{expected_dup_roots}")
+    if sorted(actual_drop_roots) != sorted(expected_drop_roots):
+        errors.append(
+            f"{symbol}: ring_drop roots {actual_drop_roots} != "
+            f"{expected_drop_roots}")
+    return errors
 
 
 def generated_c_dataflow_errors(symbol: str, c_body: str) -> List[str]:
@@ -1708,7 +1859,9 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
         if count_error:
             errors.append(count_error)
         if symbol.startswith("ring_structural_"):
+            errors.extend(c_straight_line_errors(symbol, body))
             errors.extend(generated_c_dataflow_errors(symbol, body))
+            errors.extend(generated_c_rc_operand_errors(symbol, body))
 
     holder_body = bodies.get("ring_drop_StructuralHolder")
     if holder_body is not None:
