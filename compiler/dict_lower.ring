@@ -554,7 +554,6 @@ fn dl_stmt(s: HStmt, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
                 then_block: dl_expr(then_block, defs, seen, counter), else_block: new_else, span: span }
         },
         // RC ops are inserted by perceus (after this pass) — never present.
-        HStmt::Drop { name, ty, span } => HStmt::Drop { name: name, ty: ty, span: span },
-        HStmt::Dup { name, ty, span } => HStmt::Dup { name: name, ty: ty, span: span },
+        HStmt::Drop { name, ty, span } => HStmt::Drop { name: name, ty: ty, span: span }
     }
 }

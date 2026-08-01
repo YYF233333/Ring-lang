@@ -420,8 +420,8 @@ extern "C" void ring_dup(void* ptr) {
     // B-099: foreign-pointer guard — extern type values (LLVM opaque refs etc.)
     // are NOT Ring-allocated.  Their ptr-4/ptr-8 bytes are arbitrary heap data.
     // Validating tid + rc catches most foreign pointers cheaply (reads are safe;
-    // only writes corrupt).  This is defense-in-depth alongside codegen-level
-    // extern-type exclusion in HStmt::Dup/Drop and gen_clone.
+    // only writes corrupt).  This is defense-in-depth alongside Perceus/HIR-level
+    // extern-type exclusion from HStmt::Drop and HExpr::Clone.
     if (tid >= 4096u) return;
     uint32_t rc = *(uint32_t*)((char*)ptr - 8);
     if (rc == 0u || rc > 100000u) return;

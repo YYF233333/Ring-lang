@@ -318,15 +318,6 @@
       "reason": "Perceus-inserted scope-end drops are exercised by owned projections."
     },
     {
-      "feature_id": "HStmt.Dup",
-      "evidence": ["compiler/hir.ring"],
-      "oracle": "manual-source-inspection",
-      "lane": ["manual-source"],
-      "status": "manual-evidence",
-      "reason": "HStmt.Dup has consumers and walker reconstruction but no producer; it is currently dead/unreachable and awaits cleanup."
-    },
-
-    {
       "feature_id": "HDecl.Fn",
       "evidence": ["tests/cases/llvm/basic_ops.ring"],
       "oracle": "golden+dual-backend",

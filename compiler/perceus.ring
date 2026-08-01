@@ -22,7 +22,8 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
 use types::{Type}
 
 // ============================================================
-// Synthetic span for inserted Drop/Dup nodes
+// Synthetic span for pass-inserted ANF/RC nodes.
+// Duplication is represented by HExpr::Clone rather than a statement node.
 // ============================================================
 
 fn synthetic_span() -> Span {
@@ -31,11 +32,12 @@ fn synthetic_span() -> Span {
 }
 
 // B-084 #131(a): the wildcard `_` is never bound to a real named_values slot
-// (codegen's destructure / for-in / let lowering deliberately skips `_`), so a
-// Drop/Dup naming `_` is unrunnable RC noise (a fail-safe codegen skip + rc-warn).
+// (codegen's destructure / for-in / let lowering deliberately skips `_`), so an
+// HStmt::Drop naming `_` is unrunnable RC noise (a fail-safe codegen skip +
+// rc-warn); duplication is represented by HExpr::Clone, not a named statement.
 // `_` also has no observable binding to release — it is a discard, the value
 // flows through the enclosing scrutinee's own RC. Centralise the skip so every
-// drop/dup emission site is consistent.
+// drop emission site is consistent.
 // (pub: shared with verify_rc.ring — the B-104 D2 static verifier mirrors the
 // same skip so `_` never enters its binding account.)
 pub fn rc_name_skippable(name: Str) -> Bool {
@@ -788,10 +790,9 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
         },
         HStmt::Break { span } => [HStmt::Break { span: span }],
         HStmt::Continue { span } => [HStmt::Continue { span: span }],
-        // Drop / Dup are not present in the input HIR to the ANF pass (perceus runs
-        // after); pass through idempotently if ever seen.
-        HStmt::Drop { .. } => [stmt],
-        HStmt::Dup { .. } => [stmt],
+        // Drop is not present in the input HIR to the ANF pass (perceus runs
+        // after); pass it through idempotently if ever seen.
+        HStmt::Drop { .. } => [stmt]
     }
 }
 
@@ -2303,9 +2304,8 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, dr
             }
             [HStmt::IfLet { pattern: pattern, expr: new_expr, then_block: new_then, else_block: new_else, span: span }]
         },
-        // Drop / Dup are inserted by this pass; pass through if seen (idempotent).
-        HStmt::Drop { .. } => [stmt],
-        HStmt::Dup { .. } => [stmt],
+        // Drop is inserted by this pass; pass through if seen (idempotent).
+        HStmt::Drop { .. } => [stmt]
     }
 }
 

@@ -1369,12 +1369,9 @@ fn collect_c_captures_stmt(ctx: CCtx, stmt: HStmt, params: List<HParam>, mut cap
                 none => {},
             }
         },
-        // B-084 #131: Perceus branch-balancing may place a Drop/Dup for an
+        // B-084 #131: Perceus branch-balancing may place an HStmt::Drop for an
         // outer-scope variable inside the lambda body — treat as a use.
         HStmt::Drop { name, .. } => {
-            consider_c_capture_name(ctx, name, none, params, captures)
-        },
-        HStmt::Dup { name, .. } => {
             consider_c_capture_name(ctx, name, none, params, captures)
         },
         _ => {},
@@ -4015,18 +4012,7 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
                     eprintln("[rc-warn] C codegen Drop: variable '${name}' not found")
                 },
             }
-        },
-        HStmt::Dup { name, .. } => {
-            match ctx.named_values.get(name) {
-                some(cv) => {
-                    rt_use(ctx, "ring_dup", 1)
-                    c_emit(ctx, "ring_dup(${cv});")
-                },
-                none => {
-                    eprintln("[rc-warn] C codegen Dup: variable '${name}' not found")
-                },
-            }
-        },
+        }
     }
 }
 

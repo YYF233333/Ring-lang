@@ -5180,7 +5180,7 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
 
 // Decide whether a bare variable name (no resolved_name) should be captured into
 // the enclosing closure's env, and if so append it to `captures`. Factored out of
-// collect_captures' Ident arm so the RC-stmt (Drop/Dup) path can reuse the exact
+// collect_captures' Ident arm so the HStmt::Drop path can reuse the exact
 // same param/function/local classification — a Drop must capture the variable it
 // names, otherwise the closure body cannot find it in named_values (B-084 #131).
 fn consider_capture_name(ctx: LlvmCtx, name: Str, resolved_name: Str?, params: List<HParam>, mut captures: List<Str>) {
@@ -5494,15 +5494,12 @@ fn collect_captures_stmt(ctx: LlvmCtx, stmt: HStmt, params: List<HParam>, mut ca
                 none => {},
             }
         },
-        // B-084 #131: Perceus branch-balancing can place a Drop/Dup for an
+        // B-084 #131: Perceus branch-balancing can place an HStmt::Drop for an
         // outer-scope variable inside a branch that codegen lowers to a separate
         // closure (try/catch body+arms, handle body). The closure must capture
         // that variable so the RC op can load it from named_values; treat the
         // RC-stmt's target name as a use for capture purposes.
         HStmt::Drop { name, .. } => {
-            consider_capture_name(ctx, name, none, params, captures)
-        },
-        HStmt::Dup { name, .. } => {
             consider_capture_name(ctx, name, none, params, captures)
         },
         _ => {},
