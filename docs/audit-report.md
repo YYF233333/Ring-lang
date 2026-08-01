@@ -60,7 +60,7 @@
 
 发现者：B-107 merge 独立 review
 
-### #259 inline mod 短类型别名泄漏使顶层显式注解发生 registration/check 身份分裂 [critical] [judgment] [open]
+### #259 inline mod 短类型别名泄漏使顶层显式注解发生 registration/check 身份分裂 [critical] [judgment] [doing]
 
 2026-07-29 B-107 HOF 门禁实锤：文件先声明 raw `extern type Item`，后有 inline mod re-export 普通 `origin::Item`，顶层 `keep_raw(value: Item) -> Item` 会先注册为 `(raw Item) -> raw Item`，最终却导出成 `(raw Item) -> origin::Item`。若调用方把 `ring_raw_alloc` 的无 RC header 指针传入该函数，HIR 与公开 scheme 对 nominal identity 的分歧可使 Perceus/codegen 对 raw 指针执行 `ring_dup` / `ring_drop`，存在越界 header 读写和内存破坏风险。
 
