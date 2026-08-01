@@ -1040,7 +1040,12 @@ def audit_ledger_process_self_test_errors() -> list[str]:
             encoding="utf-8",
             errors="replace",
             text=True,
-            timeout=30,
+            # The temporary-Git notes regression crosses the 30 s boundary on
+            # Windows even when it succeeds (30.52 s observed on 2026-08-01).
+            # Keep the guard bounded, but leave enough headroom for process and
+            # filesystem startup variance instead of turning a pass into a
+            # deterministic timeout.
+            timeout=90,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         return [f"{relative} --self-test could not complete: {error}"]
