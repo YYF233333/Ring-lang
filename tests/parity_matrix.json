@@ -498,11 +498,15 @@
     },
     {
       "feature_id": "backend.c_line_directives",
-      "evidence": ["compiler/codegen_c_ctx.ring"],
-      "oracle": "manual-source-inspection",
-      "lane": ["manual-source"],
-      "status": "manual-evidence",
-      "reason": "#line emission and --no-c-lines remain source-inspection evidence, not semantic execution."
+      "evidence": [
+        "tests/cases/structural/c_line_single.ring",
+        "tests/cases/structural/c_line_project/main.ring",
+        "tests/cases/structural/c_line_project/probe.ring"
+      ],
+      "oracle": "generated-c-line-map-structural",
+      "lane": ["c-structural"],
+      "status": "covered",
+      "reason": "Fresh single-file and project C builds prove exact marker source mapping, global --no-c-lines suppression, and byte identity after directive removal."
     },
     {
       "feature_id": "backend.c_symbol_link_contract",
@@ -514,11 +518,11 @@
     },
     {
       "feature_id": "backend.extern_handle_rc_structural",
-      "evidence": ["tests/cases/llvm/extern_handle_rc_exclusion.ring"],
-      "oracle": "manual-generated-code-inspection",
-      "lane": ["manual-source"],
-      "status": "manual-evidence",
-      "reason": "The executable does not call foreign-handle paths; no dup/drop is established by structural inspection only."
+      "evidence": ["tests/cases/structural/extern_handle_rc.ring"],
+      "oracle": "generated-c-local-rc-structural",
+      "lane": ["c-structural"],
+      "status": "covered",
+      "reason": "Symbol- and brace-anchored generated-C inspection proves raw handles are RC-excluded while paired owned controls retain exact dup/drop behavior."
     },
     {
       "feature_id": "backend.frontend_check_only",

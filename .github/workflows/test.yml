@@ -31,7 +31,7 @@ jobs:
         run: python tests/run_tests.py --suite rc
 
   test:
-    # Medium: e2e + llvm golden full suite
+    # Medium: e2e + llvm golden + generated-C structural/parity gates
     needs: check
     runs-on: windows-latest
     steps:
@@ -48,8 +48,8 @@ jobs:
       - name: Link ring.exe
         run: |
           clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
-      - name: Run e2e + llvm tests
-        run: python tests/run_tests.py --suite e2e --suite llvm
+      - name: Run e2e + llvm + structural + parity tests
+        run: python tests/run_tests.py --suite e2e --suite llvm --suite structural --suite parity
 
   # bootstrap:
   #   Disabled: B-155 IR non-determinism (string constants contain heap addresses).
