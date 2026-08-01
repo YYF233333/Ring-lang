@@ -1,6 +1,6 @@
 # Trait 系统
 
-Ring 的 trait 系统提供有界多态性（bounded polymorphism），通过 dictionary passing 编译到 JavaScript。
+Ring 的 trait 系统提供有界多态性（bounded polymorphism）。具体 receiver 在类型检查时解析到唯一 impl；受 trait bound 的类型变量通过隐式 dictionary evidence 调用。Evidence 的目标表示不是语言规范的一部分。
 
 ## Trait 声明
 
@@ -199,105 +199,29 @@ bounds = { (α₁, "Show"), (α₂, "Eq"), ... }
 
 泛化时 trait bound 从 `var_bounds` 收集并存入 type scheme。实例化时 bound 从旧变量转移到 fresh 变量。
 
-## 方法解析
+## 方法解析与 Dictionary Evidence
 
-调用 `x.method()` 时，方法按以下顺序查找：
+调用 `x.method()` 时按以下语义顺序解析：
 
-1. **固有方法**：`impl_methods[type_name]["method"]`
-2. **原始类型方法**：Str/Int/Float 的内置方法表
-3. **Trait 方法**：搜索所有 `trait_impls`，找到为该类型实现的 trait 中的方法
-4. **Dictionary dispatch**：如果 receiver 是类型变量且有 trait bound，通过 dictionary 调用
+1. receiver 上可调用的字段；
+2. receiver 具体类型的固有方法；
+3. 原始类型提供的方法；
+4. 具体类型唯一可用的 trait impl；
+5. receiver 是受约束类型变量时，从其 trait bound 取得隐式 dictionary evidence。
 
-### 具体类型直接调用
-
-```ring
-let p = Point { x: 1, y: 2 }
-p.to_str()   // 直接调用 Point_Show_to_str(p)
-```
-
-类型已知时，编译器直接选择具体实现。
-
-### 泛型 Dictionary Dispatch
+找不到方法时报 E0305。
 
 ```ring
-fn show_it<T: Show>(x: T) -> Str {
-    x.to_str()   // 通过 dictionary 调用
+fn stringify<T: Show>(value: T) -> Str {
+    value.to_str()
+}
+
+fn show_twice<T: Show>(value: T) -> Str {
+    "${stringify(value)} ${stringify(value)}"
 }
 ```
 
-类型变量时，方法调用通过 dictionary 参数间接调用。
-
-## Dictionary Passing 编译模型
-
-### Trait 实现 → Dictionary 对象
-
-```ring
-impl Show for Point { fn to_str(self) -> Str { ... } }
-```
-
-编译为：
-
-```javascript
-function Point_Show_to_str(self) { ... }
-const Point_Show = { to_str: Point_Show_to_str };
-```
-
-### 泛型函数 → 接收 Dictionary 参数
-
-```ring
-fn stringify<T: Show>(x: T) -> Str { x.to_str() }
-```
-
-编译为：
-
-```javascript
-function stringify(x, __ring_T_Show) {
-    return __ring_T_Show.to_str(x);
-}
-```
-
-### 调用时 → 传递 Dictionary
-
-```ring
-stringify(my_point)
-```
-
-编译为：
-
-```javascript
-stringify(my_point, Point_Show)
-```
-
-### Dictionary 转发
-
-泛型函数调用另一个泛型函数时自动传递 dictionary：
-
-```ring
-fn show_twice<T: Show>(x: T) -> Str {
-    stringify(x) + stringify(x)
-}
-```
-
-编译为：
-
-```javascript
-function show_twice(x, __ring_T_Show) {
-    return stringify(x, __ring_T_Show) + stringify(x, __ring_T_Show);
-}
-```
-
-### 默认方法的 Dictionary 引用
-
-默认方法以独立函数形式存在，dictionary 中通过 wrapper 引用：
-
-```javascript
-const Point_Eq = {
-    eq: Point_Eq_eq,
-    ne: function(other) {
-        return __Eq_ne(Point_Eq, other);
-    }
-};
-```
+`stringify` 所需的 `Show<T>` evidence 是函数约束的一部分。调用者负责提供或继续转发它；默认方法与 supertrait 调用也使用同一 evidence 链。后端可以直接调用、传递表或采用等价 lowering，只要观察到的 trait 选择与 effect 行为一致。
 
 ## Delegate（Trait 委托）
 
@@ -351,14 +275,14 @@ impl Employee {
 编译器自动为所有 struct/enum 类型派生可派生的 trait。当前支持的 auto-derive trait：
 
 - **Eq**: 当所有字段都实现 Eq 时自动派生。`==`/`!=` 运算符解糖为 `Eq.eq()` 调用。
+- **Hash**: 仅当该 struct/enum 同时走编译器的结构化 auto-Eq 路径，且所有字段都可获得 Hash evidence 时自动派生。Struct 按字段声明顺序组合 hash；enum 先组合稳定的 variant discriminator，再组合字段。已有 manual Eq 不会隐式获得结构化 Hash，避免 `Eq` / `Hash` coherence 失配。
 - **Clone**: 当所有字段都实现 Clone 时自动派生。
 - **Debug**: 当所有字段都实现 Debug 时自动派生。
 - **Ord**: 当所有字段都实现 Ord 时自动派生。`<`/`>`/`<=`/`>=` 运算符解糖为 `Ord.cmp()` 调用。
 
-派生使用 fixpoint 迭代算法：从基本类型开始，逐步扩展到包含已派生字段的类型，直到不再有新类型可以派生。
+派生按依赖 fixpoint 扩展到嵌套与递归用户类型。`Hash` 的内建基础 evidence 当前包括 `Int`、`Str`、`Bool`，不包括 `Float` 或 `Unit`；缺少所需 evidence 时保持 fail closed，并在实际 trait bound 被要求时报告 E0503。
 
 ## 限制
 
 - 不支持 `dyn Trait` 动态分发
 - 不支持 GATs（Generic Associated Types）
-- Trait dictionary dispatch 的 evidence 转发已基本修复（#77），但 delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）

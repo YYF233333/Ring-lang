@@ -1,283 +1,104 @@
 # 标准库
 
-标准库通过 `std/` 目录下的 Ring 源码声明，编译器启动时自动加载（prelude）。运行时辅助函数由 codegen 的 preamble 提供。
+本页说明预加载 builtin 与标准库模块的语义边界，不复制完整 API 表。`std/` 模块的公开声明、trait bound 与 effect 标注以 [`std/*.ring`](../../std/) 中的源码为准；由编译器预加载的类型和原语会在下文明确标出，其精确签名以 builtin 注册表为准。
 
-## 全局函数
+## Core 与预加载类型
 
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `print` | `<T>(value: T) -> Unit ! io` | 输出到 stdout |
-| `assert` | `(cond: Bool, msg: Str) -> Unit` | 条件为 false 时 panic |
-| `panic` | `(msg: Str) -> Never` | 致命错误，终止程序 |
-| `exit` | `(code: Int) -> Never` | 以指定退出码终止 |
-| `json_stringify` | `<T>(value: T) -> Str` | 序列化为 JSON 字符串 |
-
-## Option\<T\>
-
-内置 enum，表示可能为空的值。
+`Option<T>` 是内建 enum，`T?` 是它的类型语法糖：
 
 ```ring
-enum Option<T> { some(T), none }
+Option<T> = some(T) | none
 ```
 
-### 语法糖
+`some` / `none`、安全解包与 HOF 方法由 core 环境提供。`?`、`catch` 和 `fail<E>` 的关系分别见[语法](syntax.md)与 [Effect 系统](effects.md)。
 
-- `T?` ≡ `Option<T>`
+`print`、`assert`、`panic`、进程退出和 JSON 字符串化等基础入口声明在 [`std/io.ring`](../../std/io.ring)。其中 `panic` 是不可恢复的终止；可恢复错误使用 `fail<E>`。
 
-### 方法
+### `Cell<T>`
 
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `is_some` | `(self) -> Bool` | 是否为 some |
-| `is_none` | `(self) -> Bool` | 是否为 none |
-| `unwrap` | `(self) -> T` | 解包，none 时 panic |
-| `unwrap_or` | `(self, default: T) -> T` | 解包或返回默认值 |
-| `to_fail` | `(self) -> T ! fail<Str>` | 解包，none 时 raise fail |
+`Cell<T>` 是预加载的共享可变容器。构造本身是纯的；读取与修改都显式产生对应状态类型的 `mut<T>` marker effect：
 
-### HOF 方法
+| 操作 | 公开签名 |
+|------|----------|
+| `Cell(value)` | `<T>(value: T) -> Cell<T> with {}` |
+| `get` | `(self: Cell<T>) -> T with {mut<T>}` |
+| `set` | `(self: Cell<T>, value: T) -> Unit with {mut<T>}` |
+| `update` | `(self: Cell<T>, f: fn(T) -> T with {}) -> Unit with {mut<T>}` |
 
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `map` | `<U>(self, f: (T) -> U / ?ε) -> Option<U> / ?ε` | 映射 some 内的值 |
-| `and_then` | `<U>(self, f: (T) -> Option<U> / ?ε) -> Option<U> / ?ε` | 链式操作（flatMap） |
-| `unwrap_or_else` | `(self, f: () -> T / ?ε) -> T / ?ε` | 解包或调用函数获取默认值 |
+`update` 的 callback 必须是纯函数。与只修改局部 `let mut` 不同，`Cell` 的 `get`、`set` 和 `update` 都跨越共享状态边界，因此 effect 不会作为局部 mutation 被豁免；不同 `T` 的 Cell 产生可共存的不同 `mut<T>` 实例。完整规则见 [Effect 系统](effects.md)。
 
-## Str 方法
+### `Ptr<T>` 与 unsafe 原语
 
-通过 `std/str.ring` 中的 `impl Str` 声明。
+`Ptr<T>` 是预加载的 typed raw pointer：指针值本身可以传递和存储，不参与自动资源管理；编译器不证明它指向的内存有效、已初始化、对齐或仍存活。内存访问与生命周期操作因此进入 `unsafe` effect 边界。
 
-| 方法 | 签名 | JS 对应 |
-|------|------|---------|
-| `len` | `(self) -> Int` | `self.length` |
-| `contains` | `(self, sub: Str) -> Bool` | `self.includes(sub)` |
-| `starts_with` | `(self, prefix: Str) -> Bool` | `self.startsWith(prefix)` |
-| `ends_with` | `(self, suffix: Str) -> Bool` | `self.endsWith(suffix)` |
-| `slice` | `(self, start: Int, end: Int) -> Str` | `self.slice(start, end)` |
-| `trim` | `(self) -> Str` | `self.trim()` |
-| `to_upper` | `(self) -> Str` | `self.toUpperCase()` |
-| `to_lower` | `(self) -> Str` | `self.toLowerCase()` |
-| `replace` | `(self, old: Str, new: Str) -> Str` | `self.replaceAll(old, new)` |
-| `split` | `(self, sep: Str) -> List<Str>` | `self.split(sep)` |
-| `char_at` | `(self, index: Int) -> Option<Str>` | 越界返回 `none` |
-| `index_of` | `(self, sub: Str) -> Option<Int>` | 未找到返回 `none` |
-| `pad_start` | `(self, len: Int, fill: Str) -> Str` | `self.padStart(len, fill)` |
-| `pad_end` | `(self, len: Int, fill: Str) -> Str` | `self.padEnd(len, fill)` |
-| `repeat` | `(self, count: Int) -> Str` | `self.repeat(count)` |
-| `char_code_at` | `(self, index: Int) -> Option<Int>` | `self.charCodeAt(index)` |
+- `alloc<T>(count)`、`dealloc<T>(ptr, count)` 和 `ptr_copy<T>(src, dst, count)` 产生 `unsafe`；`alloc` 返回未初始化存储，分配与释放责任由调用方配对。
+- `ptr.read()`、`ptr.take()`、`ptr.write(value)` 和 `ptr.offset(index)` 产生 `unsafe`。`read` 是保留原 slot 的读取，`take` 把值移出并使原 slot 不再有效，`write` 写入新值但不负责释放旧值。
+- `ptr.cast<U>()`、`ptr.addr()` 和 `ptr_from_addr<T>(address)` 只转换或观察指针值，本身是纯操作；后续访问内存仍需 `unsafe`。
 
-## 数值方法
+这些操作必须服从 [`unsafe` effect 与 discharge 规则](effects.md#unsafe-effect)。精确名称和类型签名以 [`compiler/builtins.ring`](../../compiler/builtins.ring) 的 builtin 注册为准；host ABI 与目标表示不属于语言层 API。
 
-通过 `std/num.ring` 声明。
+## 字符串与数值
 
-| 方法/函数 | 签名 | 描述 |
-|-----------|------|------|
-| `Int.to_str` | `(self) -> Str` | 整数转字符串 |
-| `Float.to_str` | `(self) -> Str` | 浮点转字符串 |
-| `parse_int` | `(s: Str) -> Option<Int>` | 字符串转整数 |
-| `parse_float` | `(s: Str) -> Option<Float>` | 字符串转浮点 |
+- [`std/str.ring`](../../std/str.ring) 为 `Str` 提供常用查询、切分、替换和大小写操作，并定义 Ring struct `StringBuilder`。
+- [`std/num.ring`](../../std/num.ring) 提供数值转字符串及 `parse_int` / `parse_float` 等解析入口；解析失败返回 `Option`。
 
-## List\<T\>
+字符串不支持 `+` 拼接；使用插值或标准库连接操作。字符串下标失败会 panic，安全访问使用返回 `Option` 的方法。
 
-可变有序集合。JS Array 底层。通过 `std/list.ring` 声明为 `extern type`。
+## 集合
 
-### 构造
+`List<T>`、`Map<K, V>` 和 `Set<T>` 都是标准库中定义的纯 Ring struct。它们的容器算法和公开方法位于 Ring 源码中；底层存储 bridge 不属于语言层 API 或规范表示。
 
-- `[expr, ...]` — 列表字面量
-- 空列表 `[]` 需要类型上下文
+### `List<T>`
 
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `list_clone` | `<T>(l: List<T>) -> List<T>` | 浅拷贝 |
-
-### 非 HOF 方法
-
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `len` | `(self) -> Int` | 长度 |
-| `get` | `(self, index: Int) -> Option<T>` | 按索引取值 |
-| `first` | `(self) -> Option<T>` | 首元素 |
-| `last` | `(self) -> Option<T>` | 末元素 |
-| `contains` | `(self, value: T) -> Bool` | 是否包含（使用 Eq trait `==` 比较） |
-| `is_empty` | `(self) -> Bool` | 是否为空 |
-| `push` | `(self, value: T) -> Unit` | 原地追加 |
-| `pop` | `(self) -> Option<T>` | 移除并返回末元素 |
-| `concat` | `(self, other: List<T>) -> List<T>` | 拼接为新 List（不修改原列表） |
-| `extend` | `(self, other: List<T>) -> Unit` | 原地追加另一个列表 |
-| `slice` | `(self, start: Int, end: Int) -> List<T>` | 子列表（新 List） |
-| `reverse` | `(self) -> Unit` | 原地反转 |
-| `join` | `(self, separator: Str) -> Str` | 用分隔符拼接为字符串 |
-| `sort` | `(self) -> Unit` | 原地排序（数值比较器） |
-| `shift` | `(self) -> Option<T>` | 移除并返回首元素 |
-| `clear` | `(self) -> Unit` | 原地清空 |
-| `index_of` | `(self, item: T) -> Option<Int>` | 查找元素索引（使用 Eq trait `==` 比较） |
-
-### HOF 方法（effect 多态）
-
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `map` | `<U>(self, f: (T) -> U / ?ε) -> List<U> / ?ε` | 映射 |
-| `filter` | `(self, f: (T) -> Bool / ?ε) -> List<T> / ?ε` | 过滤 |
-| `flat_map` | `<U>(self, f: (T) -> List<U> / ?ε) -> List<U> / ?ε` | 展平映射 |
-| `fold` | `<A>(self, init: A, f: (A, T) -> A / ?ε) -> A / ?ε` | 折叠 |
-| `find` | `(self, f: (T) -> Bool / ?ε) -> Option<T> / ?ε` | 查找 |
-| `find_index` | `(self, f: (T) -> Bool / ?ε) -> Option<Int> / ?ε` | 查找满足条件的首个索引 |
-| `any` | `(self, f: (T) -> Bool / ?ε) -> Bool / ?ε` | 存在性 |
-| `all` | `(self, f: (T) -> Bool / ?ε) -> Bool / ?ε` | 全称性 |
-| `sort_by` | `(self, cmp: (T, T) -> Int / ?ε) -> Unit / ?ε` | 自定义比较器原地排序 |
-
-回调的 effect 通过 row 变量 `?ε` 自动传播到外层。
-
-### 迭代
+[`std/list.ring`](../../std/list.ring) 定义可变、有序集合 `List<T>`。列表字面量 `[]` 产生该类型；读取、切片和 HOF 操作返回新值或 `Option`，原地操作要求可变 receiver。`List<T>` 实现 `Iterable`；依赖值相等或排序的操作分别要求 `T: Eq` 或 `T: Ord`。
 
 ```ring
-for x in list { ... }           // 通过 Iterable trait 协议
+let mut values = [3, 1, 2]
+values.push(4)
+let doubled = values.map(fn(x) { x * 2 })
 ```
 
-## Map\<K, V\>
+### `Map<K, V>`
 
-可变键值集合。JS Map 底层。通过 `std/map.ring` 声明为 `extern type`。
+[`std/map.ring`](../../std/map.ring) 定义可变键值集合 `Map<K, V>`。长度、枚举键值等不执行 key lookup 的操作不要求额外 evidence；构造自 entries、查找、下标、插入和删除等 key 操作要求 `K: Hash + Eq`。
 
-### 构造
+`map[key]` 在 key 不存在时 panic；安全查找使用 `get`，返回 `Option<V>`。当 `K: Hash + Eq` 时，`Map` 实现 `Iterable`，迭代项是 `(K, V)`。
 
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `map_new` | `<K, V>() -> Map<K, V>` | 空 Map |
-| `map_from` | `<K, V>(entries: List<(K, V)>) -> Map<K, V>` | 从键值对列表构造 |
-| `map_clone` | `<K, V>(m: Map<K, V>) -> Map<K, V>` | 浅拷贝 |
+### `Set<T>`
 
-### 方法
-
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `len` | `(self) -> Int` | 大小 |
-| `get` | `(self, key: K) -> Option<V>` | 按键取值 |
-| `contains_key` | `(self, key: K) -> Bool` | 是否包含键 |
-| `is_empty` | `(self) -> Bool` | 是否为空 |
-| `keys` | `(self) -> List<K>` | 所有键 |
-| `values` | `(self) -> List<V>` | 所有值 |
-| `entries` | `(self) -> List<(K, V)>` | 所有键值对 |
-| `insert` | `(self, key: K, value: V) -> Unit` | 原地插入 |
-| `remove` | `(self, key: K) -> Unit` | 原地删除 |
-| `clear` | `(self) -> Unit` | 原地清空 |
-
-### HOF 方法
-
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `map_values` | `<W>(self, f: (V) -> W / ?ε) -> Map<K, W> / ?ε` | 值映射（新 Map） |
-| `filter` | `(self, f: (K, V) -> Bool / ?ε) -> Map<K, V> / ?ε` | 过滤（新 Map） |
-| `fold` | `<A>(self, init: A, f: (A, K, V) -> A / ?ε) -> A / ?ε` | 折叠 |
-| `any` | `(self, f: (K, V) -> Bool / ?ε) -> Bool / ?ε` | 存在性 |
-
-### 迭代
-
-Map 支持通过 Iterable trait 直接 `for..in` 迭代：
+[`std/set.ring`](../../std/set.ring) 定义 `Set<T>`，其语言层实现是 `Map<T, Unit>` 的 Ring wrapper。成员查询、插入、删除、集合代数和需要重新建表的过滤操作要求 `T: Hash + Eq`。迭代顺序不构成语义保证。
 
 ```ring
-for (k, v) in map { ... }      // 解构键值对
-for entry in map { ... }       // entry 为 (K, V) tuple
+let mut seen: Set<Str> = set_new()
+seen.insert("ring")
+assert(seen.contains("ring"), "membership")
 ```
 
-也可使用 `map.entries()` 获取 `List<(K, V)>` 后迭代：
+### `Hash + Eq` 契约
+
+Map key 与 Set element 使用同一份 `Hash + Eq` 契约：
+
+- 相等的两个值必须产生相同 hash；
+- 碰撞不代表相等，查找仍以 `Eq` 判定；
+- `Int`、`Str`、`Bool` 提供内建 `Hash`；
+- 用户 struct/enum 在满足 [Trait 自动派生规则](traits.md)时获得结构化 `Hash`；否则需要显式实现或会因缺少 bound 而拒绝编译。
+
+## `Result<T, E>`
+
+[`std/result.ring`](../../std/result.ring) 定义：
 
 ```ring
-for (k, v) in map.entries() { ... }
+pub enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
 ```
 
-## Set\<T\>
+该模块提供状态查询、解包、映射等常用操作，以及把 `fail<E>` 计算捕获为 `Result<T, E>` 的 `to_result`。`Result` 是数据；`fail<E>` 是计算 effect。
 
-可变无序集合。JS Set 底层。通过 `std/set.ring` 声明为 `extern type`。
+## Iterator / Iterable
 
-### 构造
-
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `set_new` | `<T>() -> Set<T>` | 空 Set |
-| `set_from` | `<T>(items: List<T>) -> Set<T>` | 从列表构造 |
-| `set_clone` | `<T>(s: Set<T>) -> Set<T>` | 浅拷贝 |
-
-### 方法
-
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `len` | `(self) -> Int` | 大小 |
-| `contains` | `(self, value: T) -> Bool` | 是否包含（使用 Eq trait `==` 比较） |
-| `is_empty` | `(self) -> Bool` | 是否为空 |
-| `to_list` | `(self) -> List<T>` | 转为列表 |
-| `insert` | `(self, value: T) -> Unit` | 原地插入 |
-| `remove` | `(self, value: T) -> Unit` | 原地删除 |
-| `clear` | `(self) -> Unit` | 原地清空 |
-| `union` | `(self, other: Set<T>) -> Set<T>` | 并集（新 Set） |
-| `intersect` | `(self, other: Set<T>) -> Set<T>` | 交集（新 Set） |
-| `difference` | `(self, other: Set<T>) -> Set<T>` | 差集（新 Set） |
-
-### HOF 方法
-
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `filter` | `(self, f: (T) -> Bool / ?ε) -> Set<T> / ?ε` | 过滤（新 Set） |
-| `fold` | `<A>(self, init: A, f: (A, T) -> A / ?ε) -> A / ?ε` | 折叠 |
-| `any` | `(self, f: (T) -> Bool / ?ε) -> Bool / ?ε` | 存在性 |
-| `all` | `(self, f: (T) -> Bool / ?ε) -> Bool / ?ε` | 全称性 |
-
-### 迭代
-
-```ring
-for x in set { ... }
-```
-
-## Cell\<T\>
-
-可变容器，用于 `mut` effect 下的状态管理。
-
-| 操作 | 签名 | 描述 |
-|------|------|------|
-| `Cell(value)` | `<T>(T) -> Cell<T>` | 创建 Cell |
-| `get` | `(self) -> T ! mut` | 读取值 |
-| `set` | `(self, value: T) -> Unit ! mut` | 设置值 |
-| `update` | `(self, f: (T) -> T) -> Unit ! mut` | 函数更新 |
-
-## 相等性说明
-
-`Eq` trait 已实现（auto-derive），`==`/`!=` 运算符解糖为 Eq trait dispatch。
-
-以下集合操作已升级为使用 Eq trait（`==`）比较，支持结构相等：
-
-- `List.contains`、`List.index_of`
-- `Set.contains`
-
-以下操作仍使用 JS `===` 引用相等（对原始类型正确，struct/enum 仅比较引用）：
-
-- `List.find`（通过回调谓词查找，谓词内部可自行使用 `==`）
-- `Map` key 查找（`Map.get`、`Map.contains_key` 等）
-
-## Result\<T, E\>
-
-标准库 enum，表示可能失败的计算结果。通过 `std/result.ring` 声明。
-
-```ring
-pub enum Result<T, E> { Ok(T), Err(E) }
-```
-
-### 方法
-
-| 方法 | 签名 | 描述 |
-|------|------|------|
-| `map` | `<U>(self, f: fn(T) -> U) -> Result<U, E>` | 映射 Ok 内的值 |
-| `and_then` | `<U>(self, f: fn(T) -> Result<U, E>) -> Result<U, E>` | 链式操作（flatMap） |
-| `unwrap_or` | `(self, default: T) -> T` | 解包 Ok 或返回默认值 |
-| `is_ok` | `(self) -> Bool` | 是否为 Ok |
-| `is_err` | `(self) -> Bool` | 是否为 Err |
-
-### 桥接函数
-
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `to_result` | `<T, E>(f: fn() -> T) -> Result<T, E>` | 将 fail effect 转为 Result：执行 `f()`，成功返回 `Ok(v)`，raise 时返回 `Err(e)` |
-
-## Iterator / Iterable Trait 协议
-
-通过 `std/iterator.ring` 声明。定义了统一的迭代器协议，`for..in` 通过 Iterable trait 脱糖。
+[`std/iterator.ring`](../../std/iterator.ring) 定义 `Iterator` 与 `Iterable` 的关联类型协议。`for x in value` 对非 range 值要求 `value` 实现 `Iterable`；List、Map 和 Set 都提供实现。自定义集合可返回自己的 iterator：
 
 ```ring
 pub trait Iterator {
@@ -292,35 +113,20 @@ pub trait Iterable {
 }
 ```
 
-- List、Map、Set 内置 Iterable 实现
-- `for x in collection { ... }` 脱糖为调用 `collection.iter()` 获取迭代器，循环调用 `next()`
-- 支持自定义迭代器：实现 Iterator trait 即可
-- Range（`0..n`）保留特殊快速路径，不经过 Iterable 协议
+精确声明仍以源码为准；上面的短定义只展示协议形状。
 
-## 文件系统（std/fs.ring）
+## 主机服务模块
 
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `read_file` | `(path: Str) -> Str` | 读取文件内容 |
-| `write_file` | `(path: Str, content: Str) -> Unit` | 写入文件内容 |
-| `file_exists` | `(path: Str) -> Bool` | 文件是否存在 |
-| `delete_file` | `(path: Str) -> Unit` | 删除文件 |
+以下模块集中声明由当前 native runtime 提供的外部能力：
 
-## 路径操作（std/path.ring）
+| 模块 | 语义范围 |
+|------|----------|
+| [`std/fs.ring`](../../std/fs.ring) | 文件读取、写入、存在性与删除 |
+| [`std/path.ring`](../../std/path.ring) | 路径连接、规范化、目录名、文件名与扩展名 |
+| [`std/process.ring`](../../std/process.ring) | 参数、工作目录、退出、stderr 与同步子进程 |
 
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `path_join` | `(a: Str, b: Str) -> Str` | 拼接路径 |
-| `path_resolve` | `(p: Str) -> Str` | 解析为绝对路径 |
-| `path_dirname` | `(p: Str) -> Str` | 目录部分 |
-| `path_basename` | `(p: Str) -> Str` | 文件名部分 |
-| `path_extname` | `(p: Str) -> Str` | 扩展名部分 |
+这些文件中的声明就是当前 API 真值；本规范不为 host ABI 或 runtime 表示另立一份契约。
 
-## 进程操作（std/process.ring）
+## Mutation 与 effect
 
-| 函数 | 签名 | 描述 |
-|------|------|------|
-| `argv` | `() -> List<Str>` | 命令行参数 |
-| `exit_process` | `(code: Int) -> Unit` | 以指定退出码终止进程 |
-| `eprintln` | `(msg: Str) -> Unit` | 输出到 stderr |
-| `cwd` | `() -> Str` | 当前工作目录 |
+集合和 iterator 的原地方法使用 `mut self`。对局部 `let mut` 的修改不会把 mutation effect 泄漏到函数签名；修改可变参数或捕获的外部状态时，编译器注入对应的多实例 `mut<T>` marker effect。完整规则见 [Effect 系统](effects.md)。

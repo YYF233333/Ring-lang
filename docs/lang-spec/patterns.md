@@ -10,7 +10,7 @@
 | 位置构造器 | `Some(x)` | enum 变体 tag 匹配，递归匹配字段 |
 | 命名构造器 | `Ok { value: x }` | enum 变体 tag 匹配，按名称匹配字段 |
 | Tuple | `(a, b)` | 元素逐个匹配 |
-| Or | `A \| B` | 任一子模式匹配 |
+| Arm-level Or | `A \| B` | match/catch arm 顶层的任一备选模式匹配 |
 
 ### 绑定 vs Unit 变体消歧
 
@@ -164,7 +164,7 @@ match (a, b) {
 
 ### Or-Pattern
 
-Or-Pattern 允许在单个 match arm 中匹配多个模式，语法为 `p₁ | p₂ | ...`，`|` 分隔备选模式。任一子模式匹配即执行该分支。
+Or-Pattern 允许在单个 match/catch arm 中匹配多个模式，语法为 `p₁ | p₂ | ...`，`|` 分隔备选模式。任一子模式匹配即执行该分支。`|` 只在 arm 的最外层解析；它不是表达式运算符，也不能直接嵌套在 tuple 或构造器字段模式中。
 
 ```ring
 match color {
@@ -215,4 +215,4 @@ Guard 是在模式匹配成功后额外检查的布尔条件。Guard 为 false �
 
 ### 非穷尽 Match
 
-如果穷尽性检查失败，编译器报 E0601 错误。运行时，如果所有分支都不匹配（仅在有 guard 时可能），调用 `__match_fail(value)` 抛出异常。
+如果穷尽性检查失败，编译器报 E0601 错误。若一个已通过检查的 match 在求值时仍没有 arm 匹配，程序触发不可恢复的 match-failure panic；具体 trap、异常或进程终止表示由后端决定，不属于语言语义。

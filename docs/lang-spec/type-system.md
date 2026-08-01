@@ -6,14 +6,14 @@ Ring 使用 Hindley-Milner 类型推断（let-polymorphism），扩展了 effect
 
 ### 原始类型
 
-| 类型 | 描述 | JS 表示 |
-|------|------|---------|
-| `Int` | 整数 | `number` |
-| `Float` | 浮点数 | `number` |
-| `Str` | 字符串 | `string` |
-| `Bool` | 布尔值 | `boolean` |
-| `Unit` | 空类型 | `undefined` |
-| `Never` | 底类型（无值） | — |
+| 类型 | 描述 |
+|------|------|
+| `Int` | 有符号整数 |
+| `Float` | 浮点数 |
+| `Str` | 字符串 |
+| `Bool` | 布尔值 |
+| `Unit` | 唯一值为 `()` 的单位类型 |
+| `Never` | 底类型（无值） |
 
 `Never` 与任何类型统一（它是类型格的底部元素）。它是永不返回的操作（如 `fail.raise`）的返回类型。
 
@@ -77,12 +77,12 @@ Option<T> = some(T) | none
 ### 集合类型
 
 ```
-List<T>      — 可变有序集合（JS Array）
-Map<K, V>    — 可变键值集合（JS Map）
-Set<T>       — 可变无序集合（JS Set）
+List<T>      — 可变有序集合
+Map<K, V>    — 可变键值集合
+Set<T>       — 可变无序集合
 ```
 
-这些在标准库中声明为 `extern type`，字段列表为空。它们是结构不透明的（不可字段访问，不可模式匹配）。
+三者都在标准库中声明为纯 Ring struct。`List<T>` 的值相等/排序操作分别要求 `T: Eq` / `T: Ord`；Map 的 key lookup 与 Set 的成员操作要求 key/element 满足 `Hash + Eq`。公开方法和当前字段定义以 [`std/list.ring`](../../std/list.ring)、[`std/map.ring`](../../std/map.ring) 与 [`std/set.ring`](../../std/set.ring) 为准。
 
 ### 类型变量
 
@@ -366,7 +366,7 @@ apply(subst, τ):
   ──────────────────────────────────
   Γ ⊢ match scrutinee { arms } : τ₀ / (ε_s ∪ ε₁ ∪ ... ∪ εₙ)
 
-  支持 Or-Pattern：p₁ | p₂ | ... | pₖ => body
+  支持 arm-level Or-Pattern：p₁ | p₂ | ... | pₖ => body
   所有子模式必须绑定相同的变量名集合，且对应变量类型兼容。
   穷尽性检查将 or-pattern 展开为独立行处理。
 
