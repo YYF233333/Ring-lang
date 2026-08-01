@@ -196,7 +196,41 @@ STEWARD_BEHAVIOR_CONTRACTS = (
             "最后把 `waiting-feedback` 转回 `queued`",
         ),
     ),
+    TextContract(
+        "long-command polling backoff",
+        (
+            ("长命令",),
+            ("5 分钟",),
+            ("预计完成时间",),
+            ("dormant wait / sleep",),
+            ("首次完成检查",),
+            ("轮询计数",),
+            ("增量日志",),
+            ("第 3 次",),
+            ("仍未结束",),
+            ("第 4 次",),
+            ("至少为上一次实际 sleep 的 2 倍",),
+            ("禁止固定频率轮询",),
+            ("平台有单次等待上限",),
+            ("平台允许的最大时长",),
+            ("不得把平台上限变成高频轮询",),
+        ),
+        (
+            "每 10 秒轮询",
+            "每 30 秒轮询",
+            "固定间隔轮询直到结束",
+        ),
+        (
+            "5 分钟",
+            "首次完成检查",
+            "第 3 次",
+            "第 4 次",
+            "至少为上一次实际 sleep 的 2 倍",
+        ),
+    ),
 )
+
+LONG_COMMAND_WAIT_CONTRACT = STEWARD_BEHAVIOR_CONTRACTS[-1]
 
 GUARANTEE_BOUNDARY_CONTRACT = TextContract(
     "restore-vs-change guarantee boundary",
@@ -709,6 +743,10 @@ class WorkflowValidator:
             text, WORKFLOW_AUDIT_LEDGER_CONTRACT
         ):
             self.errors.append(f"docs/workflow.md: {error}")
+        for error in check_text_contract(
+            text, LONG_COMMAND_WAIT_CONTRACT
+        ):
+            self.errors.append(f"docs/workflow.md: {error}")
 
     def validate_skills(self) -> None:
         existing_paths: set[str] = set()
@@ -1014,6 +1052,12 @@ Session 恢复要 reconcile planning / doing 与 durable branch、worktree、com
 要记录不一致并退回 `queued`。
 用户答复后，先把 verdict / 约束写入 design、backlog 或 workflow 真值并 commit；
 再删除 dossier；最后把 `waiting-feedback` 转回 `queued`。禁止先删 dossier。
+长命令启动前先预估；达到 5 分钟时，按预计完成时间进入一次 dormant wait / sleep，
+首次完成检查只能在计划等待结束后进行。在上下文维护 sleep 时长和轮询计数；
+仅为判断是否结束而读取增量日志也算轮询。第 3 次检查后仍未结束，
+必须在第 4 次检查前重估，下一次 sleep 至少为上一次实际 sleep 的 2 倍，
+以后继续退避，禁止固定频率轮询。平台有单次等待上限时，
+每段使用平台允许的最大时长；不得把平台上限变成高频轮询。
 """
 
 GOOD_AUDIT_EVIDENCE_FIXTURE = """
@@ -1311,6 +1355,25 @@ def run_self_tests() -> list[str]:
         )
     )
 
+    bad_long_command_wait = GOOD_STEWARD_FIXTURE.replace(
+        "长命令启动前先预估；达到 5 分钟时，按预计完成时间进入一次 dormant wait / sleep，\n"
+        "首次完成检查只能在计划等待结束后进行。在上下文维护 sleep 时长和轮询计数；\n"
+        "仅为判断是否结束而读取增量日志也算轮询。第 3 次检查后仍未结束，\n"
+        "必须在第 4 次检查前重估，下一次 sleep 至少为上一次实际 sleep 的 2 倍，\n"
+        "以后继续退避，禁止固定频率轮询。平台有单次等待上限时，\n"
+        "每段使用平台允许的最大时长；不得把平台上限变成高频轮询。",
+        "长命令每 10 秒轮询，固定间隔轮询直到结束。",
+    )
+    failures.extend(
+        deterministic_failure(
+            "long-command polling backoff fixture",
+            lambda: check_text_contract(
+                bad_long_command_wait, LONG_COMMAND_WAIT_CONTRACT
+            ),
+            "long-command polling backoff",
+        )
+    )
+
     bad_evidence = (
         "一个 finder 即可落表并验证自己的候选。"
         "already-tracked 计支持票；critical 无需 root 读码。"
@@ -1384,7 +1447,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             "workflow validator self-test passed: "
-            "19 legacy/broken fixtures rejected deterministically; "
+            "20 legacy/broken fixtures rejected deterministically; "
             "2 durable-ledger regressions passed"
         )
         return 0
@@ -1412,7 +1475,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{backlog_count} active backlog items, "
         f"{audit_count} active audit items, "
         "2 steward adapters, 4 Codex roles, "
-        "19 negative fixtures, 2 durable-ledger regressions"
+        "20 negative fixtures, 2 durable-ledger regressions"
     )
     return 0
 

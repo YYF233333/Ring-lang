@@ -62,6 +62,15 @@ Session 恢复时必须把每个 `planning` / `doing` 与 durable branch、workt
 - 同一连续任务复用原 agent 完成实现、review 返修和复验，不为每次反馈重新派无上下文 agent；
 - 合并后按 `CLAUDE.md` 执行定向测试、全量门、bootstrap/fixpoint 和必要重复运行；失败交回原 implementer，不降低门槛。
 
+## 长命令等待纪律
+
+严格执行 `docs/workflow.md` §4.7；低噪声不仅是不向用户展示进度，也包括减少内部工具调用和 token 消耗。
+
+- 启动命令前先做保守耗时预估。预计达到 **5 分钟**时，启动后若无独立工作可补位，直接按预计完成时间进入一次可中断的 dormant wait / sleep；首次完成检查只能在计划等待结束后进行，禁止连续短 `wait`、查进程或读日志来模拟 sleep。
+- 在当前上下文维护每条命令的 sleep 时长与轮询计数。仅为判断是否结束而调用 `wait`、查询进程/任务状态或读取增量日志，都算一次轮询，不得换工具规避计数。
+- 第 3 次检查后仍未结束时，必须在第 4 次检查前重估；下一次 sleep 至少为上一次实际 sleep 的 2 倍，以后每次未结束继续至少 2 倍退避，禁止固定频率轮询。只有确定的新完成时点证据才允许缩短一次等待。
+- 平台有单次等待上限时，优先使用事件通知、deferred wait 或定时唤醒；只能分段时每段使用平台允许的最大时长，增长到上限后保持上限，段间不追加状态/日志查询。不得把平台上限变成高频轮询，也不发送“仍在运行”的用户状态更新，除非用户明确询问、命令成为全局阻塞或结果改变结论。
+
 ## 风险触发 Audit
 
 `full-audit` 每次调用只执行一个 bounded round，不得在同一 round 内 loop-until-dry。Steward 可在 XL/高风险 milestone、type/effect/RC/runtime ABI/bootstrap 信任边界变化、一批 critical/medium 修复后，或队列空档存在真实风险时自主触发新 round，无需用户手动发令。
