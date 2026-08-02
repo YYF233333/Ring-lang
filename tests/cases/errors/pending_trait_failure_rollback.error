@@ -1,0 +1,2 @@
+for..in requires an iterable type
+!E0503

@@ -616,6 +616,34 @@
       "reason": "Non-Range for-in lowers through authoritative typed Iterable/Iterator calls before RC and executes with control-flow, effect, owned-item, Drop-source, enum-shadow, protocol-selection, concrete static-bound discharge, nested wrapped evidence from wrapper bounds, generic delegated instance mapping, and dual-backend evidence."
     },
     {
+      "feature_id": "checker.pending_trait_obligation_owner",
+      "evidence": [
+        "tests/cases/llvm/set_ops.ring",
+        "tests/cases/llvm/pending_trait_obligations.ring",
+        "tests/cases/llvm/pending_trait_test_owner.ring"
+      ],
+      "oracle": "golden+dual-backend",
+      "lane": ["llvm-golden", "c-golden", "llvm-diff"],
+      "status": "covered",
+      "reason": "Declaration-owned trait obligations retain one monomorphic call instantiation through annotations, surrounding calls, returns, branches, lambdas, associated constraints, map indexing, methods, defaults, consts, effects, traits, and tests before atomically publishing dictionaries under both backends."
+    },
+    {
+      "feature_id": "backend.frontend_pending_trait_obligation_fail_closed",
+      "evidence": [
+        "tests/cases/errors/pending_trait_no_source.ring",
+        "tests/cases/errors/pending_trait_concrete_missing.ring",
+        "tests/cases/errors/pending_trait_monomorphic_barrier.ring",
+        "tests/cases/errors/pending_trait_multi_bound_atomic.ring",
+        "tests/cases/errors/pending_trait_failure_rollback.ring",
+        "tests/cases/errors/pending_trait_extern_validation.ring",
+        "tests/cases/errors/pending_trait_generic_default_unsupported.ring"
+      ],
+      "oracle": "diagnostic-substring",
+      "lane": ["check"],
+      "status": "covered",
+      "reason": "The checker still rejects no-source and concrete missing evidence, conflicting later uses, partial multi-bound resolution, leaked failed-owner obligations, invalid extern callers, and caller-specific generic-default evidence."
+    },
+    {
       "feature_id": "collections.set_struct_eq",
       "evidence": ["tests/cases/set_struct_eq.ring"],
       "oracle": "handwritten-golden+dual-backend",

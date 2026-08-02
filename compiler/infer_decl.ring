@@ -19,6 +19,8 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, AssocRebindEntry, CompileE
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_dicts_from_scheme,
+    pending_dict_checkpoint, drain_pending_dicts, rollback_pending_dicts,
+    settle_default_pending_dicts,
     generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses,
     enter_project_root_frame, enter_project_child_frame,
     exit_project_namespace_frame}
@@ -37,6 +39,21 @@ use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names, collect_sel
 // ============================================================
 
 fn check_decl(
+    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?
+) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
+    let result = some(check_decl_inner(
+        ctx, decl, frame_decl_index)) catch { _ => none }
+    match result {
+        some(hdecl) => hdecl,
+        none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
+            fail.raise(CompileError {})
+        }
+    }
+}
+
+fn check_decl_inner(
     mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?
 ) -> HDecl {
     match decl {
@@ -295,6 +312,7 @@ fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub
 }
 
 fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     // Retrieve the def_id assigned during registration
@@ -317,6 +335,9 @@ fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
         },
         none => {}
     }
+    // Annotation constraints are final for this const owner.  Publish its
+    // call dictionaries before value-zonk and before restoring substitution.
+    drain_pending_dicts(ctx, obligation_checkpoint, s)
     // A const initializer is a value position.  Resolve its fully unified
     // function-value evidence before restoring the declaration substitution;
     // otherwise a bounded module function reaches codegen without its DictRef.
@@ -331,6 +352,7 @@ fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
         none => {
             // Declaration-level recovery continues checking later declarations.
             // Never leak this const's isolated substitution through that path.
+            rollback_pending_dicts(ctx, obligation_checkpoint)
             ctx.subst = saved_subst
             fail.raise(CompileError {})
         }
@@ -409,22 +431,39 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
         match ast_op_opt {
             some(ast_op) => match ast_op.body {
                 some(body_expr) => {
+                    let obligation_checkpoint = pending_dict_checkpoint(ctx)
                     // Bind op params in a new scope for type checking the default body
                     ctx.env.push_scope()
                     for p in op_params {
                         ctx.env.bind_mono(p.name, p.ty)
                     }
-                    let body_result = infer_block(ctx, body_expr, none)
-                    ctx.subst = body_result.subst
-                    let body_type = hexpr_type(body_result.hexpr)
-                    ctx.subst = unify_at(ctx.sink, ctx.env, body_type, op.return_type, ctx.subst, span)
-                    // Zonk the default body
-                    let zctx = ZonkCtx {
-                        subst: ctx.subst, names: map_new(),
-                        dict_resolver: some(ctx)
-                    }
-                    default_body = some(zonk_block(zctx, body_result.hexpr))
+                    let checked_default = some({
+                        let body_result = infer_block(ctx, body_expr, none)
+                        ctx.subst = body_result.subst
+                        let body_type = hexpr_type(body_result.hexpr)
+                        ctx.subst = unify_at(
+                            ctx.sink, ctx.env, body_type,
+                            op.return_type, ctx.subst, span)
+                        drain_pending_dicts(
+                            ctx, obligation_checkpoint, ctx.subst)
+                        // Zonk only after the owner obligation transaction.
+                        let zctx = ZonkCtx {
+                            subst: ctx.subst, names: map_new(),
+                            dict_resolver: some(ctx)
+                        }
+                        zonk_block(zctx, body_result.hexpr)
+                    }) catch { _ => none }
                     let _ = ctx.env.pop_scope()
+                    match checked_default {
+                        some(checked_body) => {
+                            default_body = some(checked_body)
+                        },
+                        none => {
+                            rollback_pending_dicts(
+                                ctx, obligation_checkpoint)
+                            fail.raise(CompileError {})
+                        }
+                    }
                 },
                 none => {},
             },
@@ -1355,6 +1394,7 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
 }
 
 fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, hparams: List<HParam>, body: Expr) -> HExpr? {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -1417,6 +1457,7 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
     let final_body = match body_result {
         some(br) => {
             ctx.subst = br.subst
+            drain_pending_dicts(ctx, obligation_checkpoint, ctx.subst)
             let zctx = ZonkCtx {
                 subst: ctx.subst, names: map_new(),
                 dict_resolver: some(ctx)
@@ -1425,7 +1466,11 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
             ctx.subst = saved_subst
             result
         },
-        none => { ctx.subst = saved_subst; none }
+        none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
+            ctx.subst = saved_subst
+            none
+        }
     }
     // Keep the trait's Self/supertrait bounds and parameter scope alive
     // through value-zonk so bounded function values can capture them.
@@ -1497,7 +1542,8 @@ fn check_fn_body(
     expected_ret: Type,
     body: Expr,
     saved_tp_scope: Map<Str, Type>,
-    span: Span
+    span: Span,
+    obligation_checkpoint: Int
 ) -> FnBodyResult {
     let body_result = infer_block(ctx, body, some(ctx.subst))
     ctx.subst = body_result.subst
@@ -1518,6 +1564,11 @@ fn check_fn_body(
             ctx.subst = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span, fn_body_notes)
         },
     }
+
+    // Defaults and the body share this function owner's inference variables.
+    // Return/annotation/arm constraints are now complete; settle every call
+    // slot before zonk or restoration can detach those variables.
+    drain_pending_dicts(ctx, obligation_checkpoint, ctx.subst)
 
     let mut local_names: Map<Int, Str> = map_new()
     for tp in type_params {
@@ -1719,6 +1770,29 @@ fn check_fn_decl(
     is_pub: Bool, span: Span, self_type: Type?,
     registration_override: TypeScheme?, rebind_identity: Str?
 ) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
+    let result = some(check_fn_decl_transaction(
+        ctx, name, type_params, params, return_type,
+        declared_effects, body, is_pub, span, self_type,
+        registration_override, rebind_identity,
+        obligation_checkpoint)) catch { _ => none }
+    match result {
+        some(hdecl) => hdecl,
+        none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
+            fail.raise(CompileError {})
+        }
+    }
+}
+
+fn check_fn_decl_transaction(
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    params: List<Param>, return_type: TypeExpr?,
+    declared_effects: List<EffectExpr>?, body: Expr,
+    is_pub: Bool, span: Span, self_type: Type?,
+    registration_override: TypeScheme?, rebind_identity: Str?,
+    obligation_checkpoint: Int
+) -> HDecl {
     // This check owns the declaration's default metadata. Clear both halves
     // before entering transient scopes so impl-method seeds or earlier SCC
     // prechecks with the same spelling cannot leak into this owner.
@@ -1834,7 +1908,21 @@ fn check_fn_decl(
     for p in params {
         match p.default_value {
             some(dv) => {
-                let dv_result = infer_expr(ctx, dv, ctx.subst)
+                let default_obligation_checkpoint =
+                    pending_dict_checkpoint(ctx)
+                // Generic defaults are shared metadata, not one caller
+                // instantiation.  Hide caller-specific bound dictionaries
+                // while checking them: ground/static evidence still resolves,
+                // while dynamic evidence becomes an explicit pending failure.
+                let saved_default_bounds = ctx.current_fn_bounds
+                ctx.current_fn_bounds = []
+                let default_result = some(
+                    infer_expr(ctx, dv, ctx.subst)) catch { _ => none }
+                ctx.current_fn_bounds = saved_default_bounds
+                let dv_result = match default_result {
+                    some(result) => result,
+                    none => fail.raise(CompileError {})
+                }
                 ctx.subst = dv_result.subst
                 // Unify default value type with param type
                 match param_types.get(pi) {
@@ -1851,6 +1939,8 @@ fn check_fn_decl(
                         p.span,
                         DiagnosticContext::OtherContext { detail: some("default parameter effect") })
                 }
+                settle_default_pending_dicts(
+                    ctx, default_obligation_checkpoint, ctx.subst)
                 default_hexprs.push(dv_result.hexpr)
                 if min_arity == params.len() {
                     // First default param sets the min arity
@@ -1872,7 +1962,8 @@ fn check_fn_decl(
     let try_result = some(
         check_fn_body(
             ctx, provenance_key, registration_scheme, type_params, hparams,
-            expected_ret, body, saved_tp_scope, span
+            expected_ret, body, saved_tp_scope, span,
+            obligation_checkpoint
         )
     ) catch { _ => none }
 
@@ -2034,6 +2125,7 @@ fn check_fn_decl(
 }
 
 fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -2042,6 +2134,7 @@ fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) 
     let final_body = match body_result {
         some(br) => {
             ctx.subst = br.subst
+            drain_pending_dicts(ctx, obligation_checkpoint, ctx.subst)
             let zctx = ZonkCtx {
                 subst: ctx.subst, names: map_new(),
                 dict_resolver: some(ctx)
@@ -2051,6 +2144,7 @@ fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) 
             result
         },
         none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
             ctx.subst = saved_subst
             // The scope must be restored before re-raising the declaration
             // error; the success path pops once below after value-zonk.

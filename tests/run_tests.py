@@ -106,14 +106,7 @@ SHARED_POSITIVE_GAPS = {}
 # above these are frontend blockers rather than codegen gaps, so every lane
 # that would compile or RC-verify the case (llvm, diff, rc) must skip it with
 # the same actionable reason.
-CHECK_BLOCKED_POSITIVE_GAPS = {
-    "tests/cases/llvm/set_ops.ring": (
-        "E0503 on `set_from([])`: call-site dict resolution fails closed on "
-        "the unsolved element TypeVar before the `Set<Int>` annotation "
-        "propagates; pre-existing checker limitation, surfaced when set_from "
-        "gained its T: Hash + Eq bound (B-170)"
-    ),
-}
+CHECK_BLOCKED_POSITIVE_GAPS = {}
 
 CHECK_ONLY_GAPS = {}
 

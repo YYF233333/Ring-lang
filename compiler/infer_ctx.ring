@@ -50,6 +50,38 @@ pub struct AssocRebindEntry {
     pub assoc_name: Str
 }
 
+// Checker-only deferred trait evidence.  The callee type retains the exact
+// instantiation variables owned by the declaration's UnionFind, while the
+// optional output list is the same alias stored in HExpr::Call.  No pending
+// obligation crosses a declaration-owner boundary.
+pub struct PendingDictObligation {
+    pub scheme: TypeScheme,
+    pub callee_type: Type,
+    pub fn_bounds: List<FnBoundsEntry>,
+    pub span: Span,
+    pub output_slot: List<DictRef>?
+}
+
+struct EvidenceFailure {
+    trait_name: Str,
+    suppress_diagnostic: Bool
+}
+
+// This tri-state is deliberately checker-private.  The public resolver below
+// remains immediate and fail-closed for registration, forwarding, protocol
+// prechecks, and final-zonk callable values.
+enum SchemeEvidenceResolution {
+    Resolved { dicts: List<DictRef> },
+    Pending { failures: List<EvidenceFailure> },
+    Missing { failures: List<EvidenceFailure> }
+}
+
+enum DictEvidenceResolution {
+    Resolved { dict_ref: DictRef },
+    Pending,
+    Missing { suppress_diagnostic: Bool }
+}
+
 // ============================================================
 // CompileError (raised via fail effect, caught at declaration level)
 // ============================================================
@@ -91,6 +123,7 @@ pub struct InferCtx {
     pub current_fn_return_type: Type?,
     pub current_fn_bounds: List<FnBoundsEntry>,
     pub fn_bounds_stack: List<List<FnBoundsEntry>>,
+    pub pending_dict_obligations: List<PendingDictObligation>,
     pub loop_depth: Int,
     pub mod_path_stack: List<Str>,
     // Local binding DefId -> canonical value origin.  DefIds are lexical, so
@@ -142,6 +175,7 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         current_fn_return_type: none,
         current_fn_bounds: [],
         fn_bounds_stack: [],
+        pending_dict_obligations: [],
         loop_depth: 0,
         mod_path_stack: [],
         use_aliases: map_new(),
@@ -1143,38 +1177,172 @@ pub fn value_binding_kind(ctx: InferCtx, def_id: Int?) -> ValueBindingKind {
     }
 }
 
-fn resolve_named_impl_dict_ref(
+fn type_has_error(t: Type) -> Bool {
+    match t {
+        Type::ErrorType => true,
+        Type::FnType { params, return_type, effects } => {
+            for p in params { if type_has_error(p) { return true } }
+            if type_has_error(return_type) { return true }
+            for eff in effects.effects {
+                match eff {
+                    Effect::FailEffect { error_type } =>
+                        if type_has_error(error_type) { return true },
+                    Effect::MutEffect { state_type } =>
+                        if type_has_error(state_type) { return true },
+                    Effect::CustomEffect { type_args, .. } => {
+                        for a in type_args { if type_has_error(a) { return true } }
+                    },
+                    _ => {}
+                }
+            }
+            false
+        },
+        Type::StructType { type_params, .. } => {
+            for p in type_params { if type_has_error(p) { return true } }
+            false
+        },
+        Type::EnumType { type_params, .. } => {
+            for p in type_params { if type_has_error(p) { return true } }
+            false
+        },
+        Type::GenericType { base, args } => {
+            if type_has_error(base) { return true }
+            for a in args { if type_has_error(a) { return true } }
+            false
+        },
+        Type::RecordType { fields, .. } => {
+            for f in fields { if type_has_error(f.ty) { return true } }
+            false
+        },
+        Type::EffectRowType { effects, .. } => {
+            for eff in effects {
+                match eff {
+                    Effect::FailEffect { error_type } =>
+                        if type_has_error(error_type) { return true },
+                    Effect::MutEffect { state_type } =>
+                        if type_has_error(state_type) { return true },
+                    Effect::CustomEffect { type_args, .. } => {
+                        for a in type_args { if type_has_error(a) { return true } }
+                    },
+                    _ => {}
+                }
+            }
+            false
+        },
+        Type::TupleType { elements } => {
+            for e in elements { if type_has_error(e) { return true } }
+            false
+        },
+        Type::PtrType { pointee } => type_has_error(pointee),
+        _ => false
+    }
+}
+
+fn resolve_named_impl_dict_evidence(
     env: TypeEnv, current_fn_bounds: List<FnBoundsEntry>,
     name: Str, type_params: List<Type>, s: UnionFind, trait_name: Str
-) -> DictRef? {
+) -> DictEvidenceResolution {
     match find_impl(env.trait_reg, name, trait_name) {
-        none => none,
+        none => {
+            let mut suppress = false
+            for type_param in type_params {
+                if type_has_error(type_param) { suppress = true }
+            }
+            DictEvidenceResolution::Missing {
+                suppress_diagnostic: suppress
+            }
+        },
         some(impl_entry) => {
             let dict_name = trait_dict_name(name, trait_name)
             if impl_entry.dict_bounds.len() == 0 {
-                return some(DictRef::Static(dict_name))
+                return DictEvidenceResolution::Resolved {
+                    dict_ref: DictRef::Static(dict_name)
+                }
             }
 
             let mut inner_dicts: List<DictRef> = []
+            let mut has_pending = false
+            let mut has_missing = false
+            let mut suppress_missing = true
             for impl_bound in impl_entry.dict_bounds {
                 match type_params.get(impl_bound.type_param_index) {
-                    none => { return none },
+                    none => {
+                        has_missing = true
+                        suppress_missing = false
+                    },
                     some(type_arg) => {
-                        match resolve_dict_ref_for_type(
+                        match resolve_dict_evidence_for_type(
                             env, current_fn_bounds, type_arg, s,
                             impl_bound.trait_name
                         ) {
-                            some(inner_dict) => inner_dicts.push(inner_dict),
-                            none => { return none }
+                            DictEvidenceResolution::Resolved { dict_ref } =>
+                                inner_dicts.push(dict_ref),
+                            DictEvidenceResolution::Pending => {
+                                has_pending = true
+                            },
+                            DictEvidenceResolution::Missing { suppress_diagnostic } => {
+                                has_missing = true
+                                if !suppress_diagnostic { suppress_missing = false }
+                            }
                         }
                     }
                 }
             }
-            some(DictRef::Wrapped {
+            if has_missing {
+                return DictEvidenceResolution::Missing {
+                    suppress_diagnostic: suppress_missing
+                }
+            }
+            if has_pending { return DictEvidenceResolution::Pending }
+            DictEvidenceResolution::Resolved { dict_ref: DictRef::Wrapped {
                 dict: dict_name,
                 trait_name: trait_name,
                 inner_dicts: inner_dicts
-            })
+            } }
+        }
+    }
+}
+
+fn resolve_dict_evidence_for_type(
+    env: TypeEnv, current_fn_bounds: List<FnBoundsEntry>,
+    t: Type, s: UnionFind, trait_name: Str
+) -> DictEvidenceResolution {
+    let concrete = apply_subst(s, t)
+    match concrete {
+        Type::TypeVar { id, .. } => match resolve_fn_bound_dict_ref(
+            current_fn_bounds, id, s, trait_name
+        ) {
+            some(dict_ref) => DictEvidenceResolution::Resolved {
+                dict_ref: dict_ref
+            },
+            none => DictEvidenceResolution::Pending
+        },
+        Type::StructType { name, type_params, .. } =>
+            resolve_named_impl_dict_evidence(
+                env, current_fn_bounds, name, type_params, s, trait_name),
+        Type::EnumType { name, type_params, .. } =>
+            resolve_named_impl_dict_evidence(
+                env, current_fn_bounds, name, type_params, s, trait_name),
+        Type::ErrorType => DictEvidenceResolution::Missing {
+            suppress_diagnostic: true
+        },
+        _ => {
+            match type_to_builtin_name(concrete) {
+                some(builtin_name) => {
+                    match find_impl(env.trait_reg, builtin_name, trait_name) {
+                        some(_) => DictEvidenceResolution::Resolved {
+                            dict_ref: DictRef::Static(
+                                trait_dict_name(builtin_name, trait_name))
+                        },
+                        none => DictEvidenceResolution::Missing {
+                            suppress_diagnostic: type_has_error(concrete)
+                        }
+                    }
+                },
+                none => DictEvidenceResolution::Missing {
+                    suppress_diagnostic: type_has_error(concrete)
+                }
+            }
         }
     }
 }
@@ -1186,52 +1354,38 @@ pub fn resolve_dict_ref_for_type(
     env: TypeEnv, current_fn_bounds: List<FnBoundsEntry>,
     t: Type, s: UnionFind, trait_name: Str
 ) -> DictRef? {
-    let concrete = apply_subst(s, t)
-    match concrete {
-        Type::TypeVar { id, .. } =>
-            resolve_fn_bound_dict_ref(current_fn_bounds, id, s, trait_name),
-        Type::StructType { name, type_params, .. } =>
-            resolve_named_impl_dict_ref(
-                env, current_fn_bounds, name, type_params, s, trait_name),
-        Type::EnumType { name, type_params, .. } =>
-            resolve_named_impl_dict_ref(
-                env, current_fn_bounds, name, type_params, s, trait_name),
-        _ => {
-            match type_to_builtin_name(concrete) {
-                some(builtin_name) => {
-                    match find_impl(env.trait_reg, builtin_name, trait_name) {
-                        some(_) => some(DictRef::Static(
-                            trait_dict_name(builtin_name, trait_name))),
-                        none => none
-                    }
-                },
-                none => none
-            }
-        }
+    match resolve_dict_evidence_for_type(
+        env, current_fn_bounds, t, s, trait_name
+    ) {
+        DictEvidenceResolution::Resolved { dict_ref } => some(dict_ref),
+        DictEvidenceResolution::Pending => none,
+        DictEvidenceResolution::Missing { .. } => none
     }
 }
 
-pub fn resolve_dicts_from_scheme(
+fn resolve_scheme_evidence(
     sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
     scheme: TypeScheme, callee_type: Type, s: UnionFind, span: Span
-) -> List<DictRef> {
-    if scheme.bounds.len() == 0 { return [] }
+) -> SchemeEvidenceResolution {
+    if scheme.bounds.len() == 0 {
+        return SchemeEvidenceResolution::Resolved { dicts: [] }
+    }
     let var_map = build_scheme_var_map(scheme, callee_type)
     let mut resolved_dicts: List<DictRef> = []
+    let mut pending_failures: List<EvidenceFailure> = []
+    let mut missing_failures: List<EvidenceFailure> = []
     for bound in scheme.bounds {
-        let mut found = false
         match var_map.get(bound.type_var) {
             some(fresh_var) => {
                 let concrete = apply_subst(s, fresh_var)
-                match resolve_dict_ref_for_type(
+                match resolve_dict_evidence_for_type(
                     env, current_fn_bounds, concrete, s, bound.trait_name
                 ) {
-                    some(dict_ref) => {
+                    DictEvidenceResolution::Resolved { dict_ref } => {
                         resolved_dicts.push(dict_ref)
-                        found = true
-                        // Associated constraints remain checked against the
-                        // selected named impl after dictionary resolution.
+                        // Associated constraints remain immediate: a later
+                        // obligation can unlock an earlier pending owner.
                         match concrete {
                             Type::StructType { name, .. } =>
                                 check_assoc_constraints(
@@ -1246,13 +1400,39 @@ pub fn resolve_dicts_from_scheme(
                             }
                         }
                     },
-                    none => {}
+                    DictEvidenceResolution::Pending =>
+                        pending_failures.push(EvidenceFailure {
+                            trait_name: bound.trait_name,
+                            suppress_diagnostic: false
+                        }),
+                    DictEvidenceResolution::Missing { suppress_diagnostic } =>
+                        missing_failures.push(EvidenceFailure {
+                            trait_name: bound.trait_name,
+                            suppress_diagnostic: suppress_diagnostic
+                        })
                 }
             },
-            none => {}
+            none => missing_failures.push(EvidenceFailure {
+                trait_name: bound.trait_name,
+                suppress_diagnostic: false
+            })
         }
-        if !found {
-            let trait_display = nominal_display_name(bound.trait_name)
+    }
+    if missing_failures.len() > 0 {
+        SchemeEvidenceResolution::Missing { failures: missing_failures }
+    } else if pending_failures.len() > 0 {
+        SchemeEvidenceResolution::Pending { failures: pending_failures }
+    } else {
+        SchemeEvidenceResolution::Resolved { dicts: resolved_dicts }
+    }
+}
+
+fn report_evidence_failures(
+    sink: CollectingSink, failures: List<EvidenceFailure>, span: Span
+) {
+    for failure in failures {
+        if !failure.suppress_diagnostic {
+            let trait_display = nominal_display_name(failure.trait_name)
             let _ = type_error(sink, E0503,
                 "Type does not satisfy trait bound '${trait_display}'",
                 span, DiagnosticContext::TraitError {
@@ -1260,7 +1440,258 @@ pub fn resolve_dicts_from_scheme(
                 })
         }
     }
-    resolved_dicts
+}
+
+fn fill_dict_output(output_slot: List<DictRef>?, dicts: List<DictRef>) {
+    match output_slot {
+        some(output) => {
+            if output.len() != 0 {
+                panic("unreachable: pending dictionary output was filled twice")
+            }
+            // Publish only after the whole scheme resolved, never a prefix.
+            for dict_ref in dicts { output.push(dict_ref) }
+        },
+        none => {}
+    }
+}
+
+pub fn resolve_dicts_from_scheme(
+    sink: CollectingSink, env: TypeEnv,
+    current_fn_bounds: List<FnBoundsEntry>,
+    scheme: TypeScheme, callee_type: Type, s: UnionFind, span: Span
+) -> List<DictRef> {
+    match resolve_scheme_evidence(
+        sink, env, current_fn_bounds, scheme, callee_type, s, span
+    ) {
+        SchemeEvidenceResolution::Resolved { dicts } => dicts,
+        SchemeEvidenceResolution::Pending { failures } => {
+            report_evidence_failures(sink, failures, span)
+            []
+        },
+        SchemeEvidenceResolution::Missing { failures } => {
+            report_evidence_failures(sink, failures, span)
+            []
+        }
+    }
+}
+
+// Pending-capable call sites hand us their freshly allocated HIR list.  The
+// exact same alias is retained by the obligation and populated only after all
+// bounds resolve atomically.
+pub fn resolve_or_defer_dicts_from_scheme(
+    mut ctx: InferCtx, scheme: TypeScheme, callee_type: Type,
+    s: UnionFind, span: Span, output_slot: List<DictRef>?
+) {
+    if scheme.bounds.len() == 0 { return }
+    match resolve_scheme_evidence(
+        ctx.sink, ctx.env, ctx.current_fn_bounds,
+        scheme, callee_type, s, span
+    ) {
+        SchemeEvidenceResolution::Resolved { dicts } =>
+            fill_dict_output(output_slot, dicts),
+        SchemeEvidenceResolution::Pending { .. } =>
+            ctx.pending_dict_obligations.push(PendingDictObligation {
+                scheme: scheme,
+                callee_type: callee_type,
+                fn_bounds: list_clone(ctx.current_fn_bounds),
+                span: span,
+                output_slot: output_slot
+            }),
+        SchemeEvidenceResolution::Missing { failures } =>
+            report_evidence_failures(ctx.sink, failures, span)
+    }
+}
+
+pub fn pending_dict_checkpoint(ctx: InferCtx) -> Int {
+    ctx.pending_dict_obligations.len()
+}
+
+pub fn has_pending_dicts_since(ctx: InferCtx, checkpoint: Int) -> Bool {
+    ctx.pending_dict_obligations.len() > checkpoint
+}
+
+pub fn rollback_pending_dicts(mut ctx: InferCtx, checkpoint: Int) {
+    if checkpoint > ctx.pending_dict_obligations.len() {
+        panic("unreachable: invalid pending dictionary checkpoint")
+    }
+    ctx.pending_dict_obligations =
+        ctx.pending_dict_obligations.slice(0, checkpoint)
+}
+
+// Drain exactly one declaration owner's suffix.  A pass can resolve an
+// obligation whose associated constraint unlocks an earlier obligation, so
+// retry at most owner-size + 1 passes before diagnosing true ambiguity.
+pub fn drain_pending_dicts(
+    mut ctx: InferCtx, checkpoint: Int, s: UnionFind
+) {
+    if checkpoint > ctx.pending_dict_obligations.len() {
+        panic("unreachable: invalid pending dictionary checkpoint")
+    }
+    let mut remaining = ctx.pending_dict_obligations.slice(
+        checkpoint, ctx.pending_dict_obligations.len())
+    ctx.pending_dict_obligations =
+        ctx.pending_dict_obligations.slice(0, checkpoint)
+
+    let max_attempts = remaining.len() + 1
+    let mut attempt = 0
+    while remaining.len() > 0 && attempt < max_attempts {
+        let mut next: List<PendingDictObligation> = []
+        for obligation in remaining {
+            match resolve_scheme_evidence(
+                ctx.sink, ctx.env, obligation.fn_bounds,
+                obligation.scheme, obligation.callee_type, s,
+                obligation.span
+            ) {
+                SchemeEvidenceResolution::Resolved { dicts } =>
+                    fill_dict_output(obligation.output_slot, dicts),
+                SchemeEvidenceResolution::Missing { failures } =>
+                    report_evidence_failures(
+                        ctx.sink, failures, obligation.span),
+                SchemeEvidenceResolution::Pending { .. } =>
+                    next.push(obligation)
+            }
+        }
+        remaining = next
+        attempt = attempt + 1
+    }
+
+    // One final observation consumes any resolution made by the last pass;
+    // only owners still unresolved here are genuine no-source obligations.
+    for obligation in remaining {
+        match resolve_scheme_evidence(
+            ctx.sink, ctx.env, obligation.fn_bounds,
+            obligation.scheme, obligation.callee_type, s,
+            obligation.span
+        ) {
+            SchemeEvidenceResolution::Resolved { dicts } =>
+                fill_dict_output(obligation.output_slot, dicts),
+            SchemeEvidenceResolution::Missing { failures } =>
+                report_evidence_failures(
+                    ctx.sink, failures, obligation.span),
+            SchemeEvidenceResolution::Pending { failures } =>
+                report_evidence_failures(
+                    ctx.sink, failures, obligation.span)
+        }
+    }
+}
+
+fn dict_ref_is_dynamic(dict_ref: DictRef) -> Bool {
+    match dict_ref {
+        DictRef::Simple(_) => true,
+        DictRef::Wrapped { inner_dicts, .. } => {
+            for inner in inner_dicts {
+                if dict_ref_is_dynamic(inner) { return true }
+            }
+            false
+        },
+        DictRef::Static(_) => false
+    }
+}
+
+fn settle_default_obligation(
+    mut ctx: InferCtx, obligation: PendingDictObligation,
+    s: UnionFind
+) -> Bool {
+    match resolve_scheme_evidence(
+        ctx.sink, ctx.env, obligation.fn_bounds,
+        obligation.scheme, obligation.callee_type, s,
+        obligation.span
+    ) {
+        SchemeEvidenceResolution::Resolved { dicts } => {
+            let mut has_dynamic = false
+            let mut i = 0
+            for dict_ref in dicts {
+                if dict_ref_is_dynamic(dict_ref) {
+                    has_dynamic = true
+                    match obligation.scheme.bounds.get(i) {
+                        some(bound) => {
+                            let trait_display =
+                                nominal_display_name(bound.trait_name)
+                            let _ = type_error(ctx.sink, E0503,
+                                "Generic default value requires caller-specific '${trait_display}' evidence, which is not supported",
+                                obligation.span,
+                                DiagnosticContext::TraitError {
+                                    detail: "bound-dependent evidence in generic defaults is unsupported"
+                                })
+                        },
+                        none => {}
+                    }
+                }
+                i = i + 1
+            }
+            if !has_dynamic {
+                fill_dict_output(obligation.output_slot, dicts)
+            }
+            true
+        },
+        SchemeEvidenceResolution::Missing { failures } => {
+            report_evidence_failures(ctx.sink, failures, obligation.span)
+            true
+        },
+        SchemeEvidenceResolution::Pending { .. } => false
+    }
+}
+
+fn report_default_pending_failures(
+    sink: CollectingSink, failures: List<EvidenceFailure>, span: Span
+) {
+    for failure in failures {
+        if !failure.suppress_diagnostic {
+            let trait_display = nominal_display_name(failure.trait_name)
+            let _ = type_error(sink, E0503,
+                "Generic default value requires caller-specific '${trait_display}' evidence, which is not supported",
+                span, DiagnosticContext::TraitError {
+                    detail: "bound-dependent evidence in generic defaults is unsupported"
+                })
+        }
+    }
+}
+
+// Default expressions are copied into fn_defaults and later reused by many
+// callers.  Ground/static pending evidence may be settled after the parameter
+// annotation, but caller-specific dynamic evidence must fail closed instead
+// of publishing a shared mutable output slot into that metadata.
+pub fn settle_default_pending_dicts(
+    mut ctx: InferCtx, checkpoint: Int, s: UnionFind
+) {
+    if checkpoint > ctx.pending_dict_obligations.len() {
+        panic("unreachable: invalid pending dictionary checkpoint")
+    }
+    let mut remaining = ctx.pending_dict_obligations.slice(
+        checkpoint, ctx.pending_dict_obligations.len())
+    ctx.pending_dict_obligations =
+        ctx.pending_dict_obligations.slice(0, checkpoint)
+    let max_attempts = remaining.len() + 1
+    let mut attempt = 0
+    while remaining.len() > 0 && attempt < max_attempts {
+        let mut next: List<PendingDictObligation> = []
+        for obligation in remaining {
+            if !settle_default_obligation(ctx, obligation, s) {
+                next.push(obligation)
+            }
+        }
+        remaining = next
+        attempt = attempt + 1
+    }
+    for obligation in remaining {
+        match resolve_scheme_evidence(
+            ctx.sink, ctx.env, obligation.fn_bounds,
+            obligation.scheme, obligation.callee_type, s,
+            obligation.span
+        ) {
+            SchemeEvidenceResolution::Resolved { .. } => {
+                // This can only happen if the last pass's associated
+                // constraints unlocked the obligation.
+                let _ = settle_default_obligation(ctx, obligation, s)
+            },
+            SchemeEvidenceResolution::Missing { failures } =>
+                report_evidence_failures(
+                    ctx.sink, failures, obligation.span),
+            SchemeEvidenceResolution::Pending { failures } =>
+                report_default_pending_failures(
+                    ctx.sink, failures, obligation.span)
+        }
+    }
 }
 
 // Check associated type constraints on a bound against an impl entry's actual

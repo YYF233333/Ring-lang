@@ -26,7 +26,9 @@ use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, type_error_with_notes, merge_effects, unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_named_type,
-    bind_pattern, resolve_dicts_from_scheme, resolve_dict_ref_for_type,
+    bind_pattern, resolve_dict_ref_for_type,
+    resolve_or_defer_dicts_from_scheme,
+    pending_dict_checkpoint, has_pending_dicts_since,
     remove_fail_effect,
     generalize, free_type_vars, resolve_relative_qualifier}
 use exhaustive::{check_exhaustive}
@@ -416,6 +418,7 @@ fn for_protocol_assoc_type(
 pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult {
     match stmt {
         Stmt::Let { name, name_span, type_annotation, init, span } => {
+            let obligation_checkpoint = pending_dict_checkpoint(ctx)
             let init_r = infer_expr(ctx, init, subst)
             let mut s = init_r.subst
             let mut var_type = hexpr_type(init_r.hexpr)
@@ -438,11 +441,16 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             // only a bare direct-call callee.
             let init_has_bounds =
                 hexpr_contains_bounded_callable_value(ctx, init_r.hexpr)
+            // An initializer that created deferred evidence is a monomorphic
+            // barrier.  Later statements must constrain the same variables;
+            // generalizing here would detach the obligation from its value.
+            let init_has_pending =
+                has_pending_dicts_since(ctx, obligation_checkpoint)
             // Optimization: skip the expensive free_type_vars_in_env scan when the resolved
             // type is ground (no type variables). Most function-local let bindings have ground
             // types, so this avoids a full env scan on each one.
             let ftv = free_type_vars(resolved, empty_subst())
-            let scheme = if ftv.len() == 0 || init_has_bounds {
+            let scheme = if ftv.len() == 0 || init_has_bounds || init_has_pending {
                 mono(resolved)
             } else {
                 generalize(ctx.env, resolved, s)
@@ -1376,9 +1384,10 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
                 _ => {}
             }
 
-            let resolved_dicts = resolve_dicts_from_scheme(
-                ctx.sink, ctx.env, ctx.current_fn_bounds,
-                callee_scheme, hexpr_type(callee), s, span)
+            let resolved_dicts: List<DictRef> = []
+            resolve_or_defer_dicts_from_scheme(
+                ctx, callee_scheme, hexpr_type(callee), s, span,
+                some(resolved_dicts))
 
             let final_result_ty = apply_subst(s, result_ty)
             InferResult {
@@ -1598,23 +1607,24 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
         _ => {}
     }
 
-    let mut resolved_dicts: List<DictRef> = []
+    let resolved_dicts: List<DictRef> = []
     match callee_metadata {
         some(metadata) => match metadata.kind {
             ValueBindingKind::DirectCallable => {
                 if metadata.live_scheme.bounds.len() > 0 {
-                    resolved_dicts = resolve_dicts_from_scheme(
-                        ctx.sink, ctx.env, ctx.current_fn_bounds,
-                        metadata.live_scheme, hexpr_type(callee_r.hexpr), s, span)
+                    resolve_or_defer_dicts_from_scheme(
+                        ctx, metadata.live_scheme,
+                        hexpr_type(callee_r.hexpr), s, span,
+                        some(resolved_dicts))
                 }
             },
             ValueBindingKind::ExternCallable => {
                 if metadata.live_scheme.bounds.len() > 0 {
                     // Extern ABI never receives Ring dictionaries. Resolution
                     // remains mandatory for static bound validation.
-                    let _ = resolve_dicts_from_scheme(
-                        ctx.sink, ctx.env, ctx.current_fn_bounds,
-                        metadata.live_scheme, hexpr_type(callee_r.hexpr), s, span)
+                    resolve_or_defer_dicts_from_scheme(
+                        ctx, metadata.live_scheme,
+                        hexpr_type(callee_r.hexpr), s, span, none)
                 }
             },
             ValueBindingKind::ConstGetter | ValueBindingKind::LocalBorrow => {}
@@ -1947,13 +1957,14 @@ fn infer_method_call_from_receiver(
         }
     }
 
-    let mut resolved_dicts: List<DictRef> = []
+    let resolved_dicts: List<DictRef> = []
     match method_scheme {
         some(ms) => {
             if ms.bounds.len() > 0 {
                 match method_type {
                     some(mt) => {
-                        resolved_dicts = resolve_dicts_from_scheme(ctx.sink, ctx.env, ctx.current_fn_bounds, ms, mt, s, span)
+                        resolve_or_defer_dicts_from_scheme(
+                            ctx, ms, mt, s, span, some(resolved_dicts))
                     },
                     none => {}
                 }
