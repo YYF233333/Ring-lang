@@ -1,5 +1,5 @@
 use types::{Type, UNIT, nominal_display_name}
-use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam}
+use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam, span_zero}
 use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImplFact,
     HStringInterpPart, HEffectHandler, ValueBindingKind,
     CHECKER_ONLY_EXTERN_CALLABLES,
@@ -8,7 +8,8 @@ use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImpl
     prelude_extern_identity,
     is_nullary_variant_ctor_ident}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, new_collecting_sink, make_diag}
-use env::{TypeEnv, TypeScheme, SigDef, new_type_env, add_impl}
+use env::{TypeEnv, TypeScheme, SigDef,
+    new_type_env, add_impl, find_impl, install_method_scheme}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_module_identity, check_prelude_decl}
 use dict_lower::{lower_dicts}
@@ -19,7 +20,7 @@ use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
 use resolver::{ResolvedNamespacePlan, ModuleFramePlan, AstSite, ImportIssue,
     ImportIssueKind, NamespaceKind}
-use codes::{E0702, E0703, E0704, E0705, E0707, E0801}
+use codes::{E0504, E0702, E0703, E0704, E0705, E0707, E0801}
 use parser::{parse}
 use union_find::{UnionFind}
 use unify::{empty_subst}
@@ -224,8 +225,8 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
 
 fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
     let mut env = new_type_env()
-    register_builtins(env)
-    register_hof_intrinsics(env)
+    register_builtins(env, sink)
+    register_hof_intrinsics(env, sink)
 
     let mut ctx = InferCtx {
         env: env,
@@ -552,6 +553,16 @@ pub fn check_module(
     }
 }
 
+fn report_hydrated_method_collision(
+    mut ctx: InferCtx, target_type: Str, method_name: Str, span: Span
+) {
+    let _ = type_error(ctx.sink, E0504,
+        "Ambiguous method '${method_name}' on '${nominal_display_name(target_type)}': dependency exports contain distinct implementation origins",
+        span, DiagnosticContext::TraitError {
+            detail: "same-origin re-exports dedupe, distinct origins collide"
+        })
+}
+
 fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
     // Canonical value payloads are the only source keys consumed by the
     // resolver plan. Export display keys are intentionally not hydrated:
@@ -660,24 +671,49 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             ctx.env.types.sigs.insert(sigdef.name, sigdef)
         }
         for impl_ in mod_.trait_impls {
+            match find_impl(
+                ctx.env.trait_reg,
+                impl_.target_type_name,
+                impl_.trait_name) {
+                some(existing) => {
+                    if existing.origin != impl_.origin {
+                        let _ = type_error(ctx.sink, E0504,
+                            "Duplicate impl '${nominal_display_name(impl_.trait_name)}' for '${nominal_display_name(impl_.target_type_name)}' from distinct dependency origins",
+                            impl_.span, DiagnosticContext::TraitError {
+                                detail: "duplicate imported target/trait implementation"
+                            })
+                    }
+                },
+                none => {}
+            }
             add_impl(ctx.env.trait_reg, impl_)
         }
         let mut sorted_impl_methods = mod_.impl_methods.entries()
         sorted_impl_methods.sort_by(compare_by_first)
         for entry in sorted_impl_methods {
             let (type_name, methods) = entry
-            match ctx.env.trait_reg.impl_methods.get(type_name) {
-                some(existing) => {
-                    let mut sorted_meths = methods.entries()
-                    sorted_meths.sort_by(compare_by_first)
-                    for mentry in sorted_meths {
-                        let (method_name, scheme) = mentry
-                        existing.insert(method_name, scheme)
+            let exported_origins = mod_.method_origins.get(type_name)
+            let mut sorted_meths = methods.entries()
+            sorted_meths.sort_by(compare_by_first)
+            for mentry in sorted_meths {
+                let (method_name, scheme) = mentry
+                match exported_origins {
+                    some(origins) => match origins.get(method_name) {
+                        some(origin) => {
+                            let _ = install_method_scheme(
+                                ctx.env.trait_reg, ctx.sink,
+                                type_name, method_name, scheme, origin)
+                        },
+                        none => {
+                            report_hydrated_method_collision(
+                                ctx, type_name, method_name, span_zero())
+                        }
+                    },
+                    none => {
+                        report_hydrated_method_collision(
+                            ctx, type_name, method_name, span_zero())
                     }
-                },
-                none => {
-                    ctx.env.trait_reg.impl_methods.insert(type_name, map_clone(methods))
-                },
+                }
             }
         }
         // Inject mut_methods

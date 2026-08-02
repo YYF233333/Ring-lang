@@ -2,13 +2,16 @@
 // Registers built-in effects, types, traits, and HOF intrinsics into TypeEnv.
 
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
-    INT, STR, BOOL, UNIT, NEVER, EMPTY_ROW,
+    INT, FLOAT, STR, BOOL, UNIT, NEVER, EMPTY_ROW,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL,
     make_option_type, make_map_type}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef,
-    ImplEntry, ImplDictBound, mono, add_impl}
-use hir::{variant_ctor_name}
+    ImplEntry, ImplDictBound, MethodOrigin, mono, add_impl,
+    install_method_scheme, specialize_trait_method_scheme}
+use ast::{span_zero}
+use hir::{variant_ctor_name, compare_by_first}
+use diagnostics::{CollectingSink}
 
 // ============================================================
 // Struct for open_row return value
@@ -20,18 +23,104 @@ struct OpenRow {
 }
 
 // ============================================================
-// Helper: get or create a method map for a type in impl_methods
+// Shared built-in method installation
 // ============================================================
 
-pub fn get_or_create_methods(mut env: TypeEnv, type_name: Str) -> Map<Str, TypeScheme> {
-    match env.trait_reg.impl_methods.get(type_name) {
-        some(m) => m,
-        none => {
-            let m: Map<Str, TypeScheme> = map_new()
-            env.trait_reg.impl_methods.insert(type_name, m)
-            m
+fn install_builtin_method_map(
+    mut env: TypeEnv, sink: CollectingSink,
+    target_type_name: Str, origin: Str,
+    trait_name: Str?, methods: Map<Str, TypeScheme>
+) {
+    let span = span_zero()
+    let mut entries = methods.entries()
+    entries.sort_by(compare_by_first)
+    for entry in entries {
+        let (method_name, scheme) = entry
+        let _ = install_method_scheme(
+            env.trait_reg, sink,
+            target_type_name, method_name, scheme,
+            MethodOrigin {
+                origin: origin,
+                trait_name: trait_name,
+                span: span
+            })
+    }
+}
+
+fn builtin_impl_self_type(
+    target_type_name: Str, type_args: List<Type>
+) -> Type {
+    match target_type_name {
+        "Int" => INT,
+        "Float" => FLOAT,
+        "Str" => STR,
+        "Bool" => BOOL,
+        BUILTIN_OPTION => Type::EnumType {
+            name: BUILTIN_OPTION, type_params: type_args
+        },
+        _ => Type::StructType {
+            name: target_type_name, type_params: type_args
         }
     }
+}
+
+fn add_builtin_impl(
+    mut env: TypeEnv, sink: CollectingSink,
+    trait_name: Str, target_type_name: Str,
+    type_params: List<Str>, type_var_ids: List<Int>,
+    dict_bounds: List<ImplDictBound>,
+    method_names: List<Str>
+) {
+    let origin = "<builtin>:${target_type_name}:${trait_name}"
+    let span = span_zero()
+    let mut type_args: List<Type> = []
+    for type_var_id in type_var_ids {
+        type_args.push(Type::TypeVar { id: type_var_id, name: none })
+    }
+    let self_type = builtin_impl_self_type(target_type_name, type_args)
+    let mut scheme_bounds: List<SchemeBound> = []
+    for dict_bound in dict_bounds {
+        match type_var_ids.get(dict_bound.type_param_index) {
+            some(type_var_id) => scheme_bounds.push(SchemeBound {
+                type_var: type_var_id,
+                trait_name: dict_bound.trait_name,
+                assoc_constraints: []
+            }),
+            none => {}
+        }
+    }
+    let mut exact: Map<Str, TypeScheme> = map_new()
+    match env.trait_reg.traits.get(trait_name) {
+        some(trait_def) => {
+            for method_name in method_names {
+                match trait_def.methods.find(fn(method) {
+                    method.name == method_name
+                }) {
+                    some(method) => exact.insert(
+                        method_name,
+                        specialize_trait_method_scheme(
+                            trait_def, method, self_type, [],
+                            type_var_ids, map_new(), scheme_bounds)),
+                    none => {}
+                }
+            }
+        },
+        none => {}
+    }
+    add_impl(env.trait_reg, ImplEntry {
+        trait_name: trait_name,
+        target_type_name: target_type_name,
+        type_params: type_params,
+        dict_bounds: dict_bounds,
+        method_names: method_names,
+        assoc_types: map_new(),
+        method_schemes: map_clone(exact),
+        origin: origin,
+        span: span
+    })
+    install_builtin_method_map(
+        env, sink, target_type_name, origin,
+        some(trait_name), exact)
 }
 
 // ============================================================
@@ -66,21 +155,21 @@ fn make_set_struct(t: Type) -> Type {
 // Main entry point: register all builtins
 // ============================================================
 
-pub fn register_builtins(mut env: TypeEnv) {
+pub fn register_builtins(mut env: TypeEnv, sink: CollectingSink) {
     register_effects(env)
-    register_cell(env)
-    register_option(env)
-    register_eq_trait(env)
-    register_option_eq(env)
-    register_clone_trait(env)
-    register_option_clone(env)
+    register_cell(env, sink)
+    register_option(env, sink)
+    register_eq_trait(env, sink)
+    register_option_eq(env, sink)
+    register_clone_trait(env, sink)
+    register_option_clone(env, sink)
     register_drop_trait(env)
-    register_ord_trait(env)
-    register_debug_trait(env)
-    register_option_debug(env)
-    register_hash_trait(env)
+    register_ord_trait(env, sink)
+    register_debug_trait(env, sink)
+    register_option_debug(env, sink)
+    register_hash_trait(env, sink)
     register_mut_methods(env)
-    register_ptr_builtins(env)
+    register_ptr_builtins(env, sink)
 }
 
 // ============================================================
@@ -108,11 +197,11 @@ fn register_mut_methods(mut env: TypeEnv) {
 }
 
 // Main entry point: register all HOF intrinsics
-pub fn register_hof_intrinsics(mut env: TypeEnv) {
-    register_list_hof(env)
-    register_map_hof(env)
-    register_set_hof(env)
-    register_option_hof(env)
+pub fn register_hof_intrinsics(mut env: TypeEnv, sink: CollectingSink) {
+    register_list_hof(env, sink)
+    register_map_hof(env, sink)
+    register_set_hof(env, sink)
+    register_option_hof(env, sink)
 }
 
 // ============================================================
@@ -152,7 +241,7 @@ fn register_effects(mut env: TypeEnv) {
 // register_cell: Cell<T> struct + get/set/update methods
 // ============================================================
 
-fn register_cell(mut env: TypeEnv) {
+fn register_cell(mut env: TypeEnv, sink: CollectingSink) {
     // Register Cell struct definition
     let cell_t_id = env.fresh_var_id()
     let cell_t = Type::TypeVar { id: cell_t_id, name: none }
@@ -214,14 +303,16 @@ fn register_cell(mut env: TypeEnv) {
         def_id: none
     })
 
-    env.trait_reg.impl_methods.insert(BUILTIN_CELL, methods)
+    install_builtin_method_map(
+        env, sink, BUILTIN_CELL, "<builtin-inherent>:Cell:core",
+        none, methods)
 }
 
 // ============================================================
 // register_option: Option<T> enum + some/none constructors + methods
 // ============================================================
 
-fn register_option(mut env: TypeEnv) {
+fn register_option(mut env: TypeEnv, sink: CollectingSink) {
     // Register Option enum definition
     let option_t_id = env.fresh_var_id()
     let option_t = Type::TypeVar { id: option_t_id, name: none }
@@ -290,7 +381,7 @@ fn register_option(mut env: TypeEnv) {
     }
 
     // Option methods: is_some, is_none, unwrap_or
-    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     let t_id = env.fresh_var_id()
     let t = Type::TypeVar { id: t_id, name: none }
@@ -334,13 +425,16 @@ fn register_option(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    install_builtin_method_map(
+        env, sink, BUILTIN_OPTION, "<builtin-inherent>:Option:core",
+        none, methods)
 }
 
 // ============================================================
 // register_eq_trait: Eq trait + primitive impls
 // ============================================================
 
-fn register_eq_trait(mut env: TypeEnv) {
+fn register_eq_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -361,14 +455,7 @@ fn register_eq_trait(mut env: TypeEnv) {
 
     // Register Eq impls for primitive types
     for prim in ["Int", "Float", "Str", "Bool"] {
-        add_impl(env.trait_reg, ImplEntry {
-            trait_name: "Eq",
-            target_type_name: prim,
-            type_params: [],
-            dict_bounds: [],
-            method_names: ["eq", "ne"],
-            assoc_types: map_new()
-        })
+        add_builtin_impl(env, sink, "Eq", prim, [], [], [], ["eq", "ne"])
     }
 }
 
@@ -376,44 +463,18 @@ fn register_eq_trait(mut env: TypeEnv) {
 // register_option_eq: Option<T: Eq> Eq impl
 // ============================================================
 
-fn register_option_eq(mut env: TypeEnv) {
+fn register_option_eq(mut env: TypeEnv, sink: CollectingSink) {
     let t_id = env.fresh_var_id()
-    let t = Type::TypeVar { id: t_id, name: none }
-    let opt = make_option_type(t)
-
-    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
-
-    let eq_bounds = [SchemeBound { type_var: t_id, trait_name: "Eq", assoc_constraints: [] }]
-
-    methods.insert("eq", TypeScheme {
-        ty: Type::FnType { params: [opt, opt], return_type: BOOL, effects: EMPTY_ROW },
-        type_vars: [t_id],
-        bounds: eq_bounds,
-        def_id: none
-    })
-
-    methods.insert("ne", TypeScheme {
-        ty: Type::FnType { params: [opt, opt], return_type: BOOL, effects: EMPTY_ROW },
-        type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Eq", assoc_constraints: [] }],
-        def_id: none
-    })
-
-    add_impl(env.trait_reg, ImplEntry {
-        trait_name: "Eq",
-        target_type_name: BUILTIN_OPTION,
-        type_params: ["T"],
-        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Eq" }],
-        method_names: ["eq", "ne"],
-        assoc_types: map_new()
-    })
+    add_builtin_impl(env, sink, "Eq", BUILTIN_OPTION, ["T"], [t_id],
+        [ImplDictBound { type_param_index: 0, trait_name: "Eq" }],
+        ["eq", "ne"])
 }
 
 // ============================================================
 // register_clone_trait: Clone trait + primitive + collection impls
 // ============================================================
 
-fn register_clone_trait(mut env: TypeEnv) {
+fn register_clone_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -432,27 +493,20 @@ fn register_clone_trait(mut env: TypeEnv) {
 
     // Primitive impls
     for prim in ["Int", "Float", "Str", "Bool"] {
-        add_impl(env.trait_reg, ImplEntry {
-            trait_name: "Clone",
-            target_type_name: prim,
-            type_params: [],
-            dict_bounds: [],
-            method_names: ["clone"],
-            assoc_types: map_new()
-        })
+        add_builtin_impl(env, sink, "Clone", prim, [], [], [], ["clone"])
     }
 
     // Collection impls
-    for coll in ["List", "Map", "Set"] {
-        add_impl(env.trait_reg, ImplEntry {
-            trait_name: "Clone",
-            target_type_name: coll,
-            type_params: [],
-            dict_bounds: [],
-            method_names: ["clone"],
-            assoc_types: map_new()
-        })
-    }
+    let list_t_id = env.fresh_var_id()
+    add_builtin_impl(env, sink, "Clone", BUILTIN_LIST,
+        ["T"], [list_t_id], [], ["clone"])
+    let map_k_id = env.fresh_var_id()
+    let map_v_id = env.fresh_var_id()
+    add_builtin_impl(env, sink, "Clone", BUILTIN_MAP,
+        ["K", "V"], [map_k_id, map_v_id], [], ["clone"])
+    let set_t_id = env.fresh_var_id()
+    add_builtin_impl(env, sink, "Clone", BUILTIN_SET,
+        ["T"], [set_t_id], [], ["clone"])
 }
 
 // ============================================================
@@ -483,35 +537,18 @@ fn register_drop_trait(mut env: TypeEnv) {
 // register_option_clone: Option<T: Clone> Clone impl
 // ============================================================
 
-fn register_option_clone(mut env: TypeEnv) {
+fn register_option_clone(mut env: TypeEnv, sink: CollectingSink) {
     let t_id = env.fresh_var_id()
-    let t = Type::TypeVar { id: t_id, name: none }
-    let opt = make_option_type(t)
-
-    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
-
-    methods.insert("clone", TypeScheme {
-        ty: Type::FnType { params: [opt], return_type: opt, effects: EMPTY_ROW },
-        type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Clone", assoc_constraints: [] }],
-        def_id: none
-    })
-
-    add_impl(env.trait_reg, ImplEntry {
-        trait_name: "Clone",
-        target_type_name: BUILTIN_OPTION,
-        type_params: ["T"],
-        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Clone" }],
-        method_names: ["clone"],
-        assoc_types: map_new()
-    })
+    add_builtin_impl(env, sink, "Clone", BUILTIN_OPTION, ["T"], [t_id],
+        [ImplDictBound { type_param_index: 0, trait_name: "Clone" }],
+        ["clone"])
 }
 
 // ============================================================
 // register_ord_trait: Ord trait + primitive impls
 // ============================================================
 
-fn register_ord_trait(mut env: TypeEnv) {
+fn register_ord_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -529,14 +566,7 @@ fn register_ord_trait(mut env: TypeEnv) {
     })
 
     for prim in ["Int", "Float", "Str", "Bool"] {
-        add_impl(env.trait_reg, ImplEntry {
-            trait_name: "Ord",
-            target_type_name: prim,
-            type_params: [],
-            dict_bounds: [],
-            method_names: ["cmp"],
-            assoc_types: map_new()
-        })
+        add_builtin_impl(env, sink, "Ord", prim, [], [], [], ["cmp"])
     }
 }
 
@@ -544,7 +574,7 @@ fn register_ord_trait(mut env: TypeEnv) {
 // register_debug_trait: Debug trait + primitive + collection impls
 // ============================================================
 
-fn register_debug_trait(mut env: TypeEnv) {
+fn register_debug_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -563,115 +593,44 @@ fn register_debug_trait(mut env: TypeEnv) {
 
     // Primitive impls
     for prim in ["Int", "Float", "Str", "Bool"] {
-        add_impl(env.trait_reg, ImplEntry {
-            trait_name: "Debug",
-            target_type_name: prim,
-            type_params: [],
-            dict_bounds: [],
-            method_names: ["debug"],
-            assoc_types: map_new()
-        })
+        add_builtin_impl(env, sink, "Debug", prim, [], [], [], ["debug"])
     }
 
     // List<T: Debug> Debug impl
-    let mut t_id = env.fresh_var_id()
-    let mut t = Type::TypeVar { id: t_id, name: none }
-    let list_self = Type::StructType { name: BUILTIN_LIST, type_params: [t] }
-    let list_debug_fn = Type::FnType { params: [list_self], return_type: STR, effects: EMPTY_ROW }
-    let mut list_methods = get_or_create_methods(env, BUILTIN_LIST)
-    list_methods.insert("debug", TypeScheme {
-        ty: list_debug_fn,
-        type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Debug", assoc_constraints: [] }],
-        def_id: none
-    })
-    add_impl(env.trait_reg, ImplEntry {
-        trait_name: "Debug",
-        target_type_name: BUILTIN_LIST,
-        type_params: ["T"],
-        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Debug" }],
-        method_names: ["debug"],
-        assoc_types: map_new()
-    })
+    let list_t_id = env.fresh_var_id()
+    add_builtin_impl(env, sink, "Debug", BUILTIN_LIST,
+        ["T"], [list_t_id],
+        [ImplDictBound { type_param_index: 0, trait_name: "Debug" }],
+        ["debug"])
 
     // Map<K, V> Debug impl (no bounds required in TS source)
-    let k_id = env.fresh_var_id()
-    let k = Type::TypeVar { id: k_id, name: none }
-    let v_id = env.fresh_var_id()
-    let v = Type::TypeVar { id: v_id, name: none }
-    let map_self = make_map_type(k, v)
-    let map_debug_fn = Type::FnType { params: [map_self], return_type: STR, effects: EMPTY_ROW }
-    let mut map_methods = get_or_create_methods(env, BUILTIN_MAP)
-    map_methods.insert("debug", TypeScheme {
-        ty: map_debug_fn,
-        type_vars: [k_id, v_id],
-        bounds: [],
-        def_id: none
-    })
-    add_impl(env.trait_reg, ImplEntry {
-        trait_name: "Debug",
-        target_type_name: BUILTIN_MAP,
-        type_params: ["K", "V"],
-        dict_bounds: [],
-        method_names: ["debug"],
-        assoc_types: map_new()
-    })
+    let map_k_id = env.fresh_var_id()
+    let map_v_id = env.fresh_var_id()
+    add_builtin_impl(env, sink, "Debug", BUILTIN_MAP,
+        ["K", "V"], [map_k_id, map_v_id], [], ["debug"])
 
     // Set<T> Debug impl (no bounds required in TS source)
-    t_id = env.fresh_var_id()
-    t = Type::TypeVar { id: t_id, name: none }
-    let set_self = Type::StructType { name: BUILTIN_SET, type_params: [t] }
-    let set_debug_fn = Type::FnType { params: [set_self], return_type: STR, effects: EMPTY_ROW }
-    let mut set_methods = get_or_create_methods(env, BUILTIN_SET)
-    set_methods.insert("debug", TypeScheme {
-        ty: set_debug_fn,
-        type_vars: [t_id],
-        bounds: [],
-        def_id: none
-    })
-    add_impl(env.trait_reg, ImplEntry {
-        trait_name: "Debug",
-        target_type_name: BUILTIN_SET,
-        type_params: ["T"],
-        dict_bounds: [],
-        method_names: ["debug"],
-        assoc_types: map_new()
-    })
+    let set_t_id = env.fresh_var_id()
+    add_builtin_impl(env, sink, "Debug", BUILTIN_SET,
+        ["T"], [set_t_id], [], ["debug"])
 }
 
 // ============================================================
 // register_option_debug: Option<T: Debug> Debug impl
 // ============================================================
 
-fn register_option_debug(mut env: TypeEnv) {
+fn register_option_debug(mut env: TypeEnv, sink: CollectingSink) {
     let t_id = env.fresh_var_id()
-    let t = Type::TypeVar { id: t_id, name: none }
-    let opt = make_option_type(t)
-
-    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
-
-    methods.insert("debug", TypeScheme {
-        ty: Type::FnType { params: [opt], return_type: STR, effects: EMPTY_ROW },
-        type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Debug", assoc_constraints: [] }],
-        def_id: none
-    })
-
-    add_impl(env.trait_reg, ImplEntry {
-        trait_name: "Debug",
-        target_type_name: BUILTIN_OPTION,
-        type_params: ["T"],
-        dict_bounds: [ImplDictBound { type_param_index: 0, trait_name: "Debug" }],
-        method_names: ["debug"],
-        assoc_types: map_new()
-    })
+    add_builtin_impl(env, sink, "Debug", BUILTIN_OPTION, ["T"], [t_id],
+        [ImplDictBound { type_param_index: 0, trait_name: "Debug" }],
+        ["debug"])
 }
 
 // ============================================================
 // register_hash_trait: Hash trait + primitive impls
 // ============================================================
 
-fn register_hash_trait(mut env: TypeEnv) {
+fn register_hash_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -689,14 +648,7 @@ fn register_hash_trait(mut env: TypeEnv) {
     })
 
     for prim in ["Int", "Str", "Bool"] {
-        add_impl(env.trait_reg, ImplEntry {
-            trait_name: "Hash",
-            target_type_name: prim,
-            type_params: [],
-            dict_bounds: [],
-            method_names: ["hash"],
-            assoc_types: map_new()
-        })
+        add_builtin_impl(env, sink, "Hash", prim, [], [], [], ["hash"])
     }
 }
 
@@ -704,8 +656,8 @@ fn register_hash_trait(mut env: TypeEnv) {
 // HOF: register_list_hof
 // ============================================================
 
-fn register_list_hof(mut env: TypeEnv) {
-    let mut methods = get_or_create_methods(env, BUILTIN_LIST)
+fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     // map: (List<T>, (T) -> U / e) -> List<U> / e
     let mut t_id = env.fresh_var_id()
@@ -820,14 +772,17 @@ fn register_list_hof(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    install_builtin_method_map(
+        env, sink, BUILTIN_LIST, "<std-predecl>:List:unbounded",
+        none, methods)
 }
 
 // ============================================================
 // HOF: register_map_hof
 // ============================================================
 
-fn register_map_hof(mut env: TypeEnv) {
-    let mut methods = get_or_create_methods(env, BUILTIN_MAP)
+fn register_map_hof(mut env: TypeEnv, sink: CollectingSink) {
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     // map_values: (Map<K,V>, (V) -> U / e) -> Map<K,U> / e
     let mut k_id = env.fresh_var_id()
@@ -888,14 +843,30 @@ fn register_map_hof(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    let mut unbounded_methods: Map<Str, TypeScheme> = map_new()
+    let mut bounded_methods: Map<Str, TypeScheme> = map_new()
+    for entry in methods.entries() {
+        let (method_name, scheme) = entry
+        if method_name == "filter" || method_name == "map_values" {
+            bounded_methods.insert(method_name, scheme)
+        } else {
+            unbounded_methods.insert(method_name, scheme)
+        }
+    }
+    install_builtin_method_map(
+        env, sink, BUILTIN_MAP, "<std-predecl>:Map:unbounded",
+        none, unbounded_methods)
+    install_builtin_method_map(
+        env, sink, BUILTIN_MAP, "<std-predecl>:Map:bounded",
+        none, bounded_methods)
 }
 
 // ============================================================
 // HOF: register_set_hof
 // ============================================================
 
-fn register_set_hof(mut env: TypeEnv) {
-    let mut methods = get_or_create_methods(env, BUILTIN_SET)
+fn register_set_hof(mut env: TypeEnv, sink: CollectingSink) {
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     // filter: (Set<T>, (T) -> Bool / e) -> Set<T> / e
     let mut t_id = env.fresh_var_id()
@@ -949,14 +920,30 @@ fn register_set_hof(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    let mut unbounded_methods: Map<Str, TypeScheme> = map_new()
+    let mut bounded_methods: Map<Str, TypeScheme> = map_new()
+    for entry in methods.entries() {
+        let (method_name, scheme) = entry
+        if method_name == "filter" {
+            bounded_methods.insert(method_name, scheme)
+        } else {
+            unbounded_methods.insert(method_name, scheme)
+        }
+    }
+    install_builtin_method_map(
+        env, sink, BUILTIN_SET, "<std-predecl>:Set:unbounded",
+        none, unbounded_methods)
+    install_builtin_method_map(
+        env, sink, BUILTIN_SET, "<std-predecl>:Set:bounded",
+        none, bounded_methods)
 }
 
 // ============================================================
 // HOF: register_option_hof
 // ============================================================
 
-fn register_option_hof(mut env: TypeEnv) {
-    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
+fn register_option_hof(mut env: TypeEnv, sink: CollectingSink) {
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     // map: (Option<T>, (T) -> U / e) -> Option<U> / e
     let mut t_id = env.fresh_var_id()
@@ -997,13 +984,16 @@ fn register_option_hof(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    install_builtin_method_map(
+        env, sink, BUILTIN_OPTION, "<builtin-inherent>:Option:hof",
+        none, methods)
 }
 
 // ============================================================
 // B-125: register Ptr<T> builtin functions and methods
 // ============================================================
 
-fn register_ptr_builtins(mut env: TypeEnv) {
+fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let unsafe_row = EffectRow { effects: [Effect::UnsafeEffect], tail: none }
 
     // ---- Top-level builtin functions ----
@@ -1054,7 +1044,7 @@ fn register_ptr_builtins(mut env: TypeEnv) {
 
     // ---- Ptr<T> methods ----
 
-    let mut methods = get_or_create_methods(env, "Ptr")
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     // read: (Ptr<T>) -> T / unsafe
     let read_t_id = env.fresh_var_id()
@@ -1124,4 +1114,7 @@ fn register_ptr_builtins(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+    install_builtin_method_map(
+        env, sink, "Ptr", "<builtin-inherent>:Ptr:core",
+        none, methods)
 }

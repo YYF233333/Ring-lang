@@ -100,12 +100,7 @@ LLVM_BACKEND_GAPS = {
     ),
 }
 
-SHARED_POSITIVE_GAPS = {
-    "tests/cases/iterator.ring": (
-        "both backends access-violate in the shared iterator/runtime path "
-        "(B-163 Phase2 P2.1 probe 2026-07-27)"
-    ),
-}
+SHARED_POSITIVE_GAPS = {}
 
 # Positive cases whose `ring check` itself fails today.  Unlike the two maps
 # above these are frontend blockers rather than codegen gaps, so every lane

@@ -1,0 +1,5 @@
+E0504
+Ambiguous method 'iter' on
+CollisionSource
+provided by trait 'Iterable' and an inherent impl
+!internal compiler error

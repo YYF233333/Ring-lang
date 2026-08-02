@@ -26,7 +26,7 @@
 
 use types::{Type, EffectRow, EMPTY_ROW, type_to_builtin_name, BUILTIN_RANGE}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField, Span}
-use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart, HForInDestructure,
+use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
     HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
     TraitDispatch, DictDispatchInfo, effect_op_slot,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
@@ -3979,9 +3979,9 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
             c_line_directive(ctx, span)
             emit_c_while(ctx, condition, body)
         },
-        HStmt::ForIn { binding, destructure, iterable, body, span, .. } => {
+        HStmt::ForIn { binding, iterable, body, span, .. } => {
             c_line_directive(ctx, span)
-            emit_c_for_in(ctx, binding, destructure, iterable, body)
+            emit_c_for_in(ctx, binding, iterable, body)
         },
         HStmt::Break { .. } => {
             if ctx.in_loop {
@@ -4239,7 +4239,7 @@ fn emit_c_while(mut ctx: CCtx, condition: HExpr, body: HExpr) {
 // current binding box leaks, the documented B-104b residual).
 // ============================================================
 
-fn emit_c_for_in(mut ctx: CCtx, binding: Str, destructure: List<HForInDestructure>?, iterable: HExpr, body: HExpr) {
+fn emit_c_for_in(mut ctx: CCtx, binding: Str, iterable: HExpr, body: HExpr) {
     match iterable {
         HExpr::RangeExpr { start, end, inclusive, .. } => {
             emit_c_for_range_direct(ctx, binding, start, end, inclusive, body)
@@ -4255,7 +4255,7 @@ fn emit_c_for_in(mut ctx: CCtx, binding: Str, destructure: List<HForInDestructur
     if is_range {
         emit_c_for_range_var(ctx, binding, iterable, body)
     } else {
-        emit_c_for_list(ctx, binding, destructure, iterable, body)
+        panic("C codegen invariant: non-Range for-in survived inference lowering")
     }
 }
 
@@ -4337,87 +4337,6 @@ fn emit_c_for_range_var(mut ctx: CCtx, binding: Str, iterable: HExpr, body: HExp
     c_emit(ctx, "${ci} = ${ci} + 1;")
     ctx.indent = ctx.indent - 1
     c_emit(ctx, "}")
-}
-
-// Index-based list iteration; Set/Map iterables are converted to a fresh
-// list first (dropped at loop exit — B-104 D1 Stage 2 parity).
-fn emit_c_for_list(mut ctx: CCtx, binding: Str, destructure: List<HForInDestructure>?, iterable: HExpr, body: HExpr) {
-    let raw = gen_c_expr(ctx, iterable)
-    let mut collection_converted = false
-    let lv = match hexpr_type(iterable) {
-        Type::StructType { name, type_params } => {
-            if name == "Set" && type_params.len() == 1 {
-                collection_converted = true
-                gen_c_method_call(
-                    ctx, raw,
-                    Type::StructType { name: name, type_params: type_params },
-                    "to_list", [], [])
-            } else if name == "Map" && type_params.len() == 2 {
-                collection_converted = true
-                gen_c_method_call(
-                    ctx, raw,
-                    Type::StructType { name: name, type_params: type_params },
-                    "entries", [], [])
-            } else {
-                raw
-            }
-        },
-        _ => raw,
-    }
-
-    rt_use(ctx, "ring_list_len", 1)
-    rt_use(ctx, "ring_list_get", 2)
-    let len = fresh_i64(ctx)
-    c_emit(ctx, "${len} = ring_list_len(${lv});")
-    let idx = fresh_i64(ctx)
-    c_emit(ctx, "${idx} = 0;")
-    let incr_label = fresh_label(ctx, "incr")
-
-    c_emit(ctx, "while (1) {")
-    ctx.indent = ctx.indent + 1
-    c_emit(ctx, "if (!(${idx} < ${len})) break;")
-    let elem = fresh_tmp(ctx)
-    c_emit(ctx, "${elem} = ring_list_get(${lv}, ${idx});")
-
-    match destructure {
-        some(ds) => {
-            if ds.len() > 0 {
-                for i in 0..ds.len() {
-                    match ds.get(i) {
-                        some(d) => {
-                            let dv = c_local(ctx, d.name)
-                            c_emit(ctx, "${dv} = ring_list_get(${elem}, ${i});")
-                        },
-                        none => {},
-                    }
-                }
-            } else {
-                let bv = c_local(ctx, binding)
-                c_emit(ctx, "${bv} = ${elem};")
-            }
-        },
-        none => {
-            let bv = c_local(ctx, binding)
-            c_emit(ctx, "${bv} = ${elem};")
-        },
-    }
-
-    let saved_cont = ctx.loop_continue_stmt
-    let saved_in_loop = ctx.in_loop
-    ctx.loop_continue_stmt = "goto ${incr_label};"
-    ctx.in_loop = true
-    discard_c(gen_c_expr(ctx, body))
-    ctx.loop_continue_stmt = saved_cont
-    ctx.in_loop = saved_in_loop
-
-    c_raw(ctx, "${incr_label}:;")
-    c_emit(ctx, "${idx} = ${idx} + 1;")
-    ctx.indent = ctx.indent - 1
-    c_emit(ctx, "}")
-    if collection_converted {
-        rt_use(ctx, "ring_drop", 1)
-        c_emit(ctx, "ring_drop(${lv});")
-    }
 }
 
 // ============================================================

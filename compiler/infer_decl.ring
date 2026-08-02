@@ -6,7 +6,11 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
     collect_extern_type_names, compare_by_first, extern_abi_leaf}
-use env::{TypeScheme, SchemeBound, apply_subst, apply_subst_map, apply_subst_row_map, find_impl, has_impl}
+use env::{TypeScheme, SchemeBound, MethodOrigin,
+    apply_subst, apply_subst_map, apply_subst_row_map,
+    find_impl, find_impl_by_origin, has_impl, impl_origin, impl_decl_origin,
+    impl_method_origin,
+    install_method_scheme, build_type_var_map}
 use union_find::{UnionFind}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
@@ -14,7 +18,7 @@ use codes::{E0201, E0204, E0301, E0402, E0403, E0404, E0405, E0409, E0410, E0501
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, AssocRebindEntry, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
-    resolve_type_expr, resolve_self_type,
+    resolve_type_expr, resolve_self_type, resolve_dicts_from_scheme,
     generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses,
     enter_project_root_frame, enter_project_child_frame,
     exit_project_namespace_frame}
@@ -45,7 +49,8 @@ fn check_decl(
         Decl::Impl { target_type, type_params, trait_name, methods, span } =>
             check_impl_decl(ctx, target_type, type_params, trait_name, methods, span),
         Decl::Fn { name, type_params, params, return_type, declared_effects, body, is_pub, span, .. } =>
-            check_fn_decl(ctx, name, type_params, params, return_type, declared_effects, body, is_pub, span, none),
+            check_fn_decl(ctx, name, type_params, params, return_type,
+                declared_effects, body, is_pub, span, none, none, none),
         Decl::Test { description, body, span } =>
             check_test_decl(ctx, description, body, span),
         Decl::Trait { name, type_params, methods, is_pub, span, .. } =>
@@ -481,29 +486,52 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
     HDecl::Effect { name: name, type_params: type_params, ops: hops, is_pub: is_pub, span: span }
 }
 
-fn update_impl_method_effects(ctx: InferCtx, target_type: Str, method_name: Str, effects: EffectRow) {
-    match ctx.env.trait_reg.impl_methods.get(target_type) {
-        some(methods_map) => {
-            match methods_map.get(method_name) {
-                some(scheme) => {
-                    match scheme.ty {
-                        Type::FnType { params, return_type, .. } => {
-                            let updated_ty = Type::FnType { params: params, return_type: return_type, effects: effects }
-                            methods_map.insert(method_name, TypeScheme {
-                                ty: updated_ty,
-                                type_vars: scheme.type_vars,
-                                bounds: scheme.bounds,
-                                def_id: scheme.def_id
-                            })
-                        },
-                        _ => {}
-                    }
+fn registered_impl_method_scheme(
+    ctx: InferCtx, target_type: Str, trait_name: Str?,
+    origin: Str, method_name: Str
+) -> TypeScheme? {
+    match trait_name {
+        some(_) => match find_impl_by_origin(
+            ctx.env.trait_reg, target_type, origin) {
+            some(entry) => entry.method_schemes.get(method_name),
+            none => none
+        },
+        none => match ctx.env.trait_reg.method_origins.get(target_type) {
+            some(origins) => match origins.get(method_name) {
+                some(method_origin_) => {
+                    if method_origin_.origin == origin {
+                        match ctx.env.trait_reg.impl_methods.get(target_type) {
+                            some(methods) => methods.get(method_name),
+                            none => none
+                        }
+                    } else { none }
                 },
-                none => {}
-            }
+                none => none
+            },
+            none => none
+        }
+    }
+}
+
+fn store_rebound_impl_method_scheme(
+    mut ctx: InferCtx, target_type: Str, trait_name: Str?,
+    origin: Str, method_name: Str, scheme: TypeScheme, span: Span
+) {
+    match trait_name {
+        some(_) => match find_impl_by_origin(
+            ctx.env.trait_reg, target_type, origin) {
+            some(entry) => entry.method_schemes.insert(method_name, scheme),
+            none => {}
         },
         none => {}
     }
+
+    let _ = install_method_scheme(
+        ctx.env.trait_reg, ctx.sink,
+        target_type, method_name, scheme,
+        MethodOrigin {
+            origin: origin, trait_name: trait_name, span: span
+        })
 }
 
 fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
@@ -515,6 +543,7 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
 }
 
 fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
+    let origin = impl_decl_origin(target_type, trait_name, type_params, span)
     let saved_tp_scope = map_clone(ctx.type_param_scope)
     let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     for tp in type_params {
@@ -663,7 +692,13 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
             Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } =>
                 hmethods.push(check_extern_fn_decl(ctx, name, mtps, params, declared_effects, is_pub, mspan)),
             Decl::Fn { name, type_params: mtps, params, return_type, declared_effects, body, is_pub, span: mspan, .. } => {
-                let hdecl = check_fn_decl(ctx, name, mtps, params, return_type, declared_effects, body, is_pub, mspan, some(impl_self_type))
+                let registration_scheme = registered_impl_method_scheme(
+                    ctx, target_type, trait_name, origin, name)
+                let rebind_identity = impl_method_origin(origin, name)
+                let hdecl = check_fn_decl(
+                    ctx, name, mtps, params, return_type, declared_effects,
+                    body, is_pub, mspan, some(impl_self_type),
+                    registration_scheme, some(rebind_identity))
                 // #210: Also register fn_mut_params with qualified key for cross-module export.
                 // check_fn_decl inserts with unqualified `name`; exports.ring looks up
                 // with "${target_type}_${mname}", so we mirror that key here.
@@ -672,15 +707,25 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
                     some(flags) => ctx.fn_mut_params.insert(qual_key, flags),
                     none => {}
                 }
-                hmethods.push(hdecl)
                 match hdecl {
-                    HDecl::Fn { name: mname, effects: inferred_effects, .. } => {
-                        if inferred_effects.effects.len() > 0 {
-                            update_impl_method_effects(ctx, target_type, mname, inferred_effects)
+                    HDecl::Fn {
+                        name: mname, params: mparams,
+                        return_type: mret, effects: meffects,
+                        span: checked_span, ..
+                    } => match registration_scheme {
+                        some(scheme) => {
+                            let rebound = rebind_checked_fn_scheme(
+                                ctx, rebind_identity, scheme,
+                                mparams, mret, meffects, checked_span)
+                            store_rebound_impl_method_scheme(
+                                ctx, target_type, trait_name, origin,
+                                mname, rebound, checked_span)
                         }
+                        none => {}
                     },
                     _ => {}
                 }
+                hmethods.push(hdecl)
             },
             Decl::Delegate { .. } => {},  // Handled at check_one_decl level
             Decl::AssocType { .. } => {},  // Already handled above
@@ -801,22 +846,153 @@ fn expand_delegate_impls(
                         Type::EnumType { name: n, .. } => some(n),
                         _ => none
                     }
-                    let field_impl_methods = match field_type_name {
-                        some(ftn) => ctx.env.trait_reg.impl_methods.get(ftn),
-                        none => none
-                    }
-
                     for tname in all_traits {
                         match ctx.env.trait_reg.traits.get(tname) {
                             none => {},  // Error already reported in Pass 1
                             some(trait_def) => {
-                                // #128: Look up field type's ImplEntry for assoc_types
+                                let delegate_impl = find_impl(
+                                    ctx.env.trait_reg, target_type, tname)
+                                let field_impl = match field_type_name {
+                                    some(ftn) => find_impl(
+                                        ctx.env.trait_reg, ftn, tname),
+                                    none => none
+                                }
+
+                                // Use the exact registered delegate receiver so
+                                // HIR, method schemes, and dictionary bounds all
+                                // share the same wrapper impl variables.
+                                let mut exact_self_type = self_type
+                                let mut found_exact_self = false
+                                match delegate_impl {
+                                    some(delegate_entry) => {
+                                        let mut exact_entries =
+                                            delegate_entry.method_schemes.entries()
+                                        exact_entries.sort_by(compare_by_first)
+                                        for exact_entry in exact_entries {
+                                            if !found_exact_self {
+                                                let (_, exact_scheme) = exact_entry
+                                                match exact_scheme.ty {
+                                                    Type::FnType { params, .. } =>
+                                                        match params.first() {
+                                                            some(receiver) => {
+                                                                exact_self_type = receiver
+                                                                found_exact_self = true
+                                                            },
+                                                            none => {}
+                                                        },
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                    },
+                                    none => {}
+                                }
+
+                                let mut declared_params: List<Type> = []
+                                let mut declared_index = 0
+                                for declared_id in struct_def.type_param_vars {
+                                    let declared_name = match
+                                        struct_def.type_params.get(declared_index) {
+                                        some(name) => some(name), none => none
+                                    }
+                                    declared_params.push(Type::TypeVar {
+                                        id: declared_id, name: declared_name
+                                    })
+                                    declared_index = declared_index + 1
+                                }
+                                let declared_self_type = Type::StructType {
+                                    name: struct_def.name,
+                                    type_params: declared_params
+                                }
+                                let field_owner_map = build_type_var_map(
+                                    declared_self_type, exact_self_type,
+                                    struct_def.type_param_vars)
+                                let resolved_ft = apply_subst_map(
+                                    field_owner_map, ft)
+
+                                // Derive one source-impl mapping from exact field
+                                // receivers to the wrapper's actual field type.
+                                let mut field_var_map: Map<Int, Type> = map_new()
+                                match field_impl {
+                                    some(field_entry) => {
+                                        let mut field_methods =
+                                            field_entry.method_schemes.entries()
+                                        field_methods.sort_by(compare_by_first)
+                                        for field_method in field_methods {
+                                            let (_, field_scheme) = field_method
+                                            match field_scheme.ty {
+                                                Type::FnType { params, .. } =>
+                                                    match params.first() {
+                                                        some(field_receiver) => {
+                                                            let candidate = build_type_var_map(
+                                                                field_receiver, resolved_ft,
+                                                                field_scheme.type_vars)
+                                                            let mut source_ids = candidate.keys()
+                                                            source_ids.sort()
+                                                            for source_id in source_ids {
+                                                                match candidate.get(source_id) {
+                                                                    some(mapped) =>
+                                                                        field_var_map.insert(
+                                                                            source_id, mapped),
+                                                                    none => {}
+                                                                }
+                                                            }
+                                                        },
+                                                        none => {}
+                                                    },
+                                                _ => {}
+                                            }
+                                        }
+                                    },
+                                    none => {}
+                                }
+
+                                let mut generated_trait_bounds: List<TraitBound> = []
+                                let mut generated_fn_bounds: List<FnBoundsEntry> = []
+                                let wrapper_type_args = match exact_self_type {
+                                    Type::StructType { type_params, .. } => type_params,
+                                    Type::EnumType { type_params, .. } => type_params,
+                                    _ => []
+                                }
+                                match delegate_impl {
+                                    some(delegate_entry) => {
+                                        for dict_bound in delegate_entry.dict_bounds {
+                                            match (delegate_entry.type_params.get(
+                                                        dict_bound.type_param_index),
+                                                   wrapper_type_args.get(
+                                                        dict_bound.type_param_index)) {
+                                                (some(type_param_name),
+                                                 some(Type::TypeVar { id, .. })) => {
+                                                    generated_trait_bounds.push(TraitBound {
+                                                        type_param: type_param_name,
+                                                        trait_name: dict_bound.trait_name
+                                                    })
+                                                    generated_fn_bounds.push(FnBoundsEntry {
+                                                        type_param_var_id: id,
+                                                        trait_name: dict_bound.trait_name,
+                                                        type_param_name: type_param_name
+                                                    })
+                                                },
+                                                _ => {}
+                                            }
+                                        }
+                                    },
+                                    none => {}
+                                }
+
+                                // #128: Look up field type's exact ImplEntry for assoc_types
                                 let mut field_assoc_map: Map<Str, Type> = map_new()
-                                match field_type_name {
-                                    some(ftn) => {
-                                        match find_impl(ctx.env.trait_reg, ftn, tname) {
-                                            some(field_impl) => { field_assoc_map = map_clone(field_impl.assoc_types) },
-                                            none => {}
+                                match field_impl {
+                                    some(field_entry) => {
+                                        let mut assoc_entries =
+                                            field_entry.assoc_types.entries()
+                                        assoc_entries.sort_by(compare_by_first)
+                                        for assoc_entry in assoc_entries {
+                                            let (assoc_name, assoc_type) = assoc_entry
+                                            field_assoc_map.insert(
+                                                assoc_name,
+                                                apply_subst_map(
+                                                    field_var_map, assoc_type))
                                         }
                                     },
                                     none => {}
@@ -824,11 +1000,17 @@ fn expand_delegate_impls(
 
                                 let mut trait_hmethods: List<HDecl> = []
                                 for tm in trait_def.methods {
-                                    // #125: Look up field type's resolved method to get concrete
-                                    // assoc types for ret_ty / param types, but keep trait def's
-                                    // method type for binary-method detection (Self type var matching).
-                                    let resolved_method_scheme = match field_impl_methods {
-                                        some(fm_map) => fm_map.get(tm.name),
+                                    // The wrapper ImplEntry owns the specialized
+                                    // public signature; the field ImplEntry owns
+                                    // the forwarded callee and its predicates.
+                                    let resolved_method_scheme = match delegate_impl {
+                                        some(wrapper_entry) =>
+                                            wrapper_entry.method_schemes.get(tm.name),
+                                        none => none
+                                    }
+                                    let field_method_scheme = match field_impl {
+                                        some(field_entry) =>
+                                            field_entry.method_schemes.get(tm.name),
                                         none => none
                                     }
                                     match tm.ty {
@@ -865,7 +1047,7 @@ fn expand_delegate_impls(
                                                 some(m) => m,
                                                 none => false
                                             }
-                                            hparams.push(HParam { name: "self", ty: self_type, def_id: some(def_id_self), is_mutable: self_is_mut })
+                                            hparams.push(HParam { name: "self", ty: exact_self_type, def_id: some(def_id_self), is_mutable: self_is_mut })
 
                                             // Determine the trait's Self type (first param) for binary method detection
                                             let trait_self_type = match trait_params.first() {
@@ -907,7 +1089,7 @@ fn expand_delegate_impls(
                                                     _ => false
                                                 }
                                                 // For binary Self-typed params, use self_type; otherwise use resolved type
-                                                let param_ty = if is_self_typed { self_type } else { resolved_pty }
+                                                let param_ty = if is_self_typed { exact_self_type } else { resolved_pty }
                                                 hparams.push(HParam { name: pname, ty: param_ty, def_id: some(pid), is_mutable: p_is_mut })
 
                                                 if is_self_typed {
@@ -915,12 +1097,12 @@ fn expand_delegate_impls(
                                                     let arg_ident = HExpr::Ident {
                                                         name: pname, resolved_name: none, def_id: some(pid),
                                                         dict_closure_dicts: none,
-                                                        ty: self_type, effects: EMPTY_ROW, span: span
+                                                        ty: exact_self_type, effects: EMPTY_ROW, span: span
                                                     }
                                                     forward_args.push(HExpr::FieldAccess {
                                                         receiver: arg_ident,
                                                         field: field,
-                                                        ty: ft,
+                                                        ty: resolved_ft,
                                                         effects: EMPTY_ROW,
                                                         span: span
                                                     })
@@ -939,10 +1121,10 @@ fn expand_delegate_impls(
                                                 receiver: HExpr::Ident {
                                                     name: "self", resolved_name: none, def_id: some(def_id_self),
                                                     dict_closure_dicts: none,
-                                                    ty: self_type, effects: EMPTY_ROW, span: span
+                                                    ty: exact_self_type, effects: EMPTY_ROW, span: span
                                                 },
                                                 field: field,
-                                                ty: ft,
+                                                ty: resolved_ft,
                                                 effects: EMPTY_ROW,
                                                 span: span
                                             }
@@ -952,7 +1134,7 @@ fn expand_delegate_impls(
                                             let mut use_dict_dispatch = false
                                             if tm.has_default {
                                                 // Get the field type name
-                                                let ftn = match ft {
+                                                let ftn = match resolved_ft {
                                                     Type::StructType { name: n, .. } => some(n),
                                                     Type::EnumType { name: n, .. } => some(n),
                                                     _ => none
@@ -961,9 +1143,9 @@ fn expand_delegate_impls(
                                                     some(field_tn) => {
                                                         // Check if the field type has an explicit impl for this method
                                                         let mut has_explicit = false
-                                                        match ctx.env.trait_reg.impl_methods.get(field_tn) {
-                                                            some(methods_map) => {
-                                                                has_explicit = methods_map.contains_key(tm.name)
+                                                        match field_impl {
+                                                            some(field_entry) => {
+                                                                has_explicit = field_entry.method_names.contains(tm.name)
                                                             },
                                                             none => {}
                                                         }
@@ -977,7 +1159,7 @@ fn expand_delegate_impls(
 
                                             let call_expr = if use_dict_dispatch {
                                                 // Generate dict dispatch: __FieldType_Trait.method(self.field, args...)
-                                                let ftn = match ft {
+                                                let ftn = match resolved_ft {
                                                     Type::StructType { name: n, .. } => n,
                                                     Type::EnumType { name: n, .. } => n,
                                                     _ => ""
@@ -1001,6 +1183,18 @@ fn expand_delegate_impls(
                                                     span: span
                                                 }
                                             } else {
+                                                let resolved_forward_dicts = match field_method_scheme {
+                                                    some(field_scheme) => {
+                                                        let field_callee_type = apply_subst_map(
+                                                            field_var_map, field_scheme.ty)
+                                                        resolve_dicts_from_scheme(
+                                                            ctx.sink, ctx.env,
+                                                            generated_fn_bounds,
+                                                            field_scheme, field_callee_type,
+                                                            ctx.subst, span)
+                                                    },
+                                                    none => []
+                                                }
                                                 // Build: self.field.method — as FieldAccess for UFCS dispatch
                                                 let method_access = HExpr::FieldAccess {
                                                     receiver: field_access,
@@ -1015,7 +1209,7 @@ fn expand_delegate_impls(
                                                     callee: method_access,
                                                     args: forward_args,
                                                     type_args: [],
-                                                    resolved_dicts: [],
+                                                    resolved_dicts: resolved_forward_dicts,
                                                     dict_dispatch: none,
                                                     ty: ret_ty,
                                                     effects: eff,
@@ -1033,7 +1227,7 @@ fn expand_delegate_impls(
                                                 effects: eff,
                                                 body: call_expr,
                                                 is_pub: false,
-                                                trait_bounds: [],
+                                                trait_bounds: generated_trait_bounds,
                                                 span: span
                                             })
                                         },
@@ -1518,7 +1712,13 @@ fn capture_assoc_rebind_provenance(
     ctx.rebind_assoc_provenance.insert(fn_name, captured)
 }
 
-fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
+fn check_fn_decl(
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    params: List<Param>, return_type: TypeExpr?,
+    declared_effects: List<EffectExpr>?, body: Expr,
+    is_pub: Bool, span: Span, self_type: Type?,
+    registration_override: TypeScheme?, rebind_identity: Str?
+) -> HDecl {
     // This check owns the declaration's default metadata. Clear both halves
     // before entering transient scopes so impl-method seeds or earlier SCC
     // prechecks with the same spelling cannot leak into this owner.
@@ -1527,10 +1727,17 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
 
     // Save the registration scheme before entering the parameter scope: a
     // parameter is allowed to have the same spelling as its function.
-    let registration_scheme = ctx.env.lookup(name)
+    let registration_scheme = match registration_override {
+        some(scheme) => some(scheme),
+        none => ctx.env.lookup(name)
+    }
+    let provenance_key = match rebind_identity {
+        some(identity) => identity,
+        none => name
+    }
     // A failed or repeated check must never reuse provenance from an earlier
     // inline/SCC precheck of the same canonical function identity.
-    ctx.rebind_assoc_provenance.insert(name, [])
+    ctx.rebind_assoc_provenance.insert(provenance_key, [])
 
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
@@ -1664,7 +1871,7 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
 
     let try_result = some(
         check_fn_body(
-            ctx, name, registration_scheme, type_params, hparams,
+            ctx, provenance_key, registration_scheme, type_params, hparams,
             expected_ret, body, saved_tp_scope, span
         )
     ) catch { _ => none }
@@ -1920,20 +2127,9 @@ fn check_one_decl_with_rebind(
             // B-122: Rebind with fully-resolved type from inference
             rebind_fn_type(ctx, name, params, return_type, effects, span)
         },
-        HDecl::Impl { methods, .. } => {
-            // Rebind each impl method's resolved type
-            for method in methods {
-                match method {
-                    HDecl::Fn { name: mname, params: mparams, return_type: mret, effects: meff, span: mspan, .. } => {
-                        if meff.effects.len() > 0 {
-                            update_fn_effects(ctx.env, mname, meff)
-                        }
-                        rebind_fn_type(ctx, mname, mparams, mret, meff, mspan)
-                    },
-                    _ => {}
-                }
-            }
-        },
+        // Impl methods are rebound against their exact ImplEntry schemes in
+        // check_impl_decl_canonical; a bare method spelling is not an identity.
+        HDecl::Impl { .. } => {},
         _ => {}
     }
 
@@ -3019,27 +3215,28 @@ fn rebind_param_fn_rows(
     }
 }
 
-fn rebind_fn_type(
-    mut ctx: InferCtx, name: Str, params: List<HParam>, return_type: Type,
+// Shared exact-scheme rebind. Top-level functions and impl methods both pass
+// their own authoritative registration scheme through this one algorithm.
+fn rebind_checked_fn_scheme(
+    mut ctx: InferCtx, name: Str, scheme: TypeScheme,
+    params: List<HParam>, return_type: Type,
     effects: EffectRow, span: Span
-) {
-    match ctx.env.lookup(name) {
-        some(scheme) => {
-            let mut original_scheme_vars: Set<Int> = set_new()
-            collect_free_vars(scheme.ty, original_scheme_vars)
-            // Associated-type variables may be owned exclusively by a
-            // SchemeBound constraint and not occur in the registration-time
-            // function shape until an open callback row is refined.
-            for owned_var in scheme.type_vars {
-                original_scheme_vars.insert(owned_var)
-            }
-            for scheme_bound in scheme.bounds {
-                original_scheme_vars.insert(scheme_bound.type_var)
-                for constraint in scheme_bound.assoc_constraints {
-                    collect_free_vars(constraint.ty, original_scheme_vars)
-                }
-            }
-            match scheme.ty {
+) -> TypeScheme {
+    let mut original_scheme_vars: Set<Int> = set_new()
+    collect_free_vars(scheme.ty, original_scheme_vars)
+    // Associated-type variables may be owned exclusively by a SchemeBound
+    // constraint and not occur in the registration-time function shape until
+    // an open callback row is refined.
+    for owned_var in scheme.type_vars {
+        original_scheme_vars.insert(owned_var)
+    }
+    for scheme_bound in scheme.bounds {
+        original_scheme_vars.insert(scheme_bound.type_var)
+        for constraint in scheme_bound.assoc_constraints {
+            collect_free_vars(constraint.ty, original_scheme_vars)
+        }
+    }
+    match scheme.ty {
             Type::FnType { params: reg_params, return_type: reg_ret, effects: reg_effects } => {
                 // Build mapping: check-time var id → registration-time var id
                 // by comparing resolved params with registered params position-by-position.
@@ -3225,15 +3422,26 @@ fn rebind_fn_type(
                 let new_type = Type::FnType {
                     params: mapped_params, return_type: mapped_ret, effects: mapped_effects
                 }
-                rebind_fn_scheme_with_alias(ctx, name, TypeScheme {
+                TypeScheme {
                     ..scheme,
                     ty: new_type,
                     type_vars: new_type_vars,
                     bounds: new_bounds
-                })
+                }
             },
-            _ => {}
-            }
+            _ => scheme
+    }
+}
+
+fn rebind_fn_type(
+    mut ctx: InferCtx, name: Str, params: List<HParam>, return_type: Type,
+    effects: EffectRow, span: Span
+) {
+    match ctx.env.lookup(name) {
+        some(scheme) => {
+            let rebound = rebind_checked_fn_scheme(
+                ctx, name, scheme, params, return_type, effects, span)
+            rebind_fn_scheme_with_alias(ctx, name, rebound)
         },
         none => {}
     }
@@ -3529,7 +3737,7 @@ fn check_registered(mut ctx: InferCtx, program: Program) -> HProgram {
     // Derive mutates canonical registries. Complete it before the lexical root
     // overlay snapshots any payload, so frame aliases always observe the
     // authoritative post-derive definitions.
-    let derived_impls = run_derive_pass(ctx.env)
+    let derived_impls = run_derive_pass(ctx.env, ctx.sink)
     let project_active = ctx.project_namespace_file_key.is_some()
     let mut entered_project_frame = false
     if project_active {

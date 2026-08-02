@@ -14,7 +14,7 @@ use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry,
     StructDef, EnumDef, TypeAliasDef, EffectDef, EffectAliasDef, TraitDef, SigDef,
     new_type_env, mono,
     apply_subst, apply_subst_row, apply_subst_map, find_impl, lookup_variant,
-    exact_scheme_value_origin}
+    exact_scheme_value_origin, build_scheme_var_map}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 use resolver::{ResolvedNamespacePlan, ModuleFramePlan, ResolvedNamespaceBinding,
     NamespaceKind}
@@ -1066,118 +1066,6 @@ pub fn update_fn_effects(mut env: TypeEnv, name: Str, effects: EffectRow) {
 // Scheme var map + dict resolution
 // ============================================================
 
-pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<Int, Type> {
-    let mut result: Map<Int, Type> = map_new()
-    let type_var_set: Set<Int> = set_from(scheme.type_vars)
-    match (scheme.ty, instantiated_type) {
-        (Type::FnType { params: sp, return_type: sr, effects: se },
-         Type::FnType { params: ip, return_type: ir, effects: ie }) => {
-            let mut i = 0
-            let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
-            while i < limit {
-                match (sp.get(i), ip.get(i)) {
-                    (some(s_param), some(i_param)) =>
-                        collect_var_mappings(s_param, i_param, type_var_set, result),
-                    _ => {}
-                }
-                i = i + 1
-            }
-            collect_var_mappings(sr, ir, type_var_set, result)
-            collect_effect_var_mappings(se, ie, type_var_set, result)
-        },
-        _ => {}
-    }
-    result
-}
-
-fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>, mut result: Map<Int, Type>) {
-    match scheme_type {
-        Type::TypeVar { id, .. } => {
-            if type_vars.contains(id) {
-                result.insert(id, inst_type)
-            }
-        },
-        Type::StructType { name: sn, type_params: stp, .. } => match inst_type {
-            Type::StructType { name: in_, type_params: itp, .. } => {
-                if sn == in_ {
-                    let mut i = 0
-                    let limit = if stp.len() < itp.len() { stp.len() } else { itp.len() }
-                    while i < limit {
-                        match (stp.get(i), itp.get(i)) {
-                            (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
-                            _ => {}
-                        }
-                        i = i + 1
-                    }
-                }
-            },
-            _ => {}
-        },
-        Type::EnumType { name: sn, type_params: stp, .. } => match inst_type {
-            Type::EnumType { name: in_, type_params: itp, .. } => {
-                if sn == in_ {
-                    let mut i = 0
-                    let limit = if stp.len() < itp.len() { stp.len() } else { itp.len() }
-                    while i < limit {
-                        match (stp.get(i), itp.get(i)) {
-                            (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
-                            _ => {}
-                        }
-                        i = i + 1
-                    }
-                }
-            },
-            _ => {}
-        },
-        Type::FnType { params: sp, return_type: sr, effects: se } => match inst_type {
-            Type::FnType { params: ip, return_type: ir, effects: ie } => {
-                let mut i = 0
-                let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
-                while i < limit {
-                    match (sp.get(i), ip.get(i)) {
-                        (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
-                        _ => {}
-                    }
-                    i = i + 1
-                }
-                collect_var_mappings(sr, ir, type_vars, result)
-                collect_effect_var_mappings(se, ie, type_vars, result)
-            },
-            _ => {}
-        },
-        Type::TupleType { elements: se, .. } => match inst_type {
-            Type::TupleType { elements: ie, .. } => {
-                let mut i = 0
-                let limit = if se.len() < ie.len() { se.len() } else { ie.len() }
-                while i < limit {
-                    match (se.get(i), ie.get(i)) {
-                        (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
-                        _ => {}
-                    }
-                    i = i + 1
-                }
-            },
-            _ => {}
-        },
-        Type::GenericType { base: sb, args: sa, .. } => match inst_type {
-            Type::GenericType { base: ib, args: ia, .. } => {
-                collect_var_mappings(sb, ib, type_vars, result)
-                let mut i = 0
-                let limit = if sa.len() < ia.len() { sa.len() } else { ia.len() }
-                while i < limit {
-                    match (sa.get(i), ia.get(i)) {
-                        (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
-                        _ => {}
-                    }
-                    i = i + 1
-                }
-            },
-            _ => {}
-        },
-        _ => {}
-    }
-}
-
 pub fn record_value_origin(mut ctx: InferCtx, local_name: Str, origin: Str) {
     match ctx.env.lookup(local_name) {
         some(scheme) => match scheme.def_id {
@@ -1206,44 +1094,6 @@ pub fn variant_ctor_origin(ctx: InferCtx, scheme: TypeScheme) -> Str? {
     match scheme.def_id {
         some(def_id) => ctx.env.types.variant_ctor_origins.get(def_id),
         none => none
-    }
-}
-
-// Scheme variables may occur exclusively in effect payloads.  They still
-// need an instantiation mapping so SchemeBound resolution can select the
-// correct trait dictionary (and reject an unsatisfied bound) at the call site.
-fn collect_effect_var_mappings(scheme_row: EffectRow, inst_row: EffectRow, type_vars: Set<Int>, mut result: Map<Int, Type>) {
-    match (scheme_row.tail, inst_row.tail) {
-        (some(sid), some(iid)) => {
-            if type_vars.contains(sid) {
-                result.insert(sid, Type::TypeVar { id: iid, name: none })
-            }
-        },
-        _ => {},
-    }
-
-    for scheme_eff in scheme_row.effects {
-        for inst_eff in inst_row.effects {
-            if effects_match_kind(scheme_eff, inst_eff) {
-                match (scheme_eff, inst_eff) {
-                    (Effect::FailEffect { error_type: st }, Effect::FailEffect { error_type: it }) =>
-                        collect_var_mappings(st, it, type_vars, result),
-                    (Effect::MutEffect { state_type: st }, Effect::MutEffect { state_type: it }) =>
-                        collect_var_mappings(st, it, type_vars, result),
-                    (Effect::CustomEffect { type_args: sa, .. }, Effect::CustomEffect { type_args: ia, .. }) => {
-                        let mut i = 0
-                        while i < sa.len() && i < ia.len() {
-                            match (sa.get(i), ia.get(i)) {
-                                (some(st), some(it)) => collect_var_mappings(st, it, type_vars, result),
-                                _ => {},
-                            }
-                            i = i + 1
-                        }
-                    },
-                    _ => {},
-                }
-            }
-        }
     }
 }
 
