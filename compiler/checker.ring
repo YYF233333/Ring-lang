@@ -236,6 +236,7 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         current_fn_return_type: none,
         current_fn_bounds: [],
         fn_bounds_stack: [],
+        pending_dict_obligations: [],
         loop_depth: 0,
         mod_path_stack: [],
         use_aliases: map_new(),

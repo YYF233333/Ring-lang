@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, RecordField, UNIT, EMPTY_ROW, type_to_string, effect_to_string, nominal_display_name, effects_match_kind, effect_kind_name, types_equal}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, SigMember}
-use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
+use hir::{HDecl, HParam, HExpr, HStmt, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
@@ -19,6 +19,8 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, AssocRebindEntry, CompileE
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_dicts_from_scheme,
+    pending_dict_checkpoint, drain_pending_dicts, rollback_pending_dicts,
+    settle_default_pending_dicts, assert_pending_dict_owner_closed,
     generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses,
     enter_project_root_frame, enter_project_child_frame,
     exit_project_namespace_frame}
@@ -27,7 +29,9 @@ use infer_register::{register_decls_two_phase, register_module_decls_two_phase,
     resolve_declared_effects, prefix_decl_name, insert_mod_aliases,
     collect_all_supertraits, inject_assoc_types_from_bounds,
     resolve_trait_identity, resolve_nominal_identity}
-use infer::{infer_block, infer_expr}
+use infer::{infer_block, infer_expr,
+    register_bounded_callable_value_shadows,
+    register_default_bounded_callable_value_shadows}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block, zonk_expr}
 use derive::{run_derive_pass}
 use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names, collect_self_method_callees}
@@ -37,6 +41,24 @@ use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names, collect_sel
 // ============================================================
 
 fn check_decl(
+    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?
+) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
+    let result = some(check_decl_inner(
+        ctx, decl, frame_decl_index)) catch { _ => none }
+    match result {
+        some(hdecl) => {
+            assert_pending_dict_owner_closed(ctx, obligation_checkpoint)
+            hdecl
+        },
+        none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
+            fail.raise(CompileError {})
+        }
+    }
+}
+
+fn check_decl_inner(
     mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?
 ) -> HDecl {
     match decl {
@@ -295,6 +317,7 @@ fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub
 }
 
 fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     // Retrieve the def_id assigned during registration
@@ -317,6 +340,11 @@ fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
         },
         none => {}
     }
+    // Annotation constraints are final for this const owner.  Callable-value
+    // shadows join the same assoc fixed point without publishing DictRefs.
+    register_bounded_callable_value_shadows(
+        ctx, init_r.hexpr, s)
+    drain_pending_dicts(ctx, obligation_checkpoint, s)
     // A const initializer is a value position.  Resolve its fully unified
     // function-value evidence before restoring the declaration substitution;
     // otherwise a bounded module function reaches codegen without its DictRef.
@@ -331,6 +359,7 @@ fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
         none => {
             // Declaration-level recovery continues checking later declarations.
             // Never leak this const's isolated substitution through that path.
+            rollback_pending_dicts(ctx, obligation_checkpoint)
             ctx.subst = saved_subst
             fail.raise(CompileError {})
         }
@@ -409,22 +438,43 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
         match ast_op_opt {
             some(ast_op) => match ast_op.body {
                 some(body_expr) => {
+                    let obligation_checkpoint = pending_dict_checkpoint(ctx)
                     // Bind op params in a new scope for type checking the default body
                     ctx.env.push_scope()
                     for p in op_params {
                         ctx.env.bind_mono(p.name, p.ty)
                     }
-                    let body_result = infer_block(ctx, body_expr, none)
-                    ctx.subst = body_result.subst
-                    let body_type = hexpr_type(body_result.hexpr)
-                    ctx.subst = unify_at(ctx.sink, ctx.env, body_type, op.return_type, ctx.subst, span)
-                    // Zonk the default body
-                    let zctx = ZonkCtx {
-                        subst: ctx.subst, names: map_new(),
-                        dict_resolver: some(ctx)
-                    }
-                    default_body = some(zonk_block(zctx, body_result.hexpr))
+                    let checked_default = some({
+                        let body_result = infer_block(ctx, body_expr, none)
+                        ctx.subst = body_result.subst
+                        let body_type = hexpr_type(body_result.hexpr)
+                        ctx.subst = unify_at(
+                            ctx.sink, ctx.env, body_type,
+                            op.return_type, ctx.subst, span)
+                        register_bounded_callable_value_shadows(
+                            ctx, body_result.hexpr, ctx.subst)
+                        drain_pending_dicts(
+                            ctx, obligation_checkpoint, ctx.subst)
+                        // Zonk only after the owner obligation transaction.
+                        let zctx = ZonkCtx {
+                            subst: ctx.subst, names: map_new(),
+                            dict_resolver: some(ctx)
+                        }
+                        zonk_block(zctx, body_result.hexpr)
+                    }) catch { _ => none }
                     let _ = ctx.env.pop_scope()
+                    match checked_default {
+                        some(checked_body) => {
+                            assert_pending_dict_owner_closed(
+                                ctx, obligation_checkpoint)
+                            default_body = some(checked_body)
+                        },
+                        none => {
+                            rollback_pending_dicts(
+                                ctx, obligation_checkpoint)
+                            fail.raise(CompileError {})
+                        }
+                    }
                 },
                 none => {},
             },
@@ -1327,13 +1377,17 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         if m.has_default {
             match ast_method {
                 some(am) => match am {
-                    Decl::Fn { body: abody, .. } => {
+                    Decl::Fn { body: abody, span: method_span, .. } => {
                         let has_body = match abody {
                             Expr::Block { stmts, tail, .. } => stmts.len() > 0 || tail.is_some(),
                             _ => true
                         }
                         if has_body {
-                            method_body = check_trait_default_body(ctx, name, self_var, hparams, abody)
+                            let method_identity = "${name}::${m.name}"
+                            method_body = check_trait_default_body(
+                                ctx, name, method_identity,
+                                self_var, hparams, fn_ret, fn_effects,
+                                method_span, abody)
                         }
                     },
                     _ => {}
@@ -1354,9 +1408,18 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
     HDecl::Trait { name: name, type_params: type_params, methods: hmethods, supertraits: trait_def.supertraits, assoc_types: hassoc_types, is_pub: is_pub, span: span }
 }
 
-fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, hparams: List<HParam>, body: Expr) -> HExpr? {
+fn check_trait_default_body(
+    mut ctx: InferCtx, trait_name: Str, method_identity: Str,
+    self_var: Type, hparams: List<HParam>, method_return: Type,
+    method_effects: EffectRow, method_span: Span, body: Expr
+) -> HExpr? {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let saved_subst = ctx.subst
+    let saved_fn_return = ctx.current_fn_return_type
     ctx.subst = empty_subst()
+    // Trait defaults are function owners too.  Keep the declared return live
+    // during inference so explicit returns constrain pending call variables.
+    ctx.current_fn_return_type = some(method_return)
     ctx.env.push_scope()
     let saved_tp_scope = map_clone(ctx.type_param_scope)
     let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
@@ -1417,6 +1480,43 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
     let final_body = match body_result {
         some(br) => {
             ctx.subst = br.subst
+            let body_type = apply_subst(ctx.subst, hexpr_type(br.hexpr))
+            match body_type {
+                Type::NeverType => {},
+                _ => {
+                    // A terminal return statement has already constrained
+                    // method_return while infer_stmt handled its value.  The
+                    // enclosing no-tail block is represented as Unit, not as
+                    // a second value-producing return path.
+                    if !block_ends_with_return_statement(br.hexpr) {
+                        let return_notes: List<DiagnosticNote> = [
+                            DiagnosticNote {
+                                message: "trait method return type is '${type_to_string(apply_subst(ctx.subst, method_return))}'",
+                                span: none
+                            },
+                            DiagnosticNote {
+                                message: "trait default body evaluates to '${type_to_string(body_type)}'",
+                                span: some(hexpr_span(br.hexpr))
+                            }
+                        ]
+                        ctx.subst = unify_at_noted(
+                            ctx.sink, ctx.env, hexpr_type(br.hexpr),
+                            method_return, ctx.subst,
+                            hexpr_span(br.hexpr), return_notes)
+                    }
+                }
+            }
+            // Trait defaults own the same declared-effect constraint surface
+            // as ordinary functions.  Payloads can be the only source for a
+            // pending call's hidden type parameter, so thread the resulting
+            // substitution before callable shadows and owner drain.
+            let (_, constrained_subst) = constrain_declared_fn_effects(
+                ctx, method_identity, br.effects, method_effects,
+                method_span, ctx.subst)
+            ctx.subst = constrained_subst
+            register_bounded_callable_value_shadows(
+                ctx, br.hexpr, ctx.subst)
+            drain_pending_dicts(ctx, obligation_checkpoint, ctx.subst)
             let zctx = ZonkCtx {
                 subst: ctx.subst, names: map_new(),
                 dict_resolver: some(ctx)
@@ -1425,14 +1525,20 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
             ctx.subst = saved_subst
             result
         },
-        none => { ctx.subst = saved_subst; none }
+        none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
+            ctx.subst = saved_subst
+            none
+        }
     }
     // Keep the trait's Self/supertrait bounds and parameter scope alive
     // through value-zonk so bounded function values can capture them.
+    ctx.current_fn_return_type = saved_fn_return
     ctx.env.pop_scope()
     ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
     ctx.type_param_scope = saved_tp_scope
     ctx.qualified_assoc_scope = saved_qualified_assoc
+    assert_pending_dict_owner_closed(ctx, obligation_checkpoint)
     final_body
 }
 
@@ -1488,6 +1594,80 @@ struct FnBodyResult {
     body: HExpr
 }
 
+// Statement-form `return value` constrains current_fn_return_type directly,
+// while a no-tail block is still represented as Unit.  Distinguish that
+// terminal control transfer from a genuinely Unit-valued function body.
+fn block_ends_with_return_statement(body: HExpr) -> Bool {
+    match body {
+        HExpr::Block { stmts, tail, .. } => {
+            if tail.is_some() { return false }
+            let mut terminal_return = false
+            for stmt in stmts {
+                terminal_return = match stmt {
+                    HStmt::Return { .. } => true,
+                    _ => false
+                }
+            }
+            terminal_return
+        },
+        _ => false
+    }
+}
+
+// Declared effects are part of the function owner's constraint surface, not a
+// post-zonk API check.  Their payload types can be the only source that fixes
+// a pending call's hidden type arguments, so apply them before owner drain.
+fn constrain_declared_fn_effects(
+    mut ctx: InferCtx, fn_name: Str,
+    inferred_effects: EffectRow, declared_row: EffectRow, span: Span,
+    subst: UnionFind
+) -> (EffectRow, UnionFind) {
+    let mut s = subst
+    for inferred_eff in inferred_effects.effects {
+        let mut found = false
+        for declared_eff in declared_row.effects {
+            if effects_match_kind(inferred_eff, declared_eff) {
+                found = true
+                match (inferred_eff, declared_eff) {
+                    (Effect::FailEffect { error_type: ie },
+                     Effect::FailEffect { error_type: de }) => {
+                        s = unify_at(
+                            ctx.sink, ctx.env, ie, de, s, span)
+                    },
+                    (Effect::MutEffect { state_type: is },
+                     Effect::MutEffect { state_type: ds }) => {
+                        s = unify_at(
+                            ctx.sink, ctx.env, is, ds, s, span)
+                    },
+                    (Effect::CustomEffect { type_args: ia, .. },
+                     Effect::CustomEffect { type_args: da, .. }) => {
+                        let mut i = 0
+                        while i < ia.len() && i < da.len() {
+                            s = unify_at(
+                                ctx.sink, ctx.env,
+                                ia.get(i).unwrap_or(UNIT),
+                                da.get(i).unwrap_or(UNIT),
+                                s, span)
+                            i = i + 1
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
+        if !found {
+            let fn_display = nominal_display_name(fn_name)
+            let _ = type_error(ctx.sink, E0404,
+                "Function '${fn_display}' has undeclared effect: ${effect_to_string(inferred_eff)}",
+                span,
+                DiagnosticContext::OtherContext {
+                    detail: some("effect annotation violation")
+                })
+        }
+    }
+    (declared_row, s)
+}
+
 fn check_fn_body(
     mut ctx: InferCtx,
     fn_name: Str,
@@ -1495,9 +1675,11 @@ fn check_fn_body(
     type_params: List<TypeParam>,
     hparams: List<HParam>,
     expected_ret: Type,
+    declared_effects: EffectRow?,
     body: Expr,
     saved_tp_scope: Map<Str, Type>,
-    span: Span
+    span: Span,
+    obligation_checkpoint: Int
 ) -> FnBodyResult {
     let body_result = infer_block(ctx, body, some(ctx.subst))
     ctx.subst = body_result.subst
@@ -1511,13 +1693,34 @@ fn check_fn_body(
     match body_type_resolved {
         Type::NeverType => {},
         _ => {
-            let fn_body_notes: List<DiagnosticNote> = [
-                DiagnosticNote { message: "function return type is declared as '${type_to_string(apply_subst(ctx.subst, expected_ret))}'", span: some(span) },
-                DiagnosticNote { message: "function body evaluates to '${type_to_string(apply_subst(ctx.subst, hexpr_type(body_result.hexpr)))}'", span: some(hexpr_span(body_result.hexpr)) }
-            ]
-            ctx.subst = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span, fn_body_notes)
+            if !block_ends_with_return_statement(body_result.hexpr) {
+                let fn_body_notes: List<DiagnosticNote> = [
+                    DiagnosticNote { message: "function return type is declared as '${type_to_string(apply_subst(ctx.subst, expected_ret))}'", span: some(span) },
+                    DiagnosticNote { message: "function body evaluates to '${type_to_string(apply_subst(ctx.subst, hexpr_type(body_result.hexpr)))}'", span: some(hexpr_span(body_result.hexpr)) }
+                ]
+                ctx.subst = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span, fn_body_notes)
+            }
         },
     }
+
+    let owner_effects = match declared_effects {
+        some(declared_row) => {
+            let constrained = constrain_declared_fn_effects(
+                ctx, fn_name, body_result.effects, declared_row, span,
+                ctx.subst)
+            ctx.subst = constrained.1
+            constrained.0
+        },
+        none => body_result.effects
+    }
+
+    register_bounded_callable_value_shadows(
+        ctx, body_result.hexpr, ctx.subst)
+
+    // Defaults and the body share this function owner's inference variables.
+    // Return/annotation/arm/effect constraints are now complete; settle every
+    // call slot before zonk or restoration can detach those variables.
+    drain_pending_dicts(ctx, obligation_checkpoint, ctx.subst)
 
     let mut local_names: Map<Int, Str> = map_new()
     for tp in type_params {
@@ -1575,7 +1778,7 @@ fn check_fn_body(
     let mut final_params: List<HParam> = []
     for hp in hparams { final_params.push(zonk_param(zctx, hp)) }
     let final_ret = zonk_type(zctx, expected_ret)
-    let eff = zonk_row(zctx, body_result.effects)
+    let eff = zonk_row(zctx, owner_effects)
     let final_body = zonk_block(zctx, body_result.hexpr)
     match registration_scheme {
         some(scheme) => capture_assoc_rebind_provenance(
@@ -1719,6 +1922,32 @@ fn check_fn_decl(
     is_pub: Bool, span: Span, self_type: Type?,
     registration_override: TypeScheme?, rebind_identity: Str?
 ) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
+    let result = some(check_fn_decl_transaction(
+        ctx, name, type_params, params, return_type,
+        declared_effects, body, is_pub, span, self_type,
+        registration_override, rebind_identity,
+        obligation_checkpoint)) catch { _ => none }
+    match result {
+        some(hdecl) => {
+            assert_pending_dict_owner_closed(ctx, obligation_checkpoint)
+            hdecl
+        },
+        none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
+            fail.raise(CompileError {})
+        }
+    }
+}
+
+fn check_fn_decl_transaction(
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    params: List<Param>, return_type: TypeExpr?,
+    declared_effects: List<EffectExpr>?, body: Expr,
+    is_pub: Bool, span: Span, self_type: Type?,
+    registration_override: TypeScheme?, rebind_identity: Str?,
+    obligation_checkpoint: Int
+) -> HDecl {
     // This check owns the declaration's default metadata. Clear both halves
     // before entering transient scopes so impl-method seeds or earlier SCC
     // prechecks with the same spelling cannot leak into this owner.
@@ -1829,12 +2058,27 @@ fn check_fn_decl(
 
     // B-069: Infer default value expressions and store in hparams
     let mut default_hexprs: List<HExpr> = []
+    let mut default_evidence_valid = true
     let mut min_arity = params.len()
     let mut pi = 0
     for p in params {
         match p.default_value {
             some(dv) => {
-                let dv_result = infer_expr(ctx, dv, ctx.subst)
+                let default_obligation_checkpoint =
+                    pending_dict_checkpoint(ctx)
+                // Generic defaults are shared metadata, not one caller
+                // instantiation.  Hide caller-specific bound dictionaries
+                // while checking them: ground/static evidence still resolves,
+                // while dynamic evidence becomes an explicit pending failure.
+                let saved_default_bounds = ctx.current_fn_bounds
+                ctx.current_fn_bounds = []
+                let default_result = some(
+                    infer_expr(ctx, dv, ctx.subst)) catch { _ => none }
+                ctx.current_fn_bounds = saved_default_bounds
+                let dv_result = match default_result {
+                    some(result) => result,
+                    none => fail.raise(CompileError {})
+                }
                 ctx.subst = dv_result.subst
                 // Unify default value type with param type
                 match param_types.get(pi) {
@@ -1851,6 +2095,14 @@ fn check_fn_decl(
                         p.span,
                         DiagnosticContext::OtherContext { detail: some("default parameter effect") })
                 }
+                register_default_bounded_callable_value_shadows(
+                    ctx, dv_result.hexpr, ctx.subst)
+                if !settle_default_pending_dicts(
+                    ctx, default_obligation_checkpoint, ctx.subst) {
+                    default_evidence_valid = false
+                }
+                assert_pending_dict_owner_closed(
+                    ctx, default_obligation_checkpoint)
                 default_hexprs.push(dv_result.hexpr)
                 if min_arity == params.len() {
                     // First default param sets the min arity
@@ -1868,11 +2120,19 @@ fn check_fn_decl(
         none => ctx.env.fresh_var()
     }
     ctx.current_fn_return_type = some(expected_ret)
+    // Resolve while this owner's type-parameter and associated-type scopes
+    // are live.  check_fn_body applies the payload constraints before drain.
+    let owner_declared_effects = match declared_effects {
+        some(de) => some(resolve_declared_effects(ctx, de)),
+        none => none
+    }
 
     let try_result = some(
         check_fn_body(
             ctx, provenance_key, registration_scheme, type_params, hparams,
-            expected_ret, body, saved_tp_scope, span
+            expected_ret, owner_declared_effects,
+            body, saved_tp_scope, span,
+            obligation_checkpoint
         )
     ) catch { _ => none }
 
@@ -1909,52 +2169,34 @@ fn check_fn_decl(
         some(r) => r,
         none => fail.raise(CompileError {})
     }
+    // Invalid default evidence has already produced its precise E0503.  Abort
+    // only after restoring all transient owner scopes, and never publish the
+    // shared fn_defaults value that carried caller-owned inference variables.
+    if !default_evidence_valid {
+        // Phase 1 has already made a top-level declaration visible to later
+        // bodies.  Replace that preregistered scheme with ErrorType before
+        // recovery continues: otherwise later calls reinterpret the omitted
+        // default as a required parameter and cascade with E0301 / bound
+        // failures.  Impl methods use their origin-keyed registration path and
+        // are rolled back by the enclosing impl owner, so do not rebind an
+        // unrelated same-spelled global here.
+        if rebind_identity.is_none() {
+            match registration_scheme {
+                some(scheme) => ctx.env.rebind(name, TypeScheme {
+                    ty: Type::ErrorType,
+                    type_vars: [],
+                    bounds: [],
+                    def_id: scheme.def_id
+                }),
+                none => {}
+            }
+        }
+        fail.raise(CompileError {})
+    }
     let final_params = fn_result.params
     let final_ret = fn_result.ret
-    let inferred_effects = fn_result.eff
+    let final_effects = fn_result.eff
     let final_body = fn_result.body
-
-    // Verify: inferred effects <= declared effects
-    let final_effects = match declared_effects {
-        some(de) => {
-            let declared_row = resolve_declared_effects(ctx, de)
-            // Check each inferred effect is in declared set
-            for inferred_eff in inferred_effects.effects {
-                let mut found = false
-                for declared_eff in declared_row.effects {
-                    if effects_match_kind(inferred_eff, declared_eff) {
-                        found = true
-                        match (inferred_eff, declared_eff) {
-                            (Effect::FailEffect { error_type: ie }, Effect::FailEffect { error_type: de }) => {
-                                ctx.subst = unify_at(ctx.sink, ctx.env, ie, de, ctx.subst, span)
-                            },
-                            (Effect::MutEffect { state_type: is }, Effect::MutEffect { state_type: ds }) => {
-                                ctx.subst = unify_at(ctx.sink, ctx.env, is, ds, ctx.subst, span)
-                            },
-                            (Effect::CustomEffect { type_args: ia, .. }, Effect::CustomEffect { type_args: da, .. }) => {
-                                let mut i = 0
-                                while i < ia.len() && i < da.len() {
-                                    ctx.subst = unify_at(ctx.sink, ctx.env, ia.get(i).unwrap_or(UNIT), da.get(i).unwrap_or(UNIT), ctx.subst, span)
-                                    i = i + 1
-                                }
-                            },
-                            _ => {}
-                        }
-                    }
-                }
-                if !found {
-                    let fn_display = nominal_display_name(name)
-                    let _ = type_error(ctx.sink, E0404,
-                        "Function '${fn_display}' has undeclared effect: ${effect_to_string(inferred_eff)}",
-                        span,
-                        DiagnosticContext::OtherContext { detail: some("effect annotation violation") })
-                }
-            }
-            // Use declared effects (they are the public contract)
-            declared_row
-        },
-        none => inferred_effects
-    }
 
     // Check: main function must not have unhandled custom effects.
     // io/fail/mut are allowed (io is implicit, fail has default handler, mut is Cell-based),
@@ -2034,6 +2276,7 @@ fn check_fn_decl(
 }
 
 fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) -> HDecl {
+    let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -2042,6 +2285,9 @@ fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) 
     let final_body = match body_result {
         some(br) => {
             ctx.subst = br.subst
+            register_bounded_callable_value_shadows(
+                ctx, br.hexpr, ctx.subst)
+            drain_pending_dicts(ctx, obligation_checkpoint, ctx.subst)
             let zctx = ZonkCtx {
                 subst: ctx.subst, names: map_new(),
                 dict_resolver: some(ctx)
@@ -2051,6 +2297,7 @@ fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) 
             result
         },
         none => {
+            rollback_pending_dicts(ctx, obligation_checkpoint)
             ctx.subst = saved_subst
             // The scope must be restored before re-raising the declaration
             // error; the success path pops once below after value-zonk.
@@ -2121,11 +2368,18 @@ fn check_one_decl_with_rebind(
     // Update fn effects and rebind resolved types
     match hd {
         HDecl::Fn { name, params, return_type, effects, span, .. } => {
+            // update_fn_effects installs check-time effect variables into the
+            // live scheme.  Snapshot the authoritative registration identity
+            // first so effect-only type parameters still map back to the same
+            // variables owned by type_vars / SchemeBounds during rebind.
+            let registration_scheme = ctx.env.lookup(name)
             if effects.effects.len() > 0 {
                 update_fn_effects(ctx.env, name, effects)
             }
             // B-122: Rebind with fully-resolved type from inference
-            rebind_fn_type(ctx, name, params, return_type, effects, span)
+            rebind_fn_type(
+                ctx, name, params, return_type, effects, span,
+                registration_scheme)
         },
         // Impl methods are rebound against their exact ImplEntry schemes in
         // check_impl_decl_canonical; a bare method spelling is not an identity.
@@ -3435,9 +3689,9 @@ fn rebind_checked_fn_scheme(
 
 fn rebind_fn_type(
     mut ctx: InferCtx, name: Str, params: List<HParam>, return_type: Type,
-    effects: EffectRow, span: Span
+    effects: EffectRow, span: Span, registration_scheme: TypeScheme?
 ) {
-    match ctx.env.lookup(name) {
+    match registration_scheme {
         some(scheme) => {
             let rebound = rebind_checked_fn_scheme(
                 ctx, name, scheme, params, return_type, effects, span)
