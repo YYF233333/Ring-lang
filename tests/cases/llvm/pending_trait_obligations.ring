@@ -47,6 +47,8 @@ fn unknown<T>() -> T {
 
 fn hash_identity<T: Hash>(value: T) -> T { value }
 
+fn hash_value<T: Hash>(value: T) -> Int { value.hash() }
+
 fn attach_source<T, S: Source<Item = T>>(source: S, _value: T) -> S {
     source
 }
@@ -56,6 +58,10 @@ fn empty_same_map<T>() -> Map<T, T> { map_new() }
 fn accept_set(value: Set<Int>) -> Int { value.len() }
 
 fn return_set() -> Set<Int> { set_from([]) }
+
+fn explicit_return_set() -> Set<Int> {
+    return set_from([])
+}
 
 fn if_set(flag: Bool) -> Set<Int> {
     if flag { set_from([]) } else { set_from([2]) }
@@ -76,6 +82,13 @@ fn default_set_count(value: Set<Int> = set_from([])) -> Int {
     value.len()
 }
 
+fn default_hash_count(
+    value: Int,
+    callback: fn(Int) -> Int = hash_value
+) -> Int {
+    callback(value)
+}
+
 fn main() {
     // The pending initializer is deliberately used by a later statement.  It
     // must remain monomorphic so both statements constrain the same ?T.
@@ -88,10 +101,14 @@ fn main() {
 
     print("outer=${accept_set(set_from([]))}")
     print("return=${return_set().len()}")
+    print("explicit-return=${explicit_return_set().len()}")
     print("if=${if_set(true).len()}")
     print("match=${match_set(true).len()}")
     let lambda_count = invoke_factory(fn() { set_from([]) })
     print("lambda=${lambda_count}")
+    let later_factory = fn() { set_from([]) }
+    let later_lambda_count = invoke_factory(later_factory)
+    print("later-lambda=${later_lambda_count}")
 
     let maker = Maker { marker: [] }
     let made: Set<Int> = maker.make()
@@ -101,6 +118,9 @@ fn main() {
     print("trait-default=${metric.empty_count()}")
     print("effect-default=${DefaultMetric.empty_count()}")
     print("param-default=${default_set_count()}")
+    let default_hash = default_hash_count(9)
+    assert(default_hash == hash_value(9), "ground callable default evidence")
+    print("callable-default=ok")
 
     if false {
         // map_get_panic registers before the result annotation constrains the

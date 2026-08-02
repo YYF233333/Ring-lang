@@ -24,10 +24,12 @@ use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef,
     build_scheme_var_map, find_impl, lookup_variant}
 use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
+    PendingDictPurpose,
     type_error, type_error_with_notes, merge_effects, unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_named_type,
     bind_pattern, resolve_dict_ref_for_type,
     resolve_or_defer_dicts_from_scheme,
+    register_callable_value_shadow,
     pending_dict_checkpoint, has_pending_dicts_since,
     remove_fail_effect,
     generalize, free_type_vars, resolve_relative_qualifier}
@@ -92,191 +94,241 @@ pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
 // Statement inference (from infer-stmt.ts)
 // ============================================================
 
-fn hstmt_contains_bounded_callable_value(ctx: InferCtx, stmt: HStmt) -> Bool {
+fn collect_bounded_callable_values_in_stmt(
+    ctx: InferCtx, stmt: HStmt, mut found: List<HExpr>
+) {
     match stmt {
-        HStmt::Let { init, .. } => hexpr_contains_bounded_callable_value(ctx, init),
-        HStmt::Var { init, .. } => hexpr_contains_bounded_callable_value(ctx, init),
-        HStmt::Assign { target, value, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, target) ||
-            hexpr_contains_bounded_callable_value(ctx, value),
+        HStmt::Let { init, .. } =>
+            collect_bounded_callable_values(ctx, init, found),
+        HStmt::Var { init, .. } =>
+            collect_bounded_callable_values(ctx, init, found),
+        HStmt::Assign { target, value, .. } => {
+            collect_bounded_callable_values(ctx, target, found)
+            collect_bounded_callable_values(ctx, value, found)
+        },
         HStmt::ExprStmt { expr, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, expr),
+            collect_bounded_callable_values(ctx, expr, found),
         HStmt::Return { value, .. } => match value {
-            some(v) => hexpr_contains_bounded_callable_value(ctx, v),
-            none => false
+            some(v) => collect_bounded_callable_values(ctx, v, found),
+            none => {}
         },
-        HStmt::While { condition, body, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, condition) ||
-            hexpr_contains_bounded_callable_value(ctx, body),
-        HStmt::ForIn { iterable, body, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, iterable) ||
-            hexpr_contains_bounded_callable_value(ctx, body),
+        HStmt::While { condition, body, .. } => {
+            collect_bounded_callable_values(ctx, condition, found)
+            collect_bounded_callable_values(ctx, body, found)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_bounded_callable_values(ctx, iterable, found)
+            collect_bounded_callable_values(ctx, body, found)
+        },
         HStmt::LetDestructure { init, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, init),
+            collect_bounded_callable_values(ctx, init, found),
         HStmt::IfLet { expr, then_block, else_block, .. } => {
-            if hexpr_contains_bounded_callable_value(ctx, expr) ||
-               hexpr_contains_bounded_callable_value(ctx, then_block) {
-                return true
-            }
+            collect_bounded_callable_values(ctx, expr, found)
+            collect_bounded_callable_values(ctx, then_block, found)
             match else_block {
-                some(block) => hexpr_contains_bounded_callable_value(ctx, block),
-                none => false
+                some(block) =>
+                    collect_bounded_callable_values(ctx, block, found),
+                none => {}
             }
         },
-        HStmt::Break { .. } => false,
-        HStmt::Continue { .. } => false,
-        HStmt::Drop { .. } => false
+        HStmt::Break { .. } => {},
+        HStmt::Continue { .. } => {},
+        HStmt::Drop { .. } => {}
     }
 }
 
-fn hexpr_contains_bounded_callable_value(ctx: InferCtx, expr: HExpr) -> Bool {
+fn collect_bounded_callable_values(
+    ctx: InferCtx, expr: HExpr, mut found: List<HExpr>
+) {
     match expr {
-        HExpr::Ident { .. } => is_bounded_direct_callable_ident(ctx, expr),
-        HExpr::BinOp { left, right, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, left) ||
-            hexpr_contains_bounded_callable_value(ctx, right),
+        HExpr::Ident { .. } => {
+            if is_bounded_direct_callable_ident(ctx, expr) {
+                found.push(expr)
+            }
+        },
+        HExpr::BinOp { left, right, .. } => {
+            collect_bounded_callable_values(ctx, left, found)
+            collect_bounded_callable_values(ctx, right, found)
+        },
         HExpr::UnaryOp { operand, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, operand),
+            collect_bounded_callable_values(ctx, operand, found),
         HExpr::Call { callee, args, .. } => {
             // A bare Ident callee is a direct invocation, not a function value.
             match callee {
                 HExpr::Ident { .. } => {},
-                _ => {
-                    if hexpr_contains_bounded_callable_value(ctx, callee) {
-                        return true
-                    }
-                }
+                _ => collect_bounded_callable_values(ctx, callee, found)
             }
             for arg in args {
-                if hexpr_contains_bounded_callable_value(ctx, arg) { return true }
+                collect_bounded_callable_values(ctx, arg, found)
             }
-            false
         },
         HExpr::FieldAccess { receiver, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, receiver),
+            collect_bounded_callable_values(ctx, receiver, found),
         HExpr::StructLit { fields, spread, .. } => {
             for field in fields {
-                if hexpr_contains_bounded_callable_value(ctx, field.value) { return true }
+                collect_bounded_callable_values(ctx, field.value, found)
             }
             match spread {
-                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
-                none => false
+                some(value) =>
+                    collect_bounded_callable_values(ctx, value, found),
+                none => {}
             }
         },
         HExpr::NamedVariantConstruct { fields, spread, .. } => {
             for field in fields {
-                if hexpr_contains_bounded_callable_value(ctx, field.value) { return true }
+                collect_bounded_callable_values(ctx, field.value, found)
             }
             match spread {
-                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
-                none => false
+                some(value) =>
+                    collect_bounded_callable_values(ctx, value, found),
+                none => {}
             }
         },
         HExpr::MatchExpr { scrutinee, arms, .. } => {
-            if hexpr_contains_bounded_callable_value(ctx, scrutinee) { return true }
+            collect_bounded_callable_values(ctx, scrutinee, found)
             for arm in arms {
                 match arm.guard {
-                    some(guard) => {
-                        if hexpr_contains_bounded_callable_value(ctx, guard) { return true }
-                    },
+                    some(guard) =>
+                        collect_bounded_callable_values(ctx, guard, found),
                     none => {}
                 }
-                if hexpr_contains_bounded_callable_value(ctx, arm.body) { return true }
+                collect_bounded_callable_values(ctx, arm.body, found)
             }
-            false
         },
         HExpr::Block { stmts, tail, .. } => {
             for stmt in stmts {
-                if hstmt_contains_bounded_callable_value(ctx, stmt) { return true }
+                collect_bounded_callable_values_in_stmt(ctx, stmt, found)
             }
             match tail {
-                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
-                none => false
+                some(value) =>
+                    collect_bounded_callable_values(ctx, value, found),
+                none => {}
             }
         },
         HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
-            if hexpr_contains_bounded_callable_value(ctx, condition) ||
-               hexpr_contains_bounded_callable_value(ctx, then_branch) {
-                return true
-            }
+            collect_bounded_callable_values(ctx, condition, found)
+            collect_bounded_callable_values(ctx, then_branch, found)
             match else_branch {
-                some(value) => hexpr_contains_bounded_callable_value(ctx, value),
-                none => false
+                some(value) =>
+                    collect_bounded_callable_values(ctx, value, found),
+                none => {}
             }
         },
         HExpr::StringInterp { parts, .. } => {
             for part in parts {
                 match part {
-                    HStringInterpPart::Expression(value) => {
-                        if hexpr_contains_bounded_callable_value(ctx, value) { return true }
-                    },
+                    HStringInterpPart::Expression(value) =>
+                        collect_bounded_callable_values(ctx, value, found),
                     _ => {}
                 }
             }
-            false
         },
         HExpr::TryCatch { body, arms, .. } => {
-            if hexpr_contains_bounded_callable_value(ctx, body) { return true }
+            collect_bounded_callable_values(ctx, body, found)
             for arm in arms {
                 match arm.guard {
-                    some(guard) => {
-                        if hexpr_contains_bounded_callable_value(ctx, guard) { return true }
-                    },
+                    some(guard) =>
+                        collect_bounded_callable_values(ctx, guard, found),
                     none => {}
                 }
-                if hexpr_contains_bounded_callable_value(ctx, arm.body) { return true }
+                collect_bounded_callable_values(ctx, arm.body, found)
             }
-            false
         },
         HExpr::HandleExpr { body, handlers, .. } => {
-            if hexpr_contains_bounded_callable_value(ctx, body) { return true }
+            collect_bounded_callable_values(ctx, body, found)
             for handler in handlers {
-                if hexpr_contains_bounded_callable_value(ctx, handler.body) { return true }
+                collect_bounded_callable_values(ctx, handler.body, found)
             }
-            false
         },
         HExpr::Lambda { body, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, body),
+            collect_bounded_callable_values(ctx, body, found),
         HExpr::EffectOp { args, .. } => {
             for arg in args {
-                if hexpr_contains_bounded_callable_value(ctx, arg) { return true }
+                collect_bounded_callable_values(ctx, arg, found)
             }
-            false
         },
-        HExpr::RangeExpr { start, end, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, start) ||
-            hexpr_contains_bounded_callable_value(ctx, end),
+        HExpr::RangeExpr { start, end, .. } => {
+            collect_bounded_callable_values(ctx, start, found)
+            collect_bounded_callable_values(ctx, end, found)
+        },
         HExpr::ListLit { elements, .. } => {
             for element in elements {
-                if hexpr_contains_bounded_callable_value(ctx, element) { return true }
+                collect_bounded_callable_values(ctx, element, found)
             }
-            false
         },
         // Keep this separate from ListLit. LLVM OrPattern lowering does not
         // bind payload fields, so a shared arm leaks `elements` into codegen.
         HExpr::TupleLit { elements, .. } => {
             for element in elements {
-                if hexpr_contains_bounded_callable_value(ctx, element) { return true }
+                collect_bounded_callable_values(ctx, element, found)
             }
-            false
         },
-        HExpr::IndexExpr { receiver, index, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, receiver) ||
-            hexpr_contains_bounded_callable_value(ctx, index),
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_bounded_callable_values(ctx, receiver, found)
+            collect_bounded_callable_values(ctx, index, found)
+        },
         HExpr::Clone { inner, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, inner),
+            collect_bounded_callable_values(ctx, inner, found),
         HExpr::ReturnExpr { value, .. } => match value {
-            some(inner) => hexpr_contains_bounded_callable_value(ctx, inner),
-            none => false
+            some(inner) =>
+                collect_bounded_callable_values(ctx, inner, found),
+            none => {}
         },
         HExpr::UnsafeBlock { body, .. } =>
-            hexpr_contains_bounded_callable_value(ctx, body),
-        HExpr::IntLit { .. } => false,
-        HExpr::FloatLit { .. } => false,
-        HExpr::StrLit { .. } => false,
-        HExpr::BoolLit { .. } => false,
-        HExpr::DictConstruct { .. } => false
+            collect_bounded_callable_values(ctx, body, found),
+        HExpr::IntLit { .. } => {},
+        HExpr::FloatLit { .. } => {},
+        HExpr::StrLit { .. } => {},
+        HExpr::BoolLit { .. } => {},
+        HExpr::DictConstruct { .. } => {}
     }
+}
+
+fn hexpr_contains_bounded_callable_value(ctx: InferCtx, expr: HExpr) -> Bool {
+    let found: List<HExpr> = []
+    collect_bounded_callable_values(ctx, expr, found)
+    found.len() > 0
+}
+
+// Register each exact DefId/live-scheme callable value once for its owner.
+// The shadow shares the canonical evidence/assoc resolver with calls but never
+// attaches DictRefs; resolve_value_ident remains the final-zonk authority.
+fn register_bounded_callable_value_shadows_inner(
+    mut ctx: InferCtx, expr: HExpr, s: UnionFind, is_default: Bool
+) {
+    let found: List<HExpr> = []
+    collect_bounded_callable_values(ctx, expr, found)
+    for callable in found {
+        match resolve_callee_metadata(ctx, callable) {
+            some(metadata) => match metadata.kind {
+                ValueBindingKind::DirectCallable |
+                ValueBindingKind::ExternCallable => {
+                    if metadata.live_scheme.bounds.len() > 0 {
+                        register_callable_value_shadow(
+                            ctx, metadata.live_scheme,
+                            hexpr_type(callable), s,
+                            hexpr_span(callable), is_default)
+                    }
+                },
+                ValueBindingKind::ConstGetter |
+                ValueBindingKind::LocalBorrow => {
+                }
+            },
+            none => {}
+        }
+    }
+}
+
+pub fn register_bounded_callable_value_shadows(
+    ctx: InferCtx, expr: HExpr, s: UnionFind
+) {
+    register_bounded_callable_value_shadows_inner(ctx, expr, s, false)
+}
+
+pub fn register_default_bounded_callable_value_shadows(
+    ctx: InferCtx, expr: HExpr, s: UnionFind
+) {
+    register_bounded_callable_value_shadows_inner(ctx, expr, s, true)
 }
 
 // B-163 C': non-Range for-in is lowered while inference still owns the
@@ -1387,7 +1439,9 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
             let resolved_dicts: List<DictRef> = []
             resolve_or_defer_dicts_from_scheme(
                 ctx, callee_scheme, hexpr_type(callee), s, span,
-                some(resolved_dicts))
+                PendingDictPurpose::DirectCallPublish {
+                    output_slot: resolved_dicts
+                })
 
             let final_result_ty = apply_subst(s, result_ty)
             InferResult {
@@ -1615,7 +1669,9 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
                     resolve_or_defer_dicts_from_scheme(
                         ctx, metadata.live_scheme,
                         hexpr_type(callee_r.hexpr), s, span,
-                        some(resolved_dicts))
+                        PendingDictPurpose::DirectCallPublish {
+                            output_slot: resolved_dicts
+                        })
                 }
             },
             ValueBindingKind::ExternCallable => {
@@ -1624,7 +1680,8 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
                     // remains mandatory for static bound validation.
                     resolve_or_defer_dicts_from_scheme(
                         ctx, metadata.live_scheme,
-                        hexpr_type(callee_r.hexpr), s, span, none)
+                        hexpr_type(callee_r.hexpr), s, span,
+                        PendingDictPurpose::ExternCallValidate)
                 }
             },
             ValueBindingKind::ConstGetter | ValueBindingKind::LocalBorrow => {}
@@ -1964,7 +2021,10 @@ fn infer_method_call_from_receiver(
                 match method_type {
                     some(mt) => {
                         resolve_or_defer_dicts_from_scheme(
-                            ctx, ms, mt, s, span, some(resolved_dicts))
+                            ctx, ms, mt, s, span,
+                            PendingDictPurpose::DirectCallPublish {
+                                output_slot: resolved_dicts
+                            })
                     },
                     none => {}
                 }

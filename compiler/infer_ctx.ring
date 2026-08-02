@@ -54,12 +54,19 @@ pub struct AssocRebindEntry {
 // instantiation variables owned by the declaration's UnionFind, while the
 // optional output list is the same alias stored in HExpr::Call.  No pending
 // obligation crosses a declaration-owner boundary.
+pub enum PendingDictPurpose {
+    DirectCallPublish { output_slot: List<DictRef> },
+    ExternCallValidate,
+    CallableValueShadow,
+    DefaultCallableValueShadow
+}
+
 pub struct PendingDictObligation {
     pub scheme: TypeScheme,
     pub callee_type: Type,
     pub fn_bounds: List<FnBoundsEntry>,
     pub span: Span,
-    pub output_slot: List<DictRef>?
+    pub purpose: PendingDictPurpose
 }
 
 struct EvidenceFailure {
@@ -80,6 +87,12 @@ enum DictEvidenceResolution {
     Resolved { dict_ref: DictRef },
     Pending,
     Missing { suppress_diagnostic: Bool }
+}
+
+enum DefaultEvidenceSettlement {
+    Valid,
+    Invalid,
+    Pending
 }
 
 // ============================================================
@@ -1366,7 +1379,8 @@ pub fn resolve_dict_ref_for_type(
 fn resolve_scheme_evidence(
     sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
-    scheme: TypeScheme, callee_type: Type, s: UnionFind, span: Span
+    scheme: TypeScheme, callee_type: Type, s: UnionFind, span: Span,
+    report_assoc_mismatch: Bool
 ) -> SchemeEvidenceResolution {
     if scheme.bounds.len() == 0 {
         return SchemeEvidenceResolution::Resolved { dicts: [] }
@@ -1389,13 +1403,16 @@ fn resolve_scheme_evidence(
                         match concrete {
                             Type::StructType { name, .. } =>
                                 check_assoc_constraints(
-                                    sink, env, bound, name, var_map, s, span),
+                                    sink, env, bound, name, var_map, s, span,
+                                    report_assoc_mismatch),
                             Type::EnumType { name, .. } =>
                                 check_assoc_constraints(
-                                    sink, env, bound, name, var_map, s, span),
+                                    sink, env, bound, name, var_map, s, span,
+                                    report_assoc_mismatch),
                             _ => match type_to_builtin_name(concrete) {
                                 some(name) => check_assoc_constraints(
-                                    sink, env, bound, name, var_map, s, span),
+                                    sink, env, bound, name, var_map, s, span,
+                                    report_assoc_mismatch),
                                 none => {}
                             }
                         }
@@ -1442,16 +1459,40 @@ fn report_evidence_failures(
     }
 }
 
-fn fill_dict_output(output_slot: List<DictRef>?, dicts: List<DictRef>) {
-    match output_slot {
-        some(output) => {
+fn purpose_reports_assoc_mismatch(purpose: PendingDictPurpose) -> Bool {
+    match purpose {
+        PendingDictPurpose::DirectCallPublish { .. } => true,
+        PendingDictPurpose::ExternCallValidate => true,
+        PendingDictPurpose::CallableValueShadow => false,
+        PendingDictPurpose::DefaultCallableValueShadow => false
+    }
+}
+
+fn purpose_reports_drain_failure(purpose: PendingDictPurpose) -> Bool {
+    match purpose {
+        PendingDictPurpose::DirectCallPublish { .. } => true,
+        PendingDictPurpose::ExternCallValidate => true,
+        PendingDictPurpose::CallableValueShadow => false,
+        // Default shadows are normally consumed by their nested settlement
+        // boundary.  Fail closed if one ever reaches the outer owner drain.
+        PendingDictPurpose::DefaultCallableValueShadow => true
+    }
+}
+
+fn publish_resolved_dicts(
+    purpose: PendingDictPurpose, dicts: List<DictRef>
+) {
+    match purpose {
+        PendingDictPurpose::DirectCallPublish { output_slot: output } => {
             if output.len() != 0 {
                 panic("unreachable: pending dictionary output was filled twice")
             }
             // Publish only after the whole scheme resolved, never a prefix.
             for dict_ref in dicts { output.push(dict_ref) }
         },
-        none => {}
+        PendingDictPurpose::ExternCallValidate => {},
+        PendingDictPurpose::CallableValueShadow => {},
+        PendingDictPurpose::DefaultCallableValueShadow => {}
     }
 }
 
@@ -1461,7 +1502,7 @@ pub fn resolve_dicts_from_scheme(
     scheme: TypeScheme, callee_type: Type, s: UnionFind, span: Span
 ) -> List<DictRef> {
     match resolve_scheme_evidence(
-        sink, env, current_fn_bounds, scheme, callee_type, s, span
+        sink, env, current_fn_bounds, scheme, callee_type, s, span, true
     ) {
         SchemeEvidenceResolution::Resolved { dicts } => dicts,
         SchemeEvidenceResolution::Pending { failures } => {
@@ -1480,25 +1521,62 @@ pub fn resolve_dicts_from_scheme(
 // bounds resolve atomically.
 pub fn resolve_or_defer_dicts_from_scheme(
     mut ctx: InferCtx, scheme: TypeScheme, callee_type: Type,
-    s: UnionFind, span: Span, output_slot: List<DictRef>?
+    s: UnionFind, span: Span, purpose: PendingDictPurpose
 ) {
     if scheme.bounds.len() == 0 { return }
     match resolve_scheme_evidence(
         ctx.sink, ctx.env, ctx.current_fn_bounds,
-        scheme, callee_type, s, span
+        scheme, callee_type, s, span,
+        purpose_reports_assoc_mismatch(purpose)
     ) {
         SchemeEvidenceResolution::Resolved { dicts } =>
-            fill_dict_output(output_slot, dicts),
+            publish_resolved_dicts(purpose, dicts),
         SchemeEvidenceResolution::Pending { .. } =>
             ctx.pending_dict_obligations.push(PendingDictObligation {
                 scheme: scheme,
                 callee_type: callee_type,
                 fn_bounds: list_clone(ctx.current_fn_bounds),
                 span: span,
-                output_slot: output_slot
+                purpose: purpose
             }),
         SchemeEvidenceResolution::Missing { failures } =>
             report_evidence_failures(ctx.sink, failures, span)
+    }
+}
+
+// Callable values keep final DictRef attachment in resolve_value_ident.  This
+// shadow participates only in the owner's canonical evidence/associated-type
+// fixed point, so ordinary shadow failures stay silent until final zonk.
+pub fn register_callable_value_shadow(
+    mut ctx: InferCtx, scheme: TypeScheme, callee_type: Type,
+    s: UnionFind, span: Span, is_default: Bool
+) {
+    if scheme.bounds.len() == 0 { return }
+    if is_default {
+        ctx.pending_dict_obligations.push(PendingDictObligation {
+            scheme: scheme,
+            callee_type: callee_type,
+            fn_bounds: [],
+            span: span,
+            purpose: PendingDictPurpose::DefaultCallableValueShadow
+        })
+        return
+    }
+
+    match resolve_scheme_evidence(
+        ctx.sink, ctx.env, ctx.current_fn_bounds,
+        scheme, callee_type, s, span, false
+    ) {
+        SchemeEvidenceResolution::Resolved { .. } => {},
+        SchemeEvidenceResolution::Pending { .. } =>
+            ctx.pending_dict_obligations.push(PendingDictObligation {
+                scheme: scheme,
+                callee_type: callee_type,
+                fn_bounds: list_clone(ctx.current_fn_bounds),
+                span: span,
+                purpose: PendingDictPurpose::CallableValueShadow
+            }),
+        SchemeEvidenceResolution::Missing { .. } => {}
     }
 }
 
@@ -1510,17 +1588,44 @@ pub fn has_pending_dicts_since(ctx: InferCtx, checkpoint: Int) -> Bool {
     ctx.pending_dict_obligations.len() > checkpoint
 }
 
+// Checker-private owner invariant.  Call it before any successful owner exit
+// and after rollback so a leaked suffix cannot become the next owner's
+// invisible prefix.
+pub fn assert_pending_dict_owner_closed(ctx: InferCtx, checkpoint: Int) {
+    if ctx.pending_dict_obligations.len() != checkpoint {
+        panic("unreachable: declaration owner leaked pending dictionary obligations")
+    }
+}
+
 pub fn rollback_pending_dicts(mut ctx: InferCtx, checkpoint: Int) {
     if checkpoint > ctx.pending_dict_obligations.len() {
         panic("unreachable: invalid pending dictionary checkpoint")
     }
     ctx.pending_dict_obligations =
         ctx.pending_dict_obligations.slice(0, checkpoint)
+    assert_pending_dict_owner_closed(ctx, checkpoint)
 }
 
-// Drain exactly one declaration owner's suffix.  A pass can resolve an
-// obligation whose associated constraint unlocks an earlier obligation, so
-// retry at most owner-size + 1 passes before diagnosing true ambiguity.
+// Every successful unlock is monotonic and is attributable to at least one
+// scheme-bound or associated-constraint evidence site.  Their total count is
+// therefore a finite saturation bound; obligation count alone is unsafe when
+// one scheme contains a long reverse-ordered associated-type chain.
+fn pending_evidence_attempt_budget(
+    obligations: List<PendingDictObligation>
+) -> Int {
+    let mut evidence_sites = 0
+    for obligation in obligations {
+        for bound in obligation.scheme.bounds {
+            evidence_sites = evidence_sites + 1
+            evidence_sites = evidence_sites + bound.assoc_constraints.len()
+        }
+    }
+    if evidence_sites == 0 { 1 } else { evidence_sites + 1 }
+}
+
+// Drain exactly one declaration owner's suffix to the finite evidence-site
+// fixed point before diagnosing call/extern failures.  Callable-value shadows
+// stay silent here; final zonk remains their diagnostic and attachment owner.
 pub fn drain_pending_dicts(
     mut ctx: InferCtx, checkpoint: Int, s: UnionFind
 ) {
@@ -1532,7 +1637,7 @@ pub fn drain_pending_dicts(
     ctx.pending_dict_obligations =
         ctx.pending_dict_obligations.slice(0, checkpoint)
 
-    let max_attempts = remaining.len() + 1
+    let max_attempts = pending_evidence_attempt_budget(remaining)
     let mut attempt = 0
     while remaining.len() > 0 && attempt < max_attempts {
         let mut next: List<PendingDictObligation> = []
@@ -1540,13 +1645,17 @@ pub fn drain_pending_dicts(
             match resolve_scheme_evidence(
                 ctx.sink, ctx.env, obligation.fn_bounds,
                 obligation.scheme, obligation.callee_type, s,
-                obligation.span
+                obligation.span,
+                purpose_reports_assoc_mismatch(obligation.purpose)
             ) {
                 SchemeEvidenceResolution::Resolved { dicts } =>
-                    fill_dict_output(obligation.output_slot, dicts),
-                SchemeEvidenceResolution::Missing { failures } =>
-                    report_evidence_failures(
-                        ctx.sink, failures, obligation.span),
+                    publish_resolved_dicts(obligation.purpose, dicts),
+                SchemeEvidenceResolution::Missing { failures } => {
+                    if purpose_reports_drain_failure(obligation.purpose) {
+                        report_evidence_failures(
+                            ctx.sink, failures, obligation.span)
+                    }
+                },
                 SchemeEvidenceResolution::Pending { .. } =>
                     next.push(obligation)
             }
@@ -1561,16 +1670,23 @@ pub fn drain_pending_dicts(
         match resolve_scheme_evidence(
             ctx.sink, ctx.env, obligation.fn_bounds,
             obligation.scheme, obligation.callee_type, s,
-            obligation.span
+            obligation.span,
+            purpose_reports_assoc_mismatch(obligation.purpose)
         ) {
             SchemeEvidenceResolution::Resolved { dicts } =>
-                fill_dict_output(obligation.output_slot, dicts),
-            SchemeEvidenceResolution::Missing { failures } =>
-                report_evidence_failures(
-                    ctx.sink, failures, obligation.span),
-            SchemeEvidenceResolution::Pending { failures } =>
-                report_evidence_failures(
-                    ctx.sink, failures, obligation.span)
+                publish_resolved_dicts(obligation.purpose, dicts),
+            SchemeEvidenceResolution::Missing { failures } => {
+                if purpose_reports_drain_failure(obligation.purpose) {
+                    report_evidence_failures(
+                        ctx.sink, failures, obligation.span)
+                }
+            },
+            SchemeEvidenceResolution::Pending { failures } => {
+                if purpose_reports_drain_failure(obligation.purpose) {
+                    report_evidence_failures(
+                        ctx.sink, failures, obligation.span)
+                }
+            }
         }
     }
 }
@@ -1591,11 +1707,12 @@ fn dict_ref_is_dynamic(dict_ref: DictRef) -> Bool {
 fn settle_default_obligation(
     mut ctx: InferCtx, obligation: PendingDictObligation,
     s: UnionFind
-) -> Bool {
+) -> DefaultEvidenceSettlement {
     match resolve_scheme_evidence(
         ctx.sink, ctx.env, obligation.fn_bounds,
         obligation.scheme, obligation.callee_type, s,
-        obligation.span
+        obligation.span,
+        purpose_reports_assoc_mismatch(obligation.purpose)
     ) {
         SchemeEvidenceResolution::Resolved { dicts } => {
             let mut has_dynamic = false
@@ -1620,15 +1737,18 @@ fn settle_default_obligation(
                 i = i + 1
             }
             if !has_dynamic {
-                fill_dict_output(obligation.output_slot, dicts)
+                publish_resolved_dicts(obligation.purpose, dicts)
+                DefaultEvidenceSettlement::Valid
+            } else {
+                DefaultEvidenceSettlement::Invalid
             }
-            true
         },
         SchemeEvidenceResolution::Missing { failures } => {
             report_evidence_failures(ctx.sink, failures, obligation.span)
-            true
+            DefaultEvidenceSettlement::Invalid
         },
-        SchemeEvidenceResolution::Pending { .. } => false
+        SchemeEvidenceResolution::Pending { .. } =>
+            DefaultEvidenceSettlement::Pending
     }
 }
 
@@ -1653,7 +1773,7 @@ fn report_default_pending_failures(
 // of publishing a shared mutable output slot into that metadata.
 pub fn settle_default_pending_dicts(
     mut ctx: InferCtx, checkpoint: Int, s: UnionFind
-) {
+) -> Bool {
     if checkpoint > ctx.pending_dict_obligations.len() {
         panic("unreachable: invalid pending dictionary checkpoint")
     }
@@ -1661,13 +1781,16 @@ pub fn settle_default_pending_dicts(
         checkpoint, ctx.pending_dict_obligations.len())
     ctx.pending_dict_obligations =
         ctx.pending_dict_obligations.slice(0, checkpoint)
-    let max_attempts = remaining.len() + 1
+    let max_attempts = pending_evidence_attempt_budget(remaining)
     let mut attempt = 0
+    let mut valid = true
     while remaining.len() > 0 && attempt < max_attempts {
         let mut next: List<PendingDictObligation> = []
         for obligation in remaining {
-            if !settle_default_obligation(ctx, obligation, s) {
-                next.push(obligation)
+            match settle_default_obligation(ctx, obligation, s) {
+                DefaultEvidenceSettlement::Valid => {},
+                DefaultEvidenceSettlement::Invalid => { valid = false },
+                DefaultEvidenceSettlement::Pending => next.push(obligation)
             }
         }
         remaining = next
@@ -1677,21 +1800,33 @@ pub fn settle_default_pending_dicts(
         match resolve_scheme_evidence(
             ctx.sink, ctx.env, obligation.fn_bounds,
             obligation.scheme, obligation.callee_type, s,
-            obligation.span
+            obligation.span,
+            purpose_reports_assoc_mismatch(obligation.purpose)
         ) {
             SchemeEvidenceResolution::Resolved { .. } => {
                 // This can only happen if the last pass's associated
                 // constraints unlocked the obligation.
-                let _ = settle_default_obligation(ctx, obligation, s)
+                match settle_default_obligation(ctx, obligation, s) {
+                    DefaultEvidenceSettlement::Valid => {},
+                    DefaultEvidenceSettlement::Invalid => { valid = false },
+                    DefaultEvidenceSettlement::Pending => {
+                        panic("unreachable: resolved default became pending")
+                    }
+                }
             },
-            SchemeEvidenceResolution::Missing { failures } =>
+            SchemeEvidenceResolution::Missing { failures } => {
                 report_evidence_failures(
-                    ctx.sink, failures, obligation.span),
-            SchemeEvidenceResolution::Pending { failures } =>
+                    ctx.sink, failures, obligation.span)
+                valid = false
+            },
+            SchemeEvidenceResolution::Pending { failures } => {
                 report_default_pending_failures(
                     ctx.sink, failures, obligation.span)
+                valid = false
+            }
         }
     }
+    valid
 }
 
 // Check associated type constraints on a bound against an impl entry's actual
@@ -1700,7 +1835,8 @@ pub fn settle_default_pending_dicts(
 fn check_assoc_constraints(
     sink: CollectingSink, env: TypeEnv,
     bound: SchemeBound, target_type_name: Str,
-    var_map: Map<Int, Type>, s: UnionFind, span: Span
+    var_map: Map<Int, Type>, s: UnionFind, span: Span,
+    report_mismatch: Bool
 ) {
     if bound.assoc_constraints.len() == 0 { return }
     let impl_entry = find_impl(env.trait_reg, target_type_name, bound.trait_name)
@@ -1727,7 +1863,8 @@ fn check_assoc_constraints(
                                 let _ = unify(expected_ty, actual_resolved, s, env) catch { _ => s }
                             },
                             _ => {
-                                if !types_equal(expected_ty, actual_resolved) {
+                                if report_mismatch &&
+                                   !types_equal(expected_ty, actual_resolved) {
                                     let _ = type_error(sink, E0513,
                                         "Associated type '${ac.name}' mismatch: expected '${type_to_string(expected_ty)}' but impl provides '${type_to_string(actual_resolved)}'",
                                         span, DiagnosticContext::TraitError { detail: "associated type constraint mismatch" })
