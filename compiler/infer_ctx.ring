@@ -78,7 +78,7 @@ struct EvidenceFailure {
 // remains immediate and fail-closed for registration, forwarding, protocol
 // prechecks, and final-zonk callable values.
 enum SchemeEvidenceResolution {
-    Resolved { dicts: List<DictRef> },
+    Resolved { dicts: List<DictRef>, assoc_mismatch: Bool },
     Pending { failures: List<EvidenceFailure> },
     Missing { failures: List<EvidenceFailure> }
 }
@@ -1383,12 +1383,15 @@ fn resolve_scheme_evidence(
     report_assoc_mismatch: Bool
 ) -> SchemeEvidenceResolution {
     if scheme.bounds.len() == 0 {
-        return SchemeEvidenceResolution::Resolved { dicts: [] }
+        return SchemeEvidenceResolution::Resolved {
+            dicts: [], assoc_mismatch: false
+        }
     }
     let var_map = build_scheme_var_map(scheme, callee_type)
     let mut resolved_dicts: List<DictRef> = []
     let mut pending_failures: List<EvidenceFailure> = []
     let mut missing_failures: List<EvidenceFailure> = []
+    let mut assoc_mismatch = false
     for bound in scheme.bounds {
         match var_map.get(bound.type_var) {
             some(fresh_var) => {
@@ -1400,7 +1403,7 @@ fn resolve_scheme_evidence(
                         resolved_dicts.push(dict_ref)
                         // Associated constraints remain immediate: a later
                         // obligation can unlock an earlier pending owner.
-                        match concrete {
+                        let assoc_valid = match concrete {
                             Type::StructType { name, .. } =>
                                 check_assoc_constraints(
                                     sink, env, bound, name, var_map, s, span,
@@ -1413,9 +1416,10 @@ fn resolve_scheme_evidence(
                                 some(name) => check_assoc_constraints(
                                     sink, env, bound, name, var_map, s, span,
                                     report_assoc_mismatch),
-                                none => {}
+                                none => true
                             }
                         }
+                        if !assoc_valid { assoc_mismatch = true }
                     },
                     DictEvidenceResolution::Pending =>
                         pending_failures.push(EvidenceFailure {
@@ -1440,7 +1444,10 @@ fn resolve_scheme_evidence(
     } else if pending_failures.len() > 0 {
         SchemeEvidenceResolution::Pending { failures: pending_failures }
     } else {
-        SchemeEvidenceResolution::Resolved { dicts: resolved_dicts }
+        SchemeEvidenceResolution::Resolved {
+            dicts: resolved_dicts,
+            assoc_mismatch: assoc_mismatch
+        }
     }
 }
 
@@ -1464,7 +1471,10 @@ fn purpose_reports_assoc_mismatch(purpose: PendingDictPurpose) -> Bool {
         PendingDictPurpose::DirectCallPublish { .. } => true,
         PendingDictPurpose::ExternCallValidate => true,
         PendingDictPurpose::CallableValueShadow => false,
-        PendingDictPurpose::DefaultCallableValueShadow => false
+        // A default is shared definition metadata.  Its nested settlement is
+        // the sole definition-time owner, so it must report concrete assoc
+        // mismatches even when no caller ever omits the argument.
+        PendingDictPurpose::DefaultCallableValueShadow => true
     }
 }
 
@@ -1504,7 +1514,7 @@ pub fn resolve_dicts_from_scheme(
     match resolve_scheme_evidence(
         sink, env, current_fn_bounds, scheme, callee_type, s, span, true
     ) {
-        SchemeEvidenceResolution::Resolved { dicts } => dicts,
+        SchemeEvidenceResolution::Resolved { dicts, .. } => dicts,
         SchemeEvidenceResolution::Pending { failures } => {
             report_evidence_failures(sink, failures, span)
             []
@@ -1529,7 +1539,7 @@ pub fn resolve_or_defer_dicts_from_scheme(
         scheme, callee_type, s, span,
         purpose_reports_assoc_mismatch(purpose)
     ) {
-        SchemeEvidenceResolution::Resolved { dicts } =>
+        SchemeEvidenceResolution::Resolved { dicts, .. } =>
             publish_resolved_dicts(purpose, dicts),
         SchemeEvidenceResolution::Pending { .. } =>
             ctx.pending_dict_obligations.push(PendingDictObligation {
@@ -1648,7 +1658,7 @@ pub fn drain_pending_dicts(
                 obligation.span,
                 purpose_reports_assoc_mismatch(obligation.purpose)
             ) {
-                SchemeEvidenceResolution::Resolved { dicts } =>
+                SchemeEvidenceResolution::Resolved { dicts, .. } =>
                     publish_resolved_dicts(obligation.purpose, dicts),
                 SchemeEvidenceResolution::Missing { failures } => {
                     if purpose_reports_drain_failure(obligation.purpose) {
@@ -1673,7 +1683,7 @@ pub fn drain_pending_dicts(
             obligation.span,
             purpose_reports_assoc_mismatch(obligation.purpose)
         ) {
-            SchemeEvidenceResolution::Resolved { dicts } =>
+            SchemeEvidenceResolution::Resolved { dicts, .. } =>
                 publish_resolved_dicts(obligation.purpose, dicts),
             SchemeEvidenceResolution::Missing { failures } => {
                 if purpose_reports_drain_failure(obligation.purpose) {
@@ -1714,7 +1724,10 @@ fn settle_default_obligation(
         obligation.span,
         purpose_reports_assoc_mismatch(obligation.purpose)
     ) {
-        SchemeEvidenceResolution::Resolved { dicts } => {
+        SchemeEvidenceResolution::Resolved { dicts, assoc_mismatch } => {
+            if assoc_mismatch {
+                return DefaultEvidenceSettlement::Invalid
+            }
             let mut has_dynamic = false
             let mut i = 0
             for dict_ref in dicts {
@@ -1803,14 +1816,20 @@ pub fn settle_default_pending_dicts(
             obligation.span,
             purpose_reports_assoc_mismatch(obligation.purpose)
         ) {
-            SchemeEvidenceResolution::Resolved { .. } => {
+            SchemeEvidenceResolution::Resolved { assoc_mismatch, .. } => {
                 // This can only happen if the last pass's associated
                 // constraints unlocked the obligation.
-                match settle_default_obligation(ctx, obligation, s) {
-                    DefaultEvidenceSettlement::Valid => {},
-                    DefaultEvidenceSettlement::Invalid => { valid = false },
-                    DefaultEvidenceSettlement::Pending => {
-                        panic("unreachable: resolved default became pending")
+                if assoc_mismatch {
+                    // resolve_scheme_evidence has already emitted the single
+                    // authoritative E0513 for this definition owner.
+                    valid = false
+                } else {
+                    match settle_default_obligation(ctx, obligation, s) {
+                        DefaultEvidenceSettlement::Valid => {},
+                        DefaultEvidenceSettlement::Invalid => { valid = false },
+                        DefaultEvidenceSettlement::Pending => {
+                            panic("unreachable: resolved default became pending")
+                        }
                     }
                 }
             },
@@ -1837,8 +1856,9 @@ fn check_assoc_constraints(
     bound: SchemeBound, target_type_name: Str,
     var_map: Map<Int, Type>, s: UnionFind, span: Span,
     report_mismatch: Bool
-) {
-    if bound.assoc_constraints.len() == 0 { return }
+) -> Bool {
+    if bound.assoc_constraints.len() == 0 { return true }
+    let mut valid = true
     let impl_entry = find_impl(env.trait_reg, target_type_name, bound.trait_name)
     match impl_entry {
         some(entry) => {
@@ -1863,11 +1883,13 @@ fn check_assoc_constraints(
                                 let _ = unify(expected_ty, actual_resolved, s, env) catch { _ => s }
                             },
                             _ => {
-                                if report_mismatch &&
-                                   !types_equal(expected_ty, actual_resolved) {
-                                    let _ = type_error(sink, E0513,
-                                        "Associated type '${ac.name}' mismatch: expected '${type_to_string(expected_ty)}' but impl provides '${type_to_string(actual_resolved)}'",
-                                        span, DiagnosticContext::TraitError { detail: "associated type constraint mismatch" })
+                                if !types_equal(expected_ty, actual_resolved) {
+                                    valid = false
+                                    if report_mismatch {
+                                        let _ = type_error(sink, E0513,
+                                            "Associated type '${ac.name}' mismatch: expected '${type_to_string(expected_ty)}' but impl provides '${type_to_string(actual_resolved)}'",
+                                            span, DiagnosticContext::TraitError { detail: "associated type constraint mismatch" })
+                                    }
                                 }
                             },
                         }
@@ -1876,8 +1898,9 @@ fn check_assoc_constraints(
                 }
             }
         },
-        none => {}
+        none => { valid = false }
     }
+    valid
 }
 
 // ============================================================

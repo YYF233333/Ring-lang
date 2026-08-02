@@ -1377,14 +1377,17 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         if m.has_default {
             match ast_method {
                 some(am) => match am {
-                    Decl::Fn { body: abody, .. } => {
+                    Decl::Fn { body: abody, span: method_span, .. } => {
                         let has_body = match abody {
                             Expr::Block { stmts, tail, .. } => stmts.len() > 0 || tail.is_some(),
                             _ => true
                         }
                         if has_body {
+                            let method_identity = "${name}::${m.name}"
                             method_body = check_trait_default_body(
-                                ctx, name, self_var, hparams, fn_ret, abody)
+                                ctx, name, method_identity,
+                                self_var, hparams, fn_ret, fn_effects,
+                                method_span, abody)
                         }
                     },
                     _ => {}
@@ -1406,8 +1409,9 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
 }
 
 fn check_trait_default_body(
-    mut ctx: InferCtx, trait_name: Str, self_var: Type,
-    hparams: List<HParam>, method_return: Type, body: Expr
+    mut ctx: InferCtx, trait_name: Str, method_identity: Str,
+    self_var: Type, hparams: List<HParam>, method_return: Type,
+    method_effects: EffectRow, method_span: Span, body: Expr
 ) -> HExpr? {
     let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let saved_subst = ctx.subst
@@ -1502,6 +1506,14 @@ fn check_trait_default_body(
                     }
                 }
             }
+            // Trait defaults own the same declared-effect constraint surface
+            // as ordinary functions.  Payloads can be the only source for a
+            // pending call's hidden type parameter, so thread the resulting
+            // substitution before callable shadows and owner drain.
+            let (_, constrained_subst) = constrain_declared_fn_effects(
+                ctx, method_identity, br.effects, method_effects,
+                method_span, ctx.subst)
+            ctx.subst = constrained_subst
             register_bounded_callable_value_shadows(
                 ctx, br.hexpr, ctx.subst)
             drain_pending_dicts(ctx, obligation_checkpoint, ctx.subst)
