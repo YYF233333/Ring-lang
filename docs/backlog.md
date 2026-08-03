@@ -14,7 +14,7 @@
 处理顺序按六道门组织：
 
 1. **C-only 收官**：B-163 只剩治理/用户文档、clean-clone 门禁、远端 CI 与 worktree 清理；代码迁移、`llvm-c-backend-final` tag、`dist-c` 固定点、LLVM/旧 anchor 删除已经完成。同步复测 #261：若 C-only 编译器不再出现 AV，以重复门证据关闭；若仍出现，立即升级为发布阻断。
-2. **Critical 正确性底线**：先修当前 critical audit #260、#255、#256；#261 若在 C-only 重现则立即并入本门，执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受安全源码崩溃、静默资源泄漏或降低既有保证。
+2. **Critical 正确性底线**：先修当前 critical audit #260、#255、#256、#268；#261 若在 C-only 重现则立即并入本门，执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受安全源码崩溃、静默资源泄漏或降低既有保证。
 3. **工具链反馈吞吐 P0**：2026-08-03 用户明确将“critical 清零后的第一优先级”改为 check/验证速度。B-176 可在 critical 修复期间提前采集不改变行为的基线；critical 清零后立即执行 B-176 → B-180，先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作。性能专项不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
 4. **其余正确性与语义/ABI 冻结**：随后处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257；再走 B-168 → B-169 → B-167 → B-152 → B-002 的 release critical path。B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。
 5. **发布产品面**：B-174 → B-175 得到可安装、可 `run/build/check/doctor` 的 Windows/Linux 候选包；B-181 建立生成程序的 runtime/内存/尺寸预算。随后 B-178 → B-016 补 formatter/LSP，B-177 → B-111 补版本化 agent contract 与可复现实验。
@@ -456,7 +456,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 ### B-180 `check` / runner 吞吐 2× 专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-168+B-174]
 
-**进入门**：#260、#255、#256 已关闭；#261 若在 C-only 重现以及执行期间新增的 critical 也必须先关闭。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
+**进入门**：#260、#255、#256、#268 已关闭；#261 若在 C-only 重现以及执行期间新增的 critical 也必须先关闭。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
 
 **实现范围 / 顺序**：
 

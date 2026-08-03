@@ -126,6 +126,16 @@ checker 对 enum 的 `impl Drop` 照常收进 `drop_types`（E0801 move 语义�
 
 发现者：step 7 worker（feedback 分诊）
 
+### #268 复合类型未传播 Drop-ness，默认安全路径可 double-drop 并损坏堆 [critical] [judgment] [open]
+
+`is_user_drop_type` 只判断名义 struct/enum 自身是否直接存在于 `drop_types`，不会把字段/variant payload 或泛型实参中的 `Drop` 语义传给外层类型。因而 `Wrapper { value: Resource }`、`Holder::Wrapped(Resource)` 等本应自动 derive Drop、保持 move-only 的复合值仍会被 Perceus Clone，并且默认 `check/build` 接受同一绑定被重复传入消费位。
+
+2026-08-03 C-only 最小 probe 同时覆盖 struct 与 enum wrapper：普通 `check`、`build` 均成功；同一 wrapper 各消费两次后程序先多次访问资源，scope end 输出异常的第三次空资源 drop，最终以 `0xC0000374`（heap corruption）退出。显式 `--verify-rc` 能报 `rc-verify[uaf-double-drop]`，但 verifier 不是默认安全门，不能替代 checker 的 move 约束。该结果把原先的“复合 Drop 语义漂移”升级为安全源码可达的内存破坏。
+
+**修复方向**：建立一个由 checker/HIR 持有、对递归类型图有界并对泛型实参敏感的 transitive Drop predicate，让 move checker、Perceus 与 verify_rc 共用同一真值；struct/enum/tuple/Option/Result/List 等所有可持有 Drop 值的复合形态都必须传播 move-only，不能只给本次 probe 的两个叶名打补丁。回归至少覆盖直接/嵌套/泛型复合、递归类型、消费后再使用的稳定诊断、正常单次析构顺序、C/RC/ASan 与 self-host fixed point。
+
+发现者：#255/#256 独立核验后 Repository Steward 对抗 probe
+
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]
 
 用户自定义 `enum Result` + `impl Result { and_then }` 与 prelude `std/result.ring` 的同名方法都 mangle 成 `ring_Result_and_then`——共享 codegen identity 未区分用户类型与被遮蔽的 prelude 类型。当前 C `CCtx.emitted_fns` 采用 first-wins 缓解，函数 body/prototype 与 evidence metadata 仍可能来自不同声明；重名双方 effect row 不同时会形成原型/实参不一致。用户 `fn drop_Foo()` 也会与 struct Foo 的生成 drop symbol 碰撞，当前表现为 clang redefinition 硬错误。
