@@ -6,7 +6,7 @@
 // This previously had a documented workaround ("use a Cell / a for loop"); the
 // behavior is in fact correct, so this file
 // pins it down. (The LLVM mut-cell write-through is locked separately in
-// tests/cases/llvm/hof_closure_mut_capture.ring.)
+// tests/cases/golden/hof_closure_mut_capture.ring.)
 
 fn main() {
     // --- inline lambda passed to .map(): accumulate a captured let mut ---

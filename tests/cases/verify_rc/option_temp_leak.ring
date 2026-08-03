@@ -4,7 +4,7 @@
 // 0 errors); under the TEST-ONLY --rc-mutate=skip-anf degradation the
 // temporaries lose their bindings and the verifier must report fatal
 // leak-temp at these positions — proving an ANF-coverage regression is caught
-// statically (at `npm test` time) instead of as a native memory wall.
+// statically (in the Python RC suite) instead of as a native memory wall.
 
 fn classify(s: Str) -> Str {
     let mut kind = "none"

@@ -31,7 +31,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -49,6 +49,61 @@ DIST_C_DIR = REPO / "compiler" / "dist-c"
 DIST_C_MAIN = DIST_C_DIR / "main.c"
 PARITY_MATRIX = REPO / "tests" / "parity_matrix.json"
 STRUCTURAL_DIR = CASES_DIR / "structural"
+NATIVE_REAL_PROGRAM = REPO / "tests" / "native" / "real_program.ring"
+NATIVE_REAL_PROGRAM_EXPECTED = NATIVE_REAL_PROGRAM.with_suffix(".expected")
+
+# CLI-observable contracts that used to live in the retired in-process Node
+# harness.  Keeping them explicit prevents companion discovery from silently
+# dropping parser-recovery and rich-diagnostic coverage.
+RECOVERY_CASES = (
+    "error_recovery_match.ring",
+    "error_recovery_handle.ring",
+    "error_recovery_if.ring",
+)
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+RC_FINDING_RE = re.compile(
+    r"^(.+):(\d+):(\d+)\s+rc-verify\[([^\]]+)\]\s+(.+)$",
+    re.MULTILINE,
+)
+RC_SUMMARY_RE = re.compile(
+    r"^RC verify:\s*(\d+) errors?,\s*(\d+) exempt \(documented\) findings$",
+    re.MULTILINE,
+)
+RC_EXEMPT_RE = re.compile(r"^rc-verify exempt classes:\s*(.*)$", re.MULTILINE)
+RC_BOUNDARY_MARKER = "HIR-level proof. Codegen-level drops are outside this check"
+
+
+@dataclass(frozen=True)
+class RcFindingLine:
+    file: str
+    line: int
+    column: int
+    category: str
+    message: str
+
+
+@dataclass(frozen=True)
+class RcReport:
+    fatal: int
+    exempt: int
+    exempt_counts: Dict[str, int]
+    findings: Tuple[RcFindingLine, ...]
+
+
+@dataclass(frozen=True)
+class RcInvocationContract:
+    name: str
+    fixture: str
+    args: Tuple[str, ...]
+    exit_zero: bool
+    strict: bool = False
+    fatal_exact: Optional[int] = None
+    fatal_min: int = 0
+    exempt_min: int = 0
+    exempt_counts: Tuple[Tuple[str, int], ...] = ()
+    finding_counts: Tuple[Tuple[str, int], ...] = ()
+    finding_lines: Tuple[Tuple[str, Tuple[int, ...]], ...] = ()
 
 # Generated-C evidence owned by the structural suite.  This map is also the
 # parity contract: every fixture below must exist, every structural .ring file
@@ -509,6 +564,403 @@ def discover_module_negative(modules_dir: Path) -> List[Path]:
     return cases
 
 
+def run_cli_diagnostic_contracts(
+    ring_exe: str,
+    collector: ResultCollector,
+    *,
+    name_filter: Optional[str] = None,
+) -> None:
+    """Run unique recovery/warning/formatter contracts from the old E2E harness."""
+    suite = "e2e"
+
+    def execute(label: str, fixture: Path, args: List[str], validator) -> None:
+        fixture_key = normalized_repo_path(fixture)
+        if not (
+            matches_filter(label, name_filter)
+            or matches_filter(fixture_key, name_filter)
+        ):
+            return
+        if not fixture.is_file():
+            collector.add(TestResult(
+                TestResult.FAIL, suite, label,
+                f"diagnostic fixture not found: {fixture_key}",
+            ))
+            return
+        try:
+            result = ring_check(ring_exe, str(fixture), extra_args=args)
+        except subprocess.TimeoutExpired:
+            collector.add(TestResult(TestResult.FAIL, suite, label, "check timed out"))
+            return
+        failure = validator(result)
+        collector.add(TestResult(
+            TestResult.PASS if failure is None else TestResult.FAIL,
+            suite,
+            label,
+            failure or "",
+        ))
+
+    def llm_error(
+        result: subprocess.CompletedProcess,
+        code: str,
+        *,
+        channel: str = "stdout",
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        if result.returncode == 0:
+            return None, "expected non-zero exit, got 0"
+        output = result.stdout if channel == "stdout" else result.stderr
+        diagnostics, failure = llm_diagnostics(output or "")
+        if failure is not None or diagnostics is None:
+            return None, failure
+        diagnostic = diagnostic_by_code(diagnostics, code)
+        if diagnostic is None:
+            return None, f"expected {code} in LLM diagnostics"
+        return diagnostic, None
+
+    def warning_failure(
+        result: subprocess.CompletedProcess,
+        code: str,
+        *,
+        llm: bool,
+        line: Optional[int] = None,
+    ) -> Optional[str]:
+        if result.returncode != 0:
+            return f"expected warning-only exit 0, got {result.returncode}"
+        if "OK" not in (result.stdout or ""):
+            return f"expected OK on stdout, got: {(result.stdout or '')[:200]}"
+        stderr = result.stderr or ""
+        if llm:
+            diagnostics, failure = llm_diagnostics(stderr)
+            if failure is not None or diagnostics is None:
+                return failure
+            diagnostic = diagnostic_by_code(diagnostics, code)
+            if diagnostic is None or diagnostic.get("severity") != "warning":
+                return f"expected warning diagnostic {code} in LLM JSON"
+            if line is not None:
+                span = diagnostic.get("span")
+                if not isinstance(span, dict) or span.get("line") != line:
+                    return f"expected {code} span on line {line}, got {span!r}"
+            return None
+        human = strip_ansi(stderr)
+        if f"warning[{code}]" not in human:
+            return f"expected warning[{code}] on stderr, got: {human[:300]}"
+        if line is not None and f":{line}:" not in human:
+            return f"expected {code} source span on line {line}"
+        return None
+
+    def recovery_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        if result.returncode == 0:
+            return "expected recovered parse/type diagnostics to exit non-zero"
+        output = strip_ansi(process_output(result))
+        match = re.search(r"\[debug\]\s+parse-recovery\s+decls=(\d+)", output)
+        if match is None:
+            return "missing '[debug] parse-recovery decls=<N>' marker"
+        if int(match.group(1)) < 2:
+            return f"expected at least 2 recovered declarations, got {match.group(1)}"
+        for code in ("E0103", "E0301"):
+            if code not in output:
+                return f"expected recovered diagnostic {code}, got: {output[:500]}"
+        return None
+
+    def suggestion_human_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        if result.returncode == 0:
+            return "expected type mismatch to exit non-zero"
+        output = strip_ansi(result.stderr or "")
+        for pattern in ("error[E0301]", "help:", "parse_int", "note:", "expected"):
+            if pattern not in output:
+                return f"human diagnostic omitted {pattern!r}: {output[:500]}"
+        return None
+
+    def suggestion_llm_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        diagnostic, failure = llm_error(result, "E0301")
+        if failure is not None or diagnostic is None:
+            return failure
+        if diagnostic.get("category") != "type":
+            return f"expected category 'type', got {diagnostic.get('category')!r}"
+        suggestions = diagnostic.get("suggestions")
+        if not isinstance(suggestions, list) or not suggestions:
+            return "expected at least one conversion suggestion"
+        if "parse_int" not in " ".join(
+            str(item.get("message", "")) for item in suggestions
+            if isinstance(item, dict)
+        ):
+            return "expected parse_int in LLM suggestions"
+        notes = diagnostic.get("notes")
+        if not isinstance(notes, list) or len(notes) < 2:
+            return "expected at least two type-constraint notes"
+        first = str(notes[0].get("message", "")) if isinstance(notes[0], dict) else ""
+        second = str(notes[1].get("message", "")) if isinstance(notes[1], dict) else ""
+        if "expected" not in first or "Int" not in first:
+            return f"first constraint note lost expected Int: {first!r}"
+        if "Str" not in second:
+            return f"second constraint note lost actual Str: {second!r}"
+        return None
+
+    def return_notes_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        diagnostic, failure = llm_error(result, "E0301")
+        if failure is not None or diagnostic is None:
+            return failure
+        notes = diagnostic.get("notes")
+        if not isinstance(notes, list) or len(notes) < 2:
+            return "expected at least two return-type constraint notes"
+        text = " ".join(
+            str(item.get("message", "")) for item in notes
+            if isinstance(item, dict)
+        )
+        if "return type" not in text and "declared" not in text:
+            return f"missing declared return-type note: {text!r}"
+        if "body" not in text and "evaluates" not in text:
+            return f"missing function-body type note: {text!r}"
+        return None
+
+    def empty_list_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        diagnostic, failure = llm_error(result, "E0301")
+        if failure is not None or diagnostic is None:
+            return failure
+        suggestions = diagnostic.get("suggestions")
+        if not isinstance(suggestions, list):
+            return "expected empty-list suggestions array"
+        matching = [
+            item for item in suggestions
+            if isinstance(item, dict)
+            and (
+                "type annotation" in str(item.get("message", ""))
+                or "List<" in str(item.get("message", ""))
+            )
+        ]
+        if not matching:
+            return "expected an empty-list type-annotation suggestion"
+        if matching[0].get("replacement") is None:
+            return "expected replacement text for empty-list suggestion"
+        return None
+
+    def effect_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        diagnostic, failure = llm_error(result, "E0403")
+        if failure is not None or diagnostic is None:
+            return failure
+        notes = diagnostic.get("notes")
+        if not isinstance(notes, list):
+            return "expected unhandled-effect notes array"
+        note_text = " ".join(
+            str(item.get("message", "")) for item in notes
+            if isinstance(item, dict)
+        )
+        if "Logger" not in note_text:
+            return f"expected Logger in unhandled-effect notes: {note_text!r}"
+        suggestions = diagnostic.get("suggestions")
+        if not isinstance(suggestions, list) or not suggestions:
+            return "expected an unhandled-effect suggestion"
+        matching = [
+            item for item in suggestions
+            if isinstance(item, dict)
+            and "handle" in str(item.get("message", "")).lower()
+            and "Logger" in str(item.get("message", ""))
+        ]
+        if not matching:
+            return "expected suggestion to handle the Logger effect"
+        replacement = matching[0].get("replacement")
+        if not isinstance(replacement, str) or "handle" not in replacement:
+            return "expected handle replacement in LLM suggestion"
+        return None
+
+    def parse_llm_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        if result.returncode == 0:
+            return "expected parse errors to exit non-zero"
+        diagnostics, failure = llm_diagnostics(result.stdout or "")
+        if failure is not None or diagnostics is None:
+            return failure
+        first_code = diagnostics[0].get("code")
+        if not isinstance(first_code, str) or not first_code.startswith("E01"):
+            return f"expected first LLM diagnostic to be a parse error, got {first_code!r}"
+        return None
+
+    def clean_llm_failure(result: subprocess.CompletedProcess) -> Optional[str]:
+        if result.returncode != 0:
+            return f"expected clean check exit 0, got {result.returncode}"
+        if "OK" not in (result.stdout or ""):
+            return f"expected OK on stdout, got: {(result.stdout or '')[:200]}"
+        if (result.stderr or "").strip():
+            return f"clean LLM check emitted diagnostics: {(result.stderr or '')[:300]}"
+        return None
+
+    def module_llm_failure(
+        result: subprocess.CompletedProcess, code: str,
+    ) -> Optional[str]:
+        _, failure = llm_error(result, code, channel="stderr")
+        return failure
+
+    for recovery_name in RECOVERY_CASES:
+        execute(
+            f"recovery:{recovery_name}",
+            CASES_DIR / recovery_name,
+            ["--debug"],
+            recovery_failure,
+        )
+
+    execute(
+        "warning:catch-pure-W0001",
+        CASES_DIR / "catch_pure_expr.ring",
+        [],
+        lambda result: warning_failure(result, "W0001", llm=False),
+    )
+    execute(
+        "warning:where-W0002-human",
+        CASES_DIR / "where_clause_warning.ring",
+        [],
+        lambda result: warning_failure(result, "W0002", llm=False, line=11),
+    )
+    execute(
+        "warning:where-W0002-llm",
+        CASES_DIR / "where_clause_warning.ring",
+        ["--error-format=llm"],
+        lambda result: warning_failure(result, "W0002", llm=True, line=11),
+    )
+    execute(
+        "diagnostic:type-suggestion-human",
+        CASES_DIR / "error_with_suggestion.ring",
+        [],
+        suggestion_human_failure,
+    )
+    execute(
+        "diagnostic:type-suggestion-llm",
+        CASES_DIR / "error_with_suggestion.ring",
+        ["--error-format=llm"],
+        suggestion_llm_failure,
+    )
+    execute(
+        "diagnostic:return-notes-llm",
+        CASES_DIR / "error_diagnostic_notes.ring",
+        ["--error-format=llm"],
+        return_notes_failure,
+    )
+    execute(
+        "diagnostic:empty-list-suggestion-llm",
+        CASES_DIR / "error_empty_list_suggestion.ring",
+        ["--error-format=llm"],
+        empty_list_failure,
+    )
+    execute(
+        "diagnostic:effect-suggestion-llm",
+        CASES_DIR / "error_effect_suggestion.ring",
+        ["--error-format=llm"],
+        effect_failure,
+    )
+    execute(
+        "diagnostic:parse-errors-llm-schema",
+        CASES_DIR / "error_multi_parse.ring",
+        ["--error-format=llm"],
+        parse_llm_failure,
+    )
+    execute(
+        "diagnostic:clean-check-llm",
+        CASES_DIR / "hello.ring",
+        ["--error-format=llm"],
+        clean_llm_failure,
+    )
+    execute(
+        "diagnostic:module-resolver-E0702-llm",
+        MODULES_DIR / "error_not_found" / "main.ring",
+        ["--error-format=llm"],
+        lambda result: module_llm_failure(result, "E0702"),
+    )
+    execute(
+        "diagnostic:module-checker-E0703-llm",
+        MODULES_DIR / "error_symbol_not_found" / "main.ring",
+        ["--error-format=llm"],
+        lambda result: module_llm_failure(result, "E0703"),
+    )
+
+
+def run_native_real_program_contract(
+    ring_exe: str,
+    clang_path: str,
+    collector: ResultCollector,
+    *,
+    name_filter: Optional[str] = None,
+) -> None:
+    """Preserve the repeated native-frontend/RC regression and execute it."""
+    suite = "e2e"
+    key = "tests/native/real_program.ring"
+    if not (
+        matches_filter("native-real-program", name_filter)
+        or matches_filter(key, name_filter)
+    ):
+        return
+    if not NATIVE_REAL_PROGRAM.is_file() or not NATIVE_REAL_PROGRAM_EXPECTED.is_file():
+        collector.add(TestResult(
+            TestResult.FAIL, suite, "native-real-program",
+            "real_program.ring or its .expected companion is missing",
+        ))
+        return
+
+    rc_contract = RcInvocationContract(
+        name="native-real-program RC",
+        fixture=key,
+        args=("--verify-rc",),
+        exit_zero=True,
+        fatal_exact=0,
+    )
+    for run_number in range(1, 4):
+        label = f"native-real-program:frontend+rc {run_number}/3"
+        try:
+            result = ring_check(
+                ring_exe,
+                str(NATIVE_REAL_PROGRAM),
+                extra_args=list(rc_contract.args),
+            )
+        except subprocess.TimeoutExpired:
+            collector.add(TestResult(TestResult.FAIL, suite, label, "check timed out"))
+            continue
+        failure = rc_contract_failure(rc_contract, result.returncode, process_output(result))
+        collector.add(TestResult(
+            TestResult.PASS if failure is None else TestResult.FAIL,
+            suite,
+            label,
+            failure or "",
+        ))
+
+    expected = norm(NATIVE_REAL_PROGRAM_EXPECTED.read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory(prefix="ring_real_program_") as tmpdir:
+        ok, stdout, detail = compile_link_run(
+            ring_exe, clang_path, str(NATIVE_REAL_PROGRAM), tmpdir,
+        )
+        first_failure = detail if not ok else None
+        if ok and norm(stdout) != expected:
+            first_failure = f"expected {expected!r}, got {norm(stdout)!r}"
+        collector.add(TestResult(
+            TestResult.PASS if first_failure is None else TestResult.FAIL,
+            suite,
+            "native-real-program:execute 1/3",
+            first_failure or "",
+        ))
+        if not ok:
+            for run_number in (2, 3):
+                collector.add(TestResult(
+                    TestResult.FAIL, suite,
+                    f"native-real-program:execute {run_number}/3",
+                    "first compile/link/run failed",
+                ))
+            return
+        executable = os.path.join(tmpdir, "real_program.exe")
+        for run_number in (2, 3):
+            label = f"native-real-program:execute {run_number}/3"
+            try:
+                result = run_exe(executable)
+            except subprocess.TimeoutExpired:
+                collector.add(TestResult(TestResult.FAIL, suite, label, "execution timed out"))
+                continue
+            failure = None
+            if result.returncode != 0:
+                failure = f"runtime crash (exit {result.returncode}): {(result.stderr or '')[:300]}"
+            elif norm(result.stdout or "") != expected:
+                failure = f"expected {expected!r}, got {norm(result.stdout or '')!r}"
+            collector.add(TestResult(
+                TestResult.PASS if failure is None else TestResult.FAIL,
+                suite,
+                label,
+                failure or "",
+            ))
+
+
 def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             name_filter: Optional[str] = None) -> None:
     """Run the E2E test suite."""
@@ -677,6 +1129,13 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             collector.add(TestResult(
                 TestResult.FAIL, suite, f"mod-neg:{mod_name}",
                 f"{contract_failure}; output: {combined[:300]}"))
+
+    run_cli_diagnostic_contracts(
+        ring_exe, collector, name_filter=name_filter,
+    )
+    run_native_real_program_contract(
+        ring_exe, clang_path, collector, name_filter=name_filter,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2284,6 +2743,172 @@ def gap_reason_for_lane(evidence_path, lane: str) -> Optional[str]:
     return None
 
 
+def strip_ansi(text: str) -> str:
+    """Remove terminal colour escapes before parsing stable CLI contracts."""
+    return ANSI_ESCAPE_RE.sub("", text)
+
+
+def process_output(result: subprocess.CompletedProcess) -> str:
+    """Return stdout and stderr in the same order used by companion checks."""
+    return (result.stdout or "") + (result.stderr or "")
+
+
+def llm_diagnostics(
+    output: str,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Extract and validate one or more formatter-v1 diagnostic JSON blocks.
+
+    Resolver/checker failures may append ``Compilation failed`` after a JSON
+    object, while future debug output may contain more than one object.  A raw
+    decoder preserves the JSON/schema assertion without depending on channels.
+    """
+    clean = strip_ansi(output)
+    decoder = json.JSONDecoder()
+    documents: List[Dict[str, Any]] = []
+    cursor = 0
+    while cursor < len(clean):
+        start = clean.find("{", cursor)
+        if start < 0:
+            break
+        try:
+            value, consumed = decoder.raw_decode(clean[start:])
+        except json.JSONDecodeError:
+            cursor = start + 1
+            continue
+        cursor = start + consumed
+        if isinstance(value, dict) and "diagnostics" in value:
+            documents.append(value)
+
+    if not documents:
+        return None, f"expected formatter-v1 JSON diagnostics, got: {clean[:300]}"
+
+    diagnostics: List[Dict[str, Any]] = []
+    for document in documents:
+        if document.get("version") != 1:
+            return None, f"expected diagnostic JSON version 1, got {document.get('version')!r}"
+        items = document.get("diagnostics")
+        if not isinstance(items, list) or not items:
+            return None, "expected a non-empty diagnostics array"
+        for item in items:
+            if not isinstance(item, dict):
+                return None, "diagnostics array contains a non-object entry"
+            diagnostics.append(item)
+    return diagnostics, None
+
+
+def diagnostic_by_code(
+    diagnostics: List[Dict[str, Any]], code: str,
+) -> Optional[Dict[str, Any]]:
+    """Return the first diagnostic with an exact stable code."""
+    return next((item for item in diagnostics if item.get("code") == code), None)
+
+
+def parse_rc_report(output: str) -> Tuple[Optional[RcReport], Optional[str]]:
+    """Parse the stable text contract emitted by ``format_rc_findings``."""
+    clean = strip_ansi(output)
+    summaries = RC_SUMMARY_RE.findall(clean)
+    if len(summaries) != 1:
+        return None, f"expected exactly one RC summary, found {len(summaries)}"
+    fatal, exempt = (int(value) for value in summaries[0])
+
+    exempt_lines = RC_EXEMPT_RE.findall(clean)
+    if len(exempt_lines) > 1:
+        return None, "expected at most one RC exempt-class summary"
+    exempt_counts: Dict[str, int] = {}
+    if exempt_lines:
+        for token in exempt_lines[0].split():
+            match = re.fullmatch(r"([^=\s]+)=(\d+)", token)
+            if match is None:
+                return None, f"malformed RC exempt-class token: {token!r}"
+            category, count_text = match.groups()
+            if category in exempt_counts:
+                return None, f"duplicate RC exempt class: {category}"
+            exempt_counts[category] = int(count_text)
+    if exempt > 0 and not exempt_lines:
+        return None, "RC report omitted exempt-class counts"
+    if exempt == 0 and exempt_lines:
+        return None, "RC report emitted exempt-class counts for zero exemptions"
+    if sum(exempt_counts.values()) != exempt:
+        return None, (
+            "RC exempt-class counts disagree with summary: "
+            f"classes={sum(exempt_counts.values())}, summary={exempt}"
+        )
+    if RC_BOUNDARY_MARKER not in clean:
+        return None, "RC report omitted the documented HIR/codegen boundary"
+
+    findings = tuple(
+        RcFindingLine(
+            file=match.group(1),
+            line=int(match.group(2)),
+            column=int(match.group(3)),
+            category=match.group(4),
+            message=match.group(5),
+        )
+        for match in RC_FINDING_RE.finditer(clean)
+    )
+    return RcReport(fatal, exempt, exempt_counts, findings), None
+
+
+def rc_contract_failure(
+    contract: RcInvocationContract,
+    returncode: int,
+    output: str,
+) -> Optional[str]:
+    """Return why an RC CLI invocation violates its exact migrated contract."""
+    if contract.exit_zero and returncode != 0:
+        return f"expected exit 0, got {returncode}: {strip_ansi(output)[:300]}"
+    if not contract.exit_zero and returncode == 0:
+        return "expected non-zero exit, got 0"
+
+    report, parse_failure = parse_rc_report(output)
+    if parse_failure is not None or report is None:
+        return parse_failure
+    if contract.fatal_exact is not None and report.fatal != contract.fatal_exact:
+        return f"expected {contract.fatal_exact} fatal findings, got {report.fatal}"
+    if report.fatal < contract.fatal_min:
+        return f"expected at least {contract.fatal_min} fatal findings, got {report.fatal}"
+    if report.exempt < contract.exempt_min:
+        return f"expected at least {contract.exempt_min} exempt findings, got {report.exempt}"
+
+    printed_expected = report.fatal + (report.exempt if contract.strict else 0)
+    if len(report.findings) != printed_expected:
+        mode = "strict" if contract.strict else "non-strict"
+        return (
+            f"{mode} RC report printed {len(report.findings)} findings; "
+            f"expected {printed_expected}"
+        )
+
+    for category, minimum in contract.exempt_counts:
+        actual = report.exempt_counts.get(category, 0)
+        if actual < minimum:
+            return f"expected {category}>={minimum} exempt findings, got {actual}"
+
+    fixture_suffix = contract.fixture.replace("\\", "/").lower()
+    by_category: Dict[str, List[RcFindingLine]] = {}
+    for finding in report.findings:
+        by_category.setdefault(finding.category, []).append(finding)
+    for category, minimum in contract.finding_counts:
+        matching = by_category.get(category, [])
+        local = [
+            finding for finding in matching
+            if finding.file.replace("\\", "/").lower().endswith(fixture_suffix)
+        ]
+        if len(local) < minimum:
+            return (
+                f"expected {category}>={minimum} findings in {contract.fixture}, "
+                f"got {len(local)} local / {len(matching)} total"
+            )
+    for category, required_lines in contract.finding_lines:
+        actual_lines = {
+            finding.line for finding in by_category.get(category, [])
+            if finding.file.replace("\\", "/").lower().endswith(fixture_suffix)
+        }
+        missing = sorted(set(required_lines) - actual_lines)
+        if missing:
+            return f"{category} findings missing fixture lines {missing}"
+    return None
+
+
 def expected_gap_lanes(scope: str, evidence: str,
                        members: dict[str, set[str]]) -> Optional[set[str]]:
     """Return the exact skipped lanes for a classified matrix gap."""
@@ -2736,13 +3361,22 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             r = ring_check(ring_exe, str(compiler_main),
                            extra_args=["--verify-rc"],
                            timeout=TIMEOUT_SELFCOMPILE)
-            if r.returncode == 0 and "RC verify: 0 errors" in (r.stdout or ""):
+            contract = RcInvocationContract(
+                name="self-verify (compiler/main.ring)",
+                fixture="compiler/main.ring",
+                args=("--verify-rc",),
+                exit_zero=True,
+                fatal_exact=0,
+            )
+            failure = rc_contract_failure(
+                contract, r.returncode, process_output(r),
+            )
+            if failure is None:
                 collector.add(TestResult(TestResult.PASS, suite, "self-verify (compiler/main.ring)"))
             else:
-                combined = (r.stdout or "") + (r.stderr or "")
                 collector.add(TestResult(
                     TestResult.FAIL, suite, "self-verify (compiler/main.ring)",
-                    f"exit {r.returncode}: {combined[:500]}"))
+                    failure))
         except subprocess.TimeoutExpired:
             collector.add(TestResult(TestResult.FAIL, suite, "self-verify", f"timed out ({TIMEOUT_SELFCOMPILE}s)"))
     else:
@@ -2777,28 +3411,143 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
                         TestResult.FAIL, suite, name,
                         f"exit {r.returncode}: {combined[:300]}"))
 
-    # 3. Negative suite: tests/cases/verify_rc/*.ring — each should trigger
-    #    verify-rc errors (the ring check itself may pass or fail; we just need
-    #    the verifier to report findings).
-    if RC_NEG_DIR.is_dir():
-        for ring_file in sorted(RC_NEG_DIR.glob("*.ring")):
-            name = f"neg/{ring_file.name}"
-            if not matches_filter(name, name_filter):
-                continue
-            try:
-                r = ring_check(ring_exe, str(ring_file), extra_args=["--verify-rc"])
-            except subprocess.TimeoutExpired:
-                collector.add(TestResult(TestResult.FAIL, suite, name, "timed out"))
-                continue
+    # 3. Exact negative/degradation contracts migrated from the legacy RC harness.
+    #    In particular, a generic "RC verify: 0 errors" line is not evidence
+    #    for a negative case: every expected category/count/location is checked.
+    rc_contracts = (
+        RcInvocationContract(
+            "field-overwrite lax", "tests/cases/verify_rc/field_overwrite_leak.ring",
+            ("--verify-rc",), True, fatal_exact=0, exempt_min=2,
+            exempt_counts=(("x-overwrite-field", 2),),
+        ),
+        RcInvocationContract(
+            "field-overwrite strict", "tests/cases/verify_rc/field_overwrite_leak.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=2,
+            exempt_counts=(("x-overwrite-field", 2),),
+            finding_counts=(("x-overwrite-field", 2),),
+            finding_lines=(("x-overwrite-field", (14, 15)),),
+        ),
+        RcInvocationContract(
+            "option-temporary live", "tests/cases/verify_rc/option_temp_leak.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "option-temporary skip-anf mutation", "tests/cases/verify_rc/option_temp_leak.ring",
+            ("--verify-rc", "--rc-mutate=skip-anf"), False, fatal_min=2,
+            finding_counts=(("leak-temp", 2),),
+            finding_lines=(("leak-temp", (11, 27)),),
+        ),
+        RcInvocationContract(
+            "drop-borrow live", "tests/cases/verify_rc/drop_borrow_uaf.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "drop-borrow drop-params mutation", "tests/cases/verify_rc/drop_borrow_uaf.ring",
+            ("--verify-rc", "--rc-mutate=drop-params"), False, fatal_min=2,
+            finding_counts=(("uaf-drop-borrow", 2),),
+        ),
+        RcInvocationContract(
+            "shadow overwrite", "tests/cases/verify_rc/shadow_overwrite.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-shadow-overwrite", 1),),
+            finding_counts=(("x-shadow-overwrite", 1),),
+        ),
+        RcInvocationContract(
+            "control-flow value", "tests/cases/verify_rc/cf_value_leak.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=2,
+            exempt_counts=(("x-cf-value", 2),),
+            finding_counts=(("x-cf-value", 2),),
+        ),
+        RcInvocationContract(
+            "effect value", "tests/cases/verify_rc/effect_value.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-effect-value", 1),),
+            finding_counts=(("x-effect-value", 1),),
+        ),
+        RcInvocationContract(
+            "parameter overwrite", "tests/cases/verify_rc/overwrite_param.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-overwrite-param", 1),),
+            finding_counts=(("x-overwrite-param", 1),),
+        ),
+        RcInvocationContract(
+            "variable overwrite", "tests/cases/verify_rc/overwrite_var.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-overwrite-var", 1),),
+            finding_counts=(("x-overwrite-var", 1),),
+        ),
+        RcInvocationContract(
+            "spread source", "tests/cases/verify_rc/spread_leak.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-spread", 1),), finding_counts=(("x-spread", 1),),
+        ),
+        RcInvocationContract(
+            "discard owned", "tests/cases/verify_rc/discard_owned.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-discard", 1),), finding_counts=(("x-discard", 1),),
+        ),
+        RcInvocationContract(
+            "boxed overwrite", "tests/cases/verify_rc/overwrite_boxed.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-overwrite-boxed", 1),),
+            finding_counts=(("x-overwrite-boxed", 1),),
+        ),
+        RcInvocationContract(
+            "callee call", "tests/cases/verify_rc/callee_call.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
+            exempt_counts=(("x-callee-call", 1),),
+            finding_counts=(("x-callee-call", 1),),
+        ),
+        RcInvocationContract(
+            "shadow mismatch lax", "tests/cases/verify_rc/shadow_mismatch.ring",
+            ("--verify-rc",), False, fatal_min=1, exempt_min=1,
+            exempt_counts=(("x-shadow-overwrite", 1),),
+            finding_counts=(("uaf-shadow-mismatch", 1),),
+        ),
+        RcInvocationContract(
+            "shadow mismatch strict", "tests/cases/verify_rc/shadow_mismatch.ring",
+            ("--verify-rc-strict",), False, strict=True, fatal_min=1, exempt_min=1,
+            exempt_counts=(("x-shadow-overwrite", 1),),
+            finding_counts=(("uaf-shadow-mismatch", 1), ("x-shadow-overwrite", 1)),
+        ),
+    )
 
-            combined = (r.stdout or "") + (r.stderr or "")
-            # The verifier should report findings (rc-verify[...] pattern)
-            if "rc-verify[" in combined or "RC verify:" in combined:
-                collector.add(TestResult(TestResult.PASS, suite, name))
-            else:
-                collector.add(TestResult(
-                    TestResult.FAIL, suite, name,
-                    f"expected verify-rc findings, got: {combined[:300]}"))
+    fixture_files = {
+        normalized_repo_path(path) for path in RC_NEG_DIR.glob("*.ring")
+    } if RC_NEG_DIR.is_dir() else set()
+    contracted_files = {contract.fixture for contract in rc_contracts}
+    if fixture_files != contracted_files:
+        missing = sorted(fixture_files - contracted_files)
+        stale = sorted(contracted_files - fixture_files)
+        detail = f"uncontracted={missing}; missing fixtures={stale}"
+        collector.add(TestResult(TestResult.FAIL, suite, "negative contract wiring", detail))
+
+    for contract in rc_contracts:
+        name = f"neg/{contract.name}"
+        if not (
+            matches_filter(name, name_filter)
+            or matches_filter(contract.fixture, name_filter)
+        ):
+            continue
+        ring_file = REPO / contract.fixture
+        try:
+            result = ring_check(
+                ring_exe,
+                str(ring_file),
+                extra_args=list(contract.args),
+            )
+        except subprocess.TimeoutExpired:
+            collector.add(TestResult(TestResult.FAIL, suite, name, "timed out"))
+            continue
+        failure = rc_contract_failure(
+            contract, result.returncode, process_output(result),
+        )
+        collector.add(TestResult(
+            TestResult.PASS if failure is None else TestResult.FAIL,
+            suite,
+            name,
+            failure or "",
+        ))
 
 
 # ---------------------------------------------------------------------------
