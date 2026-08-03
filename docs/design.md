@@ -1618,7 +1618,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 - match/catch 按源码 arm 顺序，穷尽失败 fail loud；Drop、cleanup 与 evidence 生命周期在嵌套函数边界隔离，并由共享 RC/verifier 契约审计。
 - 编译器进程只生成文本并调用外部编译器，不恢复 LLVM-C 式进程内 FFI/IR builder 信道。
 
-**收官与发布边界**：B-163 只剩 CLAUDE/README、clean-clone/远端 CI 与 worktree bookkeeping；完成后删除临时 plan。发布产品面由 B-174/B-175 承担，性能证据由 B-176 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
+**收官与发布边界**：B-163 只剩 CLAUDE/README、clean-clone/远端 CI 与 worktree bookkeeping；完成后删除临时 plan。critical correctness 清零后，B-176/B-180 先恢复可接受的 check/验证反馈速度，再由 B-174/B-175 承担发布产品面；生成程序性能证据由 B-181 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
 
 **未来 LLVM target 重启门**：只有代表性负载证明 C 不可表达的性能瓶颈、Ring 级调试信息刚需，或目标平台缺少成熟 C 工具链时才重新立项。届时 C 后端永久保留为 reference/stage-0，LLVM 只能是第二信道，并且只发文本 `.ll`，不得恢复进程内 LLVM-C FFI。
 
@@ -1710,13 +1710,18 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 > **用类型系统最大化前馈控制的覆盖面，用自动测试补全反馈控制，直到闭环足够紧密，人可以退出回路。**
 
-"安全特性优先于性能特性"的判断等价于：**先把控制器造好，再提升被控对象的性能。** 反过来先扩张 JIT/优化边界，等于给没有控制器的系统加大油门。
+"critical correctness 优先于性能"的判断等价于：**先保证控制器不会给出错误裁决，再提升控制回路的采样频率。** 2026-08-03 用户进一步明确：critical 清零后，`check`、RC/self-verify 与完整门的反馈时延本身就是层 0 瓶颈，B-176/B-180 优先于其余非 critical feature/重构；这不是用速度交换覆盖率，而是让同一套控制器更频繁地运行。生成程序优化、JIT 与扩大优化边界仍排在语义/ownership 稳定和 B-181 证据之后。
 
 ---
 
 ## 12. 性能优化策略
 
-当前优化策略以 backend-neutral HIR/Perceus → C11/clang 为主，见 §14.6 与 backlog 性能优化节；退役实现的性能分析只留 Git 历史。
+当前性能路线分两类，不再混用一份 baseline：
+
+1. **开发反馈性能**：B-176 测 `ring check`、RC/self-verify、runner/clang 调度与 self-compile，B-180 以 2× wall-time 改善为退出门；可以优化编译器算法、缓存和有界并行，但不得减少测试覆盖或吞掉原始失败。
+2. **生成程序性能**：B-181 测 runtime、内存/分配和产物尺寸，再决定 Perceus reuse、dict 缓存等优化；仍以 backend-neutral HIR/Perceus → C11/clang 为主，见 §14.6。
+
+退役实现的性能分析只留 Git 历史。两类工作都记录 cold/warm、CPU/RSS、compiler/anchor/toolchain 指纹，禁止用并行 wall-time、编译器构建优化或 microbenchmark 混报产品 runtime 收益。
 
 ## 13. 竞品与行业定位
 
@@ -1742,7 +1747,7 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 
 ### 14.2 编译目标
 
-native 是唯一产品编译目标，codegen/bootstrapping 当前均为 C11-only（JS 已归档，最后 LLVM lane 只在历史 tag）。性能数据必须注明 compiler commit、`dist-c` 指纹、C compiler/version、生成程序与 runtime 优化级别、机器和冷/热缓存状态；旧的单点“native 自编译 290s”不再作为当前基线，正式基线由 B-176 建立。
+native 是唯一产品编译目标，codegen/bootstrapping 当前均为 C11-only（JS 已归档，最后 LLVM lane 只在历史 tag）。性能数据必须注明 compiler commit、`dist-c` 指纹、C compiler/version、生成程序与 runtime 优化级别、机器和冷/热缓存状态；旧的单点“native 自编译 290s”不再作为当前基线。开发反馈基线由 B-176 建立并由 B-180 优化，生成程序 baseline/release budget 由 B-181 建立。
 
 ### 14.3 泛型单态化策略（2026-05-24 决策）
 
@@ -1766,8 +1771,8 @@ native 是唯一产品编译目标，codegen/bootstrapping 当前均为 C11-only
 
 **编译性能额外措施（按需实现）**：
 - Debug 快速路径：只有实测证明 clang 路径不足后才单独选型，不预设 Cranelift 或其他永久依赖
-- 增量编译：函数级增量，effect row 签名 = 精确依赖边界
-- HIR 缓存：依赖包首次编译后缓存 type-checked HIR
+- 增量 check/build：B-180 证明 unchanged-module 重复工作仍主导后，B-105 先做内容寻址的 module HIR/export/object cache；effect row 与 public signature 进入精确失效边界
+- 函数级增量只在 module granularity 仍不足时继续细化，不预先承担复杂 cache coherence
 - 并行编译：模块间 codegen 完全并行（check 完成后签名固定）
 
 ### 14.4 关键技术路径

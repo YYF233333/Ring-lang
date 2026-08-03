@@ -30,4 +30,4 @@
 
 - clean clone 不能从 tracked C anchor 自举、任一正式 C gate 红、固定点不一致或 #261 在 C-only 复现时，不得用“迁移已经成功”跳过；先形成具体 blocker 并修复。
 - 文档/runner 不得保留假兼容 target 或静默接受 `--target=llvm`；退役 target 必须 fail loud。
-- 本项不扩大为 release CLI、installer、跨平台支持或性能优化；分别由 B-174、B-175、B-176 承担。
+- 本项不扩大为 release CLI、installer、跨平台支持或性能优化；工具链反馈由 B-176/B-180、release CLI/package 由 B-174/B-175、生成程序性能由 B-181 承担。

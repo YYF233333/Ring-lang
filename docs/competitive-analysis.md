@@ -431,7 +431,7 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 2. **确定性资源与失真可见**：RC/Drop/unsafe discharge/审计面把不可自动保证的部分显式列出；
 3. **可验证的 agent 闭环**：诊断、语义 query、受检 patch、隐藏测试与 bounded proof 共同缩短生成—验证循环。
 
-“语义驱动性能”仍是长期收益，但在 B-176 基线、RIIR 与 ownership 边界未完成前，不应与已发货支柱并列宣传为已证明优势。
+“语义驱动性能”仍是长期收益，但在 B-181 生成程序基线、RIIR 与 ownership 边界未完成前，不应与已发货支柱并列宣传为已证明优势。B-176/B-180 解决的是 compiler/check 反馈吞吐，不能把开发工具 wall-time 改善混报为用户程序性能。
 
 ### 10.4 可对外使用的一句话
 
@@ -447,9 +447,10 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 - **B-163**：完成 C-only 文档、clean-clone/远端 CI 与 worktree 收官；codegen/bootstrap 迁移本身已完成。
 - **B-174/B-175**：交付可安装、可运行、可诊断的 preview CLI 与 Windows/Linux candidate artifacts。
-- **B-176**：建立编译反馈、运行时、内存/分配与产物尺寸的可复现 baseline/budget。
+- **B-176/B-180**：建立 `check`、RC/self-verify、runner/self-compile 的可复现 baseline，并以不减覆盖的 2× wall-time 改善恢复快速开发反馈。
+- **B-181**：单独建立生成程序 runtime、内存/分配与产物尺寸的 release baseline/budget。
 - **B-177**：导出版本化只读 semantic inspection contract 与 bundled primer，不改变源码/Git 真值模型。
-- **B-168**：在 B-163 后确定 C-native failure/control ABI 及其 Drop、TCB 与可移植性边界。
+- **B-168**：在 B-176/B-180 工具链吞吐专项后确定 C-native failure/control ABI 及其 Drop、TCB 与可移植性边界。
 - **B-111**：用固定模型、预算和公开 artifact 复现 Ring vs TypeScript 7 的 agent 开发对照。
 - **B-001**：保持 refinement bounded、deterministic，并显式记录 solver、整数模型与 assumption 边界。
 
