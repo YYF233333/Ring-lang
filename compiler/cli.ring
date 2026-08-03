@@ -3,9 +3,8 @@ use hir::{HProgram}
 use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
 use formatter::{format_human, format_llm}
 use checker::{CheckResult, check as check_single}
-use codegen_llvm::{generate_llvm}
 use codegen_c::{generate_c}
-use compiler_mod::{compile_project, compile_project_llvm, compile_project_c, verify_project_rc}
+use compiler_mod::{compile_project, compile_project_c, verify_project_rc}
 use parser::{parse}
 use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{verify_rc_program, rc_fatal_count, format_rc_findings}
@@ -13,6 +12,12 @@ use verify_rc::{verify_rc_program, rc_fatal_count, format_rc_findings}
 pub fn cli_main() {
     let args = argv()
     let parsed = parse_cli_args(args)
+
+    if parsed.target != "c" {
+        eprintln("Error: unsupported code generation target '${parsed.target}'; this compiler supports only '--target=c'.")
+        exit_process(1)
+        return
+    }
 
     if parsed.command == "help" || parsed.command == "" {
         usage()
@@ -50,6 +55,21 @@ pub fn cli_main() {
         } else {
             eprintln(format_human(diagnostics, source))
         }
+        // Production behavior stays fail-fast. Debug mode additionally exposes
+        // parser recovery state and checks the recovered AST so recovery
+        // regressions can be asserted through the native CLI.
+        if parsed.debug {
+            eprintln("[debug] parse-recovery decls=${ast.decls.len()}")
+            let recovery_sink = new_collecting_sink()
+            let recovery_result = check_single(ast, recovery_sink)
+            if recovery_sink.items.len() > 0 {
+                if parsed.error_format == "llm" {
+                    eprintln(format_llm(recovery_sink.items, file_path))
+                } else {
+                    eprintln(format_human(recovery_sink.items, source))
+                }
+            }
+        }
         exit_process(1)
         return
     }
@@ -58,7 +78,7 @@ pub fn cli_main() {
     if ast.uses.len() > 0 {
         // B-104 D2: static RC leak/UAF verification (post-perceus HIR linear
         // check; --verify-rc on the `check` command).  Runs the same per-module
-        // perceus_transform as the LLVM pipeline, then verify_rc_program.
+        // perceus_transform as native compilation, then verify_rc_program.
         if parsed.command == "check" && (parsed.verify_rc || parsed.verify_strict) {
             let res = verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict, parsed.error_format)
             if res.success == false {
@@ -85,30 +105,19 @@ pub fn cli_main() {
         } else {
             if parsed.command == "build" {
                 let out_dir = path_resolve(parsed.out_dir)
-                if parsed.target == "c" {
-                    // B-163 step 8: multi-file (project) C emission — both the
-                    // .c and the clang-compiled .o land in out_dir (parity with
-                    // the LLVM project branch, which always uses out_dir).
-                    let base = path_basename(file_path).replace(".ring", "")
-                    let c_path = path_join(out_dir, "${base}.c")
-                    let o_path = path_join(out_dir, "${base}.o")
-                    let c_result = compile_project_c(file_path, c_path, o_path, parsed.c_lines, parsed.error_format)
-                    if c_result.success {
-                        // success message printed by generate_c_project
-                    } else {
-                        eprintln("Compilation failed")
-                        exit_process(1)
-                    }
-                    return
-                }
-                let out_path = path_join(out_dir, path_basename(file_path).replace(".ring", ".o"))
-                let result = compile_project_llvm(file_path, out_path, parsed.error_format)
-                if result.success {
-                    // success message printed by generate_llvm_project
+                // Multi-file (project) C emission: both the .c and the
+                // clang-compiled .o land in out_dir.
+                let base = path_basename(file_path).replace(".ring", "")
+                let c_path = path_join(out_dir, "${base}.c")
+                let o_path = path_join(out_dir, "${base}.o")
+                let c_result = compile_project_c(file_path, c_path, o_path, parsed.c_lines, parsed.error_format)
+                if c_result.success {
+                    // success message printed by generate_c_project
                 } else {
                     eprintln("Compilation failed")
                     exit_process(1)
                 }
+                return
             } else {
                 eprintln("Only 'build' and 'check' commands are supported")
                 exit_process(1)
@@ -167,36 +176,21 @@ pub fn cli_main() {
     } else {
         if parsed.command == "build" {
             let rc_program = perceus_transform(check_result.program)
-            if parsed.target == "c" {
-                // B-163 C backend: emit <name>.c, then shell out clang -c → <name>.o.
-                // --out-dir redirects both artifacts when explicitly given;
-                // default drops them next to the source (LLVM single-file parity).
-                let base = path_basename(file_path).replace(".ring", "")
-                let c_path = if parsed.out_dir_set {
-                    path_join(path_resolve(parsed.out_dir), "${base}.c")
-                } else {
-                    file_path.replace(".ring", ".c")
-                }
-                let o_path = if parsed.out_dir_set {
-                    path_join(path_resolve(parsed.out_dir), "${base}.o")
-                } else {
-                    file_path.replace(".ring", ".o")
-                }
-                generate_c(rc_program, c_path, o_path, parsed.c_lines)
+            // Emit <name>.c, then shell out clang -c → <name>.o.
+            // --out-dir redirects both artifacts when explicitly given;
+            // the default places them next to the source.
+            let base = path_basename(file_path).replace(".ring", "")
+            let c_path = if parsed.out_dir_set {
+                path_join(path_resolve(parsed.out_dir), "${base}.c")
             } else {
-                // --out-dir redirects the .o when explicitly given; default
-                // drops it next to the source. This matches the C backend
-                // branch above and the project branch, so a caller passing
-                // --out-dir always finds the artifact there regardless of
-                // whether the entry file turned out to have dependencies.
-                let out_path = if parsed.out_dir_set {
-                    let base = path_basename(file_path).replace(".ring", "")
-                    path_join(path_resolve(parsed.out_dir), "${base}.o")
-                } else {
-                    file_path.replace(".ring", ".o")
-                }
-                generate_llvm(rc_program, out_path)
+                file_path.replace(".ring", ".c")
             }
+            let o_path = if parsed.out_dir_set {
+                path_join(path_resolve(parsed.out_dir), "${base}.o")
+            } else {
+                file_path.replace(".ring", ".o")
+            }
+            generate_c(rc_program, c_path, o_path, parsed.c_lines)
         } else {
             eprintln("Only 'build' and 'check' commands are supported")
             exit_process(1)
@@ -244,7 +238,7 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
     let mut error_format = "human"
     let mut out_dir = "dist"
     let mut out_dir_set = false
-    let mut target = "llvm"
+    let mut target = "c"
     let mut c_lines = true
     let mut verify_rc = false
     let mut verify_strict = false
@@ -323,8 +317,8 @@ fn usage() {
     print("  --debug                   Print intermediate info")
     print("  --error-format=human|llm  Error output format (default: human)")
     print("  --out-dir=<path>          Output directory (default: dist)")
-    print("  --target=llvm|c           Code generation backend (default: llvm; c = B-163 C backend)")
-    print("  --no-c-lines              (--target=c) omit #line directives from the generated C")
+    print("  --target=c                Code generation target (default: c)")
+    print("  --no-c-lines              Omit #line directives from the generated C")
     print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR")
     print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail")
 }
