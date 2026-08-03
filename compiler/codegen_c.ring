@@ -371,8 +371,8 @@ fn assemble_c_file(ctx: CCtx) -> Str {
 // Option: { i64 tag, ptr payload }, typeid 8 (RING_TYPEID_OPTION).
 //   ring_Option_some is emitted here; ring_Option_none is DEFINED by
 //   ring_runtime.cpp (B-104 D6 memoised none singleton) — declaration only.
-// Result: same layout, first user typeid (parity with the LLVM backend's
-//   register_builtin_enums → get_or_assign_typeid("Result")).
+// Result: same layout, first generated typeid.  Unlike Option, Result uses the
+//   ordinary generated enum drop glue registered for that typeid.
 // ============================================================
 
 fn c_register_builtin_enums(mut ctx: CCtx) {
@@ -985,14 +985,14 @@ fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: St
 // with the RC runtime (drop_table dispatch on the header typeid):
 //   * structs: [user `impl Drop` body first (B-002p1)] then per-field
 //     ring_drop, skipping extern-handle fields (B-104 D1 rule ①)
-//   * enums: switch on the tag, ring_drop each payload slot of the live
-//     variant (same skip flags)
+//   * enums: [user `impl Drop` body first (B-002p1)] then switch on the tag and
+//     ring_drop each payload slot of the live variant (same skip flags)
 //   * List/Map keep the runtime's native drop_list/drop_map (fixed typeids
 //     4/5, registered by ring_runtime_init — the RingList/RingMapStruct
-//     layouts are runtime-private; B-152 P2/P3).  Option/Result keep the
-//     builtin recursion (drop_option; Result has no registered drop).  Set is
-//     an ordinary generated struct; StringBuilder remains an
-//     extern type (not in struct_types).
+//     layouts are runtime-private; B-152 P2/P3).  Option keeps the runtime's
+//     fixed typeid-8 drop_option path; Result is an ordinary generated enum.
+//     Set is an ordinary generated struct; StringBuilder remains an extern
+//     type (not in struct_types).
 // ABI note: the user drop call passes RING_UNIT / the default-evidence global
 // for the drop method's evidence params, so the generated call matches the
 // complete C prototype rather than relying on unspecified register contents.
@@ -1051,15 +1051,28 @@ fn emit_c_drop_functions(mut ctx: CCtx) {
     let mut enum_names = ctx.enum_types.keys()
     enum_names.sort()
     for ename in enum_names {
-        // Built-in enums: Option uses the runtime's drop_option (typeid 8);
-        // Result keeps generic recursion (LLVM parity: both skipped).
+        // Option alone uses the runtime's fixed drop_option (typeid 8).
+        // Result shares this generated path with every ordinary enum.
         if ename == "Option" { continue }
-        if ename == "Result" { continue }
         match ctx.enum_types.get(ename) {
             some(enum_info) => {
                 let drop_name = "ring_drop_${c_symbol_fragment(ename)}"
                 let mut def: List<Str> = []
                 def.push("void ${drop_name}(void* p) {")
+
+                // The user destructor runs while the complete enum payload is
+                // still live, matching the struct drop order above.
+                if ctx.drop_types.contains(ename) {
+                    let user_drop_name = c_mangle_method(ename, "drop")
+                    match ctx.functions.get(user_drop_name) {
+                        some(fi) => {
+                            def.push("    ${fi.c_name}(${c_user_drop_args(ctx, user_drop_name, fi.total_params)});")
+                        },
+                        none => {
+                            eprintln("[drop-warn] user drop method '${user_drop_name}' not found for Drop type '${ename}'")
+                        },
+                    }
+                }
 
                 let mut variant_keys = enum_info.variants.keys()
                 variant_keys.sort()
