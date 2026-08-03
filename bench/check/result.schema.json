@@ -87,6 +87,10 @@
         "post_exists",
         "post_sha256",
         "restored",
+        "backup_path",
+        "backup_exists_after",
+        "staging_path",
+        "staging_exists_after",
         "errors"
       ],
       "properties": {
@@ -108,6 +112,10 @@
         "post_exists": { "type": "boolean" },
         "post_sha256": { "type": ["string", "null"] },
         "restored": { "type": "boolean" },
+        "backup_path": { "type": ["string", "null"] },
+        "backup_exists_after": { "type": "boolean" },
+        "staging_path": { "type": ["string", "null"] },
+        "staging_exists_after": { "type": "boolean" },
         "errors": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }

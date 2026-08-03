@@ -169,14 +169,138 @@ class ManifestAndPolicyTests(unittest.TestCase):
             sample = repo / "sample"
             sample.mkdir()
             with mock.patch.object(harness, "REPO_ROOT", repo):
-                record, backup = harness._begin_runner_runtime_isolation(
+                record, transaction = harness._begin_runner_runtime_isolation(
                     lane, setup, sample
                 )
                 self.assertEqual(root_object.read_bytes(), b"prepared")
-                harness._finish_runner_runtime_isolation(record, setup, backup)
+                harness._finish_runner_runtime_isolation(record, setup, transaction)
             self.assertEqual(root_object.read_bytes(), b"original")
             self.assertTrue(record["restored"])
             self.assertEqual(record["errors"], [])
+
+    def _runtime_transaction_fixture(
+        self, repo: Path
+    ) -> tuple[Path, dict, dict, Path]:
+        source = repo / "ring_runtime.cpp"
+        root_object = repo / "ring_runtime.o"
+        prepared = repo / "prepared.o"
+        source.write_text("runtime", encoding="utf-8")
+        root_object.write_bytes(b"original")
+        prepared.write_bytes(b"prepared")
+        setup = {
+            "mode": "warm",
+            "root_path": str(root_object),
+            "source_sha256": harness._sha256_file(source),
+            "flags": ["-O2"],
+            "original_root": harness._optional_file_state(root_object),
+            "prepared": {
+                **harness._optional_file_state(prepared),
+                "path": str(prepared),
+            },
+        }
+        sample = repo / "sample"
+        sample.mkdir()
+        return root_object, setup, {"isolate_runner_runtime": True}, sample
+
+    def test_runtime_backup_failure_keeps_unique_root_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root, setup, lane, sample = self._runtime_transaction_fixture(repo)
+            real_replace = os.replace
+
+            def fail_backup(source: object, destination: object) -> None:
+                if Path(source) == root and ".backup.o" in str(destination):
+                    raise OSError("injected backup failure")
+                real_replace(source, destination)
+
+            with (
+                mock.patch.object(harness, "REPO_ROOT", repo),
+                mock.patch.object(harness.os, "replace", side_effect=fail_backup),
+                self.assertRaises(harness.HarnessError),
+            ):
+                harness._begin_runner_runtime_isolation(lane, setup, sample)
+            self.assertEqual(root.read_bytes(), b"original")
+            self.assertEqual(list(repo.glob("ring_runtime.b176-*.backup.o")), [])
+            self.assertEqual(list(repo.glob("ring_runtime.b176-*.install.o")), [])
+
+    def test_runtime_install_failure_restores_atomic_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root, setup, lane, sample = self._runtime_transaction_fixture(repo)
+            real_replace = os.replace
+
+            def fail_install(source: object, destination: object) -> None:
+                if ".install.o" in str(source) and Path(destination) == root:
+                    raise OSError("injected install failure")
+                real_replace(source, destination)
+
+            with (
+                mock.patch.object(harness, "REPO_ROOT", repo),
+                mock.patch.object(harness.os, "replace", side_effect=fail_install),
+                self.assertRaises(harness.HarnessError),
+            ):
+                harness._begin_runner_runtime_isolation(lane, setup, sample)
+            self.assertEqual(root.read_bytes(), b"original")
+            self.assertEqual(list(repo.glob("ring_runtime.b176-*.backup.o")), [])
+            self.assertEqual(list(repo.glob("ring_runtime.b176-*.install.o")), [])
+
+    def test_runtime_cleanup_failure_does_not_skip_original_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root, setup, lane, sample = self._runtime_transaction_fixture(repo)
+            with mock.patch.object(harness, "REPO_ROOT", repo):
+                record, transaction = harness._begin_runner_runtime_isolation(
+                    lane, setup, sample
+                )
+                staging = Path(transaction["staging"])
+                staging.write_bytes(b"stale-install")
+                real_unlink = Path.unlink
+
+                def fail_staging(path: Path, *args: object, **kwargs: object) -> None:
+                    if path == staging:
+                        raise OSError("injected cleanup failure")
+                    real_unlink(path, *args, **kwargs)
+
+                with mock.patch.object(Path, "unlink", new=fail_staging):
+                    harness._finish_runner_runtime_isolation(
+                        record, setup, transaction
+                    )
+            self.assertEqual(root.read_bytes(), b"original")
+            self.assertTrue(record["restored"])
+            self.assertFalse(record["backup_exists_after"])
+            self.assertTrue(record["staging_exists_after"])
+            self.assertTrue(any("staging cleanup failed" in e for e in record["errors"]))
+            staging.unlink()
+
+    def test_runtime_restore_failure_retains_backup_as_unique_original(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root, setup, lane, sample = self._runtime_transaction_fixture(repo)
+            with mock.patch.object(harness, "REPO_ROOT", repo):
+                record, transaction = harness._begin_runner_runtime_isolation(
+                    lane, setup, sample
+                )
+                backup = Path(transaction["backup"])
+                real_replace = os.replace
+
+                def fail_restore(source: object, destination: object) -> None:
+                    if Path(source) == backup and Path(destination) == root:
+                        raise OSError("injected restore failure")
+                    real_replace(source, destination)
+
+                with mock.patch.object(
+                    harness.os, "replace", side_effect=fail_restore
+                ):
+                    harness._finish_runner_runtime_isolation(
+                        record, setup, transaction
+                    )
+            self.assertEqual(root.read_bytes(), b"prepared")
+            self.assertEqual(backup.read_bytes(), b"original")
+            self.assertFalse(record["restored"])
+            self.assertTrue(record["backup_exists_after"])
+            self.assertTrue(any("restore failed" in e for e in record["errors"]))
+            os.replace(backup, root)
+            self.assertEqual(root.read_bytes(), b"original")
 
 
 @unittest.skipUnless(os.name == "nt", "Windows Job Object tests require Windows")

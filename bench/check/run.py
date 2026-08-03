@@ -565,8 +565,18 @@ def _begin_runner_runtime_isolation(
     lane: Mapping[str, Any],
     setup: Mapping[str, Any],
     sample_dir: Path,
-) -> tuple[dict[str, Any], Path | None]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     applies = bool(lane.get("isolate_runner_runtime", False))
+    root_object = Path(setup["root_path"])
+    token = re.sub(r"[^a-zA-Z0-9_-]", "_", sample_dir.name)
+    backup = root_object.with_name(f"ring_runtime.b176-{token}.backup.o")
+    staging = root_object.with_name(f"ring_runtime.b176-{token}.install.o")
+    transaction = {
+        "root": root_object,
+        "backup": backup,
+        "staging": staging,
+        "applies": applies,
+    }
     record: dict[str, Any] = {
         "mode": setup["mode"] if applies else "not_applicable",
         "isolated": applies,
@@ -580,12 +590,20 @@ def _begin_runner_runtime_isolation(
         "post_exists": False,
         "post_sha256": None,
         "restored": True,
+        "backup_path": str(backup.resolve()) if applies else None,
+        "backup_exists_after": False,
+        "staging_path": str(staging.resolve()) if applies else None,
+        "staging_exists_after": False,
         "errors": [],
     }
     if not applies:
-        return record, None
+        return record, transaction
 
-    root_object = Path(setup["root_path"])
+    if backup.exists() or staging.exists():
+        raise HarnessError(
+            "runner runtime transaction path already exists; refusing to overwrite "
+            f"backup={backup.exists()} staging={staging.exists()}"
+        )
     original = _optional_file_state(root_object)
     record["original_exists"] = original["exists"]
     record["original_sha256"] = original["sha256"]
@@ -594,17 +612,28 @@ def _begin_runner_runtime_isolation(
         original["exists"] != expected_original["exists"]
         or original["sha256"] != expected_original["sha256"]
     ):
-        record["errors"].append("root runtime object changed since environment capture")
-    backup = sample_dir / "runner-runtime-original.o" if original["exists"] else None
+        raise HarnessError("root runtime object changed since environment capture")
+
+    original_moved = False
     try:
-        if backup is not None:
-            shutil.copy2(root_object, backup)
-        root_object.unlink(missing_ok=True)
+        if original["exists"]:
+            # Both paths are beside one another, so os.replace is an atomic
+            # same-volume rename.  A failed call leaves the sole original at
+            # one of these two known paths; it is never unlinked first.
+            os.replace(root_object, backup)
+            original_moved = True
+            if _sha256_file(backup) != original["sha256"]:
+                raise HarnessError("runner runtime backup hash mismatch")
         if setup["mode"] == "warm":
             prepared = setup.get("prepared")
             if not isinstance(prepared, dict) or not prepared.get("path"):
                 raise HarnessError("warm runner runtime object was not prepared")
-            shutil.copy2(Path(prepared["path"]), root_object)
+            # Copy into a sibling staging file, verify it, then atomically
+            # install.  A partial copy can never replace the root path.
+            shutil.copy2(Path(prepared["path"]), staging)
+            if _sha256_file(staging) != prepared["sha256"]:
+                raise HarnessError("runner runtime install staging hash mismatch")
+            os.replace(staging, root_object)
             source = REPO_ROOT / "ring_runtime.cpp"
             if root_object.stat().st_mtime_ns < source.stat().st_mtime_ns:
                 timestamp = source.stat().st_mtime_ns + 1_000_000_000
@@ -612,23 +641,57 @@ def _begin_runner_runtime_isolation(
         pre = _optional_file_state(root_object)
         record["pre_exists"] = pre["exists"]
         record["pre_sha256"] = pre["sha256"]
-        return record, backup
-    except BaseException:
-        root_object.unlink(missing_ok=True)
-        if backup is not None and backup.is_file():
-            shutil.copy2(backup, root_object)
-            backup.unlink(missing_ok=True)
-        raise
+        return record, transaction
+    except BaseException as exc:
+        recovery_errors: list[str] = []
+        # An injected/OS error may occur after an atomic rename completed, so
+        # inspect the paths as well as the local flag before recovery.
+        original_moved = original_moved or (
+            bool(original["exists"]) and backup.is_file() and not root_object.is_file()
+        )
+        try:
+            if original_moved:
+                if backup.is_file():
+                    try:
+                        os.replace(backup, root_object)
+                    except OSError as restore_exc:
+                        recovery_errors.append(f"restore failed: {restore_exc}")
+                else:
+                    recovery_errors.append("restore failed: backup disappeared")
+            elif not original["exists"] and root_object.is_file():
+                try:
+                    root_object.unlink()
+                except OSError as cleanup_exc:
+                    recovery_errors.append(f"installed-object cleanup failed: {cleanup_exc}")
+        finally:
+            if staging.exists():
+                try:
+                    staging.unlink()
+                except OSError as cleanup_exc:
+                    recovery_errors.append(f"staging cleanup failed: {cleanup_exc}")
+        if recovery_errors:
+            raise HarnessError(
+                f"runner runtime transaction failed: {exc}; "
+                f"recovery={' | '.join(recovery_errors)}; "
+                f"root_exists={root_object.is_file()} "
+                f"backup_exists={backup.is_file()} "
+                f"staging_exists={staging.is_file()}"
+            ) from exc
+        raise HarnessError(
+            f"runner runtime transaction failed and was safely rolled back: {exc}"
+        ) from exc
 
 
 def _finish_runner_runtime_isolation(
     record: dict[str, Any],
     setup: Mapping[str, Any],
-    backup: Path | None,
+    transaction: Mapping[str, Any],
 ) -> None:
     if not record["isolated"]:
         return
-    root_object = Path(record["root_path"])
+    root_object = Path(transaction["root"])
+    backup = Path(transaction["backup"])
+    staging = Path(transaction["staging"])
     try:
         post = _optional_file_state(root_object)
         record["post_exists"] = post["exists"]
@@ -641,17 +704,45 @@ def _finish_runner_runtime_isolation(
             if post["sha256"] != expected_hash:
                 record["errors"].append("runner replaced the prepared warm runtime object")
     finally:
-        root_object.unlink(missing_ok=True)
-        if backup is not None and backup.is_file():
-            shutil.copy2(backup, root_object)
-            backup.unlink(missing_ok=True)
+        # Restore first.  os.replace atomically swaps the preserved original
+        # over any generated object without deleting the backup beforehand.
+        try:
+            if record["original_exists"]:
+                if backup.is_file():
+                    try:
+                        os.replace(backup, root_object)
+                    except OSError as restore_exc:
+                        record["errors"].append(f"original restore failed: {restore_exc}")
+                else:
+                    current = _optional_file_state(root_object)
+                    if current["sha256"] != record["original_sha256"]:
+                        record["errors"].append("original restore failed: backup missing")
+            elif root_object.exists():
+                try:
+                    root_object.unlink()
+                except OSError as cleanup_exc:
+                    record["errors"].append(
+                        f"generated runtime cleanup failed: {cleanup_exc}"
+                    )
+        finally:
+            # Cleanup can fail independently, but it must never prevent the
+            # original-object restoration attempt above.
+            if staging.exists():
+                try:
+                    staging.unlink()
+                except OSError as cleanup_exc:
+                    record["errors"].append(f"install staging cleanup failed: {cleanup_exc}")
         restored = _optional_file_state(root_object)
         record["restored"] = (
             restored["exists"] == record["original_exists"]
             and restored["sha256"] == record["original_sha256"]
         )
+        record["backup_exists_after"] = backup.is_file()
+        record["staging_exists_after"] = staging.is_file()
         if not record["restored"]:
-            record["errors"].append("failed to restore pre-existing root runtime object")
+            record["errors"].append(
+                "failed to restore root runtime state; preserved backup is retained when present"
+            )
 
 
 def _context(
@@ -912,7 +1003,7 @@ def execute_invocation(
     measurement: dict[str, Any] | None = None
     measurement_error: str | None = None
     runtime_setup = environment["runner_runtime"]
-    runtime_record, runtime_backup = _begin_runner_runtime_isolation(
+    runtime_record, runtime_transaction = _begin_runner_runtime_isolation(
         lane, runtime_setup, sample_dir
     )
     try:
@@ -934,7 +1025,7 @@ def execute_invocation(
             stderr_path.touch(exist_ok=True)
     finally:
         _finish_runner_runtime_isolation(
-            runtime_record, runtime_setup, runtime_backup
+            runtime_record, runtime_setup, runtime_transaction
         )
 
     stdout = _file_record(stdout_path)

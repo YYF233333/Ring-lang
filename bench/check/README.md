@@ -79,6 +79,11 @@ object built with the runner's exact clang++ path and
 `-std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS`; its source/object hashes, flags,
 pre/post state, and restoration result are recorded. A stale ignored object can
 therefore neither silently turn a cold sample warm nor contaminate another lane.
+The original is atomically renamed to a same-directory ignored backup before
+any replacement; warm installation is copied to a sibling staging path,
+hash-checked, then atomically renamed into place. Restoration is attempted
+before cleanup. If restoration itself fails, the backup is deliberately kept
+and its path/state is recorded instead of deleting the only original copy.
 
 ## Commands
 
