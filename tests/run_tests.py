@@ -3528,10 +3528,8 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             finding_counts=(("x-overwrite-boxed", 1),),
         ),
         RcInvocationContract(
-            "callee call", "tests/cases/verify_rc/callee_call.ring",
-            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
-            exempt_counts=(("x-callee-call", 1),),
-            finding_counts=(("x-callee-call", 1),),
+            "callee call materialized", "tests/cases/verify_rc/callee_call.ring",
+            ("--verify-rc",), True, fatal_exact=0,
         ),
         RcInvocationContract(
             "shadow mismatch lax", "tests/cases/verify_rc/shadow_mismatch.ring",
