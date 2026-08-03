@@ -401,6 +401,10 @@ def case_expects_panic(ring_file: Path, expected_raw: str) -> bool:
 # Compile + link + run helpers
 # ---------------------------------------------------------------------------
 
+# Ring diagnostics and program output are UTF-8 contracts.  Windows CI's
+# locale may be a legacy code page, so every decoded child-process stream must
+# opt into UTF-8 instead of inheriting locale.getpreferredencoding().
+
 def ring_build(ring_exe: str, ring_file: str, *,
                out_dir: Optional[str] = None,
                extra_args: Optional[List[str]] = None,
@@ -413,8 +417,10 @@ def ring_build(ring_exe: str, ring_file: str, *,
         cmd.append(f"--out-dir={out_dir}")
     if extra_args:
         cmd.extend(extra_args)
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                          cwd=str(REPO))
+    return subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout, cwd=str(REPO),
+    )
 
 
 def ring_check(ring_exe: str, ring_file: str, *,
@@ -424,21 +430,27 @@ def ring_check(ring_exe: str, ring_file: str, *,
     cmd = [ring_exe, "check", ring_file]
     if extra_args:
         cmd.extend(extra_args)
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                          cwd=str(REPO))
+    return subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout, cwd=str(REPO),
+    )
 
 
 def clang_link(clang: str, o_file: str, exe_file: str) -> subprocess.CompletedProcess:
     """Link .o + runtime into an executable."""
     cmd = [clang, o_file, str(RUNTIME_O), "-o", exe_file, *CLANG_LINK_FLAGS]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_LINK,
-                          cwd=str(REPO))
+    return subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=TIMEOUT_LINK, cwd=str(REPO),
+    )
 
 
 def run_exe(exe_path: str, timeout: int = TIMEOUT_RUN) -> subprocess.CompletedProcess:
     """Execute a linked test binary."""
-    return subprocess.run([exe_path], capture_output=True, text=True, timeout=timeout,
-                          cwd=str(REPO))
+    return subprocess.run(
+        [exe_path], capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=timeout, cwd=str(REPO),
+    )
 
 
 # ---------------------------------------------------------------------------
