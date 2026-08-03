@@ -11,27 +11,22 @@ concurrency:
 
 jobs:
   check:
-    # Fast: ring.exe check + RC verify
+    # The Python runner builds ring.exe from compiler/dist-c/main.c.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install LLVM
-        run: choco install llvm -y
-      - name: Add LLVM to PATH
-        run: echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-      - name: Build runtime
-        run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
-      - name: Link ring.exe
+      - name: Verify C toolchain
         run: |
-          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
-      - name: Run check + RC suite
+          clang --version
+          clang++ --version
+      - name: Run C-native RC suite
         run: python tests/run_tests.py --suite rc
 
   test:
-    # Medium: e2e + llvm golden + generated-C structural/parity gates
+    # C-native executable, golden, generated-C structural, and parity gates.
     needs: check
     runs-on: windows-latest
     steps:
@@ -39,38 +34,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install LLVM
-        run: choco install llvm -y
-      - name: Add LLVM to PATH
-        run: echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-      - name: Build runtime
-        run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
-      - name: Link ring.exe
+      - name: Verify C toolchain
         run: |
-          clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
-      - name: Run e2e + llvm + structural + parity tests
-        run: python tests/run_tests.py --suite e2e --suite llvm --suite structural --suite parity
+          clang --version
+          clang++ --version
+      - name: Run C-native executable and evidence suites
+        run: python tests/run_tests.py --suite e2e --suite golden --suite structural --suite parity
 
-  # bootstrap:
-  #   Disabled: B-155 IR non-determinism (string constants contain heap addresses).
-  #   Re-enable after B-155 fix + performance optimization pass.
-  #   # Heavy: self-compile x3, main branch only
-  #   needs: test
-  #   runs-on: windows-latest
-  #   if: github.ref == 'refs/heads/main'
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-python@v5
-  #       with:
-  #         python-version: '3.11'
-  #     - name: Install LLVM
-  #       run: choco install llvm -y
-  #     - name: Add LLVM to PATH
-  #       run: echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-  #     - name: Build runtime
-  #       run: clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
-  #     - name: Link ring.exe
-  #       run: |
-  #         clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:NO" "-LC:\Program Files\LLVM\lib" -lLLVM-C
-  #     - name: Self-compile x3
-  #       run: python tests/run_tests.py --suite self-compile
+  bootstrap:
+    # Regenerate C from the tracked C-native compiler and require byte identity.
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify C toolchain
+        run: |
+          clang --version
+          clang++ --version
+      - name: Verify tracked dist-c fixed point
+        run: python tests/run_tests.py --suite self-compile

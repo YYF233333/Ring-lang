@@ -1,4 +1,4 @@
-// ring_runtime.cpp — C ABI runtime for Ring LLVM native backend
+// ring_runtime.cpp — C ABI runtime for Ring native programs
 // Target: x86_64-pc-windows-msvc (MSVC compatible)
 // Convention: all functions extern "C", void* in/out (or int64_t/double for unboxing)
 // Memory: Perceus RC (L0) — every heap object has an 8-byte header [rc:u32 | typeid:u32]
@@ -417,7 +417,7 @@ extern "C" void ring_dup(void* ptr) {
     if (!ptr) return;
     if ((uintptr_t)ptr & 1) return;  // B-080: tagged scalar — no RC
     uint32_t tid = *(uint32_t*)((char*)ptr - 4);
-    // B-099: foreign-pointer guard — extern type values (LLVM opaque refs etc.)
+    // B-099: foreign-pointer guard — extern type values (opaque handles etc.)
     // are NOT Ring-allocated.  Their ptr-4/ptr-8 bytes are arbitrary heap data.
     // Validating tid + rc catches most foreign pointers cheaply (reads are safe;
     // only writes corrupt).  This is defense-in-depth alongside Perceus/HIR-level
@@ -981,40 +981,6 @@ extern "C" void* ring_float_to_str(double val) {
 extern "C" void* ring_bool_to_str(int64_t val) {
     if (val) return make_ring_str("true", 4);
     return make_ring_str("false", 5);
-}
-
-// ============================================================================
-// B-099: LLVM-C extern fn marshalling helpers
-// ============================================================================
-// When the Ring compiler is compiled to a native binary (--target=llvm), calls
-// to LLVM-C functions bypass the N-API addon and go through C-ABI directly.
-// These helpers convert Ring boxed values to C-ABI types at call sites.
-
-// Extract C string pointer from a Ring Str (RingStr*) — zero-copy, already null-terminated
-extern "C" const char* ring_str_to_cstr(void* str) {
-    return as_str(str)->buf;
-}
-
-// Extract the length of a Ring Str as unsigned (for LLVM-C APIs that need it)
-extern "C" unsigned ring_str_len_u32(void* str) {
-    return (unsigned)as_str(str)->len;
-}
-
-// Extract data pointer from a Ring List (RingList struct)
-extern "C" void** ring_list_data(void* list) {
-    return as_list(list)->buf;
-}
-
-// Extract size from a Ring List as unsigned (for LLVM-C count params)
-extern "C" unsigned ring_list_size_u32(void* list) {
-    return (unsigned)list_len(as_list(list));
-}
-
-// LLVMIsNullPtr — custom helper (not part of LLVM-C API, provided by the N-API
-// addon for JS backend).  For native builds, we provide a C implementation.
-// Takes an opaque pointer, returns 1 if null, 0 if non-null.
-extern "C" int LLVMIsNullPtr(void* val) {
-    return val == nullptr ? 1 : 0;
 }
 
 // ============================================================================

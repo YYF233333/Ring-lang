@@ -626,7 +626,7 @@ pub fn c_interned_cstr(mut ctx: CCtx, s: Str) -> Str {
 // ============================================================
 
 pub fn c_stub_stmt(mut ctx: CCtx, what: Str) {
-    let g = c_interned_cstr(ctx, "ring-c backend: ${what} not implemented yet (B-163 later step)")
+    let g = c_interned_cstr(ctx, "ring-c backend: ${what} is not implemented")
     rt_use(ctx, "ring_panic", 1)
     rt_use(ctx, "ring_str_from_cstr", 1)
     c_emit(ctx, "ring_panic(ring_str_from_cstr(${g}));")
@@ -799,7 +799,6 @@ fn rt_sig(name: Str) -> Str? {
     if name == "ring_str_pad_end" { return some("pip>p") }
     if name == "ring_str_repeat" { return some("pi>p") }
     if name == "ring_str_join" { return some("pp>p") }
-    if name == "ring_str_to_cstr" { return some("p>p") }
     // StringBuilder (runtime std::string SB used by string interpolation)
     if name == "ring_sb_new" { return some(">p") }
     if name == "ring_sb_add" { return some("pp>p") }

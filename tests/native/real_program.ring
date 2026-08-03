@@ -3,8 +3,9 @@
 // A REAL program exercising the std surfaces most likely to expose RC over-free /
 // leak bugs under the clone-all-escape borrow model: print, List (push / index /
 // iterate / join), Map (insert / index / get / iterate), Str (interpolation /
-// index / len). Compiled by the NATIVE ring.exe (see native_selfcompile.test.mjs)
-// and run; the harness asserts EXIT 0 + this exact stdout. Element-READ projections
+// index / len). The Python e2e lane checks it with RC verification three times,
+// then compiles once and runs it three times against real_program.expected.
+// Element-READ projections
 // bound to `let` (list[i], m[k], obj.field) are the B-101 alias-aware-ownership
 // hot path: each must be Clone-balanced (no double-free with the container drop).
 

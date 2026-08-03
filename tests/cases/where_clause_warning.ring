@@ -5,7 +5,7 @@
 // the program still type-checks, builds, and runs (exit code 0).
 //
 // NOTE: when refinement types land (B-001), this warning, this test case,
-// and the W0002 assertions in tests/e2e.test.ts must be removed together.
+// and the W0002 contracts in tests/run_tests.py must be removed together.
 
 struct Account {
     balance: Int where balance >= 0
