@@ -86,8 +86,8 @@ EXTRA_NEG_DIRS = ["negative", "errors"]
 TIMEOUT_COMPILE = 60   # seconds, for ring.exe build / check
 TIMEOUT_LINK = 60      # seconds, for clang link
 TIMEOUT_RUN = 30       # seconds, per test program execution
-TIMEOUT_SELFCOMPILE = 900  # seconds, for self-compile / rc self-verify (600 was
-                           # grazed at +2.4k compiler lines after B-163 step 5)
+TIMEOUT_SELFCOMPILE = 1200  # seconds, for self-compile / rc self-verify (900 was
+                            # exceeded after B-170; clean builds take ~18 min)
 
 # B-163 Phase 2 parity classification.  These maps intentionally describe
 # different scopes: a backend-specific failure must never hide the other
