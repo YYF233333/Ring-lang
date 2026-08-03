@@ -104,6 +104,7 @@ class RcInvocationContract:
     exempt_counts: Tuple[Tuple[str, int], ...] = ()
     finding_counts: Tuple[Tuple[str, int], ...] = ()
     finding_lines: Tuple[Tuple[str, Tuple[int, ...]], ...] = ()
+    finding_function_bindings: Tuple[Tuple[str, str, str], ...] = ()
 
 # Generated-C evidence owned by the structural suite.  This map is also the
 # parity contract: every fixture below must exist, every structural .ring file
@@ -602,13 +603,10 @@ def run_cli_diagnostic_contracts(
     def llm_error(
         result: subprocess.CompletedProcess,
         code: str,
-        *,
-        channel: str = "stdout",
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         if result.returncode == 0:
             return None, "expected non-zero exit, got 0"
-        output = result.stdout if channel == "stdout" else result.stderr
-        diagnostics, failure = llm_diagnostics(output or "")
+        diagnostics, failure = llm_diagnostics(result.stdout or "")
         if failure is not None or diagnostics is None:
             return None, failure
         diagnostic = diagnostic_by_code(diagnostics, code)
@@ -785,8 +783,15 @@ def run_cli_diagnostic_contracts(
     def module_llm_failure(
         result: subprocess.CompletedProcess, code: str,
     ) -> Optional[str]:
-        _, failure = llm_error(result, code, channel="stderr")
-        return failure
+        if result.returncode == 0:
+            return "expected module diagnostic to exit non-zero"
+        diagnostics, failure = module_llm_diagnostics(result.stderr or "")
+        if failure is not None or diagnostics is None:
+            return failure
+        actual = diagnostics[0].get("code")
+        if actual != code:
+            return f"expected first module diagnostic {code}, got {actual!r}"
+        return None
 
     for recovery_name in RECOVERY_CASES:
         execute(
@@ -2756,43 +2761,56 @@ def process_output(result: subprocess.CompletedProcess) -> str:
 def llm_diagnostics(
     output: str,
 ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
-    """Extract and validate one or more formatter-v1 diagnostic JSON blocks.
+    """Strictly decode one complete formatter-v1 JSON channel."""
+    clean = output.strip()
+    if not clean:
+        return None, "expected formatter-v1 JSON diagnostics, got an empty channel"
+    try:
+        document = json.loads(clean)
+    except json.JSONDecodeError as exc:
+        return None, f"diagnostic channel is not exactly one JSON object: {exc.msg}"
+    return validate_llm_document(document)
 
-    Resolver/checker failures may append ``Compilation failed`` after a JSON
-    object, while future debug output may contain more than one object.  A raw
-    decoder preserves the JSON/schema assertion without depending on channels.
-    """
-    clean = strip_ansi(output)
-    decoder = json.JSONDecoder()
-    documents: List[Dict[str, Any]] = []
-    cursor = 0
-    while cursor < len(clean):
-        start = clean.find("{", cursor)
-        if start < 0:
-            break
-        try:
-            value, consumed = decoder.raw_decode(clean[start:])
-        except json.JSONDecodeError:
-            cursor = start + 1
-            continue
-        cursor = start + consumed
-        if isinstance(value, dict) and "diagnostics" in value:
-            documents.append(value)
 
-    if not documents:
-        return None, f"expected formatter-v1 JSON diagnostics, got: {clean[:300]}"
+def module_llm_diagnostics(
+    output: str,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Decode exactly ``<formatter JSON>\nCompilation failed[\n]``."""
+    clean = output.replace("\r\n", "\n")
+    if clean.endswith("\n"):
+        clean = clean[:-1]
+    suffix = "\nCompilation failed"
+    if not clean.endswith(suffix):
+        return None, (
+            "module LLM stderr must be one JSON object followed by "
+            "'Compilation failed'"
+        )
+    json_text = clean[:-len(suffix)]
+    if json_text != json_text.strip():
+        return None, "module LLM JSON has unexpected surrounding whitespace"
+    try:
+        document = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        return None, f"module diagnostic prefix is not exactly one JSON object: {exc.msg}"
+    return validate_llm_document(document)
 
+
+def validate_llm_document(
+    document: Any,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Validate the stable formatter-v1 envelope and diagnostic array."""
+    if not isinstance(document, dict):
+        return None, "expected diagnostic JSON top level to be an object"
+    if document.get("version") != 1:
+        return None, f"expected diagnostic JSON version 1, got {document.get('version')!r}"
+    items = document.get("diagnostics")
+    if not isinstance(items, list) or not items:
+        return None, "expected a non-empty diagnostics array"
     diagnostics: List[Dict[str, Any]] = []
-    for document in documents:
-        if document.get("version") != 1:
-            return None, f"expected diagnostic JSON version 1, got {document.get('version')!r}"
-        items = document.get("diagnostics")
-        if not isinstance(items, list) or not items:
-            return None, "expected a non-empty diagnostics array"
-        for item in items:
-            if not isinstance(item, dict):
-                return None, "diagnostics array contains a non-object entry"
-            diagnostics.append(item)
+    for item in items:
+        if not isinstance(item, dict):
+            return None, "diagnostics array contains a non-object entry"
+        diagnostics.append(item)
     return diagnostics, None
 
 
@@ -2906,6 +2924,20 @@ def rc_contract_failure(
         missing = sorted(set(required_lines) - actual_lines)
         if missing:
             return f"{category} findings missing fixture lines {missing}"
+    for category, function_name, binding_name in contract.finding_function_bindings:
+        expected_message = (
+            f"in {function_name}: Drop of borrowed binding '{binding_name}' "
+            "(param/pattern/for-in projection) — frees a reference owned elsewhere"
+        )
+        matching = [
+            finding for finding in by_category.get(category, [])
+            if finding.message == expected_message
+        ]
+        if len(matching) != 1:
+            return (
+                f"expected exactly one {category} finding for "
+                f"{function_name}/{binding_name}, got {len(matching)}"
+            )
     return None
 
 
@@ -3444,7 +3476,10 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
         RcInvocationContract(
             "drop-borrow drop-params mutation", "tests/cases/verify_rc/drop_borrow_uaf.ring",
             ("--verify-rc", "--rc-mutate=drop-params"), False, fatal_min=2,
-            finding_counts=(("uaf-drop-borrow", 2),),
+            finding_function_bindings=(
+                ("uaf-drop-borrow", "describe", "name"),
+                ("uaf-drop-borrow", "describe", "age"),
+            ),
         ),
         RcInvocationContract(
             "shadow overwrite", "tests/cases/verify_rc/shadow_overwrite.ring",
