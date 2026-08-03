@@ -14,13 +14,15 @@
 
 2026-07-31 B-107 merge 门禁的 main 基线 ×3 实测定量：a511d50 时代 ring.exe（= B-107 分支分叉点）跑全量套件，AV 频次 round1=0 / round2=2（`closure_capture_loop`、`supertrait_evidence`）/ round3=1（`struct_basic`——最基础用例也能炸）；B-107 worktree 侧另有独立观测（`adversarial_method_set_all`、`effect_custom_typed` 各 1 次）。用例无规律、复跑即过——是编译器进程自身的间歇堆损坏，非被测程序缺陷；历史「间歇 AV 复跑即过」流程豁免对应的正是这个从未立案的问题。
 
-**影响**：CI/自编译假红；更深层是编译器存在真实内存错误，当前仅以崩溃形式暴露（fail loud），不排除同根源存在静默错误产出路径。**归因方向**：ASan gating 档跑受累用例集定位；与 #247/#242（module verification failed 族）是否同根待查。B-163 P2 LLVM 退役后若信号消失可归因 LLVM 信道并关闭；若 C 后端仍现则为共享层/RC 问题升级处理。
+**影响**：CI/自编译假红；更深层是历史 compiler 曾存在真实内存错误，不能排除同根源有静默产物路径。旧 LLVM verify/emit finding 已随 lane 退役删除，不再作为当前归因候选；现只按下方 C-only 重分类门判断是退役信号还是共享层/RC blocker。
 
 > **2026-07-31 补充观测（B-107 merge 收官轮，merged 编译器）**：单轮 3 AV——`adversarial_dispatch_option_and_then`、`adversarial_effect_multi_delegate`、`generic_ord_dispatch`，全部 dict/dispatch 族聚集（B-107 动过 dict evidence 面），高于基线 ~1/轮但单轮样本不足定论；B-107 worktree 干净 ×3 的 AV 用例（effect/range/catch/reexport 族）无此聚集。#265 修复后的全量轮继续记录：若 dict 族聚集复现，优先用 ASan gating 跑该三用例。
 
 > **2026-08-01 takeover 补充观测（#266/#259 merged 编译器）**：聚合轮在 LLVM golden 的 `closure_capture_nonloop` 出现唯一一次无诊断 `0xC0000005`，随后同用例隔离 ×3 全绿；其余在外层 30 分钟限额前完成的 e2e / golden / RC / self-compile 前两轮累计 1338 pass / 7 contract skip，未见 dict 族聚集。信号与本条既有随机、复跑即过基线一致，原始失败保留，不以整轮重跑抹除。
 
 > **2026-08-01 tuple/structural merge 补充观测**：完整轮唯一失败为 LLVM golden `trait_default_method.ring` 无诊断 `0xC0000005`，隔离 ×3 全绿；全轮其余 1438 pass / 8 contract skip，self-compile 三代一致，未见 tuple/structural 或 dict 族聚集。原始失败与日志保留，不以隔离复跑替代全轮结论。
+
+> **2026-08-03 C-only 重分类门**：LLVM/`dist-llvm` 已从 main 退役，上述样本只能证明历史 lane 曾存在随机 AV，不能证明当前 `dist-c` compiler 仍受影响。B-163 收官先用 clean-clone C-only compiler 跑全套 ×3，并对历史高频 dict/effect/closure fixture 跑 ASan gating；零复现且进程/产物 hash 稳定则以“退役 lane 信号消亡”关闭，任一 C-only AV 或不稳定产物则立即升级为 critical release blocker 并保留 alloc/free 栈。
 
 发现者：Repository Steward main 基线 ×3 定量
 
@@ -34,7 +36,7 @@
 
 ### #262 derived Hash/Eq 泛型嵌套字段每次调用现场构造/回收动态 wrapped dict [medium] [judgment] [open]
 
-2026-07-31 B-107 merge review（b973859）发现：`Outer<T>` 的嵌套泛型字段（如 `Inner<Inner<T>>`）每次 `hash()`/`eq()` 都经 `resolve_derived_extra_dicts` 现场构造 dynamic wrapped dict（dict+closure+env 三次 alloc/method slot）再 drop（`emit_dict_hash_call`/`emit_c_derived_dict_call`，双后端同型）。Map/Set 探测是热路径——探测一次 = 每层泛型字段一轮 alloc/free。`dict_lower.ring:36-38` 注释自认只 memoise 全 static wrapper。功能正确（128 轮循环测试验证），纯 perf。
+2026-07-31 B-107 merge review（b973859）发现：`Outer<T>` 的嵌套泛型字段（如 `Inner<Inner<T>>`）每次 `hash()`/`eq()` 都经 `resolve_derived_extra_dicts` 现场构造 dynamic wrapped dict（dict+closure+env 三次 alloc/method slot）再由当前 C `emit_c_derived_dict_call` 路径 drop。Map/Set 探测是热路径——探测一次 = 每层泛型字段一轮 alloc/free。`dict_lower.ring:36-38` 注释自认只 memoise 全 static wrapper。功能正确（128 轮循环测试验证），纯 perf；是否优先由 B-176 allocation baseline 决定。
 
 **修复方向**：dynamic wrapped dict 的 per-callsite/per-monomorph 缓存，或在 derived 方法入口一次构造复用。
 
@@ -50,7 +52,7 @@
 
 ### #264 derived hash 对缺失字段/未知 enum tag 静默降级（失真不响）[medium] [judgment] [open]
 
-2026-07-31 B-107 merge review（b973859）发现两处防御性静默，与公理④「失真必须响」相悖：① `emit_struct_hash_fn`（LLVM/C 同型）对 field name 查不到时 `if field_idx >= 0` 静默跳过该字段——「Eq 区分、hash 相同」的静默失真（同型旧模式在 Eq/Ord 也存在）；② enum hash 的 default 分支（未知 tag = 内存损坏时）两后端静默返回 `DERIVED_HASH_SEED` 而非 panic。**修复方向**：两处统一 fail-loud（panic）；顺带排查 Eq/Ord 同型位置。另记录：`map_set_for_each` golden 弱化为 order-independent 总长（Set 迭代序 unspecified 口径），跨后端一致性由 `derive_hash_set` hash 值 golden 兜底——已接受，无行动项。
+2026-07-31 B-107 merge review（b973859）发现当前 C derived hash 两处防御性静默，与公理④「失真必须响」相悖：① `emit_struct_hash_fn` 对 field name 查不到时 `if field_idx >= 0` 静默跳过该字段——「Eq 区分、hash 相同」的静默失真（Eq/Ord 也有同型旧模式）；② enum hash 的 default 分支（未知 tag = 内存损坏时）静默返回 `DERIVED_HASH_SEED` 而非 panic。**修复方向**：两处统一 fail-loud（panic）并排查 Eq/Ord 同型位置；以 C golden/structural gate 锁定未知字段/tag 失败路径。
 
 发现者：B-107 merge 独立 review
 
@@ -59,9 +61,9 @@
 
 ### #260 `json_stringify<T>` 的 native runtime 无条件按 Str 解引用 [critical] [judgment] [open]
 
-2026-07-29 B-107 HOF 正式门禁发现并由 direct-call 对照确认：`std/io.ring` 与语言规范公开声明 `json_stringify<T>(value: T) -> Str`，但 native `ring_json_stringify(void*)` 除 null 外无条件把参数转成 `RingStr*`。安全源码直接执行 `json_stringify(107)` 时，C 与 LLVM 后端均把 tagged Int `0xD7` 当字符串指针解引用并以 `0xC0000005` 崩溃；不需要一等函数或字典传递即可触发。
+2026-07-29 B-107 HOF 正式门禁发现并由 direct-call 对照确认：`std/io.ring` 与语言规范公开声明 `json_stringify<T>(value: T) -> Str`，但 native `ring_json_stringify(void*)` 除 null 外无条件把参数转成 `RingStr*`。当前 C-native 安全源码直接执行 `json_stringify(107)` 时，会把 tagged Int `0xD7` 当字符串指针解引用并以 `0xC0000005` 崩溃；不需要一等函数或字典传递即可触发。
 
-**修复约束**：公开签名与 native 实现必须一致。若保留 `<T>`，需设计可证明覆盖所承诺类型的序列化/type-evidence 或单态 type-directed lowering，并让直接调用与一等 extern wrapper 共用同一路径；若只支持 Str，则必须收窄标准库签名和规范，不能继续让 checker 接受会越界访问的安全程序。验收至少覆盖 Int/Float/Bool/Str、直接调用/一等函数值、C/LLVM/diff，并对不支持的结构类型给出编译期诊断而非 runtime UB。
+**修复约束**：公开签名与 native 实现必须一致。若保留 `<T>`，需设计可证明覆盖所承诺类型的序列化/type-evidence 或单态 type-directed lowering，并让直接调用与一等 extern wrapper 共用同一路径；若只支持 Str，则必须收窄标准库签名和规范，不能继续让 checker 接受会越界访问的安全程序。验收至少覆盖 Int/Float/Bool/Str、直接调用/一等函数值、C-native/structural/self-host，并对不支持的结构类型给出编译期诊断而非 runtime UB。任何收窄公开签名的候选先形成用户决策包。
 
 发现者：B-107 HOF implementation + independent review
 
@@ -99,7 +101,7 @@
 
 ### #232 _ReturnAddress() 无跨平台守卫 [low] [mechanical] [open]
 
-`ring_runtime.cpp:338,345,381,669,2337,2353`：`_ReturnAddress()`（MSVC intrinsic）在 `RING_BOX_PROFILE` 和 `RING_RC_DEBUG` 块内使用，但无 `_WIN32` 守卫。Linux/macOS 启用这些调试宏时编译失败。当前仅目标 Windows，影响有限。
+`ring_runtime.cpp:338,345,381,669,2337,2353`：`_ReturnAddress()`（MSVC intrinsic）在 `RING_BOX_PROFILE` 和 `RING_RC_DEBUG` 块内使用，但无 `_WIN32` 守卫。Linux/macOS 启用这些调试宏时编译失败。B-175 已把 Linux 纳入 preview CI，本条不再是“仅 Windows、影响有限”的潜伏清理；profiling/RC debug 是 release 性能与内存归因信道，须在跨平台基线前修复。
 
 **修复方向**：添加 `#ifdef _MSC_VER ... #else __builtin_return_address(0) #endif` 宏。
 
@@ -108,132 +110,35 @@
 
 ## Native codegen 与 RC
 
-### #255 `impl Drop for <enum>` 的用户 drop 从不被调用（两后端一致的既有 gap）[critical] [judgment] [open]
+### #255 `impl Drop for <enum>` 的用户 drop 从不被调用 [critical] [judgment] [open]
 
-> 2026-07-12 B-163 step 7 worker 发现（C 侧按 oracle parity 照搬保持 diff=0，两侧都缺）。
+checker 对 enum 的 `impl Drop` 照常收进 `drop_types`（E0801 move 语义生效），但当前 C drop glue 的 enum 路径只做 payload 递归 drop，**用户 drop body 静默不执行**（用户以为 RAII 生效实则没有）。这是现行 C-only 产品路径的直接 correctness blocker，不再保留旧 oracle parity 叙述。
 
-checker 对 enum 的 `impl Drop` 照常收进 `drop_types`（E0801 move 语义生效），但 LLVM `emit_drop_functions` 只在 struct 循环里查 `drop_types` 调用户 drop——enum 循环只做 payload 递归 drop，**用户 drop body 静默不执行**（静默资源泄漏：用户以为 RAII 生效实则没有）。C 侧 step 7 忠实移植同 gap。
-
-**修复方向**（解法明确）：两后端 enum drop fn 里 tag switch 前插用户 drop 调用（对齐 struct 循环的处理）+ E2E 锁定（enum 变体持资源 + impl Drop 触发顺序）。双后端同修保持 diff=0。
+**修复方向**（解法明确）：C enum drop fn 在 tag switch 前插入用户 drop 调用（对齐 struct 路径）并锁定 enum 变体持资源、用户 drop 与 payload drop 的精确顺序；与 B-168/B-002 的 failure cleanup 共享同一 Drop identity，不在 runtime 另造特判。
 
 发现者：step 7 worker（feedback 分诊）
 
-### #256 Result 壳 RC 归零时 payload 不递归释放（两后端同构泄漏）[critical] [judgment] [open]
+### #256 Result 壳 RC 归零时 payload 不递归释放 [critical] [judgment] [open]
 
-> 2026-07-12 B-163 step 7 worker 发现（skip 集逐一对齐时暴露）。既有行为，非 step 7 引入。
+当前 C drop glue 对 `Result` 仍沿用“由 runtime 处理”的 skip，但 **runtime 没有 `drop_result`**（对照：Option 有固定 drop 路径）——Result 对象 RC 归零时只 free 外壳，ok/err payload 不递归 drop。
 
-LLVM `emit_drop_functions` 的 enum 循环 skip "Result"（预期 runtime 处理），但 **runtime 没有 drop_result**（对照：Option 有 drop_option 固定 tid 8）——Result 对象 RC 归零时整壳 free、payload（ok/err 内含的堆对象）不递归 drop = 泄漏。两后端同构。
-
-**修复方向**（二选一，倾向 ①）：① runtime 加 `drop_result` 固定 tid 64（对齐 Option 先例，一致性最好；runtime 改动需同步 bootstrap 考虑）；② 两侧 codegen 取消 skip、为 Result 生成 drop fn（零 runtime 改动但两处发射）。修复后跑 RC 泄漏敏感 golden ×3。
+**修复方向**：在“共享 enum drop glue”与“固定 runtime typeid drop”两候选间做 bounded Argument，优先减少 builtin 特例并与 B-152 RIIR 终态一致；无论选择哪条，Result/Option/普通 enum 的 drop identity 必须唯一，修复后跑 RC 泄漏敏感 golden ×3、ASan 与 self-host fixed point。
 
 发现者：step 7 worker（feedback 分诊）
-
-### #254 LLVM 用户 drop 调用 under-call（evidence 实参缺失，潜伏炸点）[medium] [judgment] [open] [deferred: B-163p2-retire]
-
-> 2026-07-12 B-163 step 7 worker 发现（C 侧已按正确 arity 补齐 evidence 实参，有意偏离）。
-
-`fn drop(self)` 推断带 `{io}` → 原型两参，但 LLVM `emit_drop_functions` 构建用户 drop 调用只传 data_ptr 一个实参——callee 从垃圾寄存器读 evidence 参，io 路径恰好不读所以不炸。**潜伏条件**：drop 方法带「有 default ops 的自定义 effect」且 body 调 op 时，LLVM 读垃圾 evidence 指针即炸；C 侧正确（default evidence 全局或 RING_UNIT）。
-
-**修复方向**：LLVM 侧调用补齐 evidence 实参对齐 C；或不修随 Phase 2 退役消亡。
-
-发现者：step 7 worker（feedback 分诊）
-
-### #252 catch 顶层 TuplePattern / OrPattern 在 LLVM 链路径是静默空分支 [medium] [judgment] [open]
-
-> 2026-07-12 B-163 step 6 worker 发现（#246 修复时的相邻观察，未扩面）。
-
-#246 修复覆盖了 ctor 嵌套 + 顶层 literal，但 LLVM catch 链路径对顶层 tuple/or-pattern arm 仍是 `_ => {}` 空分支——若 checker 放行此类 arm（`fail<(Int,Str)>` 的 tuple 模式），LLVM 侧静默跳过该 arm；C 侧 `emit_c_match_arm` 天然支持，双后端不对称。
-
-**修复方向**：先复核 checker 是否放行 catch arm 顶层 tuple/or-pattern——不放行则本条降级关闭；放行则 LLVM 链路径补支持（对照 match 路径现成逻辑），差分验收。
-
-发现者：step 6 worker（feedback 分诊）
-
-### #253 LLVM gen_lambda 不隔离 handle_cleanup_stack——lambda 内 return 错误发射 catch pop [medium] [judgment] [open] [deferred: B-163p2-retire]
-
-> 2026-07-12 B-163 step 6 worker 发现（C 侧以 `c_push_fn`/`c_pop_fn` 隔离，有意正确性偏离；LLVM 侧未动）。
-
-嵌套函数（lambda/dict getter/thunk）是独立栈帧，lambda body 里的 `return` 不得 pop 外层函数的 catch frame。LLVM `gen_lambda` 未保存/清空 `handle_cleanup_stack`——handler body 的 lambda 内含显式 `return` 时，会在 lambda 帧里错误发射 `ring_catch_pop`（栈不平衡 → 后续 catch 行为未定义）。触发面窄（handler body 内 lambda 显式 return）。
-
-**修复方向**：`gen_lambda` 进入时保存并清空 cleanup stack、退出时恢复（对齐 C 侧 bracket）；或不修随 Phase 2 退役消亡。
-
-发现者：step 6 worker（feedback 分诊）
-
-### #247 合法 match 程序触发 module verification failed（IR 与文本形式不一致，行为正确）[medium] [judgment] [open]
-
-> 2026-07-11 #245 worker 范围外发现（基线 `44e69f9` 对照确认预存在，与 #245 修复无关）。
-
-`fn f(o: Int?) -> Str { match o { some(n) => "n=${n}", none => "none" } }` + main 两次调用即触发 `LLVM module verification failed (1 errors)`。怪异点：dump 的 ring_output.ll 经 clang 解析编译**无错**——in-memory module 与文本形式不一致（疑似空 block / 游离 block 类，#198 builder 簿记家族）；运行输出正确。
-
-**影响**：verify 信道被既有噪声污染——verify 失败无法作为硬门槛（见 #242 扩注的 fail-stop 决策依赖）。**修复方向**：最小复现 → `LLVMVerifyModule` 的具体错误文本定位（action=2 会打到 stderr，先抓全错误内容）→ 定位发射游离/空 block 的路径。注：LLVM 后端 Phase 2 退役后本条随之消亡，但它 gate 着 verify fail-stop 决策，且 Phase 1 期间 LLVM 是 oracle——oracle 自身 verify 不过削弱差分可信度。
-
-发现者：#245 worker（feedback 分诊）
-
-> **2026-07-31 升级注记（#265 修复过程观测）**：含 #258（`6a67552`）的编译器上警告已**全局化**——任何 LLVM build（含 hello.ring）都打印 `LLVM module verification failed (1 errors) — attempting emit anyway`，082f9a7 与 6b1be7d 均复现；退出码与产物行为仍正确。触发源大概率是 #258 的 handler contract 发射模式落入本条的游离/空 block 家族。B-163 P2 期间 LLVM 仍是差分 oracle，全局 verify 噪声进一步削弱 oracle 可信度——若定位成本低应在退役前修，至少定位到具体发射位置再决定修/豁免。
-
-### #248 LLVM derived clone 签名与 checker scheme 契约不一致（静默多传参）[low] [judgment] [open] [deferred: B-163p2-retire]
-
-> 2026-07-11 step 5 worker 发现（clang 在 C 侧把它变成硬错误而暴露；C 侧已修，LLVM 未动）。
-
-checker（`derive.ring` `register_derived_impl`）给 derived clone 注册带 `[T: Clone]` bounds 的 scheme → 调用位按 scheme 传 dict 参数；LLVM `emit_clone_fn` 却用 empty_bounds 生成单参函数——调用位多传 1 个 dict 参数，LLVM-C 不校验、x64 调用约定下静默无害（plan §0.1「类型系统真空」实例）。C 侧修复 = clone 签名与 scheme 对齐（接收 dict 参数，body 忽略）。
-
-**修复方向**：`emit_clone_fn` 传 `di.bounds` 对齐 scheme；或不修随 Phase 2 退役消亡。Phase 1 期间动 LLVM derived 区的任何改动需先修此项。
-
-发现者：step 5 worker（feedback 分诊）
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]
 
-> 2026-07-11 step 4 worker 发现（C 侧硬重定义错误暴露；已按 LLVM 等效语义 first-wins 缓解，根因未修）。
+用户自定义 `enum Result` + `impl Result { and_then }` 与 prelude `std/result.ring` 的同名方法都 mangle 成 `ring_Result_and_then`——共享 codegen identity 未区分用户类型与被遮蔽的 prelude 类型。当前 C `CCtx.emitted_fns` 采用 first-wins 缓解，函数 body/prototype 与 evidence metadata 仍可能来自不同声明；重名双方 effect row 不同时会形成原型/实参不一致。用户 `fn drop_Foo()` 也会与 struct Foo 的生成 drop symbol 碰撞，当前表现为 clang redefinition 硬错误。
 
-用户自定义 `enum Result` + `impl Result { and_then }` 与 prelude `std/result.ring` 的同名方法都 mangle 成 `ring_Result_and_then`——codegen 身份未区分用户类型与被遮蔽的 prelude 类型。LLVM 后端「通过」纯属侥幸（forward pass 重名去重后第二个 body 成死块，调用点全走 prelude 定义，恰好语义相同）；C 后端 `2b85e9f` 起 `CCtx.emitted_fns` first-wins（等效语义，同样是缓解不是修复）。**次生 wrinkle**：`c_declare_fn`/LLVM forward_declare 对重名的 `fn_evidence_params` 是 last-wins（body/proto 是 first-wins）——重名双方 effect 行不同时调用点 evidence 实参数与原型不匹配（现有用例未触发）。
-
-**修复方向**：checker/mangling 层给用户定义类型与 prelude/builtin 类型不同的 codegen 身份（如模块前缀入 mangled name），两后端消费同一来源；歧义存在期间至少发 W/E 级诊断（用户 enum 遮蔽 prelude 类型名）。涉及 checker + hir 共享约定，需设计判断。
-
-> 2026-07-12 同族补充（step 7 worker）：用户 `fn drop_Foo()` mangle 成 `ring_drop_Foo` 会撞 struct Foo 的 drop fn 符号——LLVM 静默 rename 兜底，C 是 clang redefinition 硬错误（更响但报错不友好）。概率极低，随本条 mangling 方案一并解决。
+**修复方向**：checker/HIR mangling 层让 user/prelude/builtin/module/generated symbol 使用同一唯一 identity 来源；C codegen 只消费该 identity，不做 first-wins 仲裁。歧义存在期间至少发 W/E 级诊断并给 qualified/rename 建议；补同 method 不同 effect、生成 drop collision 与跨模块 shadow 回归。
 
 发现者：step 4 worker（feedback 分诊）
 
-### #242 finalize_llvm_module emit 失败后进程退出码仍为 0 [medium] [mechanical] [open]
-
-> 2026-07-11 从 worker feedback 分诊入表（Phase 0 worker 发现冻结 JS 版同病 → 现源码查证同病）。
-
-`codegen_llvm.ring:1759-1764`：`LLVMTargetMachineEmitToFile` 失败只 `eprintln("Failed to emit object file")` 后正常返回，进程 exit 0——脚本/CI 假绿隐患。典型事故：dist-llvm rebuild 时 emit 失败但脚本继续链接旧 main.o，用旧编译器却以为是新的。Python runner 靠 ".o file not found" 兜底，但直接调 ring.exe 的脚本（CLAUDE.md 常用命令、rebuild 流程）无此防护。对照：cli.ring 全部 lex/parse/check 错误路径正确 `exit_process(1)`；C 后端 `codegen_c.ring:69` clang 失败正确 `exit_process(1)`。
-
-**修复方向**（解法唯一）：emit 失败分支加 `exit_process(1)`，对齐 C 后端先例。同函数 verify 失败（L1746，注释明示 attempting emit anyway）与 pass 失败（L1753）是故意继续的既有行为，**保持不动**。注：本条属 codegen_llvm，若不修将随 B-163 Phase 2 LLVM 后端退役消亡；但 Phase 1 期间 LLVM 仍是主力构建路径 + 差分 oracle，1 行修复值得做。
-
-> **2026-07-11 扩注（#245 worker [观察] 分诊）——verify 失败 fail-stop**：invalid IR（duplicate switch case）下 "attempting emit anyway" 实测会**挂死 ring.exe 进程**（滞留占文件锁），违背「失真必须响」。建议 verify 失败直接 fail-stop（exit 非零）而非继续 emit——**但被 #247 gate**：现存在合法程序触发 verification failed 的既有噪声（行为正确的假阳性），先修 #247 才能启用 fail-stop，否则合法程序编译失败。执行序：#247 根因修复 → Steward 通过 Argument/定向回归启用 verify fail-stop（届时本条 emit/verify 两处一并收口）。这是恢复既有诊断保证的内部工程决定；只有接受继续 emit 或降低“失真必须响”门槛才需用户 waiver。
-
-发现者：Phase 0 worker（feedback 分诊）
-
-### #233 method_to_runtime + 4 配套查找链需同步维护 [medium] [judgment] [open]
-
-`codegen_llvm_expr.ring:2776-2891`：5 个独立 if-else 链映射同一组运行时方法（method_to_runtime、method_to_llvm_return_type、method_needs_list_content_type、method_is_void、method_extra_args）。新增一个方法映射需同步修改 5 处，遗漏导致 codegen 错误。
-
-**修复方向**：合并为单一 `RuntimeMethodInfo` 结构体（含 runtime_name, return_type, needs_content_type, is_void, extra_args），单一查找函数返回该结构。
-
-发现者：Opus
-
-### #234 codegen 层硬编码类型名 vs types.ring 常量 91 处 [medium] [mechanical] [open]
-
-`codegen_llvm_expr.ring` 中约 91 处使用原始字符串 `"Int"`, `"Str"`, `"Bool"`, `"Float"`, `"List"`, `"Map"`, `"Set"` 等进行类型判断，而 `types.ring` 已定义 `BUILTIN_INT`, `BUILTIN_STR` 等常量。字符串拼写错误不会被编译器捕获。
-
-**修复方向**：codegen 层统一使用 `types.ring` 的常量。
-
-发现者：Opus
-
-### #235 codegen_llvm_expr.ring 5634 行——编译器最大文件需拆分 [medium] [judgment] [open]
-
-`codegen_llvm_expr.ring` 是编译器最大文件（5634 行），是次大文件（`perceus.ring` 2473 行）的 2.3 倍。包含表达式 codegen、match 编译（~1500 行）、lambda/handler/证据构造、emit_c_main、RC drop 辅助等职责过多。
-
-**修复方向**：沿职责边界拆分——至少拆出 `codegen_llvm_match.ring`（match 编译约 1500 行）和 `codegen_llvm_entry.ring`（emit_c_main + 模块初始化）。
-
-发现者：Opus+DS
-
-
 ### #257 verify_rc 对同名 local shadow 仍假定共享 alloca [medium] [judgment] [open]
 
-`verify_rc.ring` 的 shadow 检查仍假定同名 local 复用一个 alloca；当前 C/LLVM codegen 已为每个 lexical binding 分配独立存储并在离开 match / catch / if-let 分支时恢复外层名称。因此合法的 `let x = ...` 后再以 pattern binding shadow `x` 会被误报为 `uaf-shadow-mismatch` / `uaf-drop-borrow`，而双后端直接执行结果正确。
+`verify_rc.ring` 的 shadow 检查仍假定同名 local 复用一个 alloca；当前 C codegen 已为每个 lexical binding 分配独立存储并在离开 match / catch / if-let 分支时恢复外层名称。因此合法的 `let x = ...` 后再以 pattern binding shadow `x` 会被误报为 `uaf-shadow-mismatch` / `uaf-drop-borrow`，而 C-native 直接执行结果正确。
 
-**证据**：`compiler/verify_rc.ring:350-365` 的注释和判定仍编码旧假设；含 match / catch / if-let local shadow 的直接 probe 产生 12 条误报，等价的参数 shadow 回归在 C/LLVM 均保持外层值。修复应让 verifier 按 binding identity / lexical scope 跟踪，而不是按裸名称合并；不得削弱真实 use-after-free 检查。
+**证据**：`compiler/verify_rc.ring:350-365` 的注释和判定仍编码旧假设；含 match / catch / if-let local shadow 的直接 probe 产生 12 条误报，等价的参数 shadow 回归在 C-native 保持外层值。修复应让 verifier 按 binding identity / lexical scope 跟踪，而不是按裸名称合并；不得削弱真实 use-after-free 检查。
 
 发现者：B-163 Phase 2 P2.2 对抗 review
 
@@ -258,30 +163,13 @@ str-keyed `Map.clone()` / `List.clone()` / `Set.clone()` 的方法语法仍缺�
 ## 跨模块代码健康
 
 
-### #202 LLVM extern 类型重声明分散在 5 个 codegen 文件 [low] [judgment] [open]
+### #237 45 处 sort_by(compare_by_first) 缺 sorted_entries 工具函数 [low] [mechanical] [open]
 
-`codegen_llvm.ring:18-27`、`codegen_llvm_ctx.ring:6-12`、`codegen_llvm_decl.ring:46-52`、`codegen_llvm_stmt.ring:9-13`、`codegen_llvm_expr.ring:25-31`：每个文件独立重声明所有 LLVM opaque 类型（`LLVMContextRef`/`LLVMModuleRef`/`LLVMBuilderRef` 等）。注释说明是为避免 ESM 跨模块导入问题。导致新增 LLVM-C API 调用需更新 5 处，遗漏则运行时链接错误。
-
-若 ESM 导入问题已解决，应集中到 `llvm_ffi.ring` 统一声明。
-
-发现者：DS
-
-
-### #237 34+ 处 sort_by(compare_by_first) 缺 sorted_entries 工具函数 [low] [mechanical] [open]
-
-`checker.ring`, `derive.ring`, `codegen_llvm_expr.ring`, `infer_decl.ring`, `infer_register.ring`, `resolver.ring`, `scc.ring` 等 11 个文件中共 34+ 处使用 `map.entries().sort_by(compare_by_first)` 模式实现确定性 Map 迭代。68+ 行样板。
+2026-08-03 C-only main 复核：`builtins/checker/codegen_c*/derive/exports/infer*/resolver/scc` 共 12 个文件、45 个调用点先复制 entries 再 `sort_by(compare_by_first)`，用于确定性 Map 迭代。旧 LLVM 调用点已随退役消亡，但当前 C/shared 路径的重复量反而已增长，仍有统一 helper 价值。
 
 **修复方向**：添加 `Map.sorted_entries()` 方法到 `std/map.ring`，或在编译器内部提供 `sorted_entries(map)` 工具函数。
 
 发现者：Opus+DS
-
-### #238 collect_all_supertraits_llvm 跨模块拷贝 [low] [mechanical] [open]
-
-`codegen_llvm_decl.ring:22-45`：注释 "Local copy to avoid circular dependency"，与 checker 中的同名函数算法完全相同。变更算法需改两处。
-
-**修复方向**：移至 `codegen_llvm_ctx.ring` 或 `hir.ring` 共享模块，消除循环依赖。
-
-发现者：Opus
 
 ### #239 DictRef::Wrapped extra_dicts codegen 未消费 [medium] [judgment] [open]
 

@@ -1,8 +1,8 @@
 # Ring-lang 竞品与行业定位
 
-> 最后更新：2026-07-28
+> 最后更新：2026-08-03
 >
-> 事实截止：2026-07-28（版本、活跃度与 stars 均为时点数据）
+> 事实截止：2026-08-03（版本、活跃度与 stars 均为时点数据）
 >
 > 用途：产品定位、路线图取舍、B-001 Refinement Types 与 B-111 LLM eval harness 的证据输入
 
@@ -22,7 +22,7 @@
 
 ### 1.1 Ring 仍有差异化，但不能再表述为「无直接竞品」
 
-截至 2026-07-28，尚未发现一个项目**同时交付**以下组合：
+截至 2026-08-03，尚未发现一个项目**同时交付**以下组合：
 
 - 面向应用开发、接近脚本语言的低标注表面；
 - HM 类型推断与 application-facing effect inference；
@@ -52,18 +52,19 @@
 | **极高** | TypeScript 7 | 主流替代、native 工具链速度、编辑器与训练数据 | 已从 beta 风险变成正式发货事实 |
 | **高** | MoonBit | 最接近的应用语言产品、团队与工具链、`moon prove` | 工程威胁上调，effect 机制仍不同 |
 | **高** | Python + Astral/Codex | agent 生态与低摩擦「够用」路径 | 语言保证弱，但采用阻力最低 |
-| **高** | Zero | agent-first 叙事、语义图与 checked edits | 机制是另一条路线，叙事竞争直接 |
+| **高** | Zero | graph-native 程序库、checked edits 与完整 agent CLI/skills | 机制路线不同，但产品面竞争直接 |
 | **中高** | Rust + Verus | 安全基线、证明能力、训练数据、系统生态 | Ring 的安全/验证措辞必须分层且可证 |
 | **中** | Flix / Koka / Effekt / Unison | effect 与语义工具机制先例 | 市场替代低，技术与叙事纠偏价值高 |
 | **中** | Mojo | 大厂资源、AI compute、agent skills | 资源/叙事强，应用语言定位重叠有限 |
 | **中** | Rue | 一人 + agent 的编译器工程速度与纪律 | 非直接产品竞品，是执行力基准 |
 | **低** | Mog | 小规范、嵌入式 capability 模型 | 活跃度低，保留为规格压缩启发 |
 
-### 1.3 三个最重要的路线图含义
+### 1.3 四个最重要的路线图含义
 
 1. **B-111 是立论门，不是营销附件。** TS7 已正式发布，Ring 必须用同协议、同模型、同预算的实验回答“effect 签名是否真的减少 token/轮数/运行时错误”。
 2. **B-001 应做 bounded refinement，不应复制 Verus。** 普通 Ring 代码继续依靠默认类型/effect/资源检查；refinement 先限定可判定片段、机器整数语义和运行时兜底，再谈通用 SMT。
 3. **形式化验证必须显式管理信任。** Verus 与 `moon prove` 都说明“证明成功”不等于“无假设”：solver、整数模型、axiom/external spec、编译器和 runtime 都属于保证边界。
+4. **C-only 只是发布地基，不是产品发布。** Zero 已把 install/query/check/test/run、稳定 identity 与版本匹配的 agent skills 做成 compiler 产品面，Koka/MoonBit/TS7 也都有可安装工具链。Ring 应先完成 B-174/B-175 的本地闭环与候选包，再以 B-177 提供只读、版本化的 semantic inspection/primer；保持源码 + Git 为真值，不追随 graph-native 存储重写。
 
 ---
 
@@ -94,14 +95,14 @@ stars 和发布频率只辅助判断后两项，不直接证明产品质量。
 
 ## 3. 全景矩阵
 
-| 项目 | 2026-07-28 状态 | 已发货核心 | Agent 路线 | 保证层 | 对 Ring 的关系 |
+| 项目 | 2026-08-03 状态 | 已发货核心 | Agent 路线 | 保证层 | 对 Ring 的关系 |
 |---|---|---|---|---|---|
-| **Ring** | 自举；C 后端迁移 Phase 2 进行中，LLVM 仍为 anchor/oracle；RIIR 后续暂停等待 | HM + trait、`io/fail/mut`、tail-resumptive/abort handler、Perceus RC、native | 诊断 + 高信息签名；B-111 待测 | G1（部分目标仍在收口） | 被比较对象 |
+| **Ring** | 自举；2026-08-03 完成 C-only codegen/bootstrap 与 tracked `dist-c` 固定点；发布产品面/RIIR/Drop Phase 2 待收口 | HM + trait、`io/fail/mut`、tail-resumptive/abort handler、Perceus RC、C11 native | 结构化诊断已有；inspection/primer 与 B-111 待交付 | G1（部分 ownership/runtime 保证仍在收口） | 被比较对象 |
 | **TypeScript 7** | 2026-07-08 正式发布 | Go native 编译器、LSP、`strict` 默认、并行检查 | 海量训练数据 + 编辑器/agent 生态 | G1 的结构类型子集 | 最大主流替代 |
 | **Python + Astral** | Ruff/uv/ty 持续发展；OpenAI 收购协议未确认交割 | 极低摩擦生态与高速工具链 | Codex/agent 原生使用场景 | G0–G1（依工具） | 最大低阻力替代 |
 | **Rust** | 成熟系统生态 | ownership/borrow、trait、unsafe 隔离、native | 高训练覆盖 + LSP/agent 工具 | 强 G1 | 安全基线与底层替代 |
 | **MoonBit** | v0.10.4；1.0 目标 Q3 2026 | ML 风类型、Wasm/JS/C/native、LSP、包管理、Pilot | 专用 coding agent 与工具链 | G1；`moon prove` 为实验性 G3 | 最接近产品竞品 |
-| **Zero** | v0.3.4；约 5.2k stars | semantic graph、query/patch、World capability、实验性 LLVM | agent 直接操作程序图 | G0–G1 | 最直接 agent 叙事竞品 |
+| **Zero** | experimental；官方 main 已明确 graph-native，semantic graph 是程序数据库、`.0` 是 projection | checked graph/patch、query/inspect/check/test/run、显式 capability | agent 直接操作图并消费版本匹配 skills | G0–G1 | 最直接 agent 产品面竞品 |
 | **Mojo** | 1.0 Beta 2；Modular 主仓约 26.6k stars | Pythonic syntax、linear types、compile-time reflection、AI compute | 官方 agent skills | G1 | 资源/叙事强，定位偏 AI compute |
 | **Koka** | v3.2.3；活跃研究语言 | effect inference/handlers、evidence passing、Perceus、C backend | 非主要目标 | G1 | Ring 最接近理论与实现来源 |
 | **Flix** | v0.75.1；活跃 | effect polymorphism、subeffecting/exclusion、handlers、purity-driven optimization | 官方已直接研究 LLM 对新语言的影响 | G1 | 直接机制近邻 |
@@ -194,24 +195,16 @@ MoonBit 当前比 Ring 成熟得多：多后端、包管理、LSP、文档与专
 
 结论：**工程与采用威胁高，effect 机制不是同一路线，验证叙事已正面相遇。**
 
-### 5.2 Zero：semantic graph 是另一种 agent-first 赌注
+### 5.2 Zero：graph-native 已从叙事推进为完整 agent loop
 
-Zero 的核心不是“更强类型”，而是把 semantic graph 作为程序数据库：
+2026-08-03 复核官方 main 后，Zero 的定位比 7 月 28 日记录更激进：semantic graph 明确成为 program database，`.0` 文本是 human-readable projection，而不是普通 authoring 真值；checked graph 是 compiler input。其公开 loop 已包括：
 
-- `.0` 文本是面向人的 projection，语义图才是编译器/工具的稳定对象；
-- agent 用 `zero query` 获取结构，用 `zero patch` 提交 checked edits；
-- graph hash 让过期 patch fail closed；
-- v0.3.4 已把 graph patching 推为主要 agent 编辑循环；
-- `World` 是显式 capability，不是 Ring 式 effect inference；
-- native/LLVM 仍有实验性部分，项目整体也明确处于早期阶段。
+- `zero query` / `zero inspect` 获取 stable graph facts，`zero patch` 以 graph hash 拒绝陈旧或非法编辑；
+- `zero check` / `zero test` / `zero run` 覆盖日常闭环，并提供一行安装与 `--version`；
+- compiler 随版本提供 language/stdlib/agent/graph skills，减少外部 primer 漂移；
+- `World`/capability 与 graph model 仍不同于 Ring 的 inferred effect + 普通文件/Git 路线；项目继续明确标为 experimental，不应把产品面完整误写成 production safety。
 
-Zero 约 5.2k stars，首发传播证明 agent-first 叙事有强需求；但 6 月底后公开提交节奏较首发期放缓，不能把早期指数增长外推。
-
-对 Ring 的启发不是复制 graph-native 存储，而是：
-
-- 给 agent 稳定 identity、结构化 query、可验证 patch 与 stale guard；
-- 明确文本签名路线何时比语义图足够，何时需要更强结构化接口；
-- 把 agent protocol 作为可测试产品面，而非诊断 JSON 的附属品。
+这使 Zero 的威胁从“agent-first 叙事”上升为“agent compiler 产品面”。Ring 不应复制 graph-native source-of-truth：这会牺牲现有 Git/文本生态并引入第二套存储模型。合理响应是 B-174/B-175 先交付可安装的 check/build/run/doctor，再由 B-177 从 checker/HIR 导出只读、版本化的 identity/signature/effect/import/unsafe contract，配套 source hash stale guard 与 bundled primer。是否需要 checked patch 必须由 B-111/真实 agent loop 证据另行立项，不能因竞品存在就预设。
 
 ### 5.3 Mojo：资源与叙事强，主战场不同
 
@@ -229,7 +222,7 @@ Mojo 编译器本身的开放范围仍需区分于 Modular 主仓中的开源组
 
 ### 6.1 Koka：最接近的理论与实现来源
 
-Koka v3.2.3，2026-07-28 仍有维护提交。它已经证明：
+Koka v3.2.3，2026-08-03 官方 dev 主线仍活跃。它已经证明：
 
 - polymorphic type/effect inference 与 algebraic handlers 可工程实现；
 - evidence passing 可把 handlers 降为高效直接代码；
@@ -416,7 +409,7 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 - HM 推断、trait、row-polymorphic effect 基础；
 - `io` / `fail` / `mut` 可见，tail-resumptive + abort handler；
 - Perceus L0/L1 RC 与 post-RC `LEAK/UAF/BALANCE` verifier；
-- native 双后端过渡：C 后端 Phase 1 已覆盖单文件/project/self-host，Phase 2 parity 认证中；LLVM 仍是 anchor/oracle；
+- C11 是唯一 native codegen/bootstrap，覆盖单文件/project/self-host；tracked `dist-c` 达到文本固定点，最后 LLVM lane 只保存在历史 tag；
 - `unsafe` effect、`Ptr<T>` 与显式 discharge/audit 面；
 - 结构化/LLM 诊断基础。
 
@@ -425,8 +418,9 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 - async effect 设计已有，但 native 实现未发货；
 - full algebraic effects/multi-shot continuation 明确不做；
 - refinement types 未实现，参数位 `where` 目前仍是 parse error；
-- C 后端尚未完成 parity gate，LLVM 尚未退役；
 - RIIR 标准库迁移尚未完成；
+- Drop 的 C-native abort unwind、Weak 与若干已知 critical RC/runtime 缺陷尚未收口；
+- CLI 仍只有 `check/build`，缺可安装 bundle、exe link/run/doctor、跨平台 release matrix 与版本化 agent inspection contract；
 - LSP 暂不可用；
 - B-111 尚无一轮公开、可复现的 Ring vs TS7 数据；
 - “Rust 级安全”“LLM 更容易写对”“语义驱动性能领先”仍需分项证据，不是现成事实。
@@ -437,7 +431,7 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 2. **确定性资源与失真可见**：RC/Drop/unsafe discharge/审计面把不可自动保证的部分显式列出；
 3. **可验证的 agent 闭环**：诊断、语义 query、受检 patch、隐藏测试与 bounded proof 共同缩短生成—验证循环。
 
-“语义驱动性能”仍是长期收益，但在 C 后端迁移和 RIIR 未完成前，不应与已发货支柱并列宣传为已证明优势。
+“语义驱动性能”仍是长期收益，但在 B-176 基线、RIIR 与 ownership 边界未完成前，不应与已发货支柱并列宣传为已证明优势。
 
 ### 10.4 可对外使用的一句话
 
@@ -451,7 +445,10 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 ## 11. 相关工作项
 
-- **B-163**：完成 C 后端 parity 认证，在既定 gate 闭合前保留 LLVM oracle。
+- **B-163**：完成 C-only 文档、clean-clone/远端 CI 与 worktree 收官；codegen/bootstrap 迁移本身已完成。
+- **B-174/B-175**：交付可安装、可运行、可诊断的 preview CLI 与 Windows/Linux candidate artifacts。
+- **B-176**：建立编译反馈、运行时、内存/分配与产物尺寸的可复现 baseline/budget。
+- **B-177**：导出版本化只读 semantic inspection contract 与 bundled primer，不改变源码/Git 真值模型。
 - **B-168**：在 B-163 后确定 C-native failure/control ABI 及其 Drop、TCB 与可移植性边界。
 - **B-111**：用固定模型、预算和公开 artifact 复现 Ring vs TypeScript 7 的 agent 开发对照。
 - **B-001**：保持 refinement bounded、deterministic，并显式记录 solver、整数模型与 assumption 边界。
@@ -460,7 +457,7 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 ## 12. 复查节奏与触发条件
 
-常规保鲜期：**6 周**。下次定期复查建议不晚于 2026-09-08。
+常规保鲜期：**6 周**。下次定期复查建议不晚于 2026-09-14。
 
 出现以下任一事件时提前复查：
 

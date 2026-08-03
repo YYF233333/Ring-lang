@@ -1,6 +1,6 @@
 # Ring-lang 设计哲学
 
-不信任程序员的 native 编程语言。编译器是最终权威——不信任你，但也不要求你自证清白；它自己做功课（全推断），查到问题了来找你。写起来像 Python（lv0 零标注），编译器看到 Rust 级别的类型与副作用信息。语义内核 = Rust − borrow checker − 标注负担 + 代数效果 + 可判定推断。主战场：CLI / 服务端 / 系统编程——编译器自身是第一个生产负载。当前 C11/LLVM 双后端迁移不改变这些语言公理；后端状态以 CLAUDE.md 为准。
+不信任程序员的 native 编程语言。编译器是最终权威——不信任你，但也不要求你自证清白；它自己做功课（全推断），查到问题了来找你。写起来像 Python（lv0 零标注），编译器看到 Rust 级别的类型与副作用信息。语义内核 = Rust − borrow checker − 标注负担 + 代数效果 + 可判定推断。主战场：CLI / 服务端 / 系统编程——编译器自身是第一个生产负载。自 2026-08-03 起 main 为 C11-only codegen/bootstrap，`dist-c` 是 tracked stage-0；后端收口不改变这些语言公理。
 
 ## 出发点（2026-06-12 成文，2026-06-24 重构——原始动机从"agent 验证瓶颈"回溯到"程序员不可信"）
 
@@ -93,7 +93,7 @@ Bidirectional + constraint solving + effect inference。写代码的体验接近
 
 ### 7. 场景不可堵死（层 1 · 硬约束）
 
-对 ④ 具名场景集的部署路径，设计决策不得不可逆地堵死。当前兑现形式：native、零强制 runtime、C ABI FFI；C11/LLVM 只是迁移期的实现信道。与 ⑤⑥ 同为当场可检验——「这个设计需要强制 runtime 吗」是今天即可裁定的架构事实，无需等测量。不可逆性是本条成立的根基：堵死是单向门（与 ⑥ GC 记录的「不可逆性不对称」同一逻辑）。
+对 ④ 具名场景集的部署路径，设计决策不得不可逆地堵死。当前兑现形式：native、零强制 runtime、C ABI FFI；C11 是可审计的 reference/stage-0 信道，未来第二后端不得取代它或把语义重新锁进进程内私有 API。与 ⑤⑥ 同为当场可检验——「这个设计需要强制 runtime 吗」是今天即可裁定的架构事实，无需等测量。不可逆性是本条成立的根基：堵死是单向门（与 ⑥ GC 记录的「不可逆性不对称」同一逻辑）。
 
 实例：⑥ GC 取舍记录的引擎收益①（runtime-free → WASM/嵌入式/GPU 路径不堵死）即本条在该仲裁中的出场；B-007/B-116 选 evidence-passing async effect 而非 GC 续体 runtime 调度器——绿色线程对 agent 可能更友好（层 2 议题），但堵死嵌入式/GPU/零摩擦 FFI（层 1 否决）。2026-06-12 自 ⑥ 的 GC 记录升格成文。
 
@@ -245,4 +245,4 @@ TS 要读完实现才知道函数会抛什么异常。Ring 的模块签名包含
 | 数据结构 | struct + enum + trait，不造 class 层级 |
 | 内存 | Perceus RC + ownership 推断（无 borrow checker），零标注负担；无 GC |
 | 注释 | `//` 单行（无块注释），默认不写注释 |
-| 编译目标 | native；迁移期 C11/LLVM 双信道，最终后端策略见 design.md §10.4 |
+| 编译目标 | native；C11 为唯一产品 codegen 与 tracked bootstrap，未来第二信道门见 design.md §10.4 |

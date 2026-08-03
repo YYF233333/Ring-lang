@@ -415,7 +415,7 @@ GADT 的 scoped type equality 是编译期 unification，effect evidence 是运�
 
 ### 1.7 语义规范（后端无关，2026-05-24 确定）
 
-Ring 语言的语义规范与后端无关。JS 后端已归档（B-100 Phase 2，commit `5df6c99`）；截至 2026-07-28，LLVM 与 C11 后端处于 B-163 迁移期双轨，LLVM 暂为 native 默认/差分 oracle，C 后端已覆盖单文件、project/module 与 self-host，待 Phase 2 parity gate 闭合后切换。
+Ring 语言的语义规范与后端无关。JS 后端已归档（B-100 Phase 2，commit `5df6c99`）；自 2026-08-03 起 main 只保留 C11 codegen，覆盖单文件、project/module 与 self-host，`compiler/dist-c/main.c` 是唯一 tracked bootstrap anchor。最后 LLVM lane 只由 `llvm-c-backend-final` tag 保存，不属于现行实现或验证门。
 
 #### 数值类型（2026-05-25 更新）
 
@@ -671,11 +671,11 @@ handle {
 
 **一等 effectful function value 的 evidence 绑定（2026-07-28，过渡语义）**：
 
-- 在 LLVM 与 C 双后端并存期间，closure 使用**创建处词法捕获**的 custom-effect evidence；调用点不会给既有 function value 动态换绑 evidence。
+- 当前 C-only 实现中，closure 仍使用**创建处词法捕获**的 custom-effect evidence；调用点不会给既有 function value 动态换绑 evidence。
 - custom handler 只消除 body effect row 中**显式出现**的同名 effect label；未知 open tail 必须原样向外传播，不能因为 `handle { callback() }` 就假定 callback 的未知 effect 已被内层 handler 截获。
 - 因此，直接 effect 调用和 handler 内创建的 closure 可以使用当前 handler；handler 外创建后再传入的 effectful callback 仍使用其创建处 evidence。`with_mock_fs(callback)`、`capture_logs(callback)` 等动态注入式高阶封装在此阶段需要显式 capability、把 closure 创建移入 handler，或保留 effect 向外传播。
 
-这是 C 方案的 sound 过渡边界，不是最终语言语义。B-163 完成 LLVM 后端退役、`dist-c` 与 CI 稳定后，B-167 将改为 **A：调用点动态 evidence ABI**；届时外部创建的 callback 也由调用点内层 handler 截获。C → A 是可观测的语义升级，必须作为 breaking change 发布并以迁移测试锁定。
+这是 sound 过渡边界，不是首个公开 preview 应冻结的最终语言语义。LLVM 已退役；B-168/B-169 固定 failure/control 与 typed evidence substrate 后，B-167 将改为 **A：调用点动态 evidence ABI**，使外部创建的 callback 也由调用点内层 handler 截获。C → A 是可观测语义升级，因此排在 v0.1 candidate 之前并以迁移测试锁定。
 
 > **边界**：Ring 不计划实现 post-resume / multi-resume Full Algebraic Effects。现行公开模型固定为 tail-resumptive + abort；需要并发挂起的场景由 async 设计单独建模。
 
@@ -1607,7 +1607,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 ### 10.4 后端策略
 
-**当前状态**：B-163 迁移期采用 LLVM/C11 双后端。C 后端已支持单文件、project/module 与 self-host；Phase 2 parity gate 完成前，LLVM 仍是默认 native、bootstrap anchor 与差分 oracle。JS 后端已归档，`compiler/dist/` 只作冻结回退锚。
+**当前状态（2026-08-03）**：C11 是 main 唯一 codegen 与 bootstrap lane，支持单文件、project/module 与 self-host；`compiler/dist-c/main.c` 是 tracked stage-0，并以字节固定点验证。LLVM-C/addon、`codegen_llvm*`、旧 `compiler/dist/` 与 `dist-llvm/` 已从 main 删除；`llvm-c-backend-final` tag 是唯一历史恢复点，不是产品依赖。
 
 **C11 主路径的长期契约**：
 
@@ -1618,7 +1618,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 - match/catch 按源码 arm 顺序，穷尽失败 fail loud；Drop、cleanup 与 evidence 生命周期在嵌套函数边界隔离，并由共享 RC/verifier 契约审计。
 - 编译器进程只生成文本并调用外部编译器，不恢复 LLVM-C 式进程内 FFI/IR builder 信道。
 
-**B-163 退役顺序**：先关闭 parity/manual gate，创建 `llvm-c-backend-final` tag，独立验证 `dist-c` 构建与文本固定点，再从 main 删除 LLVM 后端及旧 `dist/`、`dist-llvm/`，最后恢复 CI bootstrap。活动清单只保存在 `docs/plan-c-backend.md` 与 B-163。
+**收官与发布边界**：B-163 只剩 CLAUDE/README、clean-clone/远端 CI 与 worktree bookkeeping；完成后删除临时 plan。发布产品面由 B-174/B-175 承担，性能证据由 B-176 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
 
 **未来 LLVM target 重启门**：只有代表性负载证明 C 不可表达的性能瓶颈、Ring 级调试信息刚需，或目标平台缺少成熟 C 工具链时才重新立项。届时 C 后端永久保留为 reference/stage-0，LLVM 只能是第二信道，并且只发文本 `.ll`，不得恢复进程内 LLVM-C FFI。
 
@@ -1726,7 +1726,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 最近邻必须按不同轴描述：Koka/Flix/Effekt 是 effect 与 handler 机制近邻，Unison 是 abilities + semantic codebase 近邻，MoonBit 是应用语言产品与实验性验证近邻，Zero 是 graph-native agent workflow 近邻，Verus 是权限/SMT/AI proof 近邻；TypeScript 7、Python 与 Rust 则构成强大的「够用就行」替代。Ring 对外定位因此收窄为：**把可推断的行为契约、确定性资源语义和 agent 验证闭环放在同一条 application-native 默认路径上，并用 B-111 的可复现实验证明收益。**
 
-当前已发货边界也必须诚实陈述：`io/fail/mut` 与有限 handler 已有，async 尚未实现，full AE 不计划实现，refinement 仍在 B-001，C 后端仍处于 B-163 parity 认证。宣传材料不得把这些计划项写成现状。
+当前已发货边界也必须诚实陈述：`io/fail/mut`、有限 handler、C11 native/self-host 与 tracked `dist-c` 已有；async 尚未实现，full AE 不计划实现，refinement 仍在 B-001，Drop abort-unwind/Weak 与 RIIR 收尾仍待 B-168/B-002/B-152。宣传材料不得把计划项写成现状，也不得把“C-only codegen 已完成”误写成“release 产品面已完成”。
 
 ---
 
@@ -1742,7 +1742,7 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 
 ### 14.2 编译目标
 
-native 是唯一产品编译目标，codegen 当前为 LLVM/C11 迁移期双轨（JS 后端已归档，B-100 Phase 2）。C11 后端将作为 B-163 完成后的主路径；LLVM 在 parity 认证完成前保留为 anchor/oracle。性能数据必须注明后端、compiler commit、优化级别和机器，旧的单点“native 自编译 290s”不再作为当前基线。
+native 是唯一产品编译目标，codegen/bootstrapping 当前均为 C11-only（JS 已归档，最后 LLVM lane 只在历史 tag）。性能数据必须注明 compiler commit、`dist-c` 指纹、C compiler/version、生成程序与 runtime 优化级别、机器和冷/热缓存状态；旧的单点“native 自编译 290s”不再作为当前基线，正式基线由 B-176 建立。
 
 ### 14.3 泛型单态化策略（2026-05-24 决策）
 
@@ -1772,7 +1772,7 @@ native 是唯一产品编译目标，codegen 当前为 LLVM/C11 迁移期双轨�
 
 ### 14.4 关键技术路径
 
-- **C11 → clang native** 是 B-163 的既定主路径；迁移期 LLVM native 保留为差分 oracle。语义优化必须尽量在 backend-neutral HIR/Perceus 层完成，避免重新把语言语义绑定到某一 codegen。
+- **C11 → clang native** 是唯一产品主路径；Linux 的 gcc/MSVC 等只作为生成 C 的去相关验证信道。语义优化必须尽量在 backend-neutral HIR/Perceus 层完成，避免重新把语言语义绑定到某一 codegen。
 - **Perceus 引用计数** 替换 GC。无停顿、确定性析构、函数式代码可就地复用已死对象的内存。语言设计无需修改——Perceus 是编译器优化，用户代码不感知。
 - **Evidence passing** 替换 generator effect handler。同样是编译器优化，用户代码不感知。
 
@@ -1805,7 +1805,7 @@ HIR 契约 → Ring passes（RC/reuse、bounds、specialize、dead effect）
 
 ## 15. 编译器实现
 
-编译器已用 Ring 自举；前端、Perceus RC 与静态 verifier 共享，当前 C/LLVM 迁移状态与退役顺序只以 §10.4、CLAUDE 和 B-163 为准。历史 TypeScript/JS 翻译过程与里程碑留在 Git/tag，不在设计真值重复维护。
+编译器已用 Ring 自举；前端、Perceus RC 与静态 verifier 共享，C11 codegen 生成 tracked `dist-c` 固定点。B-163 只跟踪一次性收官，长期后端契约以 §10.4 为准；历史 TypeScript/JS/LLVM 翻译过程与里程碑留在 Git/tag，不在设计真值重复维护。
 
 **Koka 作为参考实现**：Effect 推断（`InferEffect.hs`）和 evidence passing（`Evidence.hs`）的算法翻译自 Koka 编译器（MIT 许可）。Perceus 引用计数已翻译其 POPL'21 实现落地（§7.11）。
 

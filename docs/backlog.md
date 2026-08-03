@@ -9,7 +9,17 @@
 
 ## 当前排序
 
-B-163 是唯一 P0 doing。完成后依次执行 B-168、B-169、B-167，再恢复 B-152 Str/P5 与 B-002 Phase 2；B-110/B-068 随后，async/refinement 线在 RIIR 后启动。独立缺陷可在不冲突时并行。排序按活动 heading、依赖和 doing 状态计算，不保存逐轮插队日志。
+当前主线目标是形成 **v0.1 developer-preview candidate**；实际公开 release、许可证与最终支持平台仍由用户在候选产物和证据齐备后拍板。Preview 可以明确标注未实现能力，但不得明知违反当前语言规范、ownership/safety 保证或用豁免降低门槛。
+
+处理顺序按五道门组织：
+
+1. **C-only 收官**：B-163 只剩治理/用户文档、clean-clone 门禁、远端 CI 与 worktree 清理；代码迁移、`llvm-c-backend-final` tag、`dist-c` 固定点、LLVM/旧 anchor 删除已经完成。同步复测 #261：若 C-only 编译器不再出现 AV，以重复门证据关闭；若仍出现，立即升级为发布阻断。
+2. **正确性底线**：先修 critical audit #260、#255、#256，再处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257。其余 medium/low finding 按 workflow 排序，不因 release 压力跳过真实缺陷。
+3. **语义/ABI 冻结**：B-168 → B-169 → B-167 → B-152 → B-002 是 release critical path；B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。已知会改变 effectful function value 行为的 B-167 必须早于首个公开 preview，避免发布后立即制造一次可避免的 breaking migration。
+4. **发布产品面（与不冲突的 correctness 工作并行）**：B-174 → B-175 先得到可安装、可 `run/build/check/doctor` 的 Windows/Linux 候选包；B-176 同时建立性能基线和预算。随后 B-178 → B-016 补 formatter/LSP，B-177 → B-111 补版本化 agent contract 与可复现实验。前两项是 v0.1 candidate gate；后两条是从“能试用”走向“值得持续使用/宣传”的下一门。
+5. **发布后能力**：先做 P1 correctness/ownership 与用户高频能力（B-110、B-172、B-173、B-149 等），再由 B-111 数据决定 refinement/async 的投入顺序。B-001/B-116→B-007 均在 RIIR/ABI 稳定后启动；GADT、dyn Trait、HKT/GAT、JIT、Debugger 等 P3 工作继续后置。
+
+性能不单独越过正确性门：先由 B-176 测量，再优先消除已知热路径分配（#262）与编译反馈瓶颈；B-079 只在 B-002/B-110 ownership 边界稳定后启动，B-105 只在 per-module 编译成本达到实测阈值时启动，B-041 不进入 preview 路线。
 
 ---
 
@@ -244,7 +254,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 
 **验收**：sync/production handler、nested scope、spawn/await、取消补偿正反例；scope 外 spawn 报错；退出不遗留任务/owned 资源；完整 native/RC/ASan/self-host 门通过。
 
-### B-156 extern fn 声明处 `requires {unsafe}` 签字检查 [feature] [P2] [M] [judgment] [queued]
+### B-156 extern fn 声明处 `requires {unsafe}` 签字检查 [feature] [P1] [M] [judgment] [queued]
 
 > 2026-06-27 从 B-125 拆出。B-125 core 完成但 extern fn 签字检查推迟——当前无文件级 `requires` 语法（327 个 extern fn 声明分布在 19 个文件顶层，无 `mod` 块包装），需先设计文件级 `requires` 语法。
 
@@ -263,7 +273,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 
 ### B-168 C-native abort/unwind 实现模型探针 [design-align] [P0] [M] [judgment] [queued] [after: B-163]
 
-> 2026-07-29 Discussion 用户拍板 P0/M、保持两候选中立实测。B-163 删除 LLVM 后，B-002 Phase 2 原定的 `invoke`/`landingpad` 路径失效；现行 `setjmp`/`longjmp` 又已由 B-165 证明存在跨 catch 局部写入不可见问题。B-169/B-167 随后还会决定 effect/type evidence 的共享边界并改变 effectful function value evidence ABI，因此必须先确定共同的 C-native failure/control ABI，避免各项工作重复改写控制流、closure prototype 与 RC 证据面。
+> 2026-07-29 Discussion 用户拍板 P0/M、保持两候选中立实测。LLVM 已退役，B-002 Phase 2 原定的 `invoke`/`landingpad` 路径失效；现行 `setjmp`/`longjmp` 又已由 B-165 证明存在跨 catch 局部写入不可见问题。B-169/B-167 随后还会决定 effect/type evidence 的共享边界并改变 effectful function value evidence ABI，因此必须先确定共同的 C-native failure/control ABI，避免各项工作重复改写控制流、closure prototype 与 RC 证据面。
 
 **目标**：以最小但真实的垂直切片比较两种可移植 C11 实现模型，不在立项时预选赢家：
 
@@ -346,7 +356,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 
 ### B-167 effectful function value 调用点动态 evidence ABI [refactor] [P0] [L] [judgment] [queued] [after: B-168+B-169]
 
-> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。本项是最终 A 语义，必须等 B-163 完成 LLVM 后端退役、`dist-c/` 成为唯一 bootstrap 锚且 CI 恢复稳定后再启动；不为即将退役的 LLVM 后端实现第二套新 ABI。**2026-07-29 前置更新**：B-168 必须先拍板 C-native failure/control ABI；B-169 随后固定 trait dictionary / effect evidence 的共享边界与用户面不变量。本项必须同时复用两者的 function-pointer、failure edge、typed evidence 与 RC 契约，不得另造平行 ABI。
+> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。LLVM 已退役、`dist-c/` 已成为唯一 bootstrap 锚；本项不再等待后端代码迁移，但仍须等 B-163 的 clean-clone/远端 CI 收官。**2026-07-29 前置更新**：B-168 必须先拍板 C-native failure/control ABI；B-169 随后固定 trait dictionary / effect evidence 的共享边界与用户面不变量。本项必须同时复用两者的 function-pointer、failure edge、typed evidence 与 RC 契约，不得另造平行 ABI。
 
 **目标语义**：effectful function value 在调用点接收当前 effect evidence。外部创建的 callback 传入 `with_mock_clock` / `with_mock_fs` / `capture_logs` 等高阶 handler 后，其 effect 由调用点内层 handler 截获，而不是继续使用 callback 创建处的旧 evidence。静态 effect row 仍是 capability 真值；调用点只传递签名要求的 evidence，未知 open tail 必须逐项转发，不能被机械消除。
 
@@ -407,8 +417,9 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 2026-07-31 B-107 merge review concern：`Option<T>`、tuple-as-key、`List<T>` 字段无 Hash evidence（`resolve_hash_field_action` 覆盖集不含；`resolve_dict_ref_for_type` 对 TupleType 走 builtin 名失败），fail-closed 正确（E0503 拒绝）但含这些字段的类型进不了 Map/Set。结构化 tuple equality wave 已关闭 audit #221 的直接 `==` wrong-code；但 tuple 作为泛型 `T: Eq` 实参仍因缺少 `TupleType` DictRef 而被 E0503 拒绝，属于同一 capability gap。
 
 - **修复方向**：为三类内建结构提供结构化 Hash evidence，并为 tuple 提供可传入泛型 `T: Eq` 的结构化 Eq DictRef；复用直接 tuple equality 的结构分解路径
-- **验收**：三类字段的 struct/enum 进 Map/Set 正反用例；tuple 的泛型 Eq 正负例、manual element Eq 与嵌套结构；Float 嵌套仍拒绝；双后端与 RC 门一致
-### B-133 UTF-8 字节串模型落地 [feature] [P3] [L] [judgment] [queued]
+- **验收**：三类字段的 struct/enum 进 Map/Set 正反用例；tuple 的泛型 Eq 正负例、manual element Eq 与嵌套结构；Float 嵌套仍拒绝；C-native、structural、RC 与 self-host 门一致
+
+### B-133 UTF-8 字节串模型落地 [feature] [P1] [L] [judgment] [queued]
 
 真值为 design §1.7.1：默认 Str API 使用 UTF-8 byte 单位；code point/grapheme 用显式 API。统一 len/index/slice/iteration、literal、StringBuilder、FFI/std 边界与 fail-loud 诊断，保持 binary-safe/NUL ABI/RC；planning 时按 C-only main 定文件。
 
@@ -426,6 +437,21 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **参考**：Koka Perceus reuse pass
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
+
+### B-176 可复现性能基线与 release budget [infra] [P1] [M] [judgment] [queued] [after: B-163]
+
+目标是先回答“时间和内存花在哪里”，再决定优化，不把单个 microbenchmark 或 `-O0` 结果当性能路线依据。
+
+**测量面 / 文件**：新增 `bench/`（或 planning 时确定的等价单一入口）、机器可读结果 schema 与 `docs/performance-baseline.md`；runner 记录 compiler commit、`dist-c` 指纹、OS/CPU、clang/gcc 版本、完整 flags、冷/热缓存状态。覆盖：
+
+1. compiler feedback：单文件/多模块 `check`、生成 C、clang 编译、链接、warm rebuild、self-compile；
+2. 生成程序：代表性 CLI/容器/effect/trait/RC workload 的 wall time、peak RSS、allocation/dup/drop 数、产物尺寸；
+3. bootstrap/toolchain：`ring.exe` 冷启动、clean build 与 cached ThinLTO build；runtime 优化级别单独记录，禁止把编译器构建优化与用户程序优化混报；
+4. 至少 5 次重复，报告原始样本、中位数与离散度；明显噪声 run 标 invalid，不挑最好值。
+
+**决策输出**：为 compile latency、runtime、peak memory、allocation count 与 binary size 建立当前 baseline 和 release regression budget；用 profiler/alloc trace 把热点映射到具体 pass/runtime 路径。#262、B-079、B-105 只有在本基线证明收益面后进入性能执行；正确性修复不以性能回退为由回滚，先量化再优化。
+
+**验收**：同一 manifest 可在 Windows/Linux 重放；结果 schema 与图表由原始数据生成；CI 只运行稳定、低成本的 regression subset，完整 benchmark 手动触发；至少形成一个“立即修”、一个“保持观测”和一个“证据不足不做”的明确结论。
 
 
 
@@ -516,13 +542,59 @@ handle {
 
 ## 工具链
 
-### B-016 LSP 移植 [feature] [P2] [L] [judgment] [queued]
+### B-174 v0.1 preview CLI 与本地项目闭环 [feature] [P0] [L] [judgment] [queued] [after: B-163]
+
+当前 CLI 只有 `check`/`build`，`build` 只产出 C 与 object，版本写死且 runtime/std 定位依赖仓库布局。首个 preview 必须让解压后的用户在一个命令闭环内检查、构建、运行并诊断工具链。
+
+**范围 / 文件**：`compiler/cli.ring`、`compiler/compiler_mod.ring`、C codegen/link driver、`compiler/scripts/`、Python command-contract tests 与用户文档。
+
+- `ring --version` / `ring version` 输出语义版本、compiler commit/anchor 指纹与 target；机器格式字段稳定；
+- `ring check <entry>`、`ring build <entry> --emit=c|obj|exe`、`ring run <entry> -- <args>`、`ring doctor`；单文件和现有多文件 project 走同一 driver；
+- compiler/std/runtime/toolchain discovery 不依赖当前工作目录或源码 checkout；clang 缺失、链接失败、runtime 不匹配均非零退出并给出单轮可修诊断；
+- human/LLM 输出、stdout/stderr、退出码与产物路径形成 command contract；不把 test-only RC mutation flag 暴露为普通用户面；
+- 本项不顺带设计 registry/package solver、formatter 或 LSP，分别由 B-179/B-178/B-016 承担。
+
+**验收**：从任意目录对 hello、带参数 CLI、两层 module project 执行 check/build/run；路径含空格与非 ASCII；失败覆盖无 clang、坏源码、坏 link、缺 runtime；生成 exe 与直接 object+runtime 手工链接行为一致；完整 C/RC/self-compile/fixed-point 门通过。
+
+### B-175 可复现发布包与 Windows/Linux CI 矩阵 [infra] [P0] [L] [judgment] [queued] [after: B-174]
+
+本项产出 **release candidate artifact**，不授权公开 release。首轮支持门为 Windows x64 + Linux x64；macOS 先做可重放 smoke/evidence，未通过同等门前不宣传支持。产品 compiler 仍使用 clang；Linux 额外用 gcc 编译生成 C 作为去相关信道。
+
+**范围 / 文件**：`.github/workflows/`、`compiler/scripts/`、release manifest/NOTICE、安装与卸载脚本、README/quickstart、artifact smoke tests。
+
+- 用户选定许可证后，bundle 包含 compiler、版本匹配的 std/runtime 资产、license/NOTICE、quickstart 与 checksum；不依赖源码仓库结构；
+- clean checkout 从 tracked `dist-c/main.c` 构建，clean unpack 能运行 `ring doctor`、hello、多文件 project 与 self-compile fixed point；
+- Windows/Linux 各跑 e2e/golden/RC/structural/parity/self-compile；Linux 同时验证 clang 与 gcc 的 C11 编译，平台差异限制在 runtime/driver 边界；
+- artifact 名、版本、target triple、toolchain requirements、SHA-256 与 provenance manifest 确定；同输入重建差异必须可解释；
+- 尽早形成许可证/支持范围短 dossier；许可证选择、最终支持声明、tag 与 GitHub Release 属用户保留决定。选择前可验证私有 candidate pipeline，但不得生成对外可分发的无许可证包；选择后才完成正式 candidate packaging，仍不代用户发布。
+
+**发布阻断**：全部 critical finding 清零；当前排序列出的 silent wrong-code/heap/RC blockers 关闭；B-167/B-152/B-002/B-156/B-133 gate 完成；C-only 全量门和至少一轮 clean-clone CI 全绿；文档不得宣称 async/refinement/LSP 等未发货能力。
+
+### B-177 版本化 agent inspection contract + bundled primer [feature] [P1] [L] [judgment] [queued] [after: B-174] [before: B-111]
+
+外部 agent-first 语言已把 query/check/test/run、稳定程序 identity 与版本匹配的语言 skills 作为 compiler 产品面。Ring 保持普通源码 + Git 为真值，不改成 graph-native 数据库；但必须让 agent 无需读完整实现即可取得可缓存、可校验的语义事实。
+
+**用户面 / 文件**：在 CLI 增加 `ring inspect --format=json`（planning 时可在不制造第二套概念的前提下核定最终命名），并随 release bundle 提供版本匹配的 Ring primer 与 std public signatures。输出至少包含 schema/compiler/source hash、module/import edge、public symbol stable identity、推断 type/effect/trait bound、capability/unsafe discharge 与诊断关联 span。
+
+**约束**：canonical ordering、schema version 与内容 hash 稳定；陈旧缓存/源码 hash 不匹配 fail closed；只暴露 checker/HIR 的权威事实，不在 CLI 重做解析/推断；v1 只读，不引入 compiler-managed patch/write 或第二份程序数据库。Primer token 单独计量，必须由当前 compiler/spec 自动校验，不允许版本漂移。
+
+**验收**：单/多模块、re-export、泛型 trait/effect、unsafe 与错误程序的 JSON contract golden；相同输入字节稳定，语义变化改变 hash；primer + signatures 在固定 token budget 内覆盖 B-111 任务所需核心；B-111 harness 实际消费 bundle 中的版本化产物而非手工副本。
+
+### B-178 `ring fmt` 与行为签名物化 [feature] [P1] [L] [judgment] [queued] [after: B-174]
+
+philosophy ②/③ 已把 formatter 物化标注列为 effect/type 对 agent 的主可见载体，但当前 `compiler/formatter.ring` 只格式化诊断。实现 source formatter，先兑现稳定格式与 lv0/lv2 核心，不把全部远期 preset 一次塞入 MVP。
+
+**范围**：AST/source edit 表示、checker/HIR annotation view、`ring fmt [--check] [--preset=none|api|review]`、项目遍历与 formatter golden。`none` 做纯语法规范化；`api/review` 物化 public/internal function 的返回类型、effect row 与已定 ownership/mut 标注。pub 契约不一致必须保留人工确认边界。
+
+**机械性质 / 验收**：幂等、round-trip、不同 preset 编译语义与运行结果一致、canonical ordering、注释/字符串保持；`--check` 不写文件且以退出码报告漂移；全仓 dry-run 可枚举变化，compiler/std 迁移单独 review；B-016 只消费同一 parser/checker/format edit substrate，不复制 formatter。
+
+### B-016 LSP 移植 [feature] [P1] [L] [judgment] [queued] [after: B-178]
 原 TS 实现未移植到 Ring 自举编译器。需要重新实现。
 
 - **当前状态**：VSCode 插件仅提供语法高亮
-- **前置依赖**：无硬依赖（但 formatter 完成后 LSP 可复用其 AST 处理）
+- **前置依赖**：B-178 的 parser/checker/format edit substrate；LSP 不复制第二套 source edit 或 formatter
 - **复杂度**：大
-- **优先级**：Phase B 之后，用户需求驱动
+- **优先级**：v0.1 developer preview 后的首个可用性门；先交付 diagnostics/hover/definition/completion/formatting，再扩展 rename/code action
 
 
 ### B-018 Debugger [feature] [P3] [L] [judgment] [queued]
@@ -532,7 +604,7 @@ source-map 支持 + 断点调试。
 - **复杂度**：大
 - **优先级**：Phase D/E
 
-### B-111 LLM eval harness：核心赌注测量仪 [feature] [P1] [L] [judgment] [queued]
+### B-111 LLM eval harness：核心赌注测量仪 [feature] [P1] [L] [judgment] [queued] [after: B-175+B-177]
 
 > 2026-06-12 D-7 拍板：P2→P1——层 0 判据（公理④）的测量仪，地位等价公理⑥的 B-089 锚点；只改优先级，不动排程（B-104 里程碑照旧先行）。
 > 2026-06-11 立项（Discussion）。design.md §11.3 五指标至今零测量——「LLM 写 Ring 优于 TS」是项目存在理由，须从信念变数据，且结果反向校准语言面特性优先级（哪类 papercut 真烧 token）。拍板：**对照组 TS only**；**题目从既有 benchmark（HumanEval/MBPP 风格）改编**（防自选偏差，题目分布不由我们控制）。
@@ -566,6 +638,14 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 ## 语法增强
 
 ## 基础设施
+
+### B-179 project manifest 与可复现 dependency lock [feature] [P2] [XL] [judgment] [queued] [after: B-175]
+
+首个 preview 允许以 entry `.ring` 文件作为 project root，不等待 registry；随后补 `ring.toml` + lockfile，把编译器/std 兼容、local/path/git dependency、feature/capability 与构建输入变为可复现真值。Registry、账号、签名服务与付费托管不在本项。
+
+**约束**：依赖以内容 hash 锁定，解析确定、离线可重放；manifest/lock 进入 project/source fingerprint；禁止 build script 隐式联网或执行未声明代码；同包多版本、cycle、checksum mismatch 与 compiler/std 不兼容 fail closed。包管理用户面遵守 lang-design 的“先可复现/内容寻址/锁定，再 registry”。
+
+**验收**：local/path/git 正反例、transitive lock、离线 clean build、缓存失效、冲突/环/篡改诊断；Windows/Linux 相同 lock 得到相同依赖图与生成 C；现有无 manifest 单/多文件项目保持兼容。
 
 ## 测试基础设施
 
@@ -604,7 +684,7 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 - 新增 golden 用例锁定（catch body 写外层 mut：捕获路径 + 正常路径 + 嵌套 catch）
 - 全部 E2E + golden + rc 通过；动 RC 相关（box dup/drop）→ golden ×3
 
-### B-164 alloc 原语 size=0 语义未定义（heap corruption 风险）[bugfix] [P2] [S] [judgment] [queued]
+### B-164 alloc 原语 size=0 语义未定义（heap corruption 风险）[bugfix] [P1] [S] [judgment] [queued]
 
 > 2026-07-10 立项（Discussion，B-152 P3 worker_feedback 通知触发）。
 
@@ -677,13 +757,13 @@ Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05
 
 ## C 后端迁移与退役遗留
 
-### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [judgment] [doing: phase2-gap-fix]
+### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [mechanical] [doing: c-only-bookkeeping]
 
-Phase 1 完成；当前只做 parity/manual gate、LLVM 退役、dist-c 与 CI/bootstrap。清单见 plan，长期契约见 design §10.4。覆盖/gap/manual evidence 只看 parity matrix，不复制计数日志。
+代码迁移已经完成：C11 是唯一 codegen/bootstrapping lane，`compiler/dist-c/main.c` 是 tracked stage-0，`llvm-c-backend-final` tag 保留最后 LLVM 恢复点，main 已删除 LLVM-C/addon、`codegen_llvm*`、`dist/` 与 `dist-llvm/`；CI/runner 已切到 C-only gates。
 
-先修 shared gap 并自动化 manual gate；iterator 采用 inference-time 权威协议调用脱糖为普通 HIR，禁止双后端各自猜 evidence/RC。具体 impl 的 exact method scheme 由 trait-specific `ImplEntry` 持有并随 module export 传递，type/effect rebind 以 `(target, trait, method)` 为身份，禁止从平坦 `target + method` last-write 表拼接协议签名。依据 design §4.5，同一 target 的 inherent/trait 或 trait/trait 同名 method 必须在进入 HIR 前 fail closed，不能让后端 first-wins 选择方法体。当前 concrete custom/builtin gap 在本项收口；抽象 `T: Iterable` 的嵌套 associated dictionary evidence 明确并入 B-169，不以 type-name/位置替换伪造支持。C fixed point 已干净，剩余 LLVM 信号并入退役 review。LLVM 在完成前仍是 anchor/oracle，相关 audit 不提前删。顺序：parity/review → final tag → dist-c 固定点 → 删除 LLVM/旧 anchors → 恢复 CI。
+剩余工作严格限于收官：更新 `CLAUDE.md`/README/构建命令与项目结构，删除/重写全部 LLVM-only 文档与审计项；从 clean clone 重建 compiler，跑一次 C-only 全套与 fixed point；把 main 的本地提交批量 push 后取得远端 CI 证据；清理两个 B-163 worktree/branch；最后删除 `docs/plan-c-backend.md` 与本条。#261 在 clean C-only compiler 上按既有重复门复测，不能把 LLVM 时代随机 AV 结论直接带入或直接抹除。
 
-**验收**：matrix 无 shared/未解释 gap；C 全套/self-host 固定；tag 可恢复；main 无 LLVM-C/addon/link/旧 dist；完成 C-only bookkeeping 后删除 plan 与本项。
+**验收**：clean clone 只需 Python + C/C++ clang toolchain即可重建；e2e/golden/RC/self-compile/structural/parity 全绿且 `dist-c` 字节固定；tag 可恢复；main/文档无 LLVM-C/addon/link/旧 dist 现行依赖；远端 CI 通过；workflow validator 通过。Push、远端 CI 与 branch/worktree 清理由后续 Steward 执行，当前 Discussion 不擅自发布或删除。
 
 ### B-105 增量原生编译（per-module object）[feature] [P3] [XL] [judgment] [queued] [deferred: measured-build-cost]
 
@@ -691,12 +771,6 @@ Phase 1 完成；当前只做 parity/manual gate、LLVM 退役、dist-c 与 CI/b
 
 **验收**：改一文件只重编该文件及受影响实例；多 object 链接与单 translation unit 语义/golden 一致；cache 可解释且可失效；完整 C/native 与自举回归通过。
 
-
-### B-158 LLVM runtime 声明同名冲突退役核验 [bugfix] [P2] [S] [mechanical] [queued] [after: B-163]
-
-该缺陷只存在于 LLVM `get_or_declare_runtime_fn` lane，不再单独修复。B-163 退役验收时确认冲突路径随 `codegen_llvm*` 一并删除；StringBuilder 的 `ring_sb_*` 收口仍归 B-152 P5，不把两项重新耦合。
-
-**验收**：main 不再包含该 LLVM 声明路径或 workaround 依赖；B-152 的 C/Ring 单文件与 project/self-host 回归保持通过，随后删除本项。
 
 ## 架构与备忘边界
 
