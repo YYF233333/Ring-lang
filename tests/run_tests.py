@@ -47,6 +47,7 @@ RUNTIME_CPP = REPO / "ring_runtime.cpp"
 RUNTIME_O = REPO / "ring_runtime.o"
 DIST_C_DIR = REPO / "compiler" / "dist-c"
 DIST_C_MAIN = DIST_C_DIR / "main.c"
+THINLTO_CACHE = Path(tempfile.gettempdir()) / "ring-lang-thinlto-cache"
 PARITY_MATRIX = REPO / "tests" / "parity_matrix.json"
 STRUCTURAL_DIR = CASES_DIR / "structural"
 NATIVE_REAL_PROGRAM = REPO / "tests" / "native" / "real_program.ring"
@@ -139,6 +140,7 @@ EXTRA_NEG_DIRS = ["negative", "errors"]
 
 TIMEOUT_COMPILE = 60   # seconds, for ring.exe build / check
 TIMEOUT_LINK = 60      # seconds, for clang link
+TIMEOUT_COMPILER_LINK = 300  # cold ThinLTO link on slower CI hosts
 TIMEOUT_RUN = 30       # seconds, per test program execution
 TIMEOUT_SELFCOMPILE = 1200  # seconds, for self-compile / rc self-verify (900 was
                             # exceeded after B-170; clean builds take ~18 min)
@@ -162,6 +164,20 @@ CLANG_LINK_FLAGS = [
     "-Wl,/STACK:536870912",
     "-Wl,/MANIFEST:EMBED",
     "-Wl,/MANIFESTUAC:level='asInvoker'",
+]
+
+# The self-hosted compiler is CPU-bound. O3 + ThinLTO is about 20% faster on a
+# compiler/main.ring check than the former O2 build. The content-addressed LLD
+# cache makes repeat links effectively free while bounding cache growth.
+COMPILER_COMPILE_FLAGS = ["-O3", "-flto=thin"]
+COMPILER_LINK_FLAGS = [
+    "-flto=thin",
+    "-fuse-ld=lld",
+    f"-Wl,/lldltocache:{THINLTO_CACHE}",
+    (
+        "-Wl,/lldltocachepolicy:cache_size_bytes=1073741824:"
+        "cache_size_files=4096:prune_after=168h"
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -230,21 +246,20 @@ def find_ring_exe() -> Optional[str]:
     if clang is None:
         return None
 
-    # Ensure runtime .o exists
-    if not ensure_runtime(clang):
-        return None
-
     # Compile and link in a temp directory, so test discovery never trusts a
     # stale root ring.exe or a compiler from PATH.
     tmpdir = tempfile.mkdtemp(prefix="ring_build_")
     atexit.register(shutil.rmtree, tmpdir, True)
     object_path = os.path.join(tmpdir, "main.o")
+    runtime_object_path = os.path.join(tmpdir, "runtime.o")
     exe_path = os.path.join(tmpdir, exe_name)
 
     try:
+        THINLTO_CACHE.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             [
-                clang, "-std=c11", "-O2", "-c", str(DIST_C_MAIN),
+                clang, "-std=c11", *COMPILER_COMPILE_FLAGS,
+                "-c", str(DIST_C_MAIN),
                 "-o", object_path,
             ],
             check=True,
@@ -252,12 +267,33 @@ def find_ring_exe() -> Optional[str]:
             timeout=TIMEOUT_SELFCOMPILE,
             cwd=str(REPO),
         )
+        cpp_compiler = shutil.which("clang++")
+        if cpp_compiler:
+            runtime_cmd = [
+                cpp_compiler, "-std=c++17", *COMPILER_COMPILE_FLAGS,
+                "-D_CRT_SECURE_NO_WARNINGS", "-c", str(RUNTIME_CPP),
+                "-o", runtime_object_path,
+            ]
+        else:
+            runtime_cmd = [
+                clang, "-x", "c++", "-std=c++17", *COMPILER_COMPILE_FLAGS,
+                "-D_CRT_SECURE_NO_WARNINGS", "-c", str(RUNTIME_CPP),
+                "-o", runtime_object_path,
+            ]
+        subprocess.run(
+            runtime_cmd,
+            check=True,
+            capture_output=True,
+            timeout=TIMEOUT_COMPILE,
+            cwd=str(REPO),
+        )
         link_cmd = [
-            clang, object_path, str(RUNTIME_O), "-o", exe_path,
-            *CLANG_LINK_FLAGS,
+            clang, object_path, runtime_object_path, "-o", exe_path,
+            *CLANG_LINK_FLAGS, *COMPILER_LINK_FLAGS,
         ]
         subprocess.run(
-            link_cmd, check=True, capture_output=True, timeout=TIMEOUT_LINK,
+            link_cmd, check=True, capture_output=True,
+            timeout=TIMEOUT_COMPILER_LINK,
             cwd=str(REPO),
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
@@ -3732,7 +3768,8 @@ def main() -> int:
         return 1
 
     # Ensure runtime .o is built
-    if needs_clang and clang_path:
+    needs_runtime = any(suite in suites for suite in ["e2e", "golden"])
+    if needs_runtime and clang_path:
         if not ensure_runtime(clang_path):
             print("ERROR: failed to build ring_runtime.o from ring_runtime.cpp.", file=sys.stderr)
             return 1

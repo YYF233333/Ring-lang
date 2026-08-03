@@ -22,6 +22,7 @@ jobs:
         run: |
           clang --version
           clang++ --version
+          lld-link --version
       - name: Run C-native RC suite
         run: python tests/run_tests.py --suite rc
 
@@ -38,6 +39,7 @@ jobs:
         run: |
           clang --version
           clang++ --version
+          lld-link --version
       - name: Run C-native executable and evidence suites
         run: python tests/run_tests.py --suite e2e --suite golden --suite structural --suite parity
 
@@ -54,5 +56,6 @@ jobs:
         run: |
           clang --version
           clang++ --version
+          lld-link --version
       - name: Verify tracked dist-c fixed point
         run: python tests/run_tests.py --suite self-compile

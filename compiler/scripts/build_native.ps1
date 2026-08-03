@@ -7,10 +7,18 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $anchorPath = Join-Path $repoRoot "compiler\dist-c\main.c"
-$compilerObject = Join-Path $repoRoot "ring_compiler.o"
+$compilerObject = Join-Path $repoRoot "ring_compiler_lto.o"
 $runtimeSource = Join-Path $repoRoot "ring_runtime.cpp"
-$runtimeObject = Join-Path $repoRoot "ring_runtime.o"
+$runtimeObject = Join-Path $repoRoot "ring_runtime_lto.o"
 $outputPath = Join-Path $repoRoot "ring.exe"
+$ltoCache = Join-Path ([System.IO.Path]::GetTempPath()) "ring-lang-thinlto-cache"
+$compileOptimizationFlags = @("-O3", "-flto=thin")
+$linkOptimizationFlags = @(
+    "-flto=thin",
+    "-fuse-ld=lld",
+    "-Wl,/lldltocache:$ltoCache",
+    "-Wl,/lldltocachepolicy:cache_size_bytes=1073741824:cache_size_files=4096:prune_after=168h"
+)
 
 if (-not (Test-Path -LiteralPath $anchorPath -PathType Leaf)) {
     throw "Tracked compiler anchor not found: $anchorPath"
@@ -28,22 +36,24 @@ if ($null -eq $clangxx) {
     throw "clang++ was not found on PATH"
 }
 
-Write-Host "Step 1/3: Compiling tracked C bootstrap with clang ..."
-& $clang.Source -c $anchorPath -o $compilerObject -std=c11 -O2
+New-Item -ItemType Directory -Path $ltoCache -Force | Out-Null
+
+Write-Host "Step 1/3: Compiling tracked C bootstrap with clang (O3 + ThinLTO) ..."
+& $clang.Source -c $anchorPath -o $compilerObject -std=c11 @compileOptimizationFlags
 if ($LASTEXITCODE -ne 0) {
     throw "clang compiler-anchor compilation failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Step 2/3: Compiling native runtime with clang++ ..."
+Write-Host "Step 2/3: Compiling native runtime with clang++ (O3 + ThinLTO) ..."
 $runtimeFlags = @(
     "-c",
     $runtimeSource,
     "-o",
     $runtimeObject,
-    "-O2",
     "-std=c++17",
     "-D_CRT_SECURE_NO_WARNINGS"
 )
+$runtimeFlags += $compileOptimizationFlags
 if ($Stats) { $runtimeFlags += "-DRING_ALLOC_STATS" }
 & $clangxx.Source @runtimeFlags
 if ($LASTEXITCODE -ne 0) {
@@ -51,7 +61,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Step 3/3: Linking compiler from tracked C anchor ..."
-& $clang.Source $compilerObject $runtimeObject -o $outputPath -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'"
+& $clang.Source $compilerObject $runtimeObject -o $outputPath -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" @linkOptimizationFlags
 if ($LASTEXITCODE -ne 0) {
     throw "clang link failed with exit code $LASTEXITCODE"
 }
