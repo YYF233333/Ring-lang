@@ -55,7 +55,7 @@ Ring-lang/
 - 每个实现变更至少有相称测试；合入前运行 `python tests/run_tests.py`。RC、ABI、bootstrap 或间歇性内存路径按对应 spec 要求重复运行。
 - 修改公开功能时同步更新设计/规范；活动 spec 只保存当前目标、约束和验收，完成过程留 Git。
 - worktree、review、Argument、决策边界与持续推进规则见 `docs/workflow.md`，不要在本文件复制治理协议。
-- `ring_runtime.cpp` 必须以 `-O2` 编译；`-O0` 不作为有效性能或自举门。
+- `ring_runtime.cpp` 的优化级别由实测收益与完整正确性门禁决定，不固定为 `-O2`；`-O0` 不作为有效性能或自举门。
 
 ### Bootstrap
 
