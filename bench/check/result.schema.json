@@ -16,6 +16,7 @@
     "argv",
     "cwd",
     "cache",
+    "runner_runtime",
     "root_pid",
     "wall_ns",
     "cpu_user_ns",
@@ -68,6 +69,49 @@
         "thinlto_cache": { "type": "string", "enum": ["cold", "warm"] },
         "output": { "type": "string", "const": "fresh" },
         "os_file_cache": { "type": "string", "const": "uncontrolled" }
+      }
+    },
+    "runner_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "isolated",
+        "root_path",
+        "source_sha256",
+        "flags",
+        "original_exists",
+        "original_sha256",
+        "pre_exists",
+        "pre_sha256",
+        "post_exists",
+        "post_sha256",
+        "restored",
+        "errors"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["not_applicable", "cold", "warm"]
+        },
+        "isolated": { "type": "boolean" },
+        "root_path": { "type": ["string", "null"] },
+        "source_sha256": { "type": ["string", "null"] },
+        "flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "original_exists": { "type": "boolean" },
+        "original_sha256": { "type": ["string", "null"] },
+        "pre_exists": { "type": "boolean" },
+        "pre_sha256": { "type": ["string", "null"] },
+        "post_exists": { "type": "boolean" },
+        "post_sha256": { "type": ["string", "null"] },
+        "restored": { "type": "boolean" },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "root_pid": { "type": ["integer", "null"], "minimum": 0 },

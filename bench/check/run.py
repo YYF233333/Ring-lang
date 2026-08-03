@@ -187,7 +187,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     flags = manifest.get("fingerprint_flags")
     if not isinstance(flags, dict):
         raise HarnessError("manifest fingerprint_flags must be an object")
-    for name in ("compiler", "runtime", "link"):
+    for name in ("compiler", "runtime", "runner_runtime", "link"):
         if not isinstance(flags.get(name), list) or not all(
             isinstance(item, str) for item in flags[name]
         ):
@@ -249,6 +249,10 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             raise HarnessError(f"{prefix}.requires must be a string array")
         if not isinstance(lane["runner_summary"], bool):
             raise HarnessError(f"{prefix}.runner_summary must be boolean")
+        if "isolate_runner_runtime" in lane and not isinstance(
+            lane["isolate_runner_runtime"], bool
+        ):
+            raise HarnessError(f"{prefix}.isolate_runner_runtime must be boolean")
         for field in ("artifacts", "phase_trace_paths"):
             if not isinstance(lane[field], list) or not all(
                 isinstance(item, str) for item in lane[field]
@@ -280,6 +284,7 @@ def expand_lanes(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "output": "fresh",
                 "os_file_cache": "uncontrolled",
             }
+            lane.setdefault("isolate_runner_runtime", False)
             expanded.append(lane)
     return expanded
 
@@ -474,6 +479,181 @@ def capture_environment(
     }
 
 
+def _optional_file_state(path: Path) -> dict[str, Any]:
+    exists = path.is_file()
+    return {
+        "exists": exists,
+        "sha256": _sha256_file(path) if exists else None,
+        "bytes": path.stat().st_size if exists else None,
+        "mtime_ns": path.stat().st_mtime_ns if exists else None,
+    }
+
+
+def prepare_runner_runtime(
+    manifest: Mapping[str, Any],
+    lanes: Sequence[Mapping[str, Any]],
+    cache_state: str | None,
+    tools: Mapping[str, str | None],
+    run_dir: Path,
+) -> dict[str, Any]:
+    """Prepare an isolated runner ``ring_runtime.o`` state outside measurement."""
+
+    root_object = REPO_ROOT / "ring_runtime.o"
+    source = REPO_ROOT / "ring_runtime.cpp"
+    needs_object = any(lane.get("isolate_runner_runtime", False) for lane in lanes)
+    flags = list(manifest["fingerprint_flags"]["runner_runtime"])
+    setup: dict[str, Any] = {
+        "mode": cache_state if needs_object else "not_applicable",
+        "isolated": needs_object,
+        "root_path": str(root_object.resolve()),
+        "source_sha256": _sha256_file(source),
+        "flags": flags,
+        "original_root": _optional_file_state(root_object),
+        "prepared": None,
+        "preparation_stdout": None,
+        "preparation_stderr": None,
+    }
+    if not needs_object or cache_state == "cold":
+        return setup
+    if cache_state != "warm":
+        raise HarnessError("runner runtime isolation requires a cold or warm cache state")
+    clangxx = tools.get("clangxx")
+    if clangxx is None:
+        raise HarnessError("warm runner runtime preparation requires clang++")
+
+    prepared_dir = run_dir / "prepared" / "runner-runtime"
+    prepared_dir.mkdir(parents=True, exist_ok=False)
+    prepared_object = prepared_dir / "ring_runtime.o"
+    stdout_path = prepared_dir / "stdout.txt"
+    stderr_path = prepared_dir / "stderr.txt"
+    command = [
+        clangxx,
+        "-c",
+        str(source),
+        "-o",
+        str(prepared_object),
+        *flags,
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    stdout_path.write_bytes(completed.stdout)
+    stderr_path.write_bytes(completed.stderr)
+    if completed.returncode != 0 or not prepared_object.is_file():
+        raise HarnessError(
+            "warm runner runtime preparation failed; see "
+            f"{stdout_path} and {stderr_path}"
+        )
+    if prepared_object.stat().st_mtime_ns < source.stat().st_mtime_ns:
+        timestamp = source.stat().st_mtime_ns + 1_000_000_000
+        os.utime(prepared_object, ns=(timestamp, timestamp))
+    setup["prepared"] = {
+        **_optional_file_state(prepared_object),
+        "path": str(prepared_object.resolve()),
+        "argv": command,
+    }
+    setup["preparation_stdout"] = _file_record(stdout_path)
+    setup["preparation_stderr"] = _file_record(stderr_path)
+    return setup
+
+
+def _begin_runner_runtime_isolation(
+    lane: Mapping[str, Any],
+    setup: Mapping[str, Any],
+    sample_dir: Path,
+) -> tuple[dict[str, Any], Path | None]:
+    applies = bool(lane.get("isolate_runner_runtime", False))
+    record: dict[str, Any] = {
+        "mode": setup["mode"] if applies else "not_applicable",
+        "isolated": applies,
+        "root_path": setup["root_path"] if applies else None,
+        "source_sha256": setup["source_sha256"] if applies else None,
+        "flags": list(setup["flags"]) if applies else [],
+        "original_exists": False,
+        "original_sha256": None,
+        "pre_exists": False,
+        "pre_sha256": None,
+        "post_exists": False,
+        "post_sha256": None,
+        "restored": True,
+        "errors": [],
+    }
+    if not applies:
+        return record, None
+
+    root_object = Path(setup["root_path"])
+    original = _optional_file_state(root_object)
+    record["original_exists"] = original["exists"]
+    record["original_sha256"] = original["sha256"]
+    expected_original = setup["original_root"]
+    if (
+        original["exists"] != expected_original["exists"]
+        or original["sha256"] != expected_original["sha256"]
+    ):
+        record["errors"].append("root runtime object changed since environment capture")
+    backup = sample_dir / "runner-runtime-original.o" if original["exists"] else None
+    try:
+        if backup is not None:
+            shutil.copy2(root_object, backup)
+        root_object.unlink(missing_ok=True)
+        if setup["mode"] == "warm":
+            prepared = setup.get("prepared")
+            if not isinstance(prepared, dict) or not prepared.get("path"):
+                raise HarnessError("warm runner runtime object was not prepared")
+            shutil.copy2(Path(prepared["path"]), root_object)
+            source = REPO_ROOT / "ring_runtime.cpp"
+            if root_object.stat().st_mtime_ns < source.stat().st_mtime_ns:
+                timestamp = source.stat().st_mtime_ns + 1_000_000_000
+                os.utime(root_object, ns=(timestamp, timestamp))
+        pre = _optional_file_state(root_object)
+        record["pre_exists"] = pre["exists"]
+        record["pre_sha256"] = pre["sha256"]
+        return record, backup
+    except BaseException:
+        root_object.unlink(missing_ok=True)
+        if backup is not None and backup.is_file():
+            shutil.copy2(backup, root_object)
+            backup.unlink(missing_ok=True)
+        raise
+
+
+def _finish_runner_runtime_isolation(
+    record: dict[str, Any],
+    setup: Mapping[str, Any],
+    backup: Path | None,
+) -> None:
+    if not record["isolated"]:
+        return
+    root_object = Path(record["root_path"])
+    try:
+        post = _optional_file_state(root_object)
+        record["post_exists"] = post["exists"]
+        record["post_sha256"] = post["sha256"]
+        if not post["exists"]:
+            record["errors"].append("runner did not materialize ring_runtime.o")
+        if record["mode"] == "warm" and post["exists"]:
+            prepared = setup.get("prepared")
+            expected_hash = prepared.get("sha256") if isinstance(prepared, dict) else None
+            if post["sha256"] != expected_hash:
+                record["errors"].append("runner replaced the prepared warm runtime object")
+    finally:
+        root_object.unlink(missing_ok=True)
+        if backup is not None and backup.is_file():
+            shutil.copy2(backup, root_object)
+            backup.unlink(missing_ok=True)
+        restored = _optional_file_state(root_object)
+        record["restored"] = (
+            restored["exists"] == record["original_exists"]
+            and restored["sha256"] == record["original_sha256"]
+        )
+        if not record["restored"]:
+            record["errors"].append("failed to restore pre-existing root runtime object")
+
+
 def _context(
     tools: Mapping[str, str | None],
     run_dir: Path,
@@ -629,6 +809,7 @@ def _invalid_reason(
     runner_summary: Mapping[str, Any] | None,
     artifacts: Sequence[Mapping[str, Any]],
     phase_errors: Sequence[str],
+    runtime_errors: Sequence[str],
 ) -> str | None:
     if is_warmup:
         return "warmup"
@@ -643,7 +824,6 @@ def _invalid_reason(
         "cpu_user_ns",
         "cpu_kernel_ns",
         "peak_root_rss_bytes",
-        "max_worker_peak_rss_bytes",
         "peak_job_commit_bytes",
         "process_count",
         "job_io",
@@ -651,6 +831,12 @@ def _invalid_reason(
     missing = [field for field in exact_fields if measurement.get(field) is None]
     if missing:
         return f"missing_exact_metrics: {','.join(missing)}"
+    if measurement["measurement_errors"]:
+        return f"measurement_errors: {'; '.join(measurement['measurement_errors'])}"
+    if not measurement["rss_complete"]:
+        return "rss_incomplete"
+    if runtime_errors:
+        return f"runner_runtime_invalid: {'; '.join(runtime_errors)}"
     if runner_expected and runner_summary is None:
         return "runner_summary_missing"
     missing_artifacts = [item["path"] for item in artifacts if not item["exists"]]
@@ -725,22 +911,31 @@ def execute_invocation(
 
     measurement: dict[str, Any] | None = None
     measurement_error: str | None = None
+    runtime_setup = environment["runner_runtime"]
+    runtime_record, runtime_backup = _begin_runner_runtime_isolation(
+        lane, runtime_setup, sample_dir
+    )
     try:
-        measurement = run_in_job(
-            argv,
-            cwd=cwd,
-            env=child_env,
-            stdout_path=stdout_path,
-            stderr_path=stderr_path,
-            timeout_seconds=float(lane["timeout_seconds"]),
-            poll_ms=RSS_POLL_MS,
+        try:
+            measurement = run_in_job(
+                argv,
+                cwd=cwd,
+                env=child_env,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                timeout_seconds=float(lane["timeout_seconds"]),
+                poll_ms=RSS_POLL_MS,
+            )
+        except (OSError, ValueError, JobMeasurementError) as exc:
+            measurement_error = str(exc)
+            measurement = _empty_metrics()
+            measurement["measurement_errors"] = [measurement_error]
+            stdout_path.touch(exist_ok=True)
+            stderr_path.touch(exist_ok=True)
+    finally:
+        _finish_runner_runtime_isolation(
+            runtime_record, runtime_setup, runtime_backup
         )
-    except (OSError, ValueError, JobMeasurementError) as exc:
-        measurement_error = str(exc)
-        measurement = _empty_metrics()
-        measurement["measurement_errors"] = [measurement_error]
-        stdout_path.touch(exist_ok=True)
-        stderr_path.touch(exist_ok=True)
 
     stdout = _file_record(stdout_path)
     stderr = _file_record(stderr_path)
@@ -756,6 +951,7 @@ def execute_invocation(
         runner_summary=runner,
         artifacts=artifacts,
         phase_errors=phase_errors,
+        runtime_errors=runtime_record["errors"],
     )
     assert measurement is not None
     if cache_state == "cold":
@@ -773,6 +969,7 @@ def execute_invocation(
         "argv": argv,
         "cwd": str(Path(cwd).resolve()),
         "cache": lane["cache"],
+        "runner_runtime": runtime_record,
         **measurement,
         "exit": {
             "code": exit_code,
@@ -825,10 +1022,38 @@ def summarize_lane(
         if values:
             metrics[field] = _metric_stats(values)
     reasons: dict[str, int] = {}
+    measurement_error_counts: dict[str, int] = {}
     for record in records:
         if record["invalid_reason"] is not None:
             reason = record["invalid_reason"]
             reasons[reason] = reasons.get(reason, 0) + 1
+        for error in record.get("measurement_errors", []):
+            measurement_error_counts[error] = measurement_error_counts.get(error, 0) + 1
+    rss_incomplete = [record for record in records if not record.get("rss_complete", False)]
+    lower_bounds = [
+        record["sampled_peak_tree_rss_bytes"]
+        for record in rss_incomplete
+        if record.get("sampled_peak_tree_rss_bytes") is not None
+    ]
+    runtime_error_samples = sum(
+        1 for record in records if record.get("runner_runtime", {}).get("errors")
+    )
+    resource_quality: dict[str, Any] = {
+        "rss_complete_samples": len(records) - len(rss_incomplete),
+        "rss_incomplete_samples": len(rss_incomplete),
+        "included_rss_incomplete_samples": sum(
+            1 for record in included if not record.get("rss_complete", False)
+        ),
+        "worker_peak_unavailable_samples": sum(
+            1 for record in records if record.get("max_worker_peak_rss_bytes") is None
+        ),
+        "measurement_error_samples": sum(
+            1 for record in records if record.get("measurement_errors")
+        ),
+        "measurement_error_counts": measurement_error_counts,
+        "runner_runtime_error_samples": runtime_error_samples,
+        "rss_lower_bound": _metric_stats(lower_bounds) if lower_bounds else None,
+    }
     return {
         "case_id": lane["case_id"],
         "policy": lane["policy"],
@@ -837,6 +1062,7 @@ def summarize_lane(
         "attempts": len(records),
         "complete": len(included) == target,
         "invalid_reasons": reasons,
+        "resource_quality": resource_quality,
         "metrics": metrics,
     }
 
@@ -1025,10 +1251,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.probe:
         selected = [_probe_lane(build_tools(args.ring))]
     tools = build_tools(args.ring)
-    preflight_job_support()
+    job_preflight = preflight_job_support()
     preflight_root = (args.output or BENCH_DIR / "results" / "preflight").resolve()
     preflight_lanes(selected, tools, preflight_root, args.thinlto_cache.resolve())
 
+    state: str | None = None
     if not args.probe:
         states = {lane["cache"]["thinlto_cache"] for lane in selected}
         if len(states) != 1:
@@ -1060,6 +1287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "manifest": str(manifest_path),
                     "result_schema": str(schema_path),
                     "lanes": [lane["case_id"] for lane in selected],
+                    "job_preflight": job_preflight,
                 }
             )
         )
@@ -1081,6 +1309,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if not args.probe and environment["git_dirty"]:
         raise HarnessError("formal measurements require a clean tracked worktree")
+    environment["job_preflight"] = job_preflight
+    environment["runner_runtime"] = prepare_runner_runtime(
+        manifest,
+        selected,
+        state,
+        tools,
+        run_dir,
+    )
     _json_dump(run_dir / "environment.json", environment)
 
     lane_summaries: list[dict[str, Any]] = []

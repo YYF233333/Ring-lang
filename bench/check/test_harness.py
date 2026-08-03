@@ -11,7 +11,12 @@ from pathlib import Path
 from unittest import mock
 
 import run as harness
-from windows_job import preflight_job_support, run_in_job
+import windows_job
+from windows_job import (
+    current_process_handle_count,
+    preflight_job_support,
+    run_in_job,
+)
 
 
 class ManifestAndPolicyTests(unittest.TestCase):
@@ -46,6 +51,9 @@ class ManifestAndPolicyTests(unittest.TestCase):
             "sampled_peak_tree_rss_bytes": 1,
             "max_worker_peak_rss_bytes": 1,
             "peak_job_commit_bytes": 1,
+            "rss_complete": True,
+            "measurement_errors": [],
+            "runner_runtime": {"errors": []},
         }
         return record
 
@@ -96,9 +104,116 @@ class ManifestAndPolicyTests(unittest.TestCase):
         self.assertEqual(summary["attempts"], 7)
         self.assertFalse(summary["complete"])
 
+    def test_incomplete_rss_is_invalid_and_explicit_in_summary(self) -> None:
+        measurement = harness._empty_metrics()
+        measurement.update(
+            {
+                "exit_code": 0,
+                "wall_ns": 1,
+                "cpu_user_ns": 1,
+                "cpu_kernel_ns": 1,
+                "peak_root_rss_bytes": 1,
+                "peak_job_commit_bytes": 1,
+                "sampled_peak_tree_rss_bytes": 1,
+                "process_count": {"total": 1},
+                "job_io": {},
+                "rss_complete": False,
+            }
+        )
+        reason = harness._invalid_reason(
+            is_warmup=False,
+            measurement=measurement,
+            measurement_error=None,
+            expected_exit_codes=[0],
+            runner_expected=False,
+            runner_summary=None,
+            artifacts=[],
+            phase_errors=[],
+            runtime_errors=[],
+        )
+        self.assertEqual(reason, "rss_incomplete")
+        record = self._fake_record(included=False, warmup=False, wall_ns=1)
+        record["rss_complete"] = False
+        record["sampled_peak_tree_rss_bytes"] = 7
+        record["measurement_errors"] = ["missed worker"]
+        summary = harness.summarize_lane(
+            {"case_id": "quality", "policy": "adaptive"}, [record], 1
+        )
+        self.assertEqual(summary["resource_quality"]["rss_incomplete_samples"], 1)
+        self.assertEqual(summary["resource_quality"]["measurement_error_samples"], 1)
+        self.assertEqual(
+            summary["resource_quality"]["rss_lower_bound"]["median"], 7
+        )
+
+    def test_runner_runtime_isolation_restores_ignored_root_object(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            source = repo / "ring_runtime.cpp"
+            root_object = repo / "ring_runtime.o"
+            prepared = repo / "prepared.o"
+            source.write_text("runtime", encoding="utf-8")
+            root_object.write_bytes(b"original")
+            prepared.write_bytes(b"prepared")
+            setup = {
+                "mode": "warm",
+                "root_path": str(root_object),
+                "source_sha256": harness._sha256_file(source),
+                "flags": ["-O2"],
+                "original_root": harness._optional_file_state(root_object),
+                "prepared": {
+                    **harness._optional_file_state(prepared),
+                    "path": str(prepared),
+                },
+            }
+            lane = {"isolate_runner_runtime": True}
+            sample = repo / "sample"
+            sample.mkdir()
+            with mock.patch.object(harness, "REPO_ROOT", repo):
+                record, backup = harness._begin_runner_runtime_isolation(
+                    lane, setup, sample
+                )
+                self.assertEqual(root_object.read_bytes(), b"prepared")
+                harness._finish_runner_runtime_isolation(record, setup, backup)
+            self.assertEqual(root_object.read_bytes(), b"original")
+            self.assertTrue(record["restored"])
+            self.assertEqual(record["errors"], [])
+
 
 @unittest.skipUnless(os.name == "nt", "Windows Job Object tests require Windows")
 class WindowsJobTests(unittest.TestCase):
+    def test_preflight_and_invocations_do_not_leak_job_handles(self) -> None:
+        evidence = preflight_job_support()
+        self.assertEqual(evidence["handle_count_before"], evidence["handle_count_after"])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            # CPython initializes two process-global synchronization handles on
+            # its first low-level CreateProcess call.  Warm that one-time state,
+            # then require steady-state handle equality.
+            run_in_job(
+                [sys.executable, "-c", "pass"],
+                cwd=Path.cwd(),
+                env=os.environ,
+                stdout_path=root / "warmup-stdout.txt",
+                stderr_path=root / "warmup-stderr.txt",
+                timeout_seconds=5,
+            )
+            before = current_process_handle_count()
+            with mock.patch.object(
+                windows_job, "_new_job", wraps=windows_job._new_job
+            ) as new_job:
+                result = run_in_job(
+                    [sys.executable, "-c", "pass"],
+                    cwd=Path.cwd(),
+                    env=os.environ,
+                    stdout_path=root / "stdout.txt",
+                    stderr_path=root / "stderr.txt",
+                    timeout_seconds=5,
+                )
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(new_job.call_count, 1)
+            self.assertIsNone(result["max_worker_peak_rss_bytes"])
+            self.assertEqual(current_process_handle_count(), before)
+
     def test_process_tree_metrics_and_separate_streams(self) -> None:
         preflight_job_support()
         child_code = (

@@ -17,11 +17,17 @@ memory:
   `PeakJobMemoryUsed` come from `QueryInformationJobObject`;
 - `PeakJobMemoryUsed` is peak committed memory for the job, **not RSS**;
 - root and observed per-process peak working set come from retained process
-  handles and `GetProcessMemoryInfo`, including after process exit;
+  handles and `GetProcessMemoryInfo`, including after process exit. The
+  per-worker maximum excludes the root and is `null` when no worker existed;
 - tree working set is summed every 10 ms. Its sample count, covered duration,
   coverage ratio, observed-process count, and exact Job total are retained.
   `rss_complete=false` makes the tree peak an explicit lower bound when a short
   process was missed, coverage fell below 95%, or sampling produced an error.
+
+Preflight creates, configures, and queries a genuinely fresh Job Object, checks
+the kill-on-close flag, and proves that closing it restores the current-process
+handle count. Self-tests also assert that one invocation creates exactly one
+Job and does not grow the steady-state handle count.
 
 stdout and stderr are never merged. Each is retained with its own path, byte
 count, and SHA-256. Runner summaries, declared artifacts, and opt-in JSONL phase
@@ -34,10 +40,16 @@ traces are copied into the invocation record rather than inferred later.
   300 seconds, otherwise 3.
 - `full_gate`: always require 3 valid samples.
 - A lane gets at most `target + 2` measured attempts. Failing to obtain the
-  target is a failed run, never a silently reduced sample set.
+target is a failed run, never a silently reduced sample set.
 - All raw attempts stay in `samples.jsonl`, including warm-up and invalid
   attempts. Summaries report median, median absolute deviation, and range;
   empirical p95 is emitted only for exactly 21 valid samples.
+
+An invocation with incomplete RSS coverage or any sampling error is retained as
+an invalid lower-bound row; it never enters the formal aggregate. Lane summaries
+count complete/incomplete samples, unavailable worker peaks, measurement errors,
+runtime-isolation errors, and separately summarize incomplete tree-RSS lower
+bounds.
 
 Cold and warm are separate lane IDs. Every invocation is labelled only with:
 
@@ -57,6 +69,16 @@ preflight requires that cache to be named `ring-lang-thinlto-cache`, exist, and
 be non-empty. The operator must prewarm it with the same source/toolchain/flags
 before confirming `warm`. OS file cache is deliberately not flushed or claimed
 as controlled.
+
+The Python runner also has a separate ignored root artifact,
+`ring_runtime.o`. Lanes that can consume it (`filtered_e2e`, e2e, golden, and
+the full gate) isolate it for every invocation and restore any pre-existing
+object afterward. Cold samples start with no root object and therefore measure
+its O2 build each time. Warm samples receive an unmeasured, freshly prepared
+object built with the runner's exact clang++ path and
+`-std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS`; its source/object hashes, flags,
+pre/post state, and restoration result are recorded. A stale ignored object can
+therefore neither silently turn a cold sample warm nor contaminate another lane.
 
 ## Commands
 
@@ -101,7 +123,7 @@ Every fresh result directory contains:
 - `environment.json` — commit and dirty state, manifest hash, tracked
   `dist-c`/runtime hashes, Python/clang/clang++ paths, versions and executable
   hashes, flags, OS, CPU, total memory, logical cores, power status/plan, and
-  ThinLTO cache inventory;
+  ThinLTO cache inventory, plus runner-runtime preparation state and hashes;
 - `samples.jsonl` — one schema-validated row per invocation;
 - `samples/<case>/<sample>/stdout.txt` and `stderr.txt` plus declared artifacts;
 - `summary.json` — statistics derived only from included rows and a hard

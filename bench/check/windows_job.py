@@ -137,6 +137,13 @@ if os.name == "nt":
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessHandleCount.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetProcessHandleCount.restype = wintypes.BOOL
     psapi.GetProcessMemoryInfo.argtypes = [
         wintypes.HANDLE,
         ctypes.POINTER(PROCESS_MEMORY_COUNTERS_EX),
@@ -178,16 +185,42 @@ def _new_job() -> int:
     return int(handle)
 
 
-def preflight_job_support() -> None:
-    """Fail fast if the host cannot create and query a Job Object."""
+def current_process_handle_count() -> int:
+    """Return the exact kernel handle count for the current Python process."""
 
     _require_windows()
-    job: int | None = None
+    count = wintypes.DWORD()
+    if not kernel32.GetProcessHandleCount(
+        kernel32.GetCurrentProcess(), ctypes.byref(count)
+    ):
+        raise _winerror("GetProcessHandleCount failed")
+    return int(count.value)
+
+
+def preflight_job_support() -> dict[str, int]:
+    """Create/configure/query a fresh Job and prove preflight leaks no handle."""
+
+    _require_windows()
+    before = current_process_handle_count()
+    job = _new_job()
     try:
-        _query_accounting(job)
-        _query_extended_limits(job)
+        accounting = _query_accounting(job)
+        limits = _query_extended_limits(job)
+        if accounting.BasicInfo.TotalProcesses != 0:
+            raise JobMeasurementError("fresh preflight Job unexpectedly owns a process")
+        if not (
+            limits.BasicLimitInformation.LimitFlags
+            & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        ):
+            raise JobMeasurementError("fresh preflight Job lost kill-on-close configuration")
     finally:
         _close_handle(job)
+    after = current_process_handle_count()
+    if after != before:
+        raise JobMeasurementError(
+            f"Job preflight leaked handles: before={before}, after={after}"
+        )
+    return {"handle_count_before": before, "handle_count_after": after}
 
 
 def _query_struct(job: int, info_class: int, value: ctypes.Structure) -> None:
@@ -314,7 +347,7 @@ def run_in_job(
     stdout_file_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    job = _new_job()
+    job: int | None = None
     process_handle: int | None = None
     thread_handle: int | None = None
     retained_handles: dict[int, int] = {}
@@ -478,7 +511,9 @@ def run_in_job(
         root_memory = _memory_info(process_handle)
 
         worker_peaks: list[int] = []
-        for handle in retained_handles.values():
+        for worker_pid, handle in retained_handles.items():
+            if worker_pid == pid:
+                continue
             memory = _memory_info(handle)
             if memory is not None:
                 worker_peaks.append(int(memory.PeakWorkingSetSize))

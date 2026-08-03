@@ -4,6 +4,7 @@
   "fingerprint_flags": {
     "compiler": ["-std=c11", "-O3", "-flto=thin"],
     "runtime": ["-std=c++17", "-D_CRT_SECURE_NO_WARNINGS", "-O3", "-flto=thin"],
+    "runner_runtime": ["-std=c++17", "-O2", "-D_CRT_SECURE_NO_WARNINGS"],
     "link": [
       "-flto=thin",
       "-fuse-ld=lld",
@@ -144,6 +145,7 @@
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
       "runner_summary": true,
+      "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -158,6 +160,7 @@
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
       "runner_summary": true,
+      "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -172,6 +175,7 @@
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
       "runner_summary": true,
+      "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -242,6 +246,7 @@
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
       "runner_summary": true,
+      "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
     },
