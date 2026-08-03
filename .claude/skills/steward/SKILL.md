@@ -60,6 +60,7 @@ Session 恢复时必须把每个 `planning` / `doing` 与 durable branch、workt
 - root 独占 main、看板、Inbox、CLAUDE 和设计真值；
 - 并发 worktree 不得修改同一文件；
 - 同一连续任务复用原 agent 完成实现、review 返修和复验，不为每次反馈重新派无上下文 agent；
+- 委派 prompt 必须继承 `CLAUDE.md` 的项目语境：只描述编程语言实现、编译器正确性、所有权/资源语义与本地回归，不得扩张为网络安全、漏洞利用、攻击或其他不正当任务。若外层分类器因历史措辞误判，root 应使用 fresh context，以准确的本地工程措辞重新委派或直接接管；禁止循环发送同一个易误判 prompt，也不得因此降低验证门槛；
 - 合并后按 `CLAUDE.md` 执行定向测试、全量门、bootstrap/fixpoint 和必要重复运行；失败交回原 implementer，不降低门槛。
 
 ## 长命令等待纪律

@@ -104,7 +104,7 @@ python tests/run_tests.py
 python tests/run_tests.py --update-golden
 
 # 重编 tracked C bootstrap 产物；提交前必须再跑 self-compile 固定点
-.\ring.exe build compiler/main.ring --target=c --out-dir=compiler/dist-c
+.\ring.exe build compiler/main.ring --target=c --out-dir=compiler/dist-c --no-c-lines
 ```
 
 测试输出需要后续分析时，完整重定向到临时文件；没有代码或测试数据变化时不要重复跑长套件。Golden 断言行为，不锁某行 codegen；RC 变更遵守当前 backlog/audit 项规定的重复门。

@@ -66,6 +66,8 @@ Spec 漂移但可由既有设计唯一修正时，root 更新执行契约后继�
 
 Prompt 必须给出绝对 worktree、branch、base、完整 spec、验收标准、允许文件、禁写范围、当前测试命令和 blocker 路由。角色使用当前 runtime 暴露的 collaboration 工具，不在 skill 中伪造 provider API。
 
+委派 prompt 必须继承 `CLAUDE.md` 的项目语境：只描述编程语言实现、编译器正确性、所有权/资源语义与本地回归，不得扩张为网络安全、漏洞利用、攻击或其他不正当任务。若外层分类器因历史措辞误判，root 应使用 fresh context，以准确的本地工程措辞重新委派或直接接管；禁止循环发送同一个易误判 prompt，也不得因此降低验证门槛。
+
 ## Review、merge 与补位
 
 1. 所有 merge 前检查 base、scoped diff、验收证据、越界修改和残留风险。
