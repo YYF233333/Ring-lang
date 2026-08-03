@@ -1,4 +1,4 @@
-// B-163 C backend step 5 regression: closure / trait dict / evidence passing.
+// C-native regression: closure / trait dict / evidence passing.
 // Coverage: lambda capture by value, mut-cell write-through capture (B-091),
 // HOF chains (map/filter/fold), named local closure calls, closures returned
 // from functions (env ownership, B-098), user trait dict dispatch through a

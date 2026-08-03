@@ -1482,16 +1482,6 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   args are sink positions — is_variant_constructor_call), ring_make_closure /
 //   make_eq_dict / make_ord_dict (FRESH, dict plumbing), drop_* destructors.
 //
-// ── Out-of-table: non-RC extern pointers (llvm_ffi.ring) ──────────────────────
-//   The 59 LLVM-C API externs return OPAQUE FOREIGN handles that are NOT
-//   ring_alloc'd — neither FRESH nor BORROW: ring_dup/ring_drop on them reads a
-//   garbage header → corruption.  They need full RC EXCLUSION (never Clone,
-//   never drop), which is a TYPE-level property (ExternType), not a name-list
-//   entry here.  Dormant today (codegen_llvm only executes when the native
-//   compiler itself runs --target=llvm — B-099 scope); flagged as a hard D1
-//   prerequisite in worker_feedback + audit-report.
-// ═════════════════════════════════════════════════════════════════════════════
-//
 // NOTE: `.get()` is NOT here — list.get / map.get build a FRESH owned Option
 // (ring_*_get_opt, which ring_dup's the element into the Option), so their result
 // is a fresh owned temporary, not a borrow.  `.first` / `.last` (B-103: now

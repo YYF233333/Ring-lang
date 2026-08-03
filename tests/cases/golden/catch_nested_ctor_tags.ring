@@ -8,7 +8,7 @@
 //   - top-level literal arms fell into the single-arm fast path (first arm
 //     body executed unconditionally).
 // The .expected file is HAND-WRITTEN (the LLVM backend is the bug side here —
-// no oracle), per plan-c-backend §2.5 #3.
+// no external oracle); lock the language-level constructor-tag contract.
 
 enum MyErr {
     Code(Int),

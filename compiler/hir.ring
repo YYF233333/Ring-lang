@@ -287,7 +287,7 @@ pub enum HExpr {
     // closures); effects are pure.
     DictConstruct { base_dict: Str, trait_name: Str, inner: List<DictRef>, ty: Type, effects: EffectRow, span: Span },
     // B-098: value-level clone inserted by the Perceus L1 borrow-inference pass
-    // (clone-all-escape) for --target=llvm only.  Wraps an escaping value that
+    // (clone-all-escape).  Wraps an escaping value that
     // already has an independent owner (Ident binding / FieldAccess / IndexExpr /
     // container read result) so the escape gets its own owned reference rather
     // than aliasing the still-live source.  codegen lowers `Clone{inner}` to
@@ -321,7 +321,7 @@ pub enum HStmt {
     LetDestructure { pattern: Pattern, bindings: List<HLetDestructureBinding>, init: HExpr, span: Span },
     IfLet { pattern: Pattern, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
 
-    // Perceus RC: explicit reference counting op (inserted by RC pass for --target=llvm only)
+    // Perceus RC: explicit reference counting op inserted by the RC pass.
     Drop { name: Str, ty: Type, span: Span }
 }
 
@@ -444,7 +444,7 @@ pub struct HProgram {
     // wrapped instances that reference them).
     pub static_dicts: List<HDictDef>,
     // B-144: global set of extern type names, collected at checker phase across
-    // all modules.  perceus / codegen_llvm / verify_rc read this instead of
+    // all modules.  perceus / codegen_c / verify_rc read this instead of
     // re-collecting per-module (which misses use-imported extern types).
     pub extern_type_names: Set<Str>,
     // B-002p1: types with user `impl Drop` — perceus skips dup (move semantics),
@@ -455,7 +455,7 @@ pub struct HProgram {
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case
 // (is_type_dag_type_name / is_type_dag_type) is REMOVED.  Type and the
 // structs/enums reachable from it now participate in ordinary Perceus RC:
-// codegen_llvm generates a recursive ring_drop_T for them, perceus Clone-wraps
+// codegen_c generates a recursive ring_drop_T for them, perceus Clone-wraps
 // every escaping owner-bearing Type substructure (so the shallow ring_dup is
 // balanced by the deep recursive drop), and the working-set is reclaimed at
 // scope end.  See design.md §7.11 "Type-DAG 内存回收：pure Perceus RC".
@@ -630,7 +630,7 @@ pub fn scan_trait_method_order(decls: List<HDecl>, mut trait_method_order: Map<S
 // Transitive supertrait closure in deterministic DFS order — the ORDER is a
 // cross-stage contract too: default trait method functions take supertrait
 // dicts as leading params in exactly this order (declarer and every caller
-// must agree).  Mirrors codegen_llvm.ring::collect_all_supertraits_llvm.
+// must agree).
 pub fn collect_all_supertraits(trait_supertraits: Map<Str, List<Str>>, trait_name: Str) -> List<Str> {
     let mut result: List<Str> = []
     let mut visited: Set<Str> = set_new()
@@ -763,14 +763,14 @@ pub fn hexpr_span(e: HExpr) -> Span {
 // B-104 D1 built-in rule ① — extern-handle type-level RC exclusion (audit #139)
 // ============================================================
 //
-// `extern type` declarations (llvm_ffi.ring / the codegen_llvm_* re-declarations)
-// describe OPAQUE FOREIGN handles: their values are raw pointers produced by a
-// non-Ring allocator (LLVM-C API), with NO ring_alloc RC header at ptr-8.
+// `extern type` declarations can describe opaque foreign handles: their values
+// are raw pointers produced by a non-Ring allocator, with no ring_alloc RC
+// header at ptr-8.
 // ring_dup on one WRITES a refcount into foreign memory; ring_drop READS a
 // garbage header and may free a foreign interior pointer — both corrupt the
 // foreign heap.  Such values are therefore EXCLUDED from RC entirely, decided at
-// the TYPE level (not a name-list of the 59 LLVM-C externs, which would drift as
-// the FFI grows — 2026-06-11 user decision, backlog B-104 D1 rule ①):
+// the TYPE level rather than a name list that would drift as the FFI grows
+// (2026-06-11 user decision, backlog B-104 D1 rule ①):
 //   * never Clone   (rc_escape: escape = MOVE, no ring_dup)
 //   * never Drop    (is_droppable_init: false → never enters the owned set)
 //   * never materialise (anf_should_materialize: false → no __anf binding)

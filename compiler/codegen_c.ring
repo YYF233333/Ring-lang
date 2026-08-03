@@ -1,14 +1,13 @@
-// C backend — entry point, declaration emission, module assembly and the
+// C-native entry point, declaration emission, module assembly and the
 // clang shell-out. Expression/statement emission lives in codegen_c_expr.ring.
 //
-// Mirrors codegen_llvm.ring::generate_llvm but the module is a single C11
-// translation unit built by pure Ring string assembly — ZERO FFI during
-// compilation (plan-c-backend §2.1).  The .c is written to disk and compiled
-// by shelling out to `clang -std=c11 -O2 -c` (clang from PATH).
+// The module is a single C11 translation unit built by pure Ring string
+// assembly with zero FFI during compilation.  The .c is written to disk and
+// compiled by shelling out to `clang -std=c11 -O2 -c` (clang from PATH).
 //
 // Determinism: every map iteration below goes through sorted keys or fixed
 // declaration order (audit #237) — the emitted .c is byte-identical across
-// runs (Phase 1 hard acceptance).
+// runs.
 
 use types::{Type, Effect, EffectRow, effect_kind_name}
 use ast::{Span, UseDecl, UseImport}
@@ -981,8 +980,7 @@ fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: St
 }
 
 // ============================================================
-// Step 7: per-type drop functions — port of codegen_llvm.ring's
-// emit_drop_functions / emit_drop_registrations.  For every registered
+// Step 7: per-type drop functions.  For every registered
 // struct/enum a `void ring_drop_<T>(void* p)` is generated and registered
 // with the RC runtime (drop_table dispatch on the header typeid):
 //   * structs: [user `impl Drop` body first (B-002p1)] then per-field
@@ -992,14 +990,12 @@ fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: St
 //   * List/Map keep the runtime's native drop_list/drop_map (fixed typeids
 //     4/5, registered by ring_runtime_init — the RingList/RingMapStruct
 //     layouts are runtime-private; B-152 P2/P3).  Option/Result keep the
-//     builtin recursion (drop_option; Result has no registered drop — LLVM
-//     parity).  Set is an ordinary generated struct; StringBuilder remains an
+//     builtin recursion (drop_option; Result has no registered drop).  Set is
+//     an ordinary generated struct; StringBuilder remains an
 //     extern type (not in struct_types).
-// Deviation from the LLVM oracle (recorded in worker_feedback): the user
-// drop call passes RING_UNIT / the default-evidence global for the drop
-// method's evidence params — the LLVM backend builds the call with data_ptr
-// only, under-calling the 2-param fn (the garbage register is never read
-// for io, but C prototypes make arity a hard clang error).
+// ABI note: the user drop call passes RING_UNIT / the default-evidence global
+// for the drop method's evidence params, so the generated call matches the
+// complete C prototype rather than relying on unspecified register contents.
 // ============================================================
 
 fn emit_c_drop_functions(mut ctx: CCtx) {
@@ -1239,11 +1235,8 @@ fn register_c_default_evidence(mut ctx: CCtx) {
 }
 
 // ============================================================
-// Effect scanning — verbatim ports of the codegen_llvm.ring private passes
-// (scan_fn_effects / scan_fn_mut_params_llvm / compute_transitive_effect_
-// closure / collect_local_names_rec).  Copied because the originals are
-// module-private and codegen_llvm*.ring must stay untouched (B-163 rule:
-// the LLVM backend is the differential oracle).
+// Effect scanning — C-native source of truth for local/transitive effect
+// discovery and local-name collection.
 // ============================================================
 
 fn scan_fn_effects_c(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRow>) {

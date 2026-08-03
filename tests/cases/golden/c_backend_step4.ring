@@ -1,4 +1,4 @@
-// B-163 C backend step 4 regression: struct construction (incl. nested +
+// C-native regression: struct construction (incl. nested +
 // spread update), field access chains, struct field assignment, enum
 // construction (positional / named / zero-field variants), match compilation
 // (tag dispatch, guards, or-patterns, literal & string matches, nested

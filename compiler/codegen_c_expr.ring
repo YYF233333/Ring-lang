@@ -1,29 +1,18 @@
-// B-163 C backend — expression + statement emission (steps 2-4).
-// Port of codegen_llvm_expr.ring / codegen_llvm_stmt.ring onto plain C text.
+// C-native expression and statement emission.
 //
 // Emission protocol: gen_c_expr emits C statements into ctx.cur_body and
 // returns a C expression string holding the value.  Pure constants (Int/Bool
 // literals, RING_UNIT) are returned inline; everything else is materialised
-// into a hoisted temporary so evaluation ORDER exactly mirrors the LLVM
-// backend's SSA sequencing (plan §2.1: statement-ised expressions + temps).
+// into a hoisted temporary so evaluation order stays explicit and deterministic.
 //
 // Step 4 adds struct/enum construction, field access/assignment, match and
 // if-let.  Match compiles through ONE unified test-and-fall-through chain —
-// the C rendering of the LLVM backend's gen_match_if_else (which the LLVM
-// side documents as the general lowering; its tag-switch is "kept purely as
-// an optimization for guard-free enum matches").  Arm order = source order,
-// pattern tests jump to the next arm's label on mismatch (plan §2.1:
-// if/goto+label, no SSA, no phi).
+// a test-and-fall-through lowering.  Arm order = source order,
+// pattern tests jump to the next arm's label on mismatch (if/goto+label).
 //
 // Step 6 adds effect handlers (tail-resumptive + abort), try/catch and
 // default evidence — see the "Step 6" section below for the mechanism notes.
 //
-// Constructs beyond the current step compile to a runtime-panic stub — the
-// emitted C always compiles; executing an unported construct panics with a
-// precise message.  This is required because single-file compilation prepends
-// the whole std prelude to program.decls (checker.ring load_prelude), so
-// prelude bodies flow through this backend from step 1.
-
 use types::{Type, EffectRow, EMPTY_ROW, type_to_builtin_name, BUILTIN_RANGE}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
@@ -42,7 +31,7 @@ use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCl
 use effect_analysis::{extract_effect_names}
 
 // ============================================================
-// Type predicate helpers (ports of the codegen_llvm_expr private ones)
+// Type predicate helpers
 // ============================================================
 
 fn is_int_type(ty: Type) -> Bool {
@@ -4016,7 +4005,7 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
     }
 }
 
-// Consume a value expression (parity with codegen_llvm_expr::discard).
+// Consume a value expression without emitting an extra operation.
 fn discard_c(v: Str) {
     // intentionally empty
 }

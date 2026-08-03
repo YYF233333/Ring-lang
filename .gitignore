@@ -1,10 +1,11 @@
 node_modules/
 dist/
-!compiler/dist/
 out/
 *.js.map
 .DS_Store
 Thumbs.db
+__pycache__/
+*.py[cod]
 
 .claude/worktrees/
 /.worktrees/

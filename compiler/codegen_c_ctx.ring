@@ -1,8 +1,7 @@
-// B-163 C backend — emission context and shared helpers (step 1).
-// Mirrors codegen_llvm_ctx.ring, but the "module" is plain C11 source text:
-// pure Ring string assembly, ZERO FFI during compilation (plan-c-backend §2.1).
+// C-native emission context and shared helpers.  A module is assembled as
+// plain C11 source text with zero FFI during compilation.
 //
-// Value representation is UNCHANGED from the LLVM backend:
+// Value representation at the runtime C ABI:
 //   * every Ring value crosses function boundaries as `void*`
 //   * Int/Bool are tagged pointers: (value << 1) | 1  (B-080)
 //   * Float/Str/List/... are ring_alloc'd heap objects with an
@@ -31,8 +30,7 @@ pub struct CStructInfo {
     pub field_rc_skip: List<Bool>
 }
 
-// Enum variant registration (port of codegen_llvm_ctx::EnumVariantInfo).
-// Value layout mirrors the LLVM backend exactly:
+// Enum variant registration.  Value layout at the runtime C ABI:
 //   { int64_t tag, void* field0, ..., void* field(max_fields-1) }
 // tag at *(int64_t*)ptr, payload field i at ((void**)ptr)[i + 1].
 // field_rc_skip: same extern-containment flags as CStructInfo, per payload
@@ -49,8 +47,7 @@ pub struct CEnumInfo {
     pub max_fields: Int
 }
 
-// Step 6: one enclosing handle-expr / try-catch scope (port of
-// codegen_llvm_ctx::HandleCleanup).  A `return` inside the body must pop the
+// One enclosing handle-expr / try-catch scope.  A `return` inside the body must pop the
 // catch frame and drop the handler evidence structs before returning (#173);
 // ev_drop_vars holds the hoisted C variable names (unique per handle — no
 // name-based double free on nested handles for the same effect).
@@ -66,8 +63,8 @@ pub struct CCtx {
     pub fn_defs: List<Str>,     // completed function definitions (decl order)
 
     // ---- current function emission state ----
-    // All locals/temps are hoisted to the top of the function (cur_decls) —
-    // the C analogue of LLVM entry-block allocas.  This sidesteps every C
+    // All locals/temps are hoisted to the top of the function as cur_decls.
+    // This sidesteps every C
     // block-scope pitfall (if/loop bodies assigning result temps, goto over
     // declarations, Ring `let` shadowing).
     pub cur_decls: List<Str>,
@@ -655,9 +652,8 @@ pub fn c_line_directive(mut ctx: CCtx, span: Span) {
 }
 
 // ============================================================
-// Perceus RC typeids — same allocator discipline as the LLVM backend
-// (codegen_llvm_ctx::get_or_assign_typeid): user types start at 64,
-// List/Map keep their fixed runtime typeids.
+// Perceus RC typeids: user types start at 64; List/Map keep their fixed
+// runtime typeids.
 // ============================================================
 
 pub fn get_or_assign_c_typeid(mut ctx: CCtx, type_name: Str) -> Int {
@@ -684,8 +680,7 @@ pub fn get_or_assign_c_typeid(mut ctx: CCtx, type_name: Str) -> Int {
 // Runtime function prototypes.
 // rt_use(name, arity) registers the prototype on first use; the assembled
 // file prints them sorted by name (deterministic — audit #237 discipline).
-// Known signatures are transcribed from codegen_llvm.ring::declare_runtime_fns
-// (which in turn matches ring_runtime.cpp's extern "C" definitions).
+// Known signatures match ring_runtime.cpp's extern "C" definitions.
 // Unknown names (user/std `extern fn`s like ring_slot_read) fall back to the
 // uniform boxed ABI: all params void*, returns void*.
 // ============================================================

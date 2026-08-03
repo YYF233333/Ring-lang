@@ -10,14 +10,14 @@
 
 Ring-lang 是一门 LLM-first native 编程语言：Python 风格表面语法，HM 类型推断、trait 多态、代数 effect 与确定性资源语义由编译器统一裁决。编译器已用 Ring 自举。
 
-当前处于 B-163 后端迁移期：C11 后端已完成 Phase 1，支持单文件、project/module 与 self-host；Phase 2 parity 认证完成前，LLVM 后端仍是默认 native、bootstrap anchor 与差分 oracle。JS codegen 已归档；`compiler/dist/` 只是冻结在 `0bd7822` 的 stage-0 回退锚，不能直接编译 HEAD。
+自 2026-08-03 起，编译器只保留 C11 native 后端。单文件、project/module、self-host 与 tracked bootstrap 都以 `compiler/dist-c/main.c` 为唯一锚点；LLVM/JS codegen 及其冻结产物已经退役，不再是构建依赖或测试 oracle。
 
 ## 技术状态
 
 - **前端**：Lexer → Parser → AST → Checker（HM + effects）→ HIR。
 - **资源管理**：Perceus RC pass 在 HIR 上插入 clone/drop；`verify_rc.ring` 检查 LEAK/UAF/BALANCE。RC 无 GC，环由 `Weak<T>` 方向处理。
-- **后端**：共享 HIR/Perceus/runtime ABI，分流到 C11 发射或 LLVM-C 发射。
-- **Runtime**：迁移期使用 `ring_runtime.cpp`；RIIR 终态是只保留 RC、IO/OS、fail 与 `Ptr` 原语的纯 C runtime。
+- **后端**：HIR/Perceus 经 C11 codegen 生成 `.c`，再由 clang 生成 native object。
+- **Runtime**：当前使用 `ring_runtime.cpp` 作为 C ABI bridge；RIIR 终态是只保留 RC、IO/OS、fail 与 `Ptr` 原语的纯 C runtime。
 - **标准库**：List、Map、Set、StringBuilder 已是纯 Ring struct；底层 slot/buffer 原语经 C ABI bridge。Str 仍是内建 `Type::StrType`，RIIR Step 2 尚未完成。
 - **测试**：统一入口是 `tests/run_tests.py`，不再以 npm/Node harness 作为项目命令。
 
@@ -25,9 +25,9 @@ Ring-lang 是一门 LLM-first native 编程语言：Python 风格表面语法，
 
 ```text
 Ring-lang/
-├── compiler/              Ring 编译器源码；codegen_c* 与 codegen_llvm* 双后端
-│   ├── dist/              冻结 JS stage-0 回退锚
-│   └── dist-llvm/         当前 native bootstrap 对象产物
+├── compiler/              Ring 编译器源码与 C11 codegen
+│   ├── dist-c/            tracked C bootstrap anchor
+│   └── scripts/           native 构建脚本
 ├── std/                   纯 Ring 标准库与少量 C ABI 原语声明
 ├── tests/                 Python runner、语义用例、golden、RC/parity matrix
 ├── examples/              示例程序
@@ -38,14 +38,14 @@ Ring-lang/
 ## 编译器管线
 
 ```text
-源码 → Lexer → Parser → AST → Checker → HIR → Perceus RC
-                         │                    ├─ Codegen C → .c → clang → native
-                         └─ DiagnosticSink    └─ Codegen LLVM → .o → native
+源码 → Lexer → Parser → AST → Checker → HIR → Perceus RC → Codegen C → .c → clang → native
+                         │
+                         └─ DiagnosticSink
 ```
 
 - AST 忠实表示源码并携带 Span；HIR 与 AST 独立，每个表达式携带推断的 Type 与 EffectRow。
 - Lexer/Parser/Checker 诊断统一进入 `DiagnosticSink`，支持 human/LLM 两种格式。
-- 跨阶段字符串、ctor、trait/effect slot 等契约放在 `hir.ring` 或专用共享模块；禁止两后端各自猜测。
+- 跨阶段字符串、ctor、trait/effect slot 等契约放在 `hir.ring` 或专用共享模块；禁止 codegen 与 runtime 各自猜测。
 - 新增 AST/HIR 变体后必须处理所有穷尽 match；编译器会对遗漏 fail closed。
 
 ## 开发约定
@@ -61,8 +61,8 @@ Ring-lang/
 
 - 修改编译器后使用当前 `ring.exe` 重编 `compiler/main.ring`，并提交需要跟踪的 bootstrap 产物。
 - 数据结构级重构可能要求 double bootstrap；验证固定点后才算完成。
-- `compiler/dist/` 语言快照停在 `0bd7822`，回退到 HEAD 需按历史链式重放；不要把它当成当前 compiler CLI。
-- B-163 完成前 LLVM 仍是 anchor/oracle；LLVM、`dist/`、`dist-llvm/` 的删除顺序以 `docs/plan-c-backend.md` 当前 gate 为准。
+- `compiler/dist-c/main.c` 是唯一 tracked bootstrap anchor；`compiler/scripts/build_native.ps1` 必须能从该文件和 `ring_runtime.cpp` 构建当前 `ring.exe`。
+- 修改编译器后用当前 `ring.exe` 重新生成 `compiler/dist-c/`，并通过 self-compile suite 验证 `main.c` 固定点。
 
 ### RIIR bridge 所有权契约
 
@@ -84,25 +84,26 @@ List/Map/Set/StringBuilder 是 Ring struct；C bridge 只提供无法在安全 R
 ## 测试与常用命令
 
 ```powershell
-# 构建当前 ring.exe（迁移期需 clang + LLVM）
-clang++ -c ring_runtime.cpp -o ring_runtime.o -std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS
-clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'" "-L<LLVM_LIB_DIR>" -lLLVM-C
+# 从 tracked C anchor 构建当前 ring.exe（需 clang、clang++ 与 lld）
+.\compiler\scripts\build_native.ps1
 
 # 使用编译器
 .\ring.exe check examples/effects.ring
 .\ring.exe check --error-format=llm examples/effects.ring
-.\ring.exe build examples/hello.ring
+.\ring.exe build examples/hello.ring --target=c
 
 # 测试
 python tests/run_tests.py --suite e2e
-python tests/run_tests.py --suite llvm
+python tests/run_tests.py --suite golden
 python tests/run_tests.py --suite rc
 python tests/run_tests.py --suite self-compile
+python tests/run_tests.py --suite structural
+python tests/run_tests.py --suite parity
 python tests/run_tests.py
 python tests/run_tests.py --update-golden
 
-# 重编当前 LLVM bootstrap 产物
-.\ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
+# 重编 tracked C bootstrap 产物；提交前必须再跑 self-compile 固定点
+.\ring.exe build compiler/main.ring --target=c --out-dir=compiler/dist-c
 ```
 
 测试输出需要后续分析时，完整重定向到临时文件；没有代码或测试数据变化时不要重复跑长套件。Golden 断言行为，不锁某行 codegen；RC 变更遵守当前 backlog/audit 项规定的重复门。
@@ -123,10 +124,10 @@ python tests/run_tests.py --update-golden
 
 ## 当前路线
 
-1. 完成 B-163 Phase 2：共享 gap、manual gate、dist-c 固定点、LLVM 退役与 bootstrap 恢复。
-2. 执行 B-168 failure/control ABI 探针与 B-169 evidence 融洽性探针。
-3. 恢复 B-152 剩余 Str RIIR/P5，再完成 B-002 Phase 2。
-4. 后续按 backlog 推进别名追踪、用户面、async/refinement 与工具链。
+1. 收口 C-only 迁移簿记，并修复当前 critical audit 项。
+2. 建立 check 性能基线并优先完成工具链吞吐优化。
+3. 按依赖推进剩余正确性、failure/control ABI 与发布能力。
+4. 继续 RIIR、别名追踪、用户面、async/refinement 等长期工作。
 
 具体状态、依赖和验收只看活动看板，不在本文件复制逐轮计数。
 

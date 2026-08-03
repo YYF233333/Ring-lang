@@ -1232,7 +1232,7 @@ def run_golden(ring_exe: str, clang_path: str, collector: ResultCollector,
 
 
 # ---------------------------------------------------------------------------
-# Generated-C structural suite (B-163 Phase 2 manual-gate automation)
+# Generated-C structural suite (C-native codegen invariants)
 # ---------------------------------------------------------------------------
 
 C_LINE_MARKER_RE = re.compile(

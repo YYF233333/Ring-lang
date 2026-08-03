@@ -917,7 +917,7 @@ extern "C" void* ring_int_to_str(int64_t val) {
 // chooses fixed vs exponential notation by the ECMA-262 §6.1.6.1.20 rules — NOT by
 // printf's "%g" thresholds, which diverge (e.g. "%g" of 100.0 at 1 sig-fig is
 // "1e+02" but JS yields "100"). Used by Float.to_str and by print() of a Float arg
-// so the LLVM backend matches the JS oracle.
+// and preserves Ring's established shortest-roundtrip formatting contract.
 //
 // Algorithm: (1) find the fewest significant digits (1..17) whose decimal rendering
 // round-trips, capturing the digit string `digits` (no '.') and the base-10 point

@@ -1,4 +1,4 @@
-// B-163 C backend step 6 regression: effect handlers (tail-resumptive +
+// C-native regression: effect handlers (tail-resumptive +
 // abort) + try/catch + default evidence.
 // Coverage: multi-op evidence slot ordering (perform order != declaration
 // order), handler arms capturing outer scope, evidence forwarding through

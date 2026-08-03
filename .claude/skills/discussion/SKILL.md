@@ -25,7 +25,7 @@ description: Discuss Ring-lang language direction, architecture, backlog, or bat
 
 1. 先呈现开放 `[决策]`：一句话问题、影响、最多三条事实、明确推荐和 1–2 个真实备选；随后压缩呈现 `[里程碑]` / `[全局阻塞]`。
 2. 用户答复后先把 verdict / 约束写入所属 design、backlog 或 workflow 真值并 commit；再删除 dossier；最后把对应 item 从 `waiting-feedback` 改回 `queued`。禁止先删 dossier。
-3. 再讨论用户主动提出的新方向。基于旧限制、旧 review 或 TS 时代记录立项前，先做分钟级双后端 probe。
+3. 再讨论用户主动提出的新方向。基于旧限制、旧 review 或退役后端时代记录立项前，先用当前 C-native 管线做分钟级 probe。
 4. 新 backlog item 必须包含唯一 ID、优先级、复杂度、dispatch、文件/模块和可证伪验收标准；新 P0 由用户决定，Steward 可按证据创建 P1–P3 工程项。
 
 只写 `docs/` 治理真值，不碰编译器代码；不要修改无关的 `planning` / `doing` spec，治理同步或 Steward 明确请求除外。

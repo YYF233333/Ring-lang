@@ -1,4 +1,4 @@
-// B-163 C backend steps 1-3 regression: recursion, &&/|| (andor_lower path),
+// C-native regression: recursion, &&/|| (andor_lower path),
 // early return (incl. return inside an expression block), nested control flow
 // with break/continue, float arithmetic, string comparison chains.
 // Deliberately restricted to the step 1-3 feature surface (literals,

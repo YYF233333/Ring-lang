@@ -1,6 +1,6 @@
 // B-100 P1.3 adversarial: Option.and_then — DISCOVERED GAP.
 // Option.and_then is listed in OPTION_HOF_METHODS. Previously missing from
-// ring_runtime.cpp and codegen_llvm_expr.ring — now fixed.
+// runtime and native lowering — now fixed.
 // Documents the exact semantics expected by the golden .expected file.
 
 fn main() {
