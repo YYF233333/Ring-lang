@@ -160,6 +160,11 @@ CHECK_ONLY_GAPS = {}
 # /MANIFEST:EMBED + /MANIFESTUAC:asInvoker prevents Windows Installer Detection
 # from requiring elevation for test exes whose names contain "update"/"install"/etc.
 CLANG_LINK_FLAGS = [
+    # Keep every test link on LLD.  On hosted Windows runners, clang's default
+    # MSVC linker/manifest path can exhaust the runner's USER-handle allowance
+    # and return 1158 before the first executable is produced.  The compiler
+    # link already used LLD; using the same path here is both faster and stable.
+    "-fuse-ld=lld",
     "-lmsvcrt",
     "-Wl,/STACK:536870912",
     "-Wl,/MANIFEST:EMBED",
@@ -172,7 +177,6 @@ CLANG_LINK_FLAGS = [
 COMPILER_COMPILE_FLAGS = ["-O3", "-flto=thin"]
 COMPILER_LINK_FLAGS = [
     "-flto=thin",
-    "-fuse-ld=lld",
     f"-Wl,/lldltocache:{THINLTO_CACHE}",
     (
         "-Wl,/lldltocachepolicy:cache_size_bytes=1073741824:"
