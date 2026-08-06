@@ -28,12 +28,13 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": false,
       "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "tiny_hello_check_no_phase",
-      "description": "paired tiny direct check with compiler phase timing disabled",
+      "description": "unpaired descriptive tiny direct check with compiler phase timing disabled",
       "policy": "direct_short",
       "cache_states": ["cold", "warm"],
       "argv": ["{ring}", "check", "{repo}/tests/cases/hello.ring"],
@@ -58,6 +59,7 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/golden/abort_handler_arm.ring"],
       "runner_summary": false,
       "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
@@ -73,6 +75,7 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/modules/diamond_dep/main.ring"],
       "runner_summary": false,
       "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
@@ -88,6 +91,7 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/error_undefined.ring"],
       "runner_summary": false,
       "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
@@ -103,6 +107,7 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": false,
       "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "resource_plan_verify", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
@@ -118,6 +123,7 @@
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
       "runner_summary": false,
       "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
@@ -133,6 +139,7 @@
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
       "runner_summary": false,
       "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "resource_plan_verify", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },

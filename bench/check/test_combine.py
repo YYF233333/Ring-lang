@@ -63,7 +63,7 @@ class StrictCombineTests(unittest.TestCase):
                     "expected_exit_codes": [0],
                     "requires": ["tool:ring"],
                     "runner_summary": False,
-                    "artifacts": [],
+                    "artifacts": ["{sample_dir}/artifact.bin"],
                     "phase_trace_paths": [],
                 }
             ],
@@ -87,15 +87,29 @@ class StrictCombineTests(unittest.TestCase):
         index: int,
         source_sha: str,
         manifest_sha: str,
+        run_dir: Path,
     ) -> dict:
+        sample_id = f"{run_id}-{index}"
+        sample_dir = (run_dir / "samples" / case_id / sample_id).resolve()
+        sample_dir.mkdir(parents=True)
+        stdout_path = sample_dir / "stdout.txt"
+        stderr_path = sample_dir / "stderr.txt"
+        artifact_path = sample_dir / "artifact.bin"
+        stdout_path.write_bytes(b"")
+        stderr_path.write_bytes(b"")
+        artifact_path.write_bytes(b"artifact")
         return {
+            "schema": harness.RESULT_SCHEMA,
             "run_id": run_id,
-            "sample_id": f"{run_id}-{index}",
+            "sample_id": sample_id,
+            "sample_dir": str(sample_dir),
             "case_id": case_id,
             "index": index,
             "included": True,
             "source_sha": source_sha,
             "manifest_sha": manifest_sha,
+            "argv": ["ring.exe", "check", f"{harness.REPO_ROOT}/fixture.ring"],
+            "cwd": str(harness.REPO_ROOT.resolve()),
             "cache": {
                 "thinlto_cache": state,
                 "output": "fresh",
@@ -108,10 +122,55 @@ class StrictCombineTests(unittest.TestCase):
             "sampled_peak_tree_rss_bytes": 1000,
             "max_worker_peak_rss_bytes": None,
             "peak_job_commit_bytes": 2000,
+            "root_pid": 1,
+            "rss_poll_ms": harness.RSS_POLL_MS,
+            "rss_samples_observed": 1,
+            "rss_covered_ns": 100 + index,
+            "rss_coverage_ratio": 1.0,
+            "rss_observed_process_count": 1,
+            "rss_job_total_processes": 1,
             "rss_complete": True,
+            "process_count": {
+                "total": 1,
+                "active_at_query": 0,
+                "terminated": 1,
+            },
+            "job_io": {
+                "read_operations": 0,
+                "write_operations": 0,
+                "other_operations": 0,
+                "read_bytes": 0,
+                "write_bytes": 0,
+                "other_bytes": 0,
+            },
+            "timed_out": False,
             "measurement_errors": [],
-            "runner_runtime": {"errors": []},
+            "runner_runtime": {
+                "mode": "not_applicable",
+                "isolated": False,
+                "root_path": None,
+                "source_sha256": None,
+                "flags": [],
+                "original_exists": False,
+                "original_sha256": None,
+                "pre_exists": False,
+                "pre_sha256": None,
+                "post_exists": False,
+                "post_sha256": None,
+                "restored": True,
+                "backup_path": None,
+                "backup_exists_after": False,
+                "staging_path": None,
+                "staging_exists_after": False,
+                "errors": [],
+            },
+            "exit": {"code": 0, "expected": True},
+            "stdout": harness._file_record(stdout_path),
+            "stderr": harness._file_record(stderr_path),
+            "runner_summary": None,
+            "artifacts": harness._artifact_records([artifact_path]),
             "phase_traces": [],
+            "invocation_error": None,
             "invalid_reason": None,
         }
 
@@ -138,6 +197,7 @@ class StrictCombineTests(unittest.TestCase):
                 index=index,
                 source_sha=source_sha,
                 manifest_sha=manifest_sha,
+                run_dir=run_dir,
             )
             for index in range(3)
         ]
@@ -173,6 +233,7 @@ class StrictCombineTests(unittest.TestCase):
                 "ring": {"path": "ring.exe", "version": "v", "sha256": "d" * 64}
             },
             "flags": manifest["fingerprint_flags"],
+            "thinlto_cache_path": str((root / "thinlto-cache").resolve()),
             "os": {"system": "Windows", "release": "fixture", "version": "1", "machine": "AMD64"},
             "cpu": {"model": "fixture cpu", "logical_cores": 8},
             "memory_bytes": 16 * 1024 * 1024 * 1024,
@@ -185,6 +246,35 @@ class StrictCombineTests(unittest.TestCase):
         }
         harness._json_dump(run_dir / "environment.json", environment)
         return run_dir
+
+    def _rewrite_samples_and_summary(
+        self, run_dir: Path, mutate
+    ) -> None:
+        samples_path = run_dir / "samples.jsonl"
+        records = [
+            json.loads(line)
+            for line in samples_path.read_text(encoding="utf-8").splitlines()
+        ]
+        mutate(records)
+        samples_path.write_text(
+            "".join(harness._json_line(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+        summary_path = run_dir / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        lane_summary = summary["lanes"][0]
+        summary["lanes"] = [
+            harness.summarize_lane(
+                {
+                    "case_id": lane_summary["case_id"],
+                    "policy": lane_summary["policy"],
+                },
+                records,
+                lane_summary["target_valid_samples"],
+            )
+        ]
+        summary["samples_jsonl"] = harness._file_record(samples_path)
+        harness._json_dump(summary_path, summary)
 
     def test_combines_complete_cold_and_warm_batches(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -202,7 +292,7 @@ class StrictCombineTests(unittest.TestCase):
             )
             self.assertTrue((output / "combined-summary.json").is_file())
 
-    def test_phase_timing_control_reports_median_mad_and_p95_delta(self) -> None:
+    def test_unpaired_descriptive_control_reports_median_mad_and_p95_delta(self) -> None:
         def lane(wall: dict) -> dict:
             return {"summary": {"metrics": {"wall_ns": wall}}}
 
@@ -218,36 +308,68 @@ class StrictCombineTests(unittest.TestCase):
                 for state in ("cold", "warm")
             }
         )
-        comparison = combine._phase_timing_control_comparison(origins)
+        comparison = combine._unpaired_descriptive_control(origins)
         self.assertEqual(
             comparison["cold"]["delta_ns"],
             {"median": 10, "mad": 1, "empirical_p95": 15},
         )
 
-    def test_revalidates_embedded_compiler_phase_trace(self) -> None:
-        rows = self._compiler_rows()
-        record = {
-            "sample_id": "fixture",
-            "wall_ns": 150,
-            "exit": {"code": 0},
-            "phase_traces": [
-                {"path": "trace.jsonl", "line": index, "value": row}
+    def test_revalidates_wrapped_compiler_phase_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            sample_dir = Path(temp).resolve()
+            path = sample_dir / "trace.jsonl"
+            rows = self._compiler_rows()
+            wrappers = [
+                {
+                    "path": str(path),
+                    "line": index,
+                    "value": row,
+                    "read_error": None,
+                }
                 for index, row in enumerate(rows, 1)
-            ],
-        }
-        lane = {
-            "case_id": "fixture_cold",
-            "compiler_phase_timing": True,
-            "phase_trace_paths": ["{sample_dir}/trace.jsonl"],
-        }
-        environment = {
-            "source_sha": "a" * 40,
-            "tools": {"ring": {"sha256": "d" * 64}},
-        }
-        combine._validate_embedded_phase_timing(record, lane, environment)
-        rows[0]["compiler_identity"] = "sha256:" + "e" * 64
-        with self.assertRaisesRegex(harness.HarnessError, "compiler identity mismatch"):
-            combine._validate_embedded_phase_timing(record, lane, environment)
+            ]
+            lane = {
+                "case_id": "fixture_cold",
+                "compiler_phase_timing": True,
+                "expected_executed_phases": [
+                    "input_entry_load",
+                    "entry_parse",
+                    "type_effect_check_lower",
+                    "command_total",
+                ],
+                "phase_trace_paths": ["{sample_dir}/trace.jsonl"],
+            }
+            environment = {
+                "source_sha": "a" * 40,
+                "tools": {"ring": {"sha256": "d" * 64}},
+            }
+            errors = harness._validate_phase_trace_records(
+                wrappers,
+                paths=[path],
+                sample_dir=sample_dir,
+                lane=lane,
+                environment=environment,
+                expected_entry_file=str(
+                    (harness.REPO_ROOT / "tests" / "cases" / "hello.ring").resolve()
+                ),
+                exit_code=0,
+                wall_ns=150,
+            )
+            self.assertEqual(errors, [])
+            rows[0]["compiler_identity"] = "sha256:" + "e" * 64
+            errors = harness._validate_phase_trace_records(
+                wrappers,
+                paths=[path],
+                sample_dir=sample_dir,
+                lane=lane,
+                environment=environment,
+                expected_entry_file=str(
+                    (harness.REPO_ROOT / "tests" / "cases" / "hello.ring").resolve()
+                ),
+                exit_code=0,
+                wall_ns=150,
+            )
+            self.assertTrue(any("compiler identity mismatch" in error for error in errors))
 
     def test_rejects_lane_records_after_target_is_reached(self) -> None:
         records = [
@@ -335,6 +457,72 @@ class StrictCombineTests(unittest.TestCase):
             harness._json_dump(summary_path, summary)
             with self.assertRaisesRegex(harness.HarnessError, "cache classification"):
                 combine.combine_runs([cold, warm], root / "combined")
+
+    def test_rejects_coordinated_eligibility_field_tampering(self) -> None:
+        mutations = {
+            "rss_complete": lambda rows: rows[0].__setitem__("rss_complete", False),
+            "measurement_errors": lambda rows: rows[0].__setitem__(
+                "measurement_errors", ["forged measurement failure"]
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                cold = self._write_run(root, state="cold", run_id="cold-run")
+                self._rewrite_samples_and_summary(cold, mutate)
+                with self.assertRaisesRegex(
+                    harness.HarnessError, "stored invalid_reason mismatch"
+                ):
+                    combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_coordinated_artifact_list_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            self._rewrite_samples_and_summary(
+                cold, lambda rows: rows[0].__setitem__("artifacts", [])
+            )
+            with self.assertRaisesRegex(harness.HarnessError, "artifact provenance"):
+                combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_coordinated_stream_metadata_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+
+            def mutate(rows: list[dict]) -> None:
+                rows[0]["stdout"]["sha256"] = "f" * 64
+
+            self._rewrite_samples_and_summary(cold, mutate)
+            with self.assertRaisesRegex(harness.HarnessError, "stream provenance"):
+                combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_coordinated_runner_summary_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            forged = {
+                "status_counts": {"pass": 1, "fail": 0, "skip": 0},
+                "suite_counts": {"forged": {"pass": 1, "fail": 0, "skip": 0}},
+                "reported_exit_code": 0,
+            }
+            self._rewrite_samples_and_summary(
+                cold, lambda rows: rows[0].__setitem__("runner_summary", forged)
+            )
+            with self.assertRaisesRegex(harness.HarnessError, "runner summary provenance"):
+                combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_coordinated_runtime_error_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+
+            def mutate(rows: list[dict]) -> None:
+                rows[0]["runner_runtime"]["errors"] = ["forged runtime failure"]
+
+            self._rewrite_samples_and_summary(cold, mutate)
+            with self.assertRaisesRegex(harness.HarnessError, "runtime provenance"):
+                combine.combine_runs([cold], root / "combined")
 
     def test_rejects_duplicate_lane_across_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

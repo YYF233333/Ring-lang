@@ -8,6 +8,7 @@
     "schema",
     "run_id",
     "sample_id",
+    "sample_dir",
     "case_id",
     "index",
     "included",
@@ -42,6 +43,7 @@
     "runner_summary",
     "artifacts",
     "phase_traces",
+    "invocation_error",
     "invalid_reason"
   ],
   "properties": {
@@ -51,6 +53,7 @@
     },
     "run_id": { "type": "string", "minLength": 1 },
     "sample_id": { "type": "string", "minLength": 1 },
+    "sample_dir": { "type": "string", "minLength": 1 },
     "case_id": { "type": "string", "minLength": 1 },
     "index": { "type": "integer", "minimum": 0 },
     "included": { "type": "boolean" },
@@ -241,14 +244,16 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "line", "value"],
+        "required": ["path", "line", "value", "read_error"],
         "properties": {
           "path": { "type": "string", "minLength": 1 },
           "line": { "type": "integer", "minimum": 1 },
-          "value": { "type": "object" }
+          "value": { "type": ["object", "null"] },
+          "read_error": { "type": ["string", "null"] }
         }
       }
     },
+    "invocation_error": { "type": ["string", "null"] },
     "invalid_reason": { "type": ["string", "null"] }
   }
 }

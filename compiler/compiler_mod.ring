@@ -224,6 +224,7 @@ fn compile_phases(entry_file: Str, error_format: Str, mut timing: PhaseTiming) -
     match build_module_graph(entry_file, error_format) {
         none => {
             timing.finish_phase("project_module_load_parse", graph_start)
+            timing.skip_phase("type_effect_check_lower")
             none
         },
         some(graph) => {

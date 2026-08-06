@@ -20,28 +20,48 @@ pub fn cli_main() {
 
     if parsed.target != "c" {
         eprintln("Error: unsupported code generation target '${parsed.target}'; this compiler supports only '--target=c'.")
-        timing.finish_command(false, false)
+        timing.skip_phase("input_entry_load")
+        timing.skip_phase("entry_parse")
+        timing.skip_phase("project_module_load_parse")
+        timing.skip_phase("type_effect_check_lower")
+        timing.skip_phase("resource_plan_verify")
+        timing.finish_command(false)
         exit_process(1)
         return
     }
 
     if parsed.command == "help" || parsed.command == "" {
         usage()
-        timing.finish_command(false, true)
+        timing.skip_phase("input_entry_load")
+        timing.skip_phase("entry_parse")
+        timing.skip_phase("project_module_load_parse")
+        timing.skip_phase("type_effect_check_lower")
+        timing.skip_phase("resource_plan_verify")
+        timing.finish_command(true)
         return
     }
 
     if parsed.command == "lsp" {
         // LSP not yet supported in Ring bootstrap
         eprintln("LSP mode not available in Ring compiler")
-        timing.finish_command(false, false)
+        timing.skip_phase("input_entry_load")
+        timing.skip_phase("entry_parse")
+        timing.skip_phase("project_module_load_parse")
+        timing.skip_phase("type_effect_check_lower")
+        timing.skip_phase("resource_plan_verify")
+        timing.finish_command(false)
         exit_process(1)
         return
     }
 
     if parsed.file == "" {
         eprintln("Error: no input file specified.")
-        timing.finish_command(false, false)
+        timing.skip_phase("input_entry_load")
+        timing.skip_phase("entry_parse")
+        timing.skip_phase("project_module_load_parse")
+        timing.skip_phase("type_effect_check_lower")
+        timing.skip_phase("resource_plan_verify")
+        timing.finish_command(false)
         exit_process(1)
         return
     }
@@ -52,7 +72,11 @@ pub fn cli_main() {
     if file_exists(file_path) == false {
         eprintln("Error: file not found: ${file_path}")
         timing.finish_phase("input_entry_load", input_start)
-        timing.finish_command(false, false)
+        timing.skip_phase("entry_parse")
+        timing.skip_phase("project_module_load_parse")
+        timing.skip_phase("type_effect_check_lower")
+        timing.skip_phase("resource_plan_verify")
+        timing.finish_command(false)
         exit_process(1)
         return
     }
@@ -86,7 +110,10 @@ pub fn cli_main() {
                 }
             }
         }
-        timing.finish_command(false, false)
+        timing.skip_phase("project_module_load_parse")
+        timing.skip_phase("type_effect_check_lower")
+        timing.skip_phase("resource_plan_verify")
+        timing.finish_command(false)
         exit_process(1)
         return
     }
@@ -102,17 +129,18 @@ pub fn cli_main() {
                 parsed.error_format, timing)
             if res.success == false {
                 eprintln("Compilation failed")
-                timing.finish_command(false, false)
+                timing.skip_phase("resource_plan_verify")
+                timing.finish_command(false)
                 exit_process(1)
                 return
             }
             print(res.report)
             if res.fatal > 0 || (parsed.verify_strict && res.exempt > 0) {
-                timing.finish_command(true, false)
+                timing.finish_command(false)
                 exit_process(1)
             } else {
                 print("OK")
-                timing.finish_command(true, true)
+                timing.finish_command(true)
             }
             return
         }
@@ -121,10 +149,10 @@ pub fn cli_main() {
             timing.skip_phase("resource_plan_verify")
             if result.success {
                 print("OK")
-                timing.finish_command(true, true)
+                timing.finish_command(true)
             } else {
                 eprintln("Compilation failed")
-                timing.finish_command(false, false)
+                timing.finish_command(false)
                 exit_process(1)
             }
         } else {
@@ -140,16 +168,20 @@ pub fn cli_main() {
                     parsed.error_format, timing)
                 if c_result.success {
                     // success message printed by generate_c_project
-                    timing.finish_command(true, true)
+                    timing.finish_command(true)
                 } else {
                     eprintln("Compilation failed")
-                    timing.finish_command(false, false)
+                    timing.skip_phase("resource_plan_verify")
+                    timing.finish_command(false)
                     exit_process(1)
                 }
                 return
             } else {
                 eprintln("Only 'build' and 'check' commands are supported")
-                timing.finish_command(false, false)
+                timing.skip_phase("project_module_load_parse")
+                timing.skip_phase("type_effect_check_lower")
+                timing.skip_phase("resource_plan_verify")
+                timing.finish_command(false)
                 exit_process(1)
             }
         }
@@ -171,7 +203,7 @@ pub fn cli_main() {
             eprintln(format_human(diagnostics, source))
         }
         timing.skip_phase("resource_plan_verify")
-        timing.finish_command(true, false)
+        timing.finish_command(false)
         exit_process(1)
         return
     }
@@ -201,11 +233,11 @@ pub fn cli_main() {
         timing.finish_phase("resource_plan_verify", resource_start)
         print(format_rc_findings(findings, parsed.verify_strict))
         if fatal > 0 || (parsed.verify_strict && exempt > 0) {
-            timing.finish_command(true, false)
+            timing.finish_command(false)
             exit_process(1)
         } else {
             print("OK")
-            timing.finish_command(true, true)
+            timing.finish_command(true)
         }
         return
     }
@@ -213,7 +245,7 @@ pub fn cli_main() {
     if parsed.command == "check" {
         timing.skip_phase("resource_plan_verify")
         print("OK")
-        timing.finish_command(true, true)
+        timing.finish_command(true)
     } else {
         if parsed.command == "build" {
             let resource_start = timing.start_phase()
@@ -234,10 +266,11 @@ pub fn cli_main() {
                 file_path.replace(".ring", ".o")
             }
             generate_c(rc_program, c_path, o_path, parsed.c_lines)
-            timing.finish_command(true, true)
+            timing.finish_command(true)
         } else {
             eprintln("Only 'build' and 'check' commands are supported")
-            timing.finish_command(false, false)
+            timing.skip_phase("resource_plan_verify")
+            timing.finish_command(false)
             exit_process(1)
         }
     }

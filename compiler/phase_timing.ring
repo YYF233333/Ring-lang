@@ -21,6 +21,8 @@ pub struct PhaseTiming {
     entry_file: Str,
     command_start_ns: Int,
     integrity: Bool,
+    next_phase: Int,
+    finalized: Bool,
     rows: List<PhaseTimingRow>
 }
 
@@ -41,6 +43,8 @@ pub fn new_phase_timing(
             entry_file: "",
             command_start_ns: 0,
             integrity: true,
+            next_phase: 0,
+            finalized: false,
             rows: []
         }
     }
@@ -50,10 +54,15 @@ pub fn new_phase_timing(
     } else {
         "ring-bootstrap-v0.1.0"
     }
+    let actual_entry = if entry_file.len() > 0 {
+        path_resolve(entry_file)
+    } else {
+        ""
+    }
     let actual_source = if source_identity.len() > 0 {
         source_identity
     } else {
-        "path:${entry_file}"
+        "path:${actual_entry}"
     }
     PhaseTiming {
         enabled: true,
@@ -61,11 +70,22 @@ pub fn new_phase_timing(
         lane: actual_lane,
         compiler_identity: actual_compiler,
         source_identity: actual_source,
-        entry_file: entry_file,
+        entry_file: actual_entry,
         command_start_ns: ring_bench_monotonic_ns(),
         integrity: true,
+        next_phase: 0,
+        finalized: false,
         rows: []
     }
+}
+
+fn phase_timing_phase(index: Int) -> Str {
+    if index == 0 { return "input_entry_load" }
+    if index == 1 { return "entry_parse" }
+    if index == 2 { return "project_module_load_parse" }
+    if index == 3 { return "type_effect_check_lower" }
+    if index == 4 { return "resource_plan_verify" }
+    "<invalid-phase>"
 }
 
 impl PhaseTiming {
@@ -77,49 +97,77 @@ impl PhaseTiming {
         if self.enabled { ring_bench_monotonic_ns() } else { 0 }
     }
 
+    fn record_phase(
+        mut self, phase: Str, duration_ns: Int, executed: Bool,
+        phase_complete: Bool
+    ) {
+        if self.enabled == false { return }
+        if self.finalized || self.next_phase >= 5 ||
+            phase != phase_timing_phase(self.next_phase) {
+            // Do not append the bad transition: finalization will emit a
+            // canonical six-row trace, but every row will be incomplete. This
+            // exposes duplicate/out-of-order/missing instrumentation instead
+            // of normalizing it into apparently valid evidence.
+            self.integrity = false
+            return
+        }
+        if phase_complete == false { self.integrity = false }
+        self.rows.push(PhaseTimingRow {
+            phase: phase,
+            duration_ns: duration_ns,
+            executed: executed,
+            complete: phase_complete
+        })
+        self.next_phase = self.next_phase + 1
+    }
+
     pub fn finish_phase(mut self, phase: Str, start_ns: Int) {
         if self.enabled == false { return }
         let end_ns = ring_bench_monotonic_ns()
         let monotonic = end_ns >= start_ns
         let duration_ns = if monotonic { end_ns - start_ns } else { 0 }
-        if monotonic == false { self.integrity = false }
-        self.rows.push(PhaseTimingRow {
-            phase: phase,
-            duration_ns: duration_ns,
-            executed: true,
-            complete: monotonic
-        })
+        self.record_phase(phase, duration_ns, true, monotonic)
     }
 
     pub fn skip_phase(mut self, phase: Str) {
         if self.enabled == false { return }
-        self.rows.push(PhaseTimingRow {
-            phase: phase,
-            duration_ns: 0,
-            executed: false,
-            complete: true
-        })
+        self.record_phase(phase, 0, false, true)
     }
 
-    // Finalization is explicit at every CLI terminal path. `trace_complete`
-    // describes pipeline coverage, while `command_success` records the compiler
-    // outcome without overloading timing integrity.
-    pub fn finish_command(mut self, trace_complete: Bool, command_success: Bool) {
+    // Completeness is derived exclusively from recorder integrity and canonical
+    // phase coverage. Compiler success is an independent outcome bit.
+    pub fn finish_command(mut self, command_success: Bool) {
         if self.enabled == false { return }
+        if self.finalized {
+            self.integrity = false
+            return
+        }
+        self.finalized = true
+        if self.next_phase != 5 { self.integrity = false }
+        while self.next_phase < 5 {
+            self.rows.push(PhaseTimingRow {
+                phase: phase_timing_phase(self.next_phase),
+                duration_ns: 0,
+                executed: false,
+                complete: false
+            })
+            self.next_phase = self.next_phase + 1
+        }
         let end_ns = ring_bench_monotonic_ns()
         let monotonic = end_ns >= self.command_start_ns
         let duration_ns = if monotonic { end_ns - self.command_start_ns } else { 0 }
-        let command_complete = trace_complete && self.integrity && monotonic
+        let trace_complete = self.integrity && monotonic
         self.rows.push(PhaseTimingRow {
             phase: "command_total",
             duration_ns: duration_ns,
             executed: true,
-            complete: command_complete
+            complete: trace_complete
         })
 
         let mut lines: List<Str> = []
         for row in self.rows {
-            lines.push(phase_timing_json_line(self, row, command_success))
+            lines.push(phase_timing_json_line(
+                self, row, trace_complete, command_success))
         }
         write_file(self.output_path, "${lines.join("\n")}\n")
     }
@@ -130,7 +178,8 @@ fn json_bool(value: Bool) -> Str {
 }
 
 fn phase_timing_json_line(
-    timing: PhaseTiming, row: PhaseTimingRow, command_success: Bool
+    timing: PhaseTiming, row: PhaseTimingRow, trace_complete: Bool,
+    command_success: Bool
 ) -> Str {
     let lane = json_stringify(timing.lane)
     let phase = json_stringify(row.phase)
@@ -138,7 +187,7 @@ fn phase_timing_json_line(
     let source_identity = json_stringify(timing.source_identity)
     let entry_file = json_stringify(timing.entry_file)
     let executed = json_bool(row.executed)
-    let complete = json_bool(row.complete)
+    let complete = json_bool(trace_complete && row.complete)
     let success = json_bool(command_success)
     "{\"schema\":\"ring.compiler-phase-timing.v1\",\"schema_version\":1,\"lane\":${lane},\"phase\":${phase},\"duration_ns\":${row.duration_ns},\"unit\":\"ns\",\"compiler_identity\":${compiler_identity},\"source_identity\":${source_identity},\"entry_file\":${entry_file},\"executed\":${executed},\"complete\":${complete},\"command_success\":${success}}"
 }

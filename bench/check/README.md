@@ -56,9 +56,13 @@ total and command total fits inside Job wall time. Bootstrap traces continue to
 use `ring.check-benchmark.bootstrap-phase.v1` and are validated separately;
 unknown trace schemas fail closed.
 
-`tiny_hello_check_no_phase` is an otherwise identical 21-sample control lane.
-The combined report compares its cold/warm wall median, MAD, and empirical p95
-against `tiny_hello_check`, including absolute deltas and ratios.
+`tiny_hello_check_no_phase` is an otherwise identical 21-sample, independently
+scheduled control lane. The combined report exposes it as
+`unpaired_descriptive_control` and compares cold/warm wall median, MAD, and
+empirical p95 against `tiny_hello_check`, including absolute deltas and ratios.
+Those values are descriptive only: the two lanes are not interleaved or matched
+by attempt, so their deltas and ratios are not an instrumentation-overhead
+estimate.
 
 ## Sample policy
 
@@ -157,12 +161,25 @@ python bench/check/combine.py `
   --output C:\path\to\fresh-combined
 ```
 
-The strict combiner revalidates raw samples and recomputes lane summaries. It
+The strict combiner revalidates every raw attempt and recomputes eligibility and
+lane summaries. Trace wrappers preserve their resolved manifest path and source
+line; paths must remain inside the recorded sample directory and lines must be
+unique and contiguous. Stored inclusion and exclusion reasons must exactly
+match the recomputed policy, measurement, runtime, artifact, runner-summary,
+and phase-trace result. The combiner
 requires identical source, manifest/result schema, tracked bootstrap/runtime,
 toolchain, flags, and stable machine/power identity; rejects dirty/incomplete
 runs, duplicate lanes/samples and identity drift; and requires the full manifest
 cold/warm coverage matrix. It writes `combined-samples.jsonl` and
 `combined-summary.json` plus the shared manifest/schema snapshots.
+
+Runner-runtime mode, source/flag identity, transaction paths, original/prepared
+state, and clean postconditions are reconstructed from the manifest,
+environment, and sample identity. The `errors` strings themselves originate in
+the in-process isolation transaction and have no independent sidecar log; the
+combiner uses them when recomputing eligibility and checks every reconstructible
+field, but cannot independently recreate historical OS error text after the
+transaction has ended. This is an explicit retained-record trust boundary.
 
 ## Output contract
 
