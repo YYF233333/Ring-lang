@@ -39,7 +39,8 @@
         "expected_exit_code",
         "expected_stdout_base64",
         "expected_stderr_base64",
-        "phase_environment_prefix"
+        "phase_environment_prefix",
+        "git_archive_core_autocrlf"
       ],
       "properties": {
         "warmup_pairs": { "type": "integer", "const": 5 },
@@ -65,7 +66,8 @@
         "expected_exit_code": { "type": "integer", "const": 0 },
         "expected_stdout_base64": { "type": "string", "const": "T0sNCg==" },
         "expected_stderr_base64": { "type": "string", "const": "" },
-        "phase_environment_prefix": { "type": "string", "const": "RING_PHASE_" }
+        "phase_environment_prefix": { "type": "string", "const": "RING_PHASE_" },
+        "git_archive_core_autocrlf": { "type": "string", "const": "false" }
       }
     },
     "repository": {

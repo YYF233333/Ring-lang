@@ -28,7 +28,7 @@ REPO_ROOT = BENCH_DIR.parents[1]
 DEFAULT_SCHEMA = BENCH_DIR / "disabled_path_gate.schema.json"
 EVIDENCE_SCHEMA = "ring.check-benchmark.disabled-path-gate.v1"
 SCHEMA_ID = "ring.check-benchmark.disabled-path-gate.schema.v1"
-SCHEMA_CANONICAL_SHA256 = "4a671c880ead9c8b633039ec24fa24b2e910d83592feff296efc46309fc79fa1"
+SCHEMA_CANONICAL_SHA256 = "d829258ae57116e1c723a2ed327d82f7c5ceb3c7191faed64728264e07b9f2c6"
 
 SUBJECTS = ("base", "candidate")
 WARMUP_PAIRS = 5
@@ -121,6 +121,7 @@ def _contract() -> dict[str, Any]:
         "expected_stdout_base64": base64.b64encode(EXPECTED_STDOUT).decode("ascii"),
         "expected_stderr_base64": "",
         "phase_environment_prefix": PHASE_ENV_PREFIX,
+        "git_archive_core_autocrlf": "false",
     }
 
 
@@ -280,6 +281,34 @@ def _verify_source(
     if _input_record(expected_path, data) != record:
         raise GateError(f"{commit}:{expected_path} hash/length differs")
     return data
+
+
+def _require_current_contract_bytes(
+    repo: Path, git_path: str, candidate_commit: str
+) -> None:
+    for path, current in (
+        (GATE_PATH, Path(__file__).resolve()),
+        (SCHEMA_PATH, DEFAULT_SCHEMA.resolve()),
+    ):
+        if current.read_bytes() != _git_show(repo, git_path, candidate_commit, path):
+            raise GateError(f"current {path} bytes differ from candidate ref")
+
+
+def _require_archive_member_identity(
+    repo: Path,
+    git_path: str,
+    commit: str,
+    subject: str,
+    inputs: Mapping[str, bytes],
+) -> None:
+    paths = [ANCHOR_PATH, RUNTIME_PATH, FIXTURE_PATH]
+    if subject == "candidate":
+        paths.extend((GATE_PATH, SCHEMA_PATH))
+    for path in paths:
+        if path not in inputs or inputs[path] != _git_show(repo, git_path, commit, path):
+            raise GateError(
+                f"{subject} archive member bytes differ from Git object {commit}:{path}"
+            )
 
 
 def _verify_subjects(
@@ -548,6 +577,22 @@ def _capture(
     return _sidecar(root, record["stdout"], stem).read_bytes()
 
 
+def _archive_argv(
+    git: str, repo: Path, archive: Path, commit: str
+) -> list[str]:
+    return [
+        git,
+        "-c",
+        "core.autocrlf=false",
+        "-C",
+        str(repo),
+        "archive",
+        "--format=tar",
+        f"--output={archive}",
+        commit,
+    ]
+
+
 def _require_clean_candidate(
     base_ref: str,
     candidate_ref: str,
@@ -779,20 +824,39 @@ def run_gate(base_ref: str, candidate_ref: str, output: Path, repo: Path = REPO_
     base = _commit(_capture(git_argv("rev-parse", "--verify", f"{base_ref}^{{commit}}"), cwd=repo, environment=environment, root=root, stem="preflight-base"), "base")
     candidate = _commit(_capture(git_argv("rev-parse", "--verify", f"{candidate_ref}^{{commit}}"), cwd=repo, environment=environment, root=root, stem="preflight-candidate"), "candidate")
     _require_clean_candidate(base_ref, candidate_ref, head, base, candidate, status)
+    _require_current_contract_bytes(repo, git, candidate)
 
     archive_dir = Path(stage["root"]) / "archives"
     archive_dir.mkdir()
-    subjects = []
+    archived: list[tuple[str, str, Path, dict[str, bytes]]] = []
     for sequence, (name, commit) in enumerate(zip(SUBJECTS, (base, candidate), strict=True)):
         archive = archive_dir / f"{name}.tar"
         command = _job_command(
-            git_argv("archive", "--format=tar", f"--output={archive}", commit),
+            _archive_argv(git, repo, archive, commit),
             cwd=repo, environment=environment, root=root, stem=f"archive-{name}",
             timeout=300, phase="git_archive",
         )
         _require_command(command, f"archive {name}")
         inputs = _archive_inputs(archive, commit)
-        subjects.append(_build_subject(name, sequence, commit, archive, inputs, stage, tools, environment, root))
+        _require_archive_member_identity(repo, git, commit, name, inputs)
+        archived.append((name, commit, archive, inputs))
+    if archived[0][3][FIXTURE_PATH] != archived[1][3][FIXTURE_PATH]:
+        raise GateError("base/candidate fixture archive bytes differ")
+
+    subjects = [
+        _build_subject(
+            name,
+            sequence,
+            commit,
+            archive,
+            inputs,
+            stage,
+            tools,
+            environment,
+            root,
+        )
+        for sequence, (name, commit, archive, inputs) in enumerate(archived)
+    ]
     _require_archive_symmetry(subjects)
     fixture = Path(stage["fixture"])
     fixture.parent.mkdir(parents=True)

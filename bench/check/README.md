@@ -106,6 +106,8 @@ only after the checked-in verifier accepts the retained evidence. A failure
 keeps the scoped stage for diagnosis. A successful bundle contains only its
 JSON plus small command/stdout/stderr sidecars; source identity is rechecked
 against `git show <commit>:<path>`, so a missing commit or object fails closed.
+The archive command pins `core.autocrlf=false`, making archived text bytes equal
+to the referenced Git blobs even when the Windows checkout enables AutoCRLF.
 
 ## Sample policy
 

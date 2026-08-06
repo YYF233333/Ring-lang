@@ -299,6 +299,66 @@ class DisabledPathGateTests(unittest.TestCase):
         with self.assertRaisesRegex(gate.GateError, "fixture archive bytes differ"):
             gate._require_archive_symmetry(subjects)
 
+    def test_archive_recipe_disables_checkout_eol_conversion(self) -> None:
+        argv = gate._archive_argv(
+            "C:/Git/git.exe",
+            Path("C:/repo"),
+            Path("C:/results/stage/base.tar"),
+            "a" * 40,
+        )
+        self.assertEqual(
+            argv,
+            [
+                "C:/Git/git.exe",
+                "-c",
+                "core.autocrlf=false",
+                "-C",
+                "C:\\repo",
+                "archive",
+                "--format=tar",
+                "--output=C:\\results\\stage\\base.tar",
+                "a" * 40,
+            ],
+        )
+
+    def test_contract_blob_preflight_runs_before_archive_work(self) -> None:
+        def committed(_repo: Path, _git: str, _commit: str, path: str) -> bytes:
+            return (gate.REPO_ROOT / path).read_bytes()
+
+        with mock.patch.object(gate, "_git_show", side_effect=committed):
+            gate._require_current_contract_bytes(
+                gate.REPO_ROOT, "git", "a" * 40
+            )
+        with mock.patch.object(gate, "_git_show", return_value=b"different"):
+            with self.assertRaisesRegex(gate.GateError, "current .*candidate ref"):
+                gate._require_current_contract_bytes(
+                    gate.REPO_ROOT, "git", "a" * 40
+                )
+
+    def test_archive_member_preflight_rejects_windows_crlf_conversion(self) -> None:
+        blob = b"line\n"
+        inputs = {
+            path: blob
+            for path in (
+                gate.ANCHOR_PATH,
+                gate.RUNTIME_PATH,
+                gate.FIXTURE_PATH,
+                gate.GATE_PATH,
+                gate.SCHEMA_PATH,
+            )
+        }
+        with mock.patch.object(gate, "_git_show", return_value=blob):
+            gate._require_archive_member_identity(
+                gate.REPO_ROOT, "git", "a" * 40, "candidate", inputs
+            )
+            inputs[gate.GATE_PATH] = b"line\r\n"
+            with self.assertRaisesRegex(
+                gate.GateError, "archive member bytes differ from Git object"
+            ):
+                gate._require_archive_member_identity(
+                    gate.REPO_ROOT, "git", "a" * 40, "candidate", inputs
+                )
+
     def test_pair_count_and_order_tampering_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
