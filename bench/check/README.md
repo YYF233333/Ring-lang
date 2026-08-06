@@ -1,10 +1,9 @@
 # `check` feedback measurement harness
 
 This directory is the bounded measurement entry point for B-176. It records
-compiler and validation feedback cost without changing compiler, runtime, or
-test-runner behavior. The checked-in manifest is a replay plan; this continuity
-unit intentionally does not contain a formal baseline or phase-timing compiler
-change.
+compiler and validation feedback cost without changing default compiler,
+runtime, or test-runner behavior. The checked-in manifest is a replay plan; it
+does not itself contain a formal baseline.
 
 ## Integrity model
 
@@ -32,6 +31,34 @@ Job and does not grow the steady-state handle count.
 stdout and stderr are never merged. Each is retained with its own path, byte
 count, and SHA-256. Runner summaries, declared artifacts, and opt-in JSONL phase
 traces are copied into the invocation record rather than inferred later.
+
+Direct successful and diagnostic `check` lanes explicitly request the hidden
+compiler option `--phase-timing=<sample path>`. Default compiler invocations do
+not call the clock and do not create a timing file. Compiler timing always goes
+to that independent JSONL file, never to the human or LLM diagnostic stream.
+Every row uses `ring.compiler-phase-timing.v1`, nanoseconds from a monotonic
+clock, exact lane/compiler/source identities, `executed`, `complete`, and
+`command_success` flags. The stable phase vocabulary is:
+
+- `input_entry_load`;
+- `entry_parse`;
+- `project_module_load_parse` (the resolver currently combines module I/O and
+  parse, and single-file checks mark it skipped rather than inventing detail);
+- `type_effect_check_lower` (checker-owned HIR/dictionary lowering is not yet a
+  separate stable boundary);
+- `resource_plan_verify` (zero-duration and `executed=false` for ordinary
+  checks, measured for `--verify-rc`);
+- `command_total`.
+
+The harness requires exact phase order and fields, rejects incomplete or
+identity-mismatched rows, and checks that measured phases fit inside command
+total and command total fits inside Job wall time. Bootstrap traces continue to
+use `ring.check-benchmark.bootstrap-phase.v1` and are validated separately;
+unknown trace schemas fail closed.
+
+`tiny_hello_check_no_phase` is an otherwise identical 21-sample control lane.
+The combined report compares its cold/warm wall median, MAD, and empirical p95
+against `tiny_hello_check`, including absolute deltas and ratios.
 
 ## Sample policy
 
@@ -120,6 +147,23 @@ Run the short self-tests:
 python -m unittest discover -s bench/check -p "test_*.py" -v
 ```
 
+Formal cold/warm lanes may be run in separate fresh result directories. Combine
+only a complete set of non-overlapping batches into one auditable baseline:
+
+```powershell
+python bench/check/combine.py `
+  --run-dir C:\path\to\batch-1 `
+  --run-dir C:\path\to\batch-2 `
+  --output C:\path\to\fresh-combined
+```
+
+The strict combiner revalidates raw samples and recomputes lane summaries. It
+requires identical source, manifest/result schema, tracked bootstrap/runtime,
+toolchain, flags, and stable machine/power identity; rejects dirty/incomplete
+runs, duplicate lanes/samples and identity drift; and requires the full manifest
+cold/warm coverage matrix. It writes `combined-samples.jsonl` and
+`combined-summary.json` plus the shared manifest/schema snapshots.
+
 ## Output contract
 
 Every fresh result directory contains:
@@ -138,8 +182,8 @@ Every fresh result directory contains:
 `compiler/main.ring`, hello build, filtered e2e, each current suite, the full
 gate, and a fresh tracked-bootstrap build. `bootstrap.py` mirrors the production
 O3+ThinLTO build into the sample directory and emits compile/runtime/link phase
-wall times. Compiler-internal opt-in phase traces are accepted by the result
-format but remain a later B-176 continuity unit.
+wall times. Compiler-internal phase traces are requested only by the direct
+`check` lanes described above.
 
 The harness is Windows-only because the measurement contract is specifically a
 Windows Job Object contract. The implementation uses Python's standard library

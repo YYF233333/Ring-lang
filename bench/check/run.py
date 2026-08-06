@@ -1,8 +1,4 @@
-"""Bounded, replayable measurement harness for Ring ``check`` feedback.
-
-This first B-176 continuity unit owns measurement integrity only.  It does not
-change the compiler or test runner, and it does not publish a baseline.
-"""
+"""Bounded, replayable measurement harness for Ring ``check`` feedback."""
 
 from __future__ import annotations
 
@@ -35,6 +31,18 @@ MANIFEST_SCHEMA = "ring.check-benchmark.manifest.v1"
 RESULT_SCHEMA = "ring.check-benchmark.invocation.v1"
 ENVIRONMENT_SCHEMA = "ring.check-benchmark.environment.v1"
 SUMMARY_SCHEMA = "ring.check-benchmark.summary.v1"
+COMPILER_PHASE_SCHEMA = "ring.compiler-phase-timing.v1"
+BOOTSTRAP_PHASE_SCHEMA = "ring.check-benchmark.bootstrap-phase.v1"
+COMPILER_PHASE_ORDER = (
+    "input_entry_load",
+    "entry_parse",
+    "project_module_load_parse",
+    "type_effect_check_lower",
+    "resource_plan_verify",
+    "command_total",
+)
+BOOTSTRAP_PHASE_ORDER = ("anchor_compile", "runtime_compile", "link")
+RING_INT_MAX = (1 << 62) - 1
 ALLOWED_POLICIES = {"direct_short", "adaptive", "full_gate"}
 ALLOWED_CACHE_STATES = {"cold", "warm"}
 ALLOWED_PLACEHOLDERS = {
@@ -253,6 +261,10 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             lane["isolate_runner_runtime"], bool
         ):
             raise HarnessError(f"{prefix}.isolate_runner_runtime must be boolean")
+        if "compiler_phase_timing" in lane and not isinstance(
+            lane["compiler_phase_timing"], bool
+        ):
+            raise HarnessError(f"{prefix}.compiler_phase_timing must be boolean")
         for field in ("artifacts", "phase_trace_paths"):
             if not isinstance(lane[field], list) or not all(
                 isinstance(item, str) for item in lane[field]
@@ -268,6 +280,23 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             if "{sample_dir}" not in artifact:
                 raise HarnessError(
                     f"{prefix}: output path must live under {{sample_dir}}: {artifact}"
+                )
+        if lane.get("compiler_phase_timing", False):
+            if lane["argv"][0] != "{ring}" or "check" not in lane["argv"]:
+                raise HarnessError(
+                    f"{prefix}.compiler_phase_timing requires a direct ring check lane"
+                )
+            if lane["expected_exit_codes"] not in ([0], [1]):
+                raise HarnessError(
+                    f"{prefix}.compiler_phase_timing requires one expected exit (0 or 1)"
+                )
+            if len(lane["phase_trace_paths"]) != 1:
+                raise HarnessError(
+                    f"{prefix}.compiler_phase_timing requires exactly one phase trace path"
+                )
+            if any(arg.startswith("--phase-timing") for arg in lane["argv"]):
+                raise HarnessError(
+                    f"{prefix}: phase timing flags are owned by the harness"
                 )
 
 
@@ -285,6 +314,7 @@ def expand_lanes(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "os_file_cache": "uncontrolled",
             }
             lane.setdefault("isolate_runner_runtime", False)
+            lane.setdefault("compiler_phase_timing", False)
             expanded.append(lane)
     return expanded
 
@@ -850,6 +880,7 @@ def _phase_trace_records(paths: Iterable[Path]) -> tuple[list[dict[str, Any]], l
         if not path.is_file():
             errors.append(f"missing phase trace: {path}")
             continue
+        records_before = len(records)
         try:
             with path.open("r", encoding="utf-8") as stream:
                 for line_number, line in enumerate(stream, 1):
@@ -867,7 +898,223 @@ def _phase_trace_records(paths: Iterable[Path]) -> tuple[list[dict[str, Any]], l
                     )
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             errors.append(f"invalid phase trace {path}: {exc}")
+        if len(records) == records_before:
+            errors.append(f"empty phase trace: {path}")
     return records, errors
+
+
+def _is_trace_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_compiler_phase_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    expected_lane: str,
+    expected_compiler_identity: str,
+    expected_source_identity: str,
+    expected_success: bool,
+    wall_ns: int | None,
+) -> list[str]:
+    errors: list[str] = []
+    required = {
+        "schema",
+        "schema_version",
+        "lane",
+        "phase",
+        "duration_ns",
+        "unit",
+        "compiler_identity",
+        "source_identity",
+        "entry_file",
+        "executed",
+        "complete",
+        "command_success",
+    }
+    valid_rows: list[Mapping[str, Any]] = []
+    for index, row in enumerate(rows, 1):
+        prefix = f"compiler phase row {index}"
+        if set(row) != required:
+            errors.append(
+                f"{prefix} fields differ: missing={sorted(required - set(row))}, "
+                f"unknown={sorted(set(row) - required)}"
+            )
+            continue
+        valid_rows.append(row)
+        if row["schema"] != COMPILER_PHASE_SCHEMA or row["schema_version"] != 1:
+            errors.append(f"{prefix} has unsupported schema/version")
+        if not isinstance(row["phase"], str):
+            errors.append(f"{prefix} phase must be a string")
+        if row["lane"] != expected_lane:
+            errors.append(f"{prefix} lane identity mismatch")
+        if row["compiler_identity"] != expected_compiler_identity:
+            errors.append(f"{prefix} compiler identity mismatch")
+        if row["source_identity"] != expected_source_identity:
+            errors.append(f"{prefix} source identity mismatch")
+        if not isinstance(row["entry_file"], str) or not row["entry_file"]:
+            errors.append(f"{prefix} entry_file must be non-empty")
+        elif not Path(row["entry_file"]).is_absolute():
+            errors.append(f"{prefix} entry_file must be absolute")
+        if row["unit"] != "ns":
+            errors.append(f"{prefix} unit must be ns")
+        duration = row["duration_ns"]
+        if not _is_trace_int(duration) or not 0 <= duration <= RING_INT_MAX:
+            errors.append(f"{prefix} duration_ns is outside Ring Int nanoseconds")
+        if not isinstance(row["executed"], bool):
+            errors.append(f"{prefix} executed must be boolean")
+        if not isinstance(row["complete"], bool):
+            errors.append(f"{prefix} complete must be boolean")
+        elif not row["complete"]:
+            errors.append(f"{prefix} is incomplete")
+        if not isinstance(row["command_success"], bool):
+            errors.append(f"{prefix} command_success must be boolean")
+        elif row["command_success"] != expected_success:
+            errors.append(f"{prefix} command outcome mismatch")
+        if row["executed"] is False and duration != 0:
+            errors.append(f"{prefix} skipped phase must have zero duration")
+
+    if any(
+        not isinstance(row.get("phase"), str)
+        or not isinstance(row.get("entry_file"), str)
+        for row in valid_rows
+    ):
+        return errors
+    phases = [row["phase"] for row in valid_rows]
+    if phases != list(COMPILER_PHASE_ORDER):
+        errors.append(
+            f"compiler phase order/coverage mismatch: expected "
+            f"{list(COMPILER_PHASE_ORDER)}, got {phases}"
+        )
+        return errors
+    entry_files = {row["entry_file"] for row in valid_rows}
+    if len(entry_files) != 1:
+        errors.append("compiler phase rows disagree on entry_file")
+    by_phase = {row["phase"]: row for row in valid_rows}
+    for phase in ("input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"):
+        if by_phase[phase]["executed"] is not True:
+            errors.append(f"required compiler phase {phase} was not executed")
+    phase_sum = sum(
+        row["duration_ns"]
+        for row in valid_rows
+        if row["phase"] != "command_total" and _is_trace_int(row["duration_ns"])
+    )
+    command_total = by_phase["command_total"]["duration_ns"]
+    if _is_trace_int(command_total) and phase_sum > command_total:
+        errors.append(
+            f"compiler phase sum {phase_sum} exceeds command total {command_total}"
+        )
+    if wall_ns is None or not _is_trace_int(wall_ns):
+        errors.append("job wall time is unavailable for compiler phase validation")
+    elif _is_trace_int(command_total) and command_total > wall_ns:
+        errors.append(
+            f"compiler command total {command_total} exceeds job wall time {wall_ns}"
+        )
+    return errors
+
+
+def _validate_bootstrap_phase_rows(
+    rows: Sequence[Mapping[str, Any]], *, wall_ns: int | None
+) -> list[str]:
+    errors: list[str] = []
+    required = {"schema", "phase", "argv", "wall_ns", "exit_code"}
+    valid_rows: list[Mapping[str, Any]] = []
+    for index, row in enumerate(rows, 1):
+        prefix = f"bootstrap phase row {index}"
+        if set(row) != required:
+            errors.append(
+                f"{prefix} fields differ: missing={sorted(required - set(row))}, "
+                f"unknown={sorted(set(row) - required)}"
+            )
+            continue
+        valid_rows.append(row)
+        if row["schema"] != BOOTSTRAP_PHASE_SCHEMA:
+            errors.append(f"{prefix} has unsupported schema")
+        if not isinstance(row["phase"], str):
+            errors.append(f"{prefix} phase must be a string")
+        if not isinstance(row["argv"], list) or not row["argv"] or not all(
+            isinstance(item, str) and item for item in row["argv"]
+        ):
+            errors.append(f"{prefix} argv must be a non-empty string array")
+        if not _is_trace_int(row["wall_ns"]) or row["wall_ns"] < 0:
+            errors.append(f"{prefix} wall_ns must be non-negative")
+        if not _is_trace_int(row["exit_code"]):
+            errors.append(f"{prefix} exit_code must be an integer")
+        elif row["exit_code"] != 0:
+            errors.append(f"{prefix} is incomplete (exit {row['exit_code']})")
+    phases = [row.get("phase") for row in valid_rows]
+    if phases != list(BOOTSTRAP_PHASE_ORDER):
+        errors.append(
+            f"bootstrap phase order/coverage mismatch: expected "
+            f"{list(BOOTSTRAP_PHASE_ORDER)}, got {phases}"
+        )
+    phase_sum = sum(
+        row["wall_ns"] for row in valid_rows if _is_trace_int(row["wall_ns"])
+    )
+    if wall_ns is None or not _is_trace_int(wall_ns):
+        errors.append("job wall time is unavailable for bootstrap phase validation")
+    elif phase_sum > wall_ns:
+        errors.append(f"bootstrap phase sum {phase_sum} exceeds job wall time {wall_ns}")
+    return errors
+
+
+def _validate_phase_trace_records(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    paths: Sequence[Path],
+    lane: Mapping[str, Any],
+    environment: Mapping[str, Any],
+    measurement: Mapping[str, Any],
+) -> list[str]:
+    if not paths:
+        return []
+    errors: list[str] = []
+    grouped: dict[str, list[Mapping[str, Any]]] = {
+        str(path.resolve()): [] for path in paths
+    }
+    for record in records:
+        path = record.get("path")
+        value = record.get("value")
+        if path not in grouped or not isinstance(value, dict):
+            errors.append("phase trace record is not associated with a declared path")
+            continue
+        grouped[path].append(value)
+
+    compiler_expected = lane.get("compiler_phase_timing", False)
+    expected_schema = COMPILER_PHASE_SCHEMA if compiler_expected else BOOTSTRAP_PHASE_SCHEMA
+    for path, rows in grouped.items():
+        if not rows:
+            continue
+        schemas = [row.get("schema") for row in rows]
+        if any(not isinstance(schema, str) for schema in schemas) or set(schemas) != {expected_schema}:
+            errors.append(
+                f"phase trace {path} schema mismatch: expected {expected_schema}, "
+                f"got {sorted(str(schema) for schema in schemas)}"
+            )
+            continue
+        if compiler_expected:
+            compiler_sha = environment.get("tools", {}).get("ring", {}).get("sha256")
+            source_sha = environment.get("source_sha")
+            if not isinstance(compiler_sha, str) or not compiler_sha:
+                errors.append("compiler executable identity is unavailable")
+                continue
+            if not isinstance(source_sha, str) or not source_sha:
+                errors.append("source identity is unavailable")
+                continue
+            errors.extend(
+                _validate_compiler_phase_rows(
+                    rows,
+                    expected_lane=lane["case_id"],
+                    expected_compiler_identity=f"sha256:{compiler_sha}",
+                    expected_source_identity=f"git:{source_sha}",
+                    expected_success=measurement.get("exit_code") == 0,
+                    wall_ns=measurement.get("wall_ns"),
+                )
+            )
+        else:
+            errors.extend(
+                _validate_bootstrap_phase_rows(rows, wall_ns=measurement.get("wall_ns"))
+            )
+    return errors
 
 
 def _runner_summary(stdout_path: Path) -> dict[str, Any] | None:
@@ -993,6 +1240,18 @@ def execute_invocation(
     cwd = _format(lane["cwd"], context)
     artifact_paths = [Path(_format(item, context)) for item in lane["artifacts"]]
     phase_paths = [Path(_format(item, context)) for item in lane["phase_trace_paths"]]
+    if lane.get("compiler_phase_timing", False):
+        compiler_sha = environment["tools"]["ring"]["sha256"]
+        if not compiler_sha:
+            raise HarnessError("selected compiler executable has no SHA-256 identity")
+        argv.extend(
+            [
+                f"--phase-timing={phase_paths[0]}",
+                f"--phase-timing-lane={lane['case_id']}",
+                f"--phase-timing-compiler=sha256:{compiler_sha}",
+                f"--phase-timing-source=git:{environment['source_sha']}",
+            ]
+        )
     child_env = dict(os.environ)
     temp_root = sample_temp if cache_state == "cold" else thinlto_cache.parent
     child_env["TEMP"] = str(temp_root)
@@ -1032,6 +1291,15 @@ def execute_invocation(
     stderr = _file_record(stderr_path)
     artifacts = _artifact_records(artifact_paths)
     phase_traces, phase_errors = _phase_trace_records(phase_paths)
+    phase_errors.extend(
+        _validate_phase_trace_records(
+            phase_traces,
+            paths=phase_paths,
+            lane=lane,
+            environment=environment,
+            measurement=measurement,
+        )
+    )
     runner = _runner_summary(stdout_path) if lane["runner_summary"] else None
     reason = _invalid_reason(
         is_warmup=is_warmup,
@@ -1091,6 +1359,55 @@ def _metric_stats(values: Sequence[int]) -> dict[str, Any]:
     if len(ordered) == DIRECT_VALID_SAMPLES:
         result["empirical_p95"] = ordered[math.ceil(0.95 * len(ordered)) - 1]
     return result
+
+
+def _summarize_compiler_phase_timing(
+    records: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    samples: list[tuple[Mapping[str, Any], dict[str, Mapping[str, Any]]]] = []
+    for record in records:
+        values = [
+            item["value"]
+            for item in record.get("phase_traces", [])
+            if item.get("value", {}).get("schema") == COMPILER_PHASE_SCHEMA
+        ]
+        if values:
+            samples.append((record, {value["phase"]: value for value in values}))
+    if not samples:
+        return None
+
+    phases: dict[str, Any] = {}
+    for phase in COMPILER_PHASE_ORDER:
+        rows = [by_phase[phase] for _record, by_phase in samples]
+        phases[phase] = {
+            "executed_samples": sum(1 for row in rows if row["executed"]),
+            "duration_ns": _metric_stats([row["duration_ns"] for row in rows]),
+        }
+
+    measured_sums: list[int] = []
+    unattributed: list[int] = []
+    outside_command: list[int] = []
+    for record, by_phase in samples:
+        measured = sum(
+            by_phase[phase]["duration_ns"]
+            for phase in COMPILER_PHASE_ORDER
+            if phase != "command_total"
+        )
+        command_total = by_phase["command_total"]["duration_ns"]
+        measured_sums.append(measured)
+        unattributed.append(command_total - measured)
+        outside_command.append(record["wall_ns"] - command_total)
+    return {
+        "schema": COMPILER_PHASE_SCHEMA,
+        "unit": "ns",
+        "sample_count": len(samples),
+        "phases": phases,
+        "accounting": {
+            "measured_phase_sum_ns": _metric_stats(measured_sums),
+            "unattributed_command_ns": _metric_stats(unattributed),
+            "outside_instrumented_command_ns": _metric_stats(outside_command),
+        },
+    }
 
 
 def summarize_lane(
@@ -1155,6 +1472,7 @@ def summarize_lane(
         "invalid_reasons": reasons,
         "resource_quality": resource_quality,
         "metrics": metrics,
+        "compiler_phase_timing": _summarize_compiler_phase_timing(included),
     }
 
 

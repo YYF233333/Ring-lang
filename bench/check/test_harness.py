@@ -31,6 +31,25 @@ class ManifestAndPolicyTests(unittest.TestCase):
         self.assertTrue(any(lane["case_id"] == "full_gate_cold" for lane in lanes))
         self.assertTrue(any(lane["case_id"] == "full_gate_warm" for lane in lanes))
 
+        by_base = {lane["case_id"]: lane for lane in manifest["lanes"]}
+        timed = by_base["tiny_hello_check"]
+        control = by_base["tiny_hello_check_no_phase"]
+        for field in (
+            "policy",
+            "cache_states",
+            "argv",
+            "cwd",
+            "timeout_seconds",
+            "expected_exit_codes",
+            "requires",
+            "runner_summary",
+            "artifacts",
+        ):
+            self.assertEqual(timed[field], control[field])
+        self.assertTrue(timed["compiler_phase_timing"])
+        self.assertFalse(control["compiler_phase_timing"])
+        self.assertEqual(control["phase_trace_paths"], [])
+
     def test_result_schema_rejects_unknown_root_field(self) -> None:
         schema = harness._load_json(harness.DEFAULT_RESULT_SCHEMA)
         with self.assertRaises(harness.HarnessError):
@@ -301,6 +320,168 @@ class ManifestAndPolicyTests(unittest.TestCase):
             self.assertTrue(any("restore failed" in e for e in record["errors"]))
             os.replace(backup, root)
             self.assertEqual(root.read_bytes(), b"original")
+
+
+class PhaseTimingTests(unittest.TestCase):
+    def _compiler_rows(self) -> list[dict]:
+        durations = {
+            "input_entry_load": 10,
+            "entry_parse": 20,
+            "project_module_load_parse": 0,
+            "type_effect_check_lower": 30,
+            "resource_plan_verify": 0,
+            "command_total": 100,
+        }
+        entry = str((harness.REPO_ROOT / "tests" / "cases" / "hello.ring").resolve())
+        return [
+            {
+                "schema": harness.COMPILER_PHASE_SCHEMA,
+                "schema_version": 1,
+                "lane": "tiny_hello_check_cold",
+                "phase": phase,
+                "duration_ns": durations[phase],
+                "unit": "ns",
+                "compiler_identity": "sha256:" + "a" * 64,
+                "source_identity": "git:" + "b" * 40,
+                "entry_file": entry,
+                "executed": phase not in {
+                    "project_module_load_parse",
+                    "resource_plan_verify",
+                },
+                "complete": True,
+                "command_success": True,
+            }
+            for phase in harness.COMPILER_PHASE_ORDER
+        ]
+
+    def _validate(self, rows: list[dict], *, wall_ns: int = 150) -> list[str]:
+        return harness._validate_compiler_phase_rows(
+            rows,
+            expected_lane="tiny_hello_check_cold",
+            expected_compiler_identity="sha256:" + "a" * 64,
+            expected_source_identity="git:" + "b" * 40,
+            expected_success=True,
+            wall_ns=wall_ns,
+        )
+
+    def test_compiler_phase_trace_validates_and_summarizes_accounting(self) -> None:
+        rows = self._compiler_rows()
+        self.assertEqual(self._validate(rows), [])
+        record = {
+            "included": True,
+            "wall_ns": 150,
+            "phase_traces": [
+                {"path": "trace.jsonl", "line": index, "value": row}
+                for index, row in enumerate(rows, 1)
+            ],
+        }
+        summary = harness._summarize_compiler_phase_timing([record])
+        assert summary is not None
+        self.assertEqual(summary["sample_count"], 1)
+        self.assertEqual(
+            summary["accounting"]["measured_phase_sum_ns"]["median"], 60
+        )
+        self.assertEqual(
+            summary["accounting"]["unattributed_command_ns"]["median"], 40
+        )
+        self.assertEqual(
+            summary["accounting"]["outside_instrumented_command_ns"]["median"],
+            50,
+        )
+
+    def test_bad_or_incomplete_compiler_trace_fails_closed(self) -> None:
+        rows = self._compiler_rows()
+        rows[2]["complete"] = False
+        self.assertTrue(any("incomplete" in error for error in self._validate(rows)))
+        reason = harness._invalid_reason(
+            is_warmup=False,
+            measurement={
+                "timed_out": False,
+                "exit_code": 0,
+                "cpu_user_ns": 1,
+                "cpu_kernel_ns": 1,
+                "peak_root_rss_bytes": 1,
+                "peak_job_commit_bytes": 1,
+                "process_count": {"total": 1},
+                "job_io": {},
+                "measurement_errors": [],
+                "rss_complete": True,
+            },
+            measurement_error=None,
+            expected_exit_codes=[0],
+            runner_expected=False,
+            runner_summary=None,
+            artifacts=[],
+            phase_errors=["compiler phase row 3 is incomplete"],
+            runtime_errors=[],
+        )
+        self.assertEqual(
+            reason,
+            "phase_trace_invalid: compiler phase row 3 is incomplete",
+        )
+
+    def test_unknown_phase_trace_schema_fails_closed(self) -> None:
+        path = (harness.REPO_ROOT / "unknown.jsonl").resolve()
+        row = self._compiler_rows()[0]
+        row["schema"] = "unknown.phase.v1"
+        errors = harness._validate_phase_trace_records(
+            [{"path": str(path), "line": 1, "value": row}],
+            paths=[path],
+            lane={
+                "case_id": "tiny_hello_check_cold",
+                "compiler_phase_timing": True,
+            },
+            environment={
+                "source_sha": "b" * 40,
+                "tools": {"ring": {"sha256": "a" * 64}},
+            },
+            measurement={"exit_code": 0, "wall_ns": 150},
+        )
+        self.assertTrue(any("schema mismatch" in error for error in errors))
+
+    def test_phase_sum_and_command_total_must_fit_job_wall(self) -> None:
+        rows = self._compiler_rows()
+        rows[-1]["duration_ns"] = 50
+        errors = self._validate(rows, wall_ns=40)
+        self.assertTrue(any("phase sum" in error for error in errors))
+        self.assertTrue(any("job wall" in error for error in errors))
+
+    def test_bootstrap_phase_schema_remains_supported_and_strict(self) -> None:
+        rows = [
+            {
+                "schema": harness.BOOTSTRAP_PHASE_SCHEMA,
+                "phase": phase,
+                "argv": ["tool", phase],
+                "wall_ns": 10,
+                "exit_code": 0,
+            }
+            for phase in harness.BOOTSTRAP_PHASE_ORDER
+        ]
+        self.assertEqual(
+            harness._validate_bootstrap_phase_rows(rows, wall_ns=40), []
+        )
+        rows[0]["unknown"] = True
+        self.assertTrue(
+            any(
+                "fields differ" in error
+                for error in harness._validate_bootstrap_phase_rows(rows, wall_ns=40)
+            )
+        )
+
+    def test_timing_is_hidden_opt_in_with_disabled_default(self) -> None:
+        cli = (harness.REPO_ROOT / "compiler" / "cli.ring").read_text(encoding="utf-8")
+        timing = (harness.REPO_ROOT / "compiler" / "phase_timing.ring").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('let mut phase_timing_file = ""', cli)
+        self.assertNotIn("--phase-timing", cli[cli.index("fn usage()") :])
+        disabled = timing[
+            timing.index("if output_path.len() == 0") : timing.index("let actual_lane")
+        ]
+        self.assertIn("return PhaseTiming", disabled)
+        self.assertNotIn("ring_bench_monotonic_ns", disabled)
+        self.assertNotIn("${entry_file}", disabled)
+        self.assertIn("if self.enabled == false { return }", timing)
 
 
 @unittest.skipUnless(os.name == "nt", "Windows Job Object tests require Windows")

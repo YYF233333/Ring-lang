@@ -27,6 +27,22 @@
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": false,
+      "compiler_phase_timing": true,
+      "artifacts": [],
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
+    },
+    {
+      "case_id": "tiny_hello_check_no_phase",
+      "description": "paired tiny direct check with compiler phase timing disabled",
+      "policy": "direct_short",
+      "cache_states": ["cold", "warm"],
+      "argv": ["{ring}", "check", "{repo}/tests/cases/hello.ring"],
+      "cwd": "{repo}",
+      "timeout_seconds": 60,
+      "expected_exit_codes": [0],
+      "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
+      "runner_summary": false,
+      "compiler_phase_timing": false,
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -41,8 +57,9 @@
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/golden/abort_handler_arm.ring"],
       "runner_summary": false,
+      "compiler_phase_timing": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "diamond_dep_check",
@@ -55,8 +72,9 @@
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/modules/diamond_dep/main.ring"],
       "runner_summary": false,
+      "compiler_phase_timing": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "error_undefined_llm_check",
@@ -69,8 +87,9 @@
       "expected_exit_codes": [1],
       "requires": ["tool:ring", "path:{repo}/tests/cases/error_undefined.ring"],
       "runner_summary": false,
+      "compiler_phase_timing": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "tiny_hello_rc_check",
@@ -83,8 +102,9 @@
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": false,
+      "compiler_phase_timing": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "compiler_main_check",
@@ -97,8 +117,9 @@
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
       "runner_summary": false,
+      "compiler_phase_timing": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "compiler_main_rc_check",
@@ -111,8 +132,9 @@
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
       "runner_summary": false,
+      "compiler_phase_timing": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "hello_build",
