@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,10 @@ from windows_job import (
     preflight_job_support,
     run_in_job,
 )
+
+
+def phase_errors(classified: harness.PhaseValidation) -> list[str]:
+    return [*classified.hard_errors, *classified.eligibility_errors]
 
 
 class ManifestAndPolicyTests(unittest.TestCase):
@@ -63,6 +69,168 @@ class ManifestAndPolicyTests(unittest.TestCase):
                 [{"path": "trace.jsonl", "line": 1, "value": {}}],
                 phase_schema,
             )
+
+    def test_result_schema_v2_definition_is_pinned_before_data_load(self) -> None:
+        schema = harness._load_json(harness.DEFAULT_RESULT_SCHEMA)
+        old = json.loads(json.dumps(schema))
+        old["$id"] = "ring.check-benchmark.invocation.v1"
+        old["properties"]["schema"]["const"] = old["$id"]
+        with self.assertRaisesRegex(harness.HarnessError, r"\$id"):
+            harness.validate_schema_definition(old)
+
+        lax = json.loads(json.dumps(schema))
+        lax["properties"]["runner_summary"]["properties"]["suite_counts"] = {
+            "type": "object"
+        }
+        with self.assertRaisesRegex(harness.HarnessError, "canonical invocation.v2"):
+            harness.validate_schema_definition(lax)
+
+    def test_strict_json_rejects_top_level_and_nested_duplicate_keys(self) -> None:
+        for text in ('{"a":1,"a":2}', '{"outer":{"a":1,"a":2}}'):
+            with self.subTest(text=text), self.assertRaisesRegex(
+                harness.DuplicateJsonKeyError, "duplicate JSON key"
+            ):
+                harness._strict_json_loads(text, "fixture")
+
+    def test_runner_summary_requires_exact_counts_and_final_exit(self) -> None:
+        contract = {
+            "schema": harness.RUNNER_SUMMARY_CONTRACT_SCHEMA,
+            "expected_total": 1,
+            "expected_status_counts": {"pass": 1, "fail": 0, "skip": 0},
+            "expected_suite_counts": {
+                "e2e": {"pass": 1, "fail": 0, "skip": 0}
+            },
+            "skip_policy": "exact",
+            "fail_policy": "zero",
+            "reported_exit_policy": "required_match_raw",
+        }
+        harness._validate_runner_summary_contract(contract, "fixture")
+        cases = {
+            "missing_final_exit": (
+                "[PASS] e2e: hello\n", 0, "missing its unique final"
+            ),
+            "reported_raw_mismatch": (
+                "[PASS] e2e: hello\nExit code: 0 (all 1 tests passed)\n",
+                1,
+                "does not match",
+            ),
+            "exit_zero_with_failure": (
+                "[FAIL] e2e: hello\nExit code: 0 (all 0 tests passed)\n",
+                0,
+                "failure count",
+            ),
+            "reduced_count": (
+                "Exit code: 0 (all 0 tests passed)\n",
+                0,
+                "status counts",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name, (text, raw_exit, error) in cases.items():
+                with self.subTest(case=name):
+                    stdout = root / f"{name}.txt"
+                    stdout.write_text(text, encoding="utf-8")
+                    summary = harness._runner_summary(stdout)
+                    assert summary is not None
+                    with self.assertRaisesRegex(harness.HarnessError, error):
+                        harness._validate_runner_summary_result(
+                            summary, contract, raw_exit
+                        )
+
+    def test_manifest_binds_runner_contract_for_both_cache_states(self) -> None:
+        manifest = harness._load_json(harness.DEFAULT_MANIFEST)
+        expanded = harness.expand_lanes(manifest)
+        runner_lanes = [lane for lane in expanded if lane["runner_summary"]]
+        self.assertTrue(runner_lanes)
+        for lane in runner_lanes:
+            with self.subTest(case=lane["case_id"]):
+                contract = lane["runner_summary"]
+                self.assertEqual(contract["expected_status_counts"]["fail"], 0)
+                self.assertEqual(
+                    sum(contract["expected_status_counts"].values()),
+                    contract["expected_total"],
+                )
+        full = {
+            lane["case_id"]: lane["runner_summary"] for lane in expanded
+        }
+        self.assertEqual(full["full_gate_cold"], full["full_gate_warm"])
+        self.assertEqual(full["full_gate_cold"]["expected_total"], 1552)
+
+    def test_warm_cache_receipt_rejects_wrong_recipe_and_byte_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            cache = root / "ring-lang-thinlto-cache"
+            cache.mkdir()
+            (cache / "seed.bin").write_bytes(b"seed")
+            manifest = {
+                "fingerprint_flags": {
+                    "compiler": ["-O3"],
+                    "runtime": ["-O3"],
+                    "link": ["-flto=thin"],
+                }
+            }
+            source = {
+                "git_sha": "a" * 40,
+                "git_dirty": False,
+                **{
+                    name: {
+                        "path": str((root / name).resolve()),
+                        "sha256": character * 64,
+                        "bytes": 1,
+                    }
+                    for name, character in (
+                        ("dist_c", "b"), ("runtime", "c"), ("bootstrap", "d")
+                    )
+                },
+            }
+            tool_records = {
+                name: {
+                    "path": str((root / f"{name}.exe").resolve()),
+                    "version": "fixture",
+                    "sha256": character * 64,
+                }
+                for name, character in (
+                    ("python", "1"), ("clang", "2"), ("clangxx", "3")
+                )
+            }
+            recipe = {
+                "argv": ["fixture-seed"],
+                "cwd": str(root),
+                "timeout_seconds": harness.WARM_CACHE_SEED_TIMEOUT_SECONDS,
+            }
+            receipt = {
+                "schema": harness.WARM_CACHE_RECEIPT_SCHEMA,
+                "recipe_version": 1,
+                "source": source,
+                "tools": tool_records,
+                "flags": harness._warm_cache_flags(manifest),
+                "cache_path": str(cache),
+                "seed_invocation": recipe,
+                "outcome": {
+                    "exit_code": 0,
+                    "stdout": {"sha256": "4" * 64, "bytes": 0},
+                    "stderr": {"sha256": "5" * 64, "bytes": 0},
+                },
+                "cache_inventory": harness._cache_inventory(cache),
+            }
+            receipt_path, _output = harness._warm_cache_paths(cache)
+            tools = {name: value["path"] for name, value in tool_records.items()}
+            with (
+                mock.patch.object(harness, "_warm_cache_source_identity", return_value=source),
+                mock.patch.object(harness, "_seed_tool_records", return_value=tool_records),
+                mock.patch.object(harness, "_warm_cache_seed_recipe", return_value=recipe),
+            ):
+                wrong = json.loads(json.dumps(receipt))
+                wrong["seed_invocation"]["argv"] = ["wrong-seed"]
+                harness._json_dump(receipt_path, wrong)
+                with self.assertRaisesRegex(harness.HarnessError, "seed seed_invocation drifted"):
+                    harness.validate_warm_cache_seed(manifest, tools, cache)
+
+                harness._json_dump(receipt_path, receipt)
+                (cache / "seed.bin").write_bytes(b"drifted")
+                with self.assertRaisesRegex(harness.HarnessError, "cache_inventory drifted"):
+                    harness.validate_warm_cache_seed(manifest, tools, cache)
 
     def test_empirical_p95_only_exists_for_twenty_one_values(self) -> None:
         self.assertIn("empirical_p95", harness._metric_stats(list(range(21))))
@@ -352,6 +520,239 @@ class ManifestAndPolicyTests(unittest.TestCase):
             self.assertEqual(root.read_bytes(), b"original")
 
 
+class AttemptBoundaryTests(unittest.TestCase):
+    def _fixture(
+        self, root: Path, *, index: int, timed_out: bool = False
+    ) -> tuple[dict, dict, dict, Path]:
+        run_dir = root.resolve()
+        case_id = "boundary_cold"
+        sample_id = f"{case_id}-{index:03d}-{index:08x}"
+        sample_dir = run_dir / "samples" / case_id / sample_id
+        sample_dir.mkdir(parents=True)
+        trace = sample_dir / "trace.jsonl"
+        entry = str((harness.REPO_ROOT / "tests" / "cases" / "hello.ring").resolve())
+        compiler = str((root / "ring.exe").resolve())
+        lane = {
+            "case_id": case_id,
+            "policy": "direct_short",
+            "cache": {
+                "thinlto_cache": "cold",
+                "output": "fresh",
+                "os_file_cache": "uncontrolled",
+            },
+            "argv": ["{ring}", "check", entry],
+            "cwd": "{repo}",
+            "expected_exit_codes": [0],
+            "runner_summary": None,
+            "artifacts": [],
+            "phase_trace_paths": ["{sample_dir}/trace.jsonl"],
+            "compiler_phase_timing": True,
+            "expected_executed_phases": [
+                "input_entry_load",
+                "entry_parse",
+                "type_effect_check_lower",
+                "command_total",
+            ],
+        }
+        environment = {
+            "run_id": "fixture-run",
+            "source_sha": "b" * 40,
+            "manifest_sha": "c" * 64,
+            "tools": {
+                "ring": {"path": compiler, "sha256": "a" * 64}
+            },
+            "thinlto_cache_path": str((root / "thinlto-cache").resolve()),
+        }
+        rows = []
+        for phase in harness.COMPILER_PHASE_ORDER:
+            rows.append(
+                {
+                    "schema": harness.COMPILER_PHASE_SCHEMA,
+                    "schema_version": 1,
+                    "lane": case_id,
+                    "phase": phase,
+                    "duration_ns": 100 if phase == "command_total" else 10,
+                    "unit": "ns",
+                    "compiler_identity": "sha256:" + "a" * 64,
+                    "source_identity": "git:" + "b" * 40,
+                    "entry_file": entry,
+                    "executed": phase in lane["expected_executed_phases"],
+                    "complete": True,
+                    "command_success": True,
+                }
+            )
+        trace.write_text(
+            "".join(harness._json_line(row) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+        stdout_path = sample_dir / "stdout.txt"
+        stderr_path = sample_dir / "stderr.txt"
+        stdout_path.write_bytes(b"OK\n")
+        stderr_path.write_bytes(b"")
+        phase_records = harness._phase_trace_records([trace])
+        record = {
+            "schema": harness.RESULT_SCHEMA,
+            "run_id": "fixture-run",
+            "sample_id": sample_id,
+            "sample_dir": str(sample_dir),
+            "case_id": case_id,
+            "index": index,
+            "included": False,
+            "source_sha": "b" * 40,
+            "manifest_sha": "c" * 64,
+            "argv": [
+                compiler,
+                "check",
+                entry,
+                f"--phase-timing={trace}",
+                f"--phase-timing-lane={case_id}",
+                "--phase-timing-compiler=sha256:" + "a" * 64,
+                "--phase-timing-source=git:" + "b" * 40,
+            ],
+            "cwd": str(harness.REPO_ROOT.resolve()),
+            "cache": lane["cache"],
+            "runner_runtime": {
+                "mode": "not_applicable",
+                "isolated": False,
+                "root_path": None,
+                "source_sha256": None,
+                "flags": [],
+                "original_exists": False,
+                "original_sha256": None,
+                "pre_exists": False,
+                "pre_sha256": None,
+                "post_exists": False,
+                "post_sha256": None,
+                "restored": True,
+                "backup_path": None,
+                "backup_exists_after": False,
+                "staging_path": None,
+                "staging_exists_after": False,
+                "errors": [],
+            },
+            "root_pid": 1,
+            "wall_ns": 200,
+            "cpu_user_ns": 10,
+            "cpu_kernel_ns": 5,
+            "peak_root_rss_bytes": 1000,
+            "sampled_peak_tree_rss_bytes": 1000,
+            "max_worker_peak_rss_bytes": None,
+            "peak_job_commit_bytes": 2000,
+            "rss_poll_ms": harness.RSS_POLL_MS,
+            "rss_samples_observed": 1,
+            "rss_covered_ns": 200,
+            "rss_coverage_ratio": 1.0,
+            "rss_observed_process_count": 1,
+            "rss_job_total_processes": 1,
+            "rss_complete": True,
+            "process_count": {"total": 1, "active_at_query": 0, "terminated": 1},
+            "job_io": {
+                "read_operations": 0,
+                "write_operations": 0,
+                "other_operations": 0,
+                "read_bytes": 0,
+                "write_bytes": 0,
+                "other_bytes": 0,
+            },
+            "timed_out": timed_out,
+            "measurement_errors": [],
+            "exit": {"code": 0, "expected": True},
+            "stdout": harness._file_record(stdout_path),
+            "stderr": harness._file_record(stderr_path),
+            "runner_summary": None,
+            "artifacts": [],
+            "phase_traces": phase_records,
+            "invocation_error": None,
+            "invalid_reason": None,
+        }
+        validated = harness.validate_attempt_boundary(
+            record, lane, environment, run_dir,
+            harness._load_json(harness.DEFAULT_RESULT_SCHEMA),
+            verify_stored=False,
+        )
+        record["invalid_reason"] = validated.invalid_reason
+        record["included"] = validated.invalid_reason is None
+        return record, lane, environment, trace
+
+    def test_phase_identity_tamper_is_hard_even_for_excluded_attempts(self) -> None:
+        cases = ((0, False, "warmup"), (1, True, "timeout"))
+        for index, timed_out, reason in cases:
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as temp:
+                record, lane, environment, trace = self._fixture(
+                    Path(temp), index=index, timed_out=timed_out
+                )
+                self.assertEqual(record["invalid_reason"], reason)
+                rows = [
+                    json.loads(line)
+                    for line in trace.read_text(encoding="utf-8").splitlines()
+                ]
+                rows[0]["compiler_identity"] = "sha256:" + "f" * 64
+                trace.write_text(
+                    "".join(harness._json_line(row) + "\n" for row in rows),
+                    encoding="utf-8",
+                )
+                record["phase_traces"] = harness._phase_trace_records([trace])
+                with self.assertRaisesRegex(
+                    harness.HarnessError, "hard phase trace.*compiler identity mismatch"
+                ):
+                    harness.validate_attempt_boundary(
+                        record, lane, environment, Path(temp),
+                        harness._load_json(harness.DEFAULT_RESULT_SCHEMA),
+                        verify_stored=True,
+                    )
+
+    def test_sample_identity_cannot_cross_lane_or_traverse(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            record, lane, environment, _trace = self._fixture(
+                Path(temp), index=1
+            )
+            record["sample_dir"] = str(
+                (Path(temp) / "samples" / "other_cold" / record["sample_id"]).resolve()
+            )
+            with self.assertRaisesRegex(harness.HarnessError, "sample_dir provenance"):
+                harness.validate_attempt_boundary(
+                    record, lane, environment, Path(temp),
+                    harness._load_json(harness.DEFAULT_RESULT_SCHEMA),
+                    verify_stored=True,
+                )
+            record["sample_id"] = "boundary_cold-001-../escape"
+            with self.assertRaisesRegex(
+                harness.HarnessError, "required pattern|non-canonical sample_id"
+            ):
+                harness.validate_attempt_boundary(
+                    record, lane, environment, Path(temp),
+                    harness._load_json(harness.DEFAULT_RESULT_SCHEMA),
+                    verify_stored=True,
+                )
+
+    def test_rss_structural_invariants_reject_coordinated_tampering(self) -> None:
+        mutations = {
+            "low_coverage": lambda record: record.update(
+                rss_covered_ns=100, rss_coverage_ratio=0.5
+            ),
+            "observed_below_total": lambda record: record.update(
+                rss_observed_process_count=0
+            ),
+            "errors_but_complete": lambda record: record.update(
+                measurement_errors=["forged"], invocation_error="forged"
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as temp:
+                record, lane, environment, _trace = self._fixture(
+                    Path(temp), index=1
+                )
+                mutate(record)
+                record["included"] = True
+                record["invalid_reason"] = None
+                with self.assertRaisesRegex(harness.HarnessError, "rss_complete formula"):
+                    harness.validate_attempt_boundary(
+                        record, lane, environment, Path(temp),
+                        harness._load_json(harness.DEFAULT_RESULT_SCHEMA),
+                        verify_stored=True,
+                    )
+
+
 class PhaseTimingTests(unittest.TestCase):
     def _compiler_rows(self) -> list[dict]:
         durations = {
@@ -385,7 +786,7 @@ class PhaseTimingTests(unittest.TestCase):
         ]
 
     def _validate(self, rows: list[dict], *, wall_ns: int = 150) -> list[str]:
-        return harness._validate_compiler_phase_rows(
+        return phase_errors(harness._classify_compiler_phase_rows(
             rows,
             expected_lane="tiny_hello_check_cold",
             expected_compiler_identity="sha256:" + "a" * 64,
@@ -401,7 +802,7 @@ class PhaseTimingTests(unittest.TestCase):
                 "command_total",
             ],
             wall_ns=wall_ns,
-        )
+        ))
 
     def test_compiler_phase_trace_validates_and_summarizes_accounting(self) -> None:
         rows = self._compiler_rows()
@@ -477,7 +878,7 @@ class PhaseTimingTests(unittest.TestCase):
             path = sample_dir / "unknown.jsonl"
             row = self._compiler_rows()[0]
             row["schema"] = "unknown.phase.v1"
-            errors = harness._validate_phase_trace_records(
+            errors = phase_errors(harness._classify_phase_trace_records(
                 [
                     {
                         "path": str(path),
@@ -507,7 +908,7 @@ class PhaseTimingTests(unittest.TestCase):
                 ),
                 exit_code=0,
                 wall_ns=150,
-            )
+            ))
         self.assertTrue(any("schema mismatch" in error for error in errors))
 
     def test_phase_sum_and_command_total_must_fit_job_wall(self) -> None:
@@ -526,7 +927,7 @@ class PhaseTimingTests(unittest.TestCase):
         )
         rows[0]["executed"] = False
         rows[0]["duration_ns"] = 0
-        errors = harness._validate_compiler_phase_rows(
+        errors = phase_errors(harness._classify_compiler_phase_rows(
             rows,
             expected_lane="tiny_hello_check_cold",
             expected_compiler_identity="sha256:" + "a" * 64,
@@ -539,7 +940,7 @@ class PhaseTimingTests(unittest.TestCase):
                 "command_total",
             ],
             wall_ns=150,
-        )
+        ))
         self.assertEqual(errors, [])
 
     def test_entry_file_is_bound_to_the_invocation_entry(self) -> None:
@@ -566,7 +967,7 @@ class PhaseTimingTests(unittest.TestCase):
                 for index, row in enumerate(rows, 1)
             ]
             wrappers[1]["line"] = 3
-            errors = harness._validate_phase_trace_records(
+            errors = phase_errors(harness._classify_phase_trace_records(
                 wrappers,
                 paths=[path],
                 sample_dir=sample_dir,
@@ -589,10 +990,10 @@ class PhaseTimingTests(unittest.TestCase):
                 ),
                 exit_code=0,
                 wall_ns=150,
-            )
+            ))
             self.assertTrue(any("unique and contiguous" in error for error in errors))
             outside = sample_dir.parent / "outside.jsonl"
-            errors = harness._validate_phase_trace_records(
+            errors = phase_errors(harness._classify_phase_trace_records(
                 [],
                 paths=[outside],
                 sample_dir=sample_dir,
@@ -601,8 +1002,36 @@ class PhaseTimingTests(unittest.TestCase):
                 expected_entry_file="",
                 exit_code=0,
                 wall_ns=150,
-            )
+            ))
             self.assertTrue(any("escapes sample_dir" in error for error in errors))
+
+    def test_duplicate_key_in_phase_trace_is_a_hard_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            sample_dir = Path(temp).resolve()
+            path = sample_dir / "trace.jsonl"
+            path.write_text('{"schema":"first","schema":"second"}\n', encoding="utf-8")
+            wrappers = harness._phase_trace_records([path])
+            self.assertEqual(wrappers[0]["read_error"], "duplicate_json_key")
+            classified = harness._classify_phase_trace_records(
+                wrappers,
+                paths=[path],
+                sample_dir=sample_dir,
+                lane={
+                    "case_id": "tiny_hello_check_cold",
+                    "compiler_phase_timing": True,
+                    "expected_executed_phases": ["command_total"],
+                },
+                environment={
+                    "source_sha": "b" * 40,
+                    "tools": {"ring": {"sha256": "a" * 64}},
+                },
+                expected_entry_file="",
+                exit_code=0,
+                wall_ns=1,
+            )
+            self.assertTrue(
+                any("duplicate JSON key" in error for error in classified.hard_errors)
+            )
 
     def test_bootstrap_phase_schema_remains_supported_and_strict(self) -> None:
         rows = [
@@ -616,42 +1045,116 @@ class PhaseTimingTests(unittest.TestCase):
             for phase in harness.BOOTSTRAP_PHASE_ORDER
         ]
         self.assertEqual(
-            harness._validate_bootstrap_phase_rows(rows, wall_ns=40), []
+            phase_errors(harness._classify_bootstrap_phase_rows(rows, wall_ns=40)), []
         )
         rows[0]["unknown"] = True
         self.assertTrue(
             any(
                 "fields differ" in error
-                for error in harness._validate_bootstrap_phase_rows(rows, wall_ns=40)
+                for error in phase_errors(
+                    harness._classify_bootstrap_phase_rows(rows, wall_ns=40)
+                )
             )
         )
 
-    def test_timing_is_hidden_opt_in_with_disabled_default(self) -> None:
+    def test_timing_is_hidden_opt_in_and_defaults_to_no_state(self) -> None:
         cli = (harness.REPO_ROOT / "compiler" / "cli.ring").read_text(encoding="utf-8")
         timing = (harness.REPO_ROOT / "compiler" / "phase_timing.ring").read_text(
             encoding="utf-8"
         )
-        self.assertIn('let mut phase_timing_file = ""', cli)
+        self.assertIn("let mut phase_timing_file: Str? = none", cli)
         self.assertNotIn("--phase-timing", cli[cli.index("fn usage()") :])
-        disabled = timing[
-            timing.index("if output_path.len() == 0") : timing.index("let actual_lane")
+        self.assertIn("state: PhaseTimingState?", timing)
+        self.assertIn("none => PhaseTiming { state: none }", timing)
+        self.assertIn("phase_id != state.next_phase", timing)
+        self.assertIn("if state.next_phase != PHASE_COUNT", timing)
+        self.assertNotIn("enabled: Bool", timing)
+
+    def test_duplicate_finalize_rewrites_existing_trace_incomplete(self) -> None:
+        timing = (harness.REPO_ROOT / "compiler" / "phase_timing.ring").read_text(
+            encoding="utf-8"
+        )
+        finish = timing[
+            timing.index("pub fn finish_command") : timing.index(
+                "fn write_phase_timing_trace"
+            )
         ]
-        self.assertIn("return PhaseTiming", disabled)
-        self.assertNotIn("ring_bench_monotonic_ns", disabled)
-        self.assertNotIn("${entry_file}", disabled)
-        self.assertIn("if self.enabled == false { return }", timing)
-        self.assertIn("phase != phase_timing_phase(self.next_phase)", timing)
-        self.assertIn("if self.next_phase != 5 { self.integrity = false }", timing)
+        duplicate = finish[
+            finish.index("if state.finalized") : finish.index(
+                "state.finalized = true"
+            )
+        ]
+        self.assertIn("state.integrity = false", duplicate)
+        self.assertIn(
+            "write_phase_timing_trace(state, false, command_success)", duplicate
+        )
+        self.assertIn("return", duplicate)
+
+    def test_generated_c_disabled_path_allocates_only_inert_wrapper(self) -> None:
+        generated = (
+            harness.REPO_ROOT / "compiler" / "dist-c" / "main.c"
+        ).read_text(encoding="utf-8")
+        constructor_name = "ringmod_ring__phase__timing_m_m__PhaseTiming"
+        constructor_start = generated.index(f"void* {constructor_name}(void* a0) {{")
+        constructor_end = generated.index("\n}\n", constructor_start) + 3
+        constructor = generated[constructor_start:constructor_end]
+        allocation = re.search(r"ring_alloc\([^;]+\);", constructor)
+        assert allocation is not None
+
+        function_name = "ringmod_ring__phase__timing_m_m__new__phase__timing"
+        definitions = list(
+            re.finditer(
+                rf"^void\* {re.escape(function_name)}\("
+                r"void\* r_output_path, void\* r_lane, "
+                r"void\* r_compiler_identity, void\* r_source_identity, "
+                r"void\* r_entry_file\) \{$",
+                generated,
+                re.MULTILINE,
+            )
+        )
+        self.assertEqual(len(definitions), 1)
+        function_start = definitions[0].start()
+        function_end = generated.index("\n}\n", definitions[0].end()) + 3
+        function = generated[function_start:function_end]
+        branch = re.search(
+            r"if \(\*\(int64_t\*\)\w+ != 1\) goto (?P<label>\w+);"
+            r"(?P<body>.*?)\n(?P=label):;",
+            function,
+            re.DOTALL,
+        )
+        assert branch is not None
+        disabled = branch.group("body")
+        self.assertEqual(disabled.count("ring_alloc("), 1)
+        self.assertIn(allocation.group(0), disabled)
+        self.assertIn("ring_Option_none()", disabled)
+        for forbidden in (
+            "ring_str_from_cstr", "ring_list_new", "ring_sb_new",
+            "ring_bench_monotonic_ns", "ring_path_resolve", "ring_write_file",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, disabled)
 
 
 _PHASE_TEST_COMPILER = os.environ.get("RING_PHASE_TEST_COMPILER", "")
+_PHASE_TEST_COMPILER_SHA256 = os.environ.get(
+    "RING_PHASE_TEST_COMPILER_SHA256", ""
+)
 
 
 @unittest.skipUnless(
-    _PHASE_TEST_COMPILER and Path(_PHASE_TEST_COMPILER).is_file(),
-    "set RING_PHASE_TEST_COMPILER to run native phase-timing parity",
+    _PHASE_TEST_COMPILER
+    and _PHASE_TEST_COMPILER_SHA256
+    and Path(_PHASE_TEST_COMPILER).is_file(),
+    "set exact RING_PHASE_TEST_COMPILER and SHA256 to run native phase-timing parity",
 )
 class NativeCliPhaseTimingTests(unittest.TestCase):
+    def test_candidate_identity_is_explicit_and_exact(self) -> None:
+        self.assertRegex(_PHASE_TEST_COMPILER_SHA256, r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            harness._sha256_file(Path(_PHASE_TEST_COMPILER)),
+            _PHASE_TEST_COMPILER_SHA256,
+        )
+
     def test_timed_and_untimed_cli_contract_matrix(self) -> None:
         compiler = str(Path(_PHASE_TEST_COMPILER).resolve())
         command_only = ["command_total"]
@@ -682,6 +1185,21 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
             "resource_plan_verify",
             "command_total",
         ]
+        single_built = [
+            "input_entry_load",
+            "entry_parse",
+            "type_effect_check_lower",
+            "resource_plan_verify",
+            "command_total",
+        ]
+        project_built = [
+            "input_entry_load",
+            "entry_parse",
+            "project_module_load_parse",
+            "type_effect_check_lower",
+            "resource_plan_verify",
+            "command_total",
+        ]
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             parse_project = root / "parse-project"
@@ -702,26 +1220,50 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
             (type_project / "lib.ring").write_text(
                 'pub fn value() -> Int { "bad" }\n', encoding="utf-8"
             )
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            fake_source = root / "fake-clang.c"
+            fake_source.write_text("int main(void) { return 7; }\n", encoding="utf-8")
+            real_clang = shutil.which("clang")
+            assert real_clang is not None
+            subprocess.run(
+                [real_clang, str(fake_source), "-o", str(fake_bin / "clang.exe")],
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+            output_dirs = {
+                name: root / name
+                for name in (
+                    "single-build-success", "single-build-failure",
+                    "project-build-success", "project-build-failure",
+                )
+            }
+            for directory in output_dirs.values():
+                directory.mkdir()
             cases = [
-                ("help_success", ["help"], 0, command_only),
-                ("lsp_failure", ["lsp"], 1, command_only),
+                ("help_success", ["help"], 0, command_only, False),
+                ("lsp_failure", ["lsp"], 1, command_only, False),
                 (
                     "single_success",
                     ["check", str(harness.REPO_ROOT / "tests/cases/hello.ring")],
                     0,
                     single_checked,
+                    False,
                 ),
                 (
                     "single_parse_failure",
                     ["check", str(harness.REPO_ROOT / "tests/cases/error_multi_parse.ring")],
                     1,
                     single_parse,
+                    False,
                 ),
                 (
                     "single_type_failure",
                     ["check", str(harness.REPO_ROOT / "tests/cases/error_undefined.ring")],
                     1,
                     single_checked,
+                    False,
                 ),
                 (
                     "project_success",
@@ -734,18 +1276,21 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
                     ],
                     0,
                     project_checked,
+                    False,
                 ),
                 (
                     "project_parse_failure",
                     ["check", str(parse_project / "main.ring")],
                     1,
                     project_parse,
+                    False,
                 ),
                 (
                     "project_type_failure",
                     ["check", str(type_project / "main.ring")],
                     1,
                     project_checked,
+                    False,
                 ),
                 (
                     "rc_success",
@@ -759,6 +1304,7 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
                     ],
                     0,
                     rc_checked,
+                    False,
                 ),
                 (
                     "rc_fatal",
@@ -773,13 +1319,62 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
                     ],
                     1,
                     rc_checked,
+                    False,
+                ),
+                (
+                    "single_build_success",
+                    [
+                        "build",
+                        str(harness.REPO_ROOT / "tests/cases/hello.ring"),
+                        f"--out-dir={output_dirs['single-build-success']}",
+                    ],
+                    0,
+                    single_built,
+                    False,
+                ),
+                (
+                    "single_build_clang_failure",
+                    [
+                        "build",
+                        str(harness.REPO_ROOT / "tests/cases/hello.ring"),
+                        f"--out-dir={output_dirs['single-build-failure']}",
+                    ],
+                    1,
+                    single_built,
+                    True,
+                ),
+                (
+                    "project_build_success",
+                    [
+                        "build",
+                        str(harness.REPO_ROOT / "tests/cases/modules/diamond_dep/main.ring"),
+                        f"--out-dir={output_dirs['project-build-success']}",
+                    ],
+                    0,
+                    project_built,
+                    False,
+                ),
+                (
+                    "project_build_clang_failure",
+                    [
+                        "build",
+                        str(harness.REPO_ROOT / "tests/cases/modules/diamond_dep/main.ring"),
+                        f"--out-dir={output_dirs['project-build-failure']}",
+                    ],
+                    1,
+                    project_built,
+                    True,
                 ),
             ]
-            for name, argv, expected_exit, expected_executed in cases:
+            for name, argv, expected_exit, expected_executed, force_clang_failure in cases:
                 with self.subTest(case=name):
+                    child_env = dict(os.environ)
+                    if force_clang_failure:
+                        child_env["PATH"] = str(fake_bin) + os.pathsep + child_env["PATH"]
                     untimed = subprocess.run(
                         [compiler, *argv],
                         cwd=harness.REPO_ROOT,
+                        env=child_env,
                         capture_output=True,
                         timeout=120,
                         check=False,
@@ -795,6 +1390,7 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
                             "--phase-timing-source=native-matrix-source",
                         ],
                         cwd=harness.REPO_ROOT,
+                        env=child_env,
                         capture_output=True,
                         timeout=120,
                         check=False,
@@ -851,7 +1447,7 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
                             if not row["executed"]
                         )
                     )
-                    errors = harness._validate_compiler_phase_rows(
+                    errors = phase_errors(harness._classify_compiler_phase_rows(
                         rows,
                         expected_lane=name,
                         expected_compiler_identity="native-matrix",
@@ -864,7 +1460,7 @@ class NativeCliPhaseTimingTests(unittest.TestCase):
                         expected_success=expected_exit == 0,
                         expected_executed_phases=expected_executed,
                         wall_ns=harness.RING_INT_MAX,
-                    )
+                    ))
                     self.assertEqual(errors, [])
 
 

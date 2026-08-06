@@ -8,7 +8,11 @@ use compiler_mod::{compile_project, compile_project_c, verify_project_rc}
 use parser::{parse}
 use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{verify_rc_program, rc_fatal_count, format_rc_findings}
-use phase_timing::{new_phase_timing}
+use phase_timing::{
+    new_phase_timing,
+    PHASE_INPUT_ENTRY_LOAD, PHASE_ENTRY_PARSE,
+    PHASE_PROJECT_MODULE_LOAD_PARSE, PHASE_TYPE_EFFECT_CHECK_LOWER,
+    PHASE_RESOURCE_PLAN_VERIFY}
 
 pub fn cli_main() {
     let args = argv()
@@ -20,11 +24,11 @@ pub fn cli_main() {
 
     if parsed.target != "c" {
         eprintln("Error: unsupported code generation target '${parsed.target}'; this compiler supports only '--target=c'.")
-        timing.skip_phase("input_entry_load")
-        timing.skip_phase("entry_parse")
-        timing.skip_phase("project_module_load_parse")
-        timing.skip_phase("type_effect_check_lower")
-        timing.skip_phase("resource_plan_verify")
+        timing.skip_phase(PHASE_INPUT_ENTRY_LOAD)
+        timing.skip_phase(PHASE_ENTRY_PARSE)
+        timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+        timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         timing.finish_command(false)
         exit_process(1)
         return
@@ -32,11 +36,11 @@ pub fn cli_main() {
 
     if parsed.command == "help" || parsed.command == "" {
         usage()
-        timing.skip_phase("input_entry_load")
-        timing.skip_phase("entry_parse")
-        timing.skip_phase("project_module_load_parse")
-        timing.skip_phase("type_effect_check_lower")
-        timing.skip_phase("resource_plan_verify")
+        timing.skip_phase(PHASE_INPUT_ENTRY_LOAD)
+        timing.skip_phase(PHASE_ENTRY_PARSE)
+        timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+        timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         timing.finish_command(true)
         return
     }
@@ -44,11 +48,11 @@ pub fn cli_main() {
     if parsed.command == "lsp" {
         // LSP not yet supported in Ring bootstrap
         eprintln("LSP mode not available in Ring compiler")
-        timing.skip_phase("input_entry_load")
-        timing.skip_phase("entry_parse")
-        timing.skip_phase("project_module_load_parse")
-        timing.skip_phase("type_effect_check_lower")
-        timing.skip_phase("resource_plan_verify")
+        timing.skip_phase(PHASE_INPUT_ENTRY_LOAD)
+        timing.skip_phase(PHASE_ENTRY_PARSE)
+        timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+        timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         timing.finish_command(false)
         exit_process(1)
         return
@@ -56,11 +60,11 @@ pub fn cli_main() {
 
     if parsed.file == "" {
         eprintln("Error: no input file specified.")
-        timing.skip_phase("input_entry_load")
-        timing.skip_phase("entry_parse")
-        timing.skip_phase("project_module_load_parse")
-        timing.skip_phase("type_effect_check_lower")
-        timing.skip_phase("resource_plan_verify")
+        timing.skip_phase(PHASE_INPUT_ENTRY_LOAD)
+        timing.skip_phase(PHASE_ENTRY_PARSE)
+        timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+        timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         timing.finish_command(false)
         exit_process(1)
         return
@@ -71,22 +75,22 @@ pub fn cli_main() {
     timing.set_entry_file(file_path)
     if file_exists(file_path) == false {
         eprintln("Error: file not found: ${file_path}")
-        timing.finish_phase("input_entry_load", input_start)
-        timing.skip_phase("entry_parse")
-        timing.skip_phase("project_module_load_parse")
-        timing.skip_phase("type_effect_check_lower")
-        timing.skip_phase("resource_plan_verify")
+        timing.finish_phase(PHASE_INPUT_ENTRY_LOAD, input_start)
+        timing.skip_phase(PHASE_ENTRY_PARSE)
+        timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+        timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         timing.finish_command(false)
         exit_process(1)
         return
     }
 
     let source = read_file(file_path)
-    timing.finish_phase("input_entry_load", input_start)
+    timing.finish_phase(PHASE_INPUT_ENTRY_LOAD, input_start)
     let parse_start = timing.start_phase()
     let parse_sink = new_collecting_sink()
     let ast = parse(source, file_path, parse_sink)
-    timing.finish_phase("entry_parse", parse_start)
+    timing.finish_phase(PHASE_ENTRY_PARSE, parse_start)
 
     if parse_sink.has_errors() {
         let diagnostics = parse_sink.items
@@ -110,9 +114,9 @@ pub fn cli_main() {
                 }
             }
         }
-        timing.skip_phase("project_module_load_parse")
-        timing.skip_phase("type_effect_check_lower")
-        timing.skip_phase("resource_plan_verify")
+        timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+        timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         timing.finish_command(false)
         exit_process(1)
         return
@@ -129,7 +133,6 @@ pub fn cli_main() {
                 parsed.error_format, timing)
             if res.success == false {
                 eprintln("Compilation failed")
-                timing.skip_phase("resource_plan_verify")
                 timing.finish_command(false)
                 exit_process(1)
                 return
@@ -146,7 +149,6 @@ pub fn cli_main() {
         }
         if parsed.command == "check" {
             let result = compile_project(file_path, parsed.error_format, timing)
-            timing.skip_phase("resource_plan_verify")
             if result.success {
                 print("OK")
                 timing.finish_command(true)
@@ -171,16 +173,15 @@ pub fn cli_main() {
                     timing.finish_command(true)
                 } else {
                     eprintln("Compilation failed")
-                    timing.skip_phase("resource_plan_verify")
                     timing.finish_command(false)
                     exit_process(1)
                 }
                 return
             } else {
                 eprintln("Only 'build' and 'check' commands are supported")
-                timing.skip_phase("project_module_load_parse")
-                timing.skip_phase("type_effect_check_lower")
-                timing.skip_phase("resource_plan_verify")
+                timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+                timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+                timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
                 timing.finish_command(false)
                 exit_process(1)
             }
@@ -189,11 +190,11 @@ pub fn cli_main() {
     }
 
     // Single-file mode
-    timing.skip_phase("project_module_load_parse")
+    timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
     let check_start = timing.start_phase()
     let sink = new_collecting_sink()
     let check_result = check_single(ast, sink)
-    timing.finish_phase("type_effect_check_lower", check_start)
+    timing.finish_phase(PHASE_TYPE_EFFECT_CHECK_LOWER, check_start)
 
     if sink.has_errors() {
         let diagnostics = sink.items
@@ -202,7 +203,7 @@ pub fn cli_main() {
         } else {
             eprintln(format_human(diagnostics, source))
         }
-        timing.skip_phase("resource_plan_verify")
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         timing.finish_command(false)
         exit_process(1)
         return
@@ -230,7 +231,7 @@ pub fn cli_main() {
         let findings = verify_rc_program(rc_program)
         let fatal = rc_fatal_count(findings)
         let exempt = findings.len() - fatal
-        timing.finish_phase("resource_plan_verify", resource_start)
+        timing.finish_phase(PHASE_RESOURCE_PLAN_VERIFY, resource_start)
         print(format_rc_findings(findings, parsed.verify_strict))
         if fatal > 0 || (parsed.verify_strict && exempt > 0) {
             timing.finish_command(false)
@@ -243,14 +244,14 @@ pub fn cli_main() {
     }
 
     if parsed.command == "check" {
-        timing.skip_phase("resource_plan_verify")
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
         print("OK")
         timing.finish_command(true)
     } else {
         if parsed.command == "build" {
             let resource_start = timing.start_phase()
             let rc_program = perceus_transform(check_result.program)
-            timing.finish_phase("resource_plan_verify", resource_start)
+            timing.finish_phase(PHASE_RESOURCE_PLAN_VERIFY, resource_start)
             // Emit <name>.c, then shell out clang -c → <name>.o.
             // --out-dir redirects both artifacts when explicitly given;
             // the default places them next to the source.
@@ -265,11 +266,14 @@ pub fn cli_main() {
             } else {
                 file_path.replace(".ring", ".o")
             }
-            generate_c(rc_program, c_path, o_path, parsed.c_lines)
-            timing.finish_command(true)
+            let build_ok = generate_c(rc_program, c_path, o_path, parsed.c_lines)
+            timing.finish_command(build_ok)
+            if build_ok == false {
+                exit_process(1)
+            }
         } else {
             eprintln("Only 'build' and 'check' commands are supported")
-            timing.skip_phase("resource_plan_verify")
+            timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
             timing.finish_command(false)
             exit_process(1)
         }
@@ -292,10 +296,10 @@ struct CliArgs {
     verify_rc: Bool,
     verify_strict: Bool,
     rc_mutate: Str,
-    phase_timing_file: Str,
-    phase_timing_lane: Str,
-    phase_timing_compiler: Str,
-    phase_timing_source: Str
+    phase_timing_file: Str?,
+    phase_timing_lane: Str?,
+    phase_timing_compiler: Str?,
+    phase_timing_source: Str?
 }
 
 fn normalize_cli_args(args: List<Str>) -> List<Str> {
@@ -328,10 +332,10 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
     let mut verify_rc = false
     let mut verify_strict = false
     let mut rc_mutate = ""
-    let mut phase_timing_file = ""
-    let mut phase_timing_lane = ""
-    let mut phase_timing_compiler = ""
-    let mut phase_timing_source = ""
+    let mut phase_timing_file: Str? = none
+    let mut phase_timing_lane: Str? = none
+    let mut phase_timing_compiler: Str? = none
+    let mut phase_timing_source: Str? = none
     let mut positional: List<Str> = []
 
     for arg in args {
@@ -356,16 +360,16 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
                         rc_mutate = arg.slice(12, arg.len())
                     } else {
                         if arg.starts_with("--phase-timing=") {
-                            phase_timing_file = arg.slice(15, arg.len())
+                            phase_timing_file = some(arg.slice(15, arg.len()))
                         } else {
                         if arg.starts_with("--phase-timing-lane=") {
-                            phase_timing_lane = arg.slice(20, arg.len())
+                            phase_timing_lane = some(arg.slice(20, arg.len()))
                         } else {
                         if arg.starts_with("--phase-timing-compiler=") {
-                            phase_timing_compiler = arg.slice(24, arg.len())
+                            phase_timing_compiler = some(arg.slice(24, arg.len()))
                         } else {
                         if arg.starts_with("--phase-timing-source=") {
-                            phase_timing_source = arg.slice(22, arg.len())
+                            phase_timing_source = some(arg.slice(22, arg.len()))
                         } else {
                         if arg.starts_with("--error-format=") {
                             error_format = arg.slice(15, arg.len())

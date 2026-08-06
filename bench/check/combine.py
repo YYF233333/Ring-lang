@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import json
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -31,14 +29,16 @@ def _load_samples(path: Path, schema: Mapping[str, Any]) -> list[dict[str, Any]]
             for line_number, line in enumerate(stream, 1):
                 if not line.strip():
                     continue
-                value = json.loads(line)
+                value = harness._strict_json_loads(
+                    line, f"{path}:{line_number}"
+                )
                 if not isinstance(value, dict):
                     raise harness.HarnessError(
                         f"{path}:{line_number}: sample row is not an object"
                     )
                 harness.validate_json(value, schema, f"{path}:{line_number}")
                 records.append(value)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError) as exc:
         raise harness.HarnessError(f"cannot read samples {path}: {exc}") from exc
     if not records:
         raise harness.HarnessError(f"samples file is empty: {path}")
@@ -52,6 +52,7 @@ def _fingerprint(
     cpu = environment.get("cpu")
     power = environment.get("power")
     tools = environment.get("tools")
+    warm_seed = environment.get("warm_cache_seed")
     if not isinstance(os_record, dict) or not isinstance(cpu, dict) or not isinstance(power, dict):
         raise harness.HarnessError("environment lacks stable machine identity records")
     ring = tools.get("ring") if isinstance(tools, dict) else None
@@ -94,6 +95,9 @@ def _fingerprint(
         "result_schema_sha256": harness._sha256_file(schema_path),
         "dist_c_sha256": environment.get("dist_c_sha256"),
         "runtime_sha256": environment.get("runtime_sha256"),
+        "warm_cache_seed": (
+            warm_seed.get("identity") if isinstance(warm_seed, dict) else None
+        ),
         "tools": tools,
         "flags": environment.get("flags"),
         "machine": {
@@ -158,269 +162,6 @@ def _validate_lane_schedule(
         raise harness.HarnessError(f"attempt budget exceeded in lane {case_id}")
 
 
-def _replay_context(
-    environment: Mapping[str, Any], run_dir: Path, sample_dir: Path,
-    expected_lane: Mapping[str, Any]
-) -> dict[str, str]:
-    tools = environment.get("tools")
-    if not isinstance(tools, dict):
-        raise harness.HarnessError("environment tools record is unavailable")
-    context: dict[str, str] = {}
-    for name, tool in tools.items():
-        path = tool.get("path") if isinstance(tool, dict) else None
-        context[name] = path if isinstance(path, str) and path else f"<missing:{name}>"
-    cache_path = environment.get("thinlto_cache_path")
-    if expected_lane["cache"]["thinlto_cache"] == "cold":
-        invocation_cache = sample_dir / "temp" / "ring-lang-thinlto-cache"
-    elif isinstance(cache_path, str) and cache_path:
-        invocation_cache = Path(cache_path)
-    else:
-        raise harness.HarnessError("environment ThinLTO cache path is unavailable")
-    context.update(
-        {
-            "repo": str(harness.REPO_ROOT),
-            "run_dir": str(run_dir),
-            "sample_dir": str(sample_dir),
-            "thinlto_cache": str(invocation_cache),
-        }
-    )
-    return context
-
-
-def _actual_file_record(path: Path, label: str) -> dict[str, Any]:
-    try:
-        if not path.is_file():
-            raise harness.HarnessError(f"missing retained {label}: {path}")
-        return harness._file_record(path)
-    except OSError as exc:
-        raise harness.HarnessError(f"cannot verify retained {label} {path}: {exc}") from exc
-
-
-def _validate_runner_runtime_provenance(
-    record: Mapping[str, Any], expected_lane: Mapping[str, Any],
-    environment: Mapping[str, Any], sample_dir: Path
-) -> None:
-    runtime = record["runner_runtime"]
-    applies = bool(expected_lane.get("isolate_runner_runtime", False))
-    if not applies:
-        expected = {
-            "mode": "not_applicable",
-            "isolated": False,
-            "root_path": None,
-            "source_sha256": None,
-            "flags": [],
-            "original_exists": False,
-            "original_sha256": None,
-            "pre_exists": False,
-            "pre_sha256": None,
-            "post_exists": False,
-            "post_sha256": None,
-            "restored": True,
-            "backup_path": None,
-            "backup_exists_after": False,
-            "staging_path": None,
-            "staging_exists_after": False,
-            "errors": [],
-        }
-        if runtime != expected:
-            raise harness.HarnessError(
-                f"runner runtime provenance mismatch in {record['sample_id']}"
-            )
-        return
-
-    setup = environment.get("runner_runtime")
-    if not isinstance(setup, dict):
-        raise harness.HarnessError("environment runner runtime setup is unavailable")
-    root_text = setup.get("root_path")
-    if not isinstance(root_text, str) or not root_text:
-        raise harness.HarnessError("environment runner runtime root is unavailable")
-    root = Path(root_text)
-    token = re.sub(r"[^a-zA-Z0-9_-]", "_", sample_dir.name)
-    backup = root.with_name(f"ring_runtime.b176-{token}.backup.o").resolve()
-    staging = root.with_name(f"ring_runtime.b176-{token}.install.o").resolve()
-    original = setup.get("original_root")
-    if not isinstance(original, dict):
-        raise harness.HarnessError("environment original runtime state is unavailable")
-    expected_fields = {
-        "mode": expected_lane["cache"]["thinlto_cache"],
-        "isolated": True,
-        "root_path": str(root.resolve()),
-        "source_sha256": setup.get("source_sha256"),
-        "flags": setup.get("flags"),
-        "original_exists": original.get("exists"),
-        "original_sha256": original.get("sha256"),
-        "backup_path": str(backup),
-        "staging_path": str(staging),
-    }
-    for field, expected in expected_fields.items():
-        if runtime.get(field) != expected:
-            raise harness.HarnessError(
-                f"runner runtime {field} provenance mismatch in {record['sample_id']}"
-            )
-    if runtime["mode"] == "cold":
-        expected_pre = (False, None)
-    else:
-        prepared = setup.get("prepared")
-        if not isinstance(prepared, dict):
-            raise harness.HarnessError("prepared warm runtime state is unavailable")
-        expected_pre = (prepared.get("exists"), prepared.get("sha256"))
-    if (runtime["pre_exists"], runtime["pre_sha256"]) != expected_pre:
-        raise harness.HarnessError(
-            f"runner runtime pre-state mismatch in {record['sample_id']}"
-        )
-    if not runtime["errors"] and (
-        not runtime["post_exists"]
-        or not runtime["restored"]
-        or runtime["backup_exists_after"]
-        or runtime["staging_exists_after"]
-    ):
-        raise harness.HarnessError(
-            f"runner runtime clean-state mismatch in {record['sample_id']}"
-        )
-    if (
-        runtime["mode"] == "warm"
-        and runtime["post_exists"]
-        and isinstance(setup.get("prepared"), dict)
-        and runtime["post_sha256"] != setup["prepared"].get("sha256")
-    ):
-        raise harness.HarnessError(
-            f"runner runtime warm post-state mismatch in {record['sample_id']}"
-        )
-
-
-def _revalidate_record_eligibility(
-    record: Mapping[str, Any],
-    expected_lane: Mapping[str, Any],
-    environment: Mapping[str, Any],
-    run_dir: Path,
-) -> None:
-    sample_id = record["sample_id"]
-    expected_sample_dir = (
-        run_dir / "samples" / expected_lane["case_id"] / sample_id
-    ).resolve()
-    try:
-        expected_sample_dir.relative_to(run_dir)
-    except ValueError as exc:
-        raise harness.HarnessError(
-            f"sample_dir escapes run directory in {sample_id}"
-        ) from exc
-    sample_dir_text = record.get("sample_dir")
-    if (
-        not isinstance(sample_dir_text, str)
-        or not Path(sample_dir_text).is_absolute()
-        or sample_dir_text != str(expected_sample_dir)
-    ):
-        raise harness.HarnessError(
-            f"sample_dir provenance mismatch in {sample_id}"
-        )
-    context = _replay_context(
-        environment, run_dir, expected_sample_dir, expected_lane
-    )
-    expected_argv = [harness._format(item, context) for item in expected_lane["argv"]]
-    phase_paths = harness.resolve_phase_trace_paths(
-        expected_lane, expected_sample_dir
-    )
-    if expected_lane.get("compiler_phase_timing", False):
-        compiler_sha = environment["tools"]["ring"]["sha256"]
-        expected_argv.extend(
-            [
-                f"--phase-timing={phase_paths[0]}",
-                f"--phase-timing-lane={expected_lane['case_id']}",
-                f"--phase-timing-compiler=sha256:{compiler_sha}",
-                f"--phase-timing-source=git:{environment['source_sha']}",
-            ]
-        )
-    expected_cwd = str(Path(harness._format(expected_lane["cwd"], context)).resolve())
-    if record["argv"] != expected_argv or record["cwd"] != expected_cwd:
-        raise harness.HarnessError(f"invocation provenance mismatch in {sample_id}")
-
-    stdout_path = expected_sample_dir / "stdout.txt"
-    stderr_path = expected_sample_dir / "stderr.txt"
-    for stream_path in (stdout_path, stderr_path):
-        try:
-            stream_path.resolve().relative_to(expected_sample_dir)
-        except ValueError as exc:
-            raise harness.HarnessError(
-                f"stream path escapes sample_dir in {sample_id}: {stream_path.resolve()}"
-            ) from exc
-    actual_stdout = _actual_file_record(stdout_path, "stdout")
-    actual_stderr = _actual_file_record(stderr_path, "stderr")
-    if record["stdout"] != actual_stdout or record["stderr"] != actual_stderr:
-        raise harness.HarnessError(f"stream provenance mismatch in {sample_id}")
-    actual_runner = (
-        harness._runner_summary(stdout_path)
-        if expected_lane["runner_summary"]
-        else None
-    )
-    if record["runner_summary"] != actual_runner:
-        raise harness.HarnessError(f"runner summary provenance mismatch in {sample_id}")
-
-    artifact_paths = [
-        Path(harness._format(item, context)).resolve()
-        for item in expected_lane["artifacts"]
-    ]
-    for path in artifact_paths:
-        try:
-            path.relative_to(expected_sample_dir)
-        except ValueError as exc:
-            raise harness.HarnessError(
-                f"declared artifact escapes sample_dir in {sample_id}: {path}"
-            ) from exc
-    actual_artifacts = harness._artifact_records(artifact_paths)
-    if record["artifacts"] != actual_artifacts:
-        raise harness.HarnessError(f"artifact provenance mismatch in {sample_id}")
-
-    actual_phase_traces = harness._phase_trace_records(phase_paths)
-    if record["phase_traces"] != actual_phase_traces:
-        raise harness.HarnessError(f"phase trace provenance mismatch in {sample_id}")
-    _validate_runner_runtime_provenance(
-        record, expected_lane, environment, expected_sample_dir
-    )
-    exit_record = record["exit"]
-    exit_code = exit_record["code"]
-    expected_exit = exit_code in expected_lane["expected_exit_codes"]
-    if exit_record["expected"] is not expected_exit:
-        raise harness.HarnessError(
-            f"stored exit eligibility mismatch in {sample_id}"
-        )
-    phase_errors = harness._validate_phase_trace_records(
-        actual_phase_traces,
-        paths=phase_paths,
-        sample_dir=expected_sample_dir,
-        lane=expected_lane,
-        environment=environment,
-        expected_entry_file=(
-            harness.resolve_invocation_entry(expected_argv, expected_cwd)
-            if expected_lane.get("compiler_phase_timing", False)
-            else ""
-        ),
-        exit_code=exit_code,
-        wall_ns=record["wall_ns"],
-    )
-    reason = harness.derive_invalid_reason(
-        policy=expected_lane["policy"],
-        index=record["index"],
-        invocation_error=record["invocation_error"],
-        measurement=record,
-        exit_code=exit_code,
-        expected_exit_codes=expected_lane["expected_exit_codes"],
-        runner_expected=expected_lane["runner_summary"],
-        runner_summary=actual_runner,
-        artifacts=actual_artifacts,
-        phase_errors=phase_errors,
-        runtime_errors=record["runner_runtime"]["errors"],
-    )
-    if record["invalid_reason"] != reason:
-        raise harness.HarnessError(
-            f"stored invalid_reason mismatch in {sample_id}: "
-            f"expected {reason!r}, got {record['invalid_reason']!r}"
-        )
-    if record["included"] is not (reason is None):
-        raise harness.HarnessError(
-            f"stored included eligibility mismatch in {sample_id}"
-        )
-
-
 def _load_run(run_dir: Path) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     if not run_dir.is_dir():
@@ -444,6 +185,7 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
         raise harness.HarnessError(f"environment schema mismatch: {run_dir}")
     if environment.get("flags") != manifest["fingerprint_flags"]:
         raise harness.HarnessError(f"environment flags differ from manifest: {run_dir}")
+    harness.validate_retained_warm_cache_seed(environment, run_dir)
     fingerprint = _fingerprint(environment, manifest_path, schema_path)
     if environment.get("git_dirty") is not False:
         raise harness.HarnessError(f"formal run was not captured from a clean worktree: {run_dir}")
@@ -509,8 +251,10 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
         if lane_summary.get("policy") != expected_lane["policy"]:
             raise harness.HarnessError(f"manifest policy mismatch in lane {case_id}: {run_dir}")
         for record in lane_records:
-            _revalidate_record_eligibility(
-                record, expected_lane, environment, run_dir
+            harness.validate_attempt_boundary(
+                record, expected_lane, environment, run_dir,
+                schema,
+                verify_stored=True,
             )
         expected_target = _expected_target(expected_lane["policy"], lane_records)
         if lane_summary.get("target_valid_samples") != expected_target:

@@ -9,6 +9,10 @@ import combine
 import run as harness
 
 
+def phase_errors(classified: harness.PhaseValidation) -> list[str]:
+    return [*classified.hard_errors, *classified.eligibility_errors]
+
+
 class StrictCombineTests(unittest.TestCase):
     def _compiler_rows(self) -> list[dict]:
         durations = {
@@ -62,20 +66,61 @@ class StrictCombineTests(unittest.TestCase):
                     "timeout_seconds": 10,
                     "expected_exit_codes": [0],
                     "requires": ["tool:ring"],
-                    "runner_summary": False,
+                    "runner_summary": None,
                     "artifacts": ["{sample_dir}/artifact.bin"],
                     "phase_trace_paths": [],
                 }
             ],
         }
 
-    def _schema(self, keys: set[str]) -> dict:
+    def _schema(self, _keys: set[str]) -> dict:
+        return harness._load_json(harness.DEFAULT_RESULT_SCHEMA)
+
+    def _seed_receipt(
+        self, root: Path, source_sha: str, manifest: dict
+    ) -> dict:
+        cache = (root / "thinlto-cache").resolve()
+        cache.mkdir(exist_ok=True)
+        seed_file = cache / "seed.bin"
+        if not seed_file.exists():
+            seed_file.write_bytes(b"seed")
+        tools = {
+            name: {
+                "path": str((root / f"{name}.exe").resolve()),
+                "version": "fixture",
+                "sha256": character * 64,
+            }
+            for name, character in (
+                ("python", "1"), ("clang", "2"), ("clangxx", "3")
+            )
+        }
         return {
-            "$id": harness.RESULT_SCHEMA,
-            "type": "object",
-            "additionalProperties": False,
-            "required": sorted(keys),
-            "properties": {key: {} for key in keys},
+            "schema": harness.WARM_CACHE_RECEIPT_SCHEMA,
+            "recipe_version": 1,
+            "source": {
+                "git_sha": source_sha,
+                "git_dirty": False,
+                "dist_c": {"path": str((root / "dist-c").resolve()), "sha256": "b" * 64, "bytes": 1},
+                "runtime": {"path": str((root / "runtime").resolve()), "sha256": "c" * 64, "bytes": 1},
+                "bootstrap": {"path": str((root / "bootstrap").resolve()), "sha256": "e" * 64, "bytes": 1},
+            },
+            "tools": tools,
+            "flags": {
+                name: manifest["fingerprint_flags"][name]
+                for name in ("compiler", "runtime", "link")
+            },
+            "cache_path": str(cache),
+            "seed_invocation": {
+                "argv": ["fixture-seed"],
+                "cwd": str(root.resolve()),
+                "timeout_seconds": harness.WARM_CACHE_SEED_TIMEOUT_SECONDS,
+            },
+            "outcome": {
+                "exit_code": 0,
+                "stdout": {"sha256": "4" * 64, "bytes": 0},
+                "stderr": {"sha256": "5" * 64, "bytes": 0},
+            },
+            "cache_inventory": harness._cache_inventory(cache),
         }
 
     def _record(
@@ -89,7 +134,7 @@ class StrictCombineTests(unittest.TestCase):
         manifest_sha: str,
         run_dir: Path,
     ) -> dict:
-        sample_id = f"{run_id}-{index}"
+        sample_id = f"{case_id}-{index:03d}-{index:08x}"
         sample_dir = (run_dir / "samples" / case_id / sample_id).resolve()
         sample_dir.mkdir(parents=True)
         stdout_path = sample_dir / "stdout.txt"
@@ -230,10 +275,15 @@ class StrictCombineTests(unittest.TestCase):
             "dist_c_sha256": "b" * 64,
             "runtime_sha256": "c" * 64,
             "tools": {
-                "ring": {"path": "ring.exe", "version": "v", "sha256": "d" * 64}
+                "ring": {"path": "ring.exe", "version": "v", "sha256": "d" * 64},
+                **self._seed_receipt(root, source_sha, manifest)["tools"],
             },
             "flags": manifest["fingerprint_flags"],
+            "cache_state": state,
             "thinlto_cache_path": str((root / "thinlto-cache").resolve()),
+            "thinlto_cache_inventory": self._seed_receipt(
+                root, source_sha, manifest
+            )["cache_inventory"],
             "os": {"system": "Windows", "release": "fixture", "version": "1", "machine": "AMD64"},
             "cpu": {"model": "fixture cpu", "logical_cores": 8},
             "memory_bytes": 16 * 1024 * 1024 * 1024,
@@ -243,6 +293,13 @@ class StrictCombineTests(unittest.TestCase):
                 "battery_flag": 0,
                 "battery_life_percent": 50,
             },
+        }
+        receipt = self._seed_receipt(root, source_sha, manifest)
+        receipt_path = run_dir / "warm-cache-seed-receipt.json"
+        harness._json_dump(receipt_path, receipt)
+        environment["warm_cache_seed"] = {
+            "identity": receipt,
+            "receipt": harness._file_record(receipt_path),
         }
         harness._json_dump(run_dir / "environment.json", environment)
         return run_dir
@@ -343,7 +400,7 @@ class StrictCombineTests(unittest.TestCase):
                 "source_sha": "a" * 40,
                 "tools": {"ring": {"sha256": "d" * 64}},
             }
-            errors = harness._validate_phase_trace_records(
+            errors = phase_errors(harness._classify_phase_trace_records(
                 wrappers,
                 paths=[path],
                 sample_dir=sample_dir,
@@ -354,10 +411,10 @@ class StrictCombineTests(unittest.TestCase):
                 ),
                 exit_code=0,
                 wall_ns=150,
-            )
+            ))
             self.assertEqual(errors, [])
             rows[0]["compiler_identity"] = "sha256:" + "e" * 64
-            errors = harness._validate_phase_trace_records(
+            errors = phase_errors(harness._classify_phase_trace_records(
                 wrappers,
                 paths=[path],
                 sample_dir=sample_dir,
@@ -368,7 +425,7 @@ class StrictCombineTests(unittest.TestCase):
                 ),
                 exit_code=0,
                 wall_ns=150,
-            )
+            ))
             self.assertTrue(any("compiler identity mismatch" in error for error in errors))
 
     def test_rejects_lane_records_after_target_is_reached(self) -> None:
@@ -395,6 +452,56 @@ class StrictCombineTests(unittest.TestCase):
             with self.assertRaisesRegex(harness.HarnessError, "incomplete"):
                 combine.combine_runs([cold], root / "combined")
 
+    def test_rejects_old_or_lax_schema_before_reading_raw_samples(self) -> None:
+        mutations = {
+            "old_v1": lambda schema: schema.update(
+                {"$id": "ring.check-benchmark.invocation.v1"}
+            ),
+            "same_id_lax": lambda schema: schema["properties"]["runner_summary"][
+                "properties"
+            ].__setitem__("suite_counts", {"type": "object"}),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                cold = self._write_run(root, state="cold", run_id="cold-run")
+                schema_path = cold / "result.schema.json"
+                schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                mutate(schema)
+                harness._json_dump(schema_path, schema)
+                (cold / "samples.jsonl").write_text("not-json\n", encoding="utf-8")
+                expected = r"\$id" if name == "old_v1" else "canonical invocation.v2"
+                with self.assertRaisesRegex(harness.HarnessError, expected):
+                    combine.combine_runs([cold], root / "combined")
+
+    def test_duplicate_json_keys_fail_in_metadata_and_nested_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            environment_path = cold / "environment.json"
+            environment_path.write_text(
+                '{"schema":"first","nested":{"x":1,"x":2}}',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(harness.DuplicateJsonKeyError, "duplicate JSON key"):
+                combine.combine_runs([cold], root / "combined")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            samples_path = cold / "samples.jsonl"
+            lines = samples_path.read_text(encoding="utf-8").splitlines()
+            lines[0] = lines[0].replace(
+                '"cache": {', '"cache": {"output":"fresh",', 1
+            )
+            samples_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            summary_path = cold / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["samples_jsonl"] = harness._file_record(samples_path)
+            harness._json_dump(summary_path, summary)
+            with self.assertRaisesRegex(harness.DuplicateJsonKeyError, "duplicate JSON key"):
+                combine.combine_runs([cold], root / "combined")
+
     def test_rejects_identity_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -404,6 +511,30 @@ class StrictCombineTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(harness.HarnessError, "identity/toolchain drift"):
                 combine.combine_runs([cold, warm], root / "combined")
+
+    def test_rejects_wrong_seed_across_batches_and_retained_receipt_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            warm = self._write_run(root, state="warm", run_id="warm-run")
+            environment_path = warm / "environment.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            receipt = environment["warm_cache_seed"]["identity"]
+            receipt["outcome"]["stdout"]["sha256"] = "9" * 64
+            receipt_path = warm / "warm-cache-seed-receipt.json"
+            harness._json_dump(receipt_path, receipt)
+            environment["warm_cache_seed"]["receipt"] = harness._file_record(receipt_path)
+            harness._json_dump(environment_path, environment)
+            with self.assertRaisesRegex(harness.HarnessError, "identity/toolchain drift"):
+                combine.combine_runs([cold, warm], root / "combined")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            receipt_path = cold / "warm-cache-seed-receipt.json"
+            receipt_path.write_bytes(receipt_path.read_bytes() + b" ")
+            with self.assertRaisesRegex(harness.HarnessError, "receipt file provenance"):
+                combine.combine_runs([cold], root / "combined")
 
     def test_rejects_machine_identity_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -471,7 +602,7 @@ class StrictCombineTests(unittest.TestCase):
                 cold = self._write_run(root, state="cold", run_id="cold-run")
                 self._rewrite_samples_and_summary(cold, mutate)
                 with self.assertRaisesRegex(
-                    harness.HarnessError, "stored invalid_reason mismatch"
+                    harness.HarnessError, "rss_complete formula mismatch"
                 ):
                     combine.combine_runs([cold], root / "combined")
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ring.check-benchmark.invocation.v1",
+  "$id": "ring.check-benchmark.invocation.v2",
   "title": "Ring check benchmark invocation",
   "type": "object",
   "additionalProperties": false,
@@ -49,10 +49,13 @@
   "properties": {
     "schema": {
       "type": "string",
-      "const": "ring.check-benchmark.invocation.v1"
+      "const": "ring.check-benchmark.invocation.v2"
     },
     "run_id": { "type": "string", "minLength": 1 },
-    "sample_id": { "type": "string", "minLength": 1 },
+    "sample_id": {
+      "type": "string",
+      "pattern": "[a-z][a-z0-9_]*-[0-9]{3}-[0-9a-f]{8}"
+    },
     "sample_dir": { "type": "string", "minLength": 1 },
     "case_id": { "type": "string", "minLength": 1 },
     "index": { "type": "integer", "minimum": 0 },
@@ -220,7 +223,17 @@
           }
         },
         "suite_counts": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pass", "fail", "skip"],
+            "properties": {
+              "pass": { "type": "integer", "minimum": 0 },
+              "fail": { "type": "integer", "minimum": 0 },
+              "skip": { "type": "integer", "minimum": 0 }
+            }
+          }
         },
         "reported_exit_code": { "type": ["integer", "null"] }
       }
