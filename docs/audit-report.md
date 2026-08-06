@@ -43,7 +43,7 @@
 ## Runtime
 
 
-### #260 `json_stringify<T>` 的 native runtime 无条件按 Str 解引用 [critical] [judgment] [open]
+### #260 `json_stringify<T>` 的 native runtime 无条件按 Str 解引用 [critical] [judgment] [doing]
 
 2026-07-29 B-107 HOF 正式门禁发现并由 direct-call 对照确认：`std/io.ring` 与语言规范公开声明 `json_stringify<T>(value: T) -> Str`，但 native `ring_json_stringify(void*)` 除 null 外无条件把参数转成 `RingStr*`。当前 C-native 安全源码直接执行 `json_stringify(107)` 时，会把 tagged Int `0xD7` 当字符串指针解引用并以 `0xC0000005` 崩溃；不需要一等函数或字典传递即可触发。
 
