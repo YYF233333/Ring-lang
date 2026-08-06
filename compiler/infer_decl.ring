@@ -1077,9 +1077,20 @@ fn expand_delegate_impls(
                                     // public signature; the field ImplEntry owns
                                     // the forwarded callee and its predicates.
                                     let resolved_method_scheme = match delegate_impl {
-                                        some(wrapper_entry) =>
-                                            wrapper_entry.method_schemes.get(tm.name),
-                                        none => none
+                                        some(wrapper_entry) => match
+                                            wrapper_entry.method_schemes.get(tm.name) {
+                                            some(scheme) => scheme,
+                                            none => panic(
+                                                "unreachable: registered delegate method scheme is missing")
+                                        },
+                                        none => panic(
+                                            "unreachable: registered delegate impl is missing")
+                                    }
+                                    let resolved_method_def_id = match
+                                        resolved_method_scheme.def_id {
+                                        some(def_id) => def_id,
+                                        none => panic(
+                                            "unreachable: registered delegate method has no local DefId")
                                     }
                                     let field_method_scheme = match field_impl {
                                         some(field_entry) =>
@@ -1087,41 +1098,32 @@ fn expand_delegate_impls(
                                         none => none
                                     }
                                     match tm.ty {
-                                        Type::FnType {
-                                            params: trait_params,
-                                            return_type: trait_ret_ty,
-                                            meta: trait_meta
-                                        } => {
-                                            let trait_eff = trait_meta.effects
-                                            let trait_ownership = trait_meta.ownership_id
-                                            // Use resolved return type and effects from field type's method
-                                            // if available (concrete assoc types), else fall back to trait def
+                                        Type::FnType { params: trait_params, .. } => {
+                                            // The registered wrapper scheme is
+                                            // authoritative for the generated
+                                            // signature and ownership identity.
                                             let ret_ty = match resolved_method_scheme {
-                                                some(rs) => match rs.ty {
-                                                    Type::FnType { return_type: resolved_ret, .. } => resolved_ret,
-                                                    _ => trait_ret_ty
-                                                },
-                                                none => trait_ret_ty
+                                                TypeScheme { ty: Type::FnType {
+                                                    return_type: resolved_ret, ..
+                                                }, .. } => resolved_ret,
+                                                _ => panic(
+                                                    "unreachable: registered delegate method is not callable")
                                             }
-                                            let eff = match resolved_method_scheme {
-                                                some(rs) => match rs.ty {
-                                                    Type::FnType { meta, .. } => meta.effects,
-                                                    _ => trait_eff
-                                                },
-                                                none => trait_eff
+                                            let eff = match resolved_method_scheme.ty {
+                                                Type::FnType { meta, .. } => meta.effects,
+                                                _ => panic(
+                                                    "unreachable: registered delegate method is not callable")
                                             }
-                                            let method_ownership = match resolved_method_scheme {
-                                                some(rs) => ownership_from_fn_type(
-                                                    rs.ty, trait_params.len()),
-                                                none => trait_ownership
-                                            }
+                                            let method_ownership = ownership_from_fn_type(
+                                                resolved_method_scheme.ty,
+                                                trait_params.len())
                                             // Build resolved param types from field method (skipping self)
                                             let resolved_non_self_params = match resolved_method_scheme {
-                                                some(rs) => match rs.ty {
-                                                    Type::FnType { params: rp, .. } => some(rp),
-                                                    _ => none
-                                                },
-                                                none => none
+                                                TypeScheme { ty: Type::FnType {
+                                                    params: resolved_params, ..
+                                                }, .. } => resolved_params,
+                                                _ => panic(
+                                                    "unreachable: registered delegate method is not callable")
                                             }
                                             // Build HParam list: first is self, rest are synthetic params
                                             let mut hparams: List<HParam> = []
@@ -1157,11 +1159,9 @@ fn expand_delegate_impls(
                                                 }
                                                 // #125: Use resolved param type from field method if available
                                                 // (resolves assoc type vars to concrete types)
-                                                let resolved_pty = match resolved_non_self_params {
-                                                    some(rp) => match rp.get(pi) {
-                                                        some(rpt) => rpt,
-                                                        none => pty
-                                                    },
+                                                let resolved_pty = match
+                                                    resolved_non_self_params.get(pi) {
+                                                    some(rpt) => rpt,
                                                     none => pty
                                                 }
                                                 let pid = ctx.env.fresh_def_id()
@@ -1317,7 +1317,7 @@ fn expand_delegate_impls(
 
                                             trait_hmethods.push(HDecl::Fn {
                                                 name: tm.name,
-                                                def_id: some(ctx.env.fresh_def_id()),
+                                                def_id: some(resolved_method_def_id),
                                                 // #77: Copy method type_params from trait method declaration
                                                 type_params: tm.method_type_params,
                                                 params: hparams,

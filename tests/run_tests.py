@@ -1723,6 +1723,52 @@ def ownership_shadow_layout_errors() -> List[str]:
         errors.append(
             "ownership authority: extern checking has no exact registration input")
 
+    delegate_register_body = function_body(
+        register_path, "register_delegate_traits")
+    if delegate_register_body is not None:
+        delegate_registration_contracts = (
+            r"new_local_callable_scheme[ \t\r\n]*\(",
+            r"exact_method_schemes[ \t\r\n]*\.[ \t\r\n]*insert"
+            r"[ \t\r\n]*\([ \t\r\n]*tm[ \t\r\n]*\.[ \t\r\n]*name"
+            r"[ \t\r\n]*,[ \t\r\n]*scheme[ \t\r\n]*\)",
+            r"method_schemes[ \t\r\n]*:[ \t\r\n]*exact_method_schemes",
+        )
+        if not all(re.search(pattern, delegate_register_body)
+                   for pattern in delegate_registration_contracts):
+            errors.append(
+                "ownership authority: delegate registration does not publish "
+                "the localized wrapper scheme")
+
+    delegate_expand_body = function_body(
+        infer_decl_path, "expand_delegate_impls")
+    if delegate_expand_body is not None:
+        delegate_hir_contracts = (
+            r"wrapper_entry[ \t\r\n]*\.[ \t\r\n]*method_schemes"
+            r"[ \t\r\n]*\.[ \t\r\n]*get[ \t\r\n]*\("
+            r"[ \t\r\n]*tm[ \t\r\n]*\.[ \t\r\n]*name[ \t\r\n]*\)",
+            r"resolved_method_scheme[ \t\r\n]*\.[ \t\r\n]*def_id",
+            r"def_id[ \t\r\n]*:[ \t\r\n]*some[ \t\r\n]*\("
+            r"[ \t\r\n]*resolved_method_def_id[ \t\r\n]*\)",
+        )
+        if not all(re.search(pattern, delegate_expand_body)
+                   for pattern in delegate_hir_contracts):
+            errors.append(
+                "ownership authority: delegate HIR does not reuse the exact "
+                "registered wrapper DefId")
+        if re.search(
+            r"HDecl::Fn[ \t\r\n]*\{(?:(?!HDecl::).)*"
+            r"def_id[ \t\r\n]*:[ \t\r\n]*some[ \t\r\n]*\("
+            r"[ \t\r\n]*ctx[ \t\r\n]*\.[ \t\r\n]*env"
+            r"[ \t\r\n]*\.[ \t\r\n]*fresh_def_id",
+            delegate_expand_body,
+            re.DOTALL,
+        ):
+            errors.append(
+                "ownership authority: delegate HIR allocates a fresh callable DefId")
+        if "ctx.env.lookup" in delegate_expand_body:
+            errors.append(
+                "ownership authority: delegate HIR falls back to a name lookup")
+
     prelude_body = function_body(
         REPO / "compiler" / "checker.ring", "load_prelude")
     if prelude_body is not None and not all(token in prelude_body for token in (
