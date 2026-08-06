@@ -648,6 +648,20 @@ source-map 支持 + 断点调试。
 - 至少 5 题属于预注册的行为契约子集；两语言输入信息量差异逐题可审计
 - 发布可重放 manifest 与逐轮原始记录；报告明确列出 null/负向结果、无效 run 和已知混杂因素
 
+### B-182 证据携带补丁验收系统（低成本 agent 安全委派）[infra] [P1] [XL] [judgment] [queued] [after: B-111]
+
+B-111 回答语言层的核心赌注；本项随后验证仓库层的有界主张：在预先声明的任务与风险包络内，提议模型的能力只影响产出率、重试次数和成本，不能降低补丁的接受标准。它不把当前“CI 绿色”直接解释成正确性证明，而是要求每个被接受的补丁携带与风险等级相称、可独立重放的证据。
+
+**范围 / 文件**：以 B-111 的原始 traces、失败分类和成本基线为输入，在 `eval/` 建立仓库任务 replay/calibration corpus，在 `.agents/scripts/` 建立 acceptance contract、oracle 与校准工具，并把稳定的确定性门接入 `tests/run_tests.py` / `.github/workflows/`；风险分层、升级权限和证据保留规则写入 `docs/workflow.md`。编译器可判定的不变量仍由各自 compiler backlog 收敛，本项不复制类型/effect/ownership/RC 权威逻辑。
+
+**约束**：候选补丁声明 base SHA、允许路径、行为/非变化 claim、风险等级与所需证据；不受信任的提议者不能在同一候选中改写验收策略、隐藏 oracle 或其他 acceptance TCB。确定性检查、差分/property/fuzz/mutation 与隐藏行为 oracle 优先；模型只处理剩余的 spec/意图判断，输出 `blocker / clear / unknown`，其中 unknown、冲突、高风险或 TCB 变更一律 fail closed 并升级到强模型/用户保留边界。强模型主要用于建立永久 oracle、校准和抽样审计，而不是无限重复验收同一类低风险补丁。具体任务分层、模型组合、抽样率和统计阈值待 B-111 完成后 planning，不提前冻结。
+
+**验收标准**：
+- 每个 accepted patch 都有版本化 acceptance contract、完整 gate 结果和可从固定 snapshot 重放的证据包；缺证据、结果冲突或验证器版本不匹配不得静默通过；
+- 预注册的历史缺陷补丁与 seeded mutation calibration corpus 均被阻断或明确升级，不得作为低风险绿色补丁漏出；修改 gate/oracle/TCB 的候选自动进入高风险路径；
+- 在一批预注册外围任务上，以同一接受标准比较低成本与强模型，报告 accepted yield、重试/token/成本、隐藏 oracle 逃逸及统计上界；允许 null/负向结论，未达到预注册阈值不得扩大委派范围；
+- 对 compiler/type/effect/ownership/RC/runtime ABI/bootstrap/verifier/CI gate 等 acceptance TCB 保留独立强审，不因外围试验成功而自动降级。
+
 ## 设计验证（Stabilize 前置）
 
 > 非实现任务，而是设计探针。在对应 XL 特性实现前完成，防止特性交互导致事后 breaking change。
