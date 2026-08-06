@@ -164,11 +164,11 @@
       "phase_trace_paths": []
     },
     {
-      "case_id": "filtered_e2e_hello",
-      "description": "one filtered e2e case including isolated compiler construction",
+      "case_id": "filtered_e2e_bool_ops",
+      "description": "one uniquely filtered bool_ops e2e case including isolated compiler construction",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e", "--filter", "hello.ring"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e", "--filter", "bool_ops.ring"],
       "cwd": "{repo}",
       "timeout_seconds": 300,
       "expected_exit_codes": [0],

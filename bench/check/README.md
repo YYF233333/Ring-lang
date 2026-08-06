@@ -156,9 +156,9 @@ The retained receipt is part of the combine fingerprint. OS file cache is
 deliberately not flushed or claimed as controlled.
 
 The Python runner also has a separate ignored root artifact,
-`ring_runtime.o`. Lanes that can consume it (`filtered_e2e`, e2e, golden, and
-the full gate) isolate it for every invocation and restore any pre-existing
-object afterward. Cold samples start with no root object and therefore measure
+`ring_runtime.o`. Lanes that can consume it (`filtered_e2e_bool_ops`, e2e,
+golden, and the full gate) isolate it for every invocation and restore any
+pre-existing object afterward. Cold samples start with no root object and therefore measure
 its O2 build each time. Warm samples receive an unmeasured, freshly prepared
 object built with the runner's exact clang++ path and
 `-std=c++17 -O2 -D_CRT_SECURE_NO_WARNINGS`; its source/object hashes, flags,
@@ -256,7 +256,8 @@ Every fresh result directory contains:
   completeness result.
 
 `manifest.json` includes tiny/large/module/diagnostic/RC direct checks,
-`compiler/main.ring`, hello build, filtered e2e, each current suite, the full
+`compiler/main.ring`, hello build, the uniquely filtered `filtered_e2e_bool_ops`
+case, each current suite, the full
 gate, and a fresh tracked-bootstrap build. `bootstrap.py` mirrors the production
 O3+ThinLTO build into the sample directory and emits compile/runtime/link phase
 wall times. Compiler-internal phase traces are requested only by the direct

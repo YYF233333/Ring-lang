@@ -157,6 +157,29 @@ class ManifestAndPolicyTests(unittest.TestCase):
         self.assertEqual(full["full_gate_cold"], full["full_gate_warm"])
         self.assertEqual(full["full_gate_cold"]["expected_total"], 1552)
 
+    def test_filtered_e2e_lane_binds_unique_bool_ops_case(self) -> None:
+        manifest = harness._load_json(harness.DEFAULT_MANIFEST)
+        by_base = {lane["case_id"]: lane for lane in manifest["lanes"]}
+
+        self.assertNotIn("filtered_e2e_hello", by_base)
+        lane = by_base["filtered_e2e_bool_ops"]
+        self.assertEqual(
+            lane["argv"],
+            [
+                "{python}",
+                "{repo}/tests/run_tests.py",
+                "--suite",
+                "e2e",
+                "--filter",
+                "bool_ops.ring",
+            ],
+        )
+        self.assertEqual(lane["runner_summary"]["expected_total"], 1)
+        self.assertEqual(
+            lane["runner_summary"]["expected_status_counts"],
+            {"pass": 1, "fail": 0, "skip": 0},
+        )
+
     def test_warm_cache_receipt_rejects_wrong_recipe_and_byte_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
