@@ -9,11 +9,12 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     CALLABLE_FIRST_MUT_BORROW_OWNED, CALLABLE_BORROW_BORROWED,
     CALLABLE_MUT_MOVE_OWNED, CALLABLE_BORROW_MOVE_BORROWED,
     CALLABLE_MOVE_BORROW_OWNED, CALLABLE_BORROW_MUT_BORROW_OWNED,
-    CALLABLE_SOURCE_BUILTIN, record_callable_ownership}
+    CALLABLE_SOURCE_BUILTIN}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef,
     ImplEntry, ImplDictBound, MethodOrigin, mono, add_impl,
-    install_method_scheme, specialize_trait_method_scheme}
+    install_method_scheme, specialize_trait_method_scheme,
+    new_local_callable_scheme}
 use ast::{span_zero}
 use hir::{variant_ctor_name, compare_by_first}
 use diagnostics::{CollectingSink}
@@ -27,17 +28,12 @@ struct OpenRow {
     tail_id: Int
 }
 
-fn record_builtin_callable(mut env: TypeEnv, name: Str) {
-    match env.lookup(name) {
-        some(scheme) => match (scheme.def_id, scheme.ty) {
-            (some(def_id), Type::FnType { meta, .. }) =>
-                record_callable_ownership(
-                    env.types.ownership_metadata, def_id,
-                    meta.ownership_id, CALLABLE_SOURCE_BUILTIN, none),
-            _ => {}
-        },
-        none => {}
-    }
+fn bind_builtin_callable(
+    mut env: TypeEnv, name: Str, scheme: TypeScheme
+) {
+    let local_scheme = new_local_callable_scheme(
+        env, scheme, CALLABLE_SOURCE_BUILTIN, none)
+    env.bind(name, local_scheme)
 }
 
 // ============================================================
@@ -48,20 +44,47 @@ fn install_builtin_method_map(
     mut env: TypeEnv, sink: CollectingSink,
     target_type_name: Str, origin: Str,
     trait_name: Str?, methods: Map<Str, TypeScheme>
-) {
+) -> Map<Str, TypeScheme> {
     let span = span_zero()
+    let mut localized: Map<Str, TypeScheme> = map_new()
     let mut entries = methods.entries()
     entries.sort_by(compare_by_first)
     for entry in entries {
         let (method_name, scheme) = entry
+        let local_scheme = match scheme.def_id {
+            some(_) => scheme,
+            none => new_local_callable_scheme(
+                env, scheme, CALLABLE_SOURCE_BUILTIN, none)
+        }
+        localized.insert(method_name, local_scheme)
         let _ = install_method_scheme(
             env.trait_reg, sink,
-            target_type_name, method_name, scheme,
+            target_type_name, method_name, local_scheme,
             MethodOrigin {
                 origin: origin,
                 trait_name: trait_name,
                 span: span
             })
+    }
+    localized
+}
+
+fn builtin_trait_method(
+    mut env: TypeEnv, name: Str, ty: Type, has_default: Bool,
+    param_mutabilities: List<Bool>
+) -> TraitMethodDef {
+    let scheme = new_local_callable_scheme(env,
+        TypeScheme { ty: ty, type_vars: [], bounds: [], def_id: none },
+        CALLABLE_SOURCE_BUILTIN, none)
+    let def_id = match scheme.def_id {
+        some(id) => id,
+        none => panic("unreachable: builtin trait method has no local DefId")
+    }
+    TraitMethodDef {
+        name: name, def_id: def_id, ty: scheme.ty,
+        has_default: has_default,
+        param_mutabilities: param_mutabilities,
+        method_type_params: []
     }
 }
 
@@ -125,6 +148,9 @@ fn add_builtin_impl(
         },
         none => {}
     }
+    let local_exact = install_builtin_method_map(
+        env, sink, target_type_name, origin,
+        some(trait_name), exact)
     add_impl(env.trait_reg, ImplEntry {
         trait_name: trait_name,
         target_type_name: target_type_name,
@@ -132,13 +158,10 @@ fn add_builtin_impl(
         dict_bounds: dict_bounds,
         method_names: method_names,
         assoc_types: map_new(),
-        method_schemes: map_clone(exact),
+        method_schemes: map_clone(local_exact),
         origin: origin,
         span: span
     })
-    install_builtin_method_map(
-        env, sink, target_type_name, origin,
-        some(trait_name), exact)
 }
 
 // ============================================================
@@ -278,13 +301,12 @@ fn register_cell(mut env: TypeEnv, sink: CollectingSink) {
         name: BUILTIN_CELL,
         type_params: [ctor_t]
     }
-    env.bind(BUILTIN_CELL, TypeScheme {
+    bind_builtin_callable(env, BUILTIN_CELL, TypeScheme {
         ty: Type::FnType { params: [ctor_t], return_type: ctor_ret, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) },
         type_vars: [ctor_t_id],
         bounds: [],
         def_id: none
     })
-    record_builtin_callable(env, BUILTIN_CELL)
 
     // Methods: get, set, update
     let m_t_id = env.fresh_var_id()
@@ -331,7 +353,7 @@ fn register_cell(mut env: TypeEnv, sink: CollectingSink) {
         def_id: none
     })
 
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_CELL, "<builtin-inherent>:Cell:core",
         none, methods)
 }
@@ -364,7 +386,7 @@ fn register_option(mut env: TypeEnv, sink: CollectingSink) {
     // some constructor: (T) -> Option<T>
     let some_t_id = env.fresh_var_id()
     let some_t = Type::TypeVar { id: some_t_id, name: none }
-    env.bind("some", TypeScheme {
+    bind_builtin_callable(env, "some", TypeScheme {
         ty: Type::FnType {
             params: [some_t], return_type: make_option_type(some_t),
             meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
@@ -373,7 +395,6 @@ fn register_option(mut env: TypeEnv, sink: CollectingSink) {
         bounds: [],
         def_id: none
     })
-    record_builtin_callable(env, "some")
     // `some` is a normal payload constructor. Preserve exact constructor
     // identity through its DefId so call lowering and sink classification do
     // not depend on a same-spelled local/global.
@@ -469,7 +490,7 @@ fn register_option(mut env: TypeEnv, sink: CollectingSink) {
         bounds: [],
         def_id: none
     })
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_OPTION, "<builtin-inherent>:Option:core",
         none, methods)
 }
@@ -490,8 +511,8 @@ fn register_eq_trait(mut env: TypeEnv, sink: CollectingSink) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "eq", ty: eq_fn, has_default: false, param_mutabilities: [false, false], method_type_params: [] },
-            TraitMethodDef { name: "ne", ty: ne_fn, has_default: true, param_mutabilities: [false, false], method_type_params: [] }
+            builtin_trait_method(env, "eq", eq_fn, false, [false, false]),
+            builtin_trait_method(env, "ne", ne_fn, true, [false, false])
         ],
         supertraits: [],
         assoc_types: []
@@ -529,7 +550,7 @@ fn register_clone_trait(mut env: TypeEnv, sink: CollectingSink) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "clone", ty: clone_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
+            builtin_trait_method(env, "clone", clone_fn, false, [false])
         ],
         supertraits: [],
         assoc_types: []
@@ -573,7 +594,7 @@ fn register_drop_trait(mut env: TypeEnv) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "drop", ty: drop_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
+            builtin_trait_method(env, "drop", drop_fn, false, [false])
         ],
         supertraits: [],
         assoc_types: []
@@ -606,7 +627,7 @@ fn register_ord_trait(mut env: TypeEnv, sink: CollectingSink) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "cmp", ty: cmp_fn, has_default: false, param_mutabilities: [false, false], method_type_params: [] }
+            builtin_trait_method(env, "cmp", cmp_fn, false, [false, false])
         ],
         supertraits: [],
         assoc_types: []
@@ -632,7 +653,7 @@ fn register_debug_trait(mut env: TypeEnv, sink: CollectingSink) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "debug", ty: debug_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
+            builtin_trait_method(env, "debug", debug_fn, false, [false])
         ],
         supertraits: [],
         assoc_types: []
@@ -688,7 +709,7 @@ fn register_hash_trait(mut env: TypeEnv, sink: CollectingSink) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "hash", ty: hash_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
+            builtin_trait_method(env, "hash", hash_fn, false, [false])
         ],
         supertraits: [],
         assoc_types: []
@@ -822,7 +843,7 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
         bounds: [],
         def_id: none
     })
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_LIST, "<std-predecl>:List:unbounded",
         none, methods)
 }
@@ -903,10 +924,10 @@ fn register_map_hof(mut env: TypeEnv, sink: CollectingSink) {
             unbounded_methods.insert(method_name, scheme)
         }
     }
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_MAP, "<std-predecl>:Map:unbounded",
         none, unbounded_methods)
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_MAP, "<std-predecl>:Map:bounded",
         none, bounded_methods)
 }
@@ -980,10 +1001,10 @@ fn register_set_hof(mut env: TypeEnv, sink: CollectingSink) {
             unbounded_methods.insert(method_name, scheme)
         }
     }
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_SET, "<std-predecl>:Set:unbounded",
         none, unbounded_methods)
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_SET, "<std-predecl>:Set:bounded",
         none, bounded_methods)
 }
@@ -1037,7 +1058,7 @@ fn register_option_hof(mut env: TypeEnv, sink: CollectingSink) {
         bounds: [],
         def_id: none
     })
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, BUILTIN_OPTION, "<builtin-inherent>:Option:hof",
         none, methods)
 }
@@ -1055,19 +1076,18 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let alloc_t_id = env.fresh_var_id()
     let alloc_t = Type::TypeVar { id: alloc_t_id, name: none }
     let alloc_ptr = Type::PtrType { pointee: alloc_t }
-    env.bind("alloc", TypeScheme {
+    bind_builtin_callable(env, "alloc", TypeScheme {
         ty: Type::FnType { params: [INT], return_type: alloc_ptr, meta: fn_meta(unsafe_row, CALLABLE_BORROW_OWNED) },
         type_vars: [alloc_t_id],
         bounds: [],
         def_id: none
     })
-    record_builtin_callable(env, "alloc")
 
     // dealloc(p: Ptr<T>, count: Int) -> () / unsafe
     let dealloc_t_id = env.fresh_var_id()
     let dealloc_t = Type::TypeVar { id: dealloc_t_id, name: none }
     let dealloc_ptr = Type::PtrType { pointee: dealloc_t }
-    env.bind("dealloc", TypeScheme {
+    bind_builtin_callable(env, "dealloc", TypeScheme {
         ty: Type::FnType {
             params: [dealloc_ptr, INT], return_type: UNIT,
             meta: fn_meta(unsafe_row, CALLABLE_MOVE_BORROW_OWNED)
@@ -1076,13 +1096,12 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
         bounds: [],
         def_id: none
     })
-    record_builtin_callable(env, "dealloc")
 
     // ptr_copy(src: Ptr<T>, dst: Ptr<T>, count: Int) -> () / unsafe
     let copy_t_id = env.fresh_var_id()
     let copy_t = Type::TypeVar { id: copy_t_id, name: none }
     let copy_ptr = Type::PtrType { pointee: copy_t }
-    env.bind("ptr_copy", TypeScheme {
+    bind_builtin_callable(env, "ptr_copy", TypeScheme {
         ty: Type::FnType {
             params: [copy_ptr, copy_ptr, INT], return_type: UNIT,
             meta: fn_meta(unsafe_row, CALLABLE_BORROW_MUT_BORROW_OWNED)
@@ -1091,19 +1110,17 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
         bounds: [],
         def_id: none
     })
-    record_builtin_callable(env, "ptr_copy")
 
     // ptr_from_addr(a: Int) -> Ptr<T> (safe)
     let from_t_id = env.fresh_var_id()
     let from_t = Type::TypeVar { id: from_t_id, name: none }
     let from_ptr = Type::PtrType { pointee: from_t }
-    env.bind("ptr_from_addr", TypeScheme {
+    bind_builtin_callable(env, "ptr_from_addr", TypeScheme {
         ty: Type::FnType { params: [INT], return_type: from_ptr, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) },
         type_vars: [from_t_id],
         bounds: [],
         def_id: none
     })
-    record_builtin_callable(env, "ptr_from_addr")
 
     // ---- Ptr<T> methods ----
 
@@ -1189,7 +1206,7 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
         bounds: [],
         def_id: none
     })
-    install_builtin_method_map(
+    let _ = install_builtin_method_map(
         env, sink, "Ptr", "<builtin-inherent>:Ptr:core",
         none, methods)
 }

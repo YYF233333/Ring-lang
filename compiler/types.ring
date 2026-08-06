@@ -28,9 +28,11 @@ pub struct RecordField {
     pub ty: Type
 }
 
-// Callable ownership is a shadow-only, compact tag in Unit 1.  The hot Type
-// enum keeps three payload slots: effects and the ownership tag are grouped in
-// FnMeta, while descriptor/provenance data lives in OwnershipMetadata.  Legacy
+// Callable ownership is a shadow-only, compact tag in Unit 1.  Candidate A
+// keeps the Type enum at three payload slots by grouping effects and ownership
+// in FnMeta; FnMeta is a real heap object, not an allocation-neutral shim.  A
+// bounded wall/RSS data gate will compare this representation with flat4 after
+// integration. Descriptor/provenance data lives in OwnershipMetadata. Legacy
 // equality, unification, rendering, acceptance and lowering intentionally
 // ignore the ownership tag until the solver and Take lowering cut over
 // atomically.

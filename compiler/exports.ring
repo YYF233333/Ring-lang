@@ -555,7 +555,8 @@ fn extract_decl_export(
 // ============================================================
 
 fn copy_exported_name(
-    source: ModuleExports, source_name: Str, local_name: Str,
+    source: ModuleExports, env: TypeEnv,
+    source_name: Str, local_name: Str,
     mut values: Map<Str, TypeScheme>, mut value_origins: Map<Str, Str>,
     mut value_binding_kinds: Map<Str, ValueBindingKind>,
     mut variant_ctor_origins: Map<Str, Str>,
@@ -569,11 +570,23 @@ fn copy_exported_name(
     mut inherent_methods: Map<Str, List<Str>>, mut mut_methods: Map<Str, Set<Str>>
 ) {
     match source.values.get(source_name) {
-        some(scheme) => {
-            values.insert(local_name, scheme)
+        some(_) => {
             match source.value_origins.get(source_name) {
-                some(origin) => { value_origins.insert(local_name, origin) },
-                none => {}
+                some(origin) => {
+                    // Dependency injection allocated a checker-local DefId for
+                    // this canonical origin. Re-exports must publish that
+                    // scheme together with the current module's metadata; a
+                    // foreign scheme DefId would no longer key this bundle.
+                    match env.lookup(origin) {
+                        some(local_scheme) => values.insert(
+                            local_name, local_scheme),
+                        none => panic(
+                            "unreachable: re-export canonical value is not hydrated")
+                    }
+                    value_origins.insert(local_name, origin)
+                },
+                none => panic(
+                    "unreachable: re-exported value has no canonical origin")
             }
             match source.value_binding_kinds.get(source_name) {
                 some(kind) => { value_binding_kinds.insert(local_name, kind) },
@@ -594,7 +607,39 @@ fn copy_exported_name(
                 TypeDef::EnumDef_(edef) => edef.name
             }
             match source.impl_methods.get(canonical_type) {
-                some(methods) => { impl_methods.insert(canonical_type, map_clone(methods)) }, none => {}
+                some(methods) => {
+                    let current_methods = env.trait_reg.impl_methods.get(
+                        canonical_type)
+                    let current_origins = env.trait_reg.method_origins.get(
+                        canonical_type)
+                    let source_origins = source.method_origins.get(
+                        canonical_type)
+                    let mut localized: Map<Str, TypeScheme> = map_new()
+                    let mut method_entries = methods.entries()
+                    method_entries.sort_by(compare_by_first)
+                    for method_entry in method_entries {
+                        let (method_name, _) = method_entry
+                        match (current_methods, current_origins, source_origins) {
+                            (some(local_methods), some(local_origins),
+                             some(exported_origins)) =>
+                                match (local_methods.get(method_name),
+                                       local_origins.get(method_name),
+                                       exported_origins.get(method_name)) {
+                                    (some(local_scheme), some(local_origin),
+                                     some(exported_origin)) => {
+                                        if local_origin.origin != exported_origin.origin {
+                                            panic("unreachable: re-export method origin was replaced")
+                                        }
+                                        localized.insert(method_name, local_scheme)
+                                    },
+                                    _ => panic("unreachable: re-export method is not hydrated")
+                                },
+                            _ => panic("unreachable: re-export method registry is missing")
+                        }
+                    }
+                    impl_methods.insert(canonical_type, localized)
+                },
+                none => {}
             }
             match source.method_origins.get(canonical_type) {
                 some(origins) => { method_origins.insert(canonical_type, map_clone(origins)) }, none => {}
@@ -618,10 +663,18 @@ fn copy_exported_name(
         some(def) => { effect_aliases.insert(local_name, def) }, none => {}
     }
     match source.traits.get(source_name) {
-        some(def) => { traits.insert(local_name, def) }, none => {}
+        some(def) => match env.trait_reg.traits.get(def.name) {
+            some(local_def) => { traits.insert(local_name, local_def) },
+            none => panic("unreachable: re-export trait is not hydrated")
+        },
+        none => {}
     }
     match source.sigs.get(source_name) {
-        some(def) => { sigs.insert(local_name, def) }, none => {}
+        some(def) => match env.types.sigs.get(def.name) {
+            some(local_def) => { sigs.insert(local_name, local_def) },
+            none => panic("unreachable: re-export sig is not hydrated")
+        },
+        none => {}
     }
     match source.struct_field_orders.get(source_name) {
         some(fields) => { struct_field_orders.insert(local_name, fields) }, none => {}
@@ -749,9 +802,10 @@ pub fn extract_exports(
     export_impl_facts(impl_facts, env, fn_mut_params_map, program,
         impl_methods, method_origins, inherent_methods, mut_methods, fn_mut_params)
 
-    // Handle pub use re-exports from the dependency export objects themselves.
-    // Payloads and origins are forwarded verbatim; only the facade lookup key
-    // changes.  This covers named, aliased, whole-module, and transitive uses.
+    // Handle pub use re-exports from dependency export objects. Canonical
+    // origins are forwarded while callable schemes are rebound through this
+    // checker's local registries, so the facade's metadata and DefIds agree.
+    // This covers named, aliased, whole-module, and transitive uses.
     let mut module_map: Map<Str, ModuleExports> = map_new()
     for mod_ in available_modules { module_map.insert(mod_.module_key, mod_) }
     for use_decl in program.uses {
@@ -762,7 +816,7 @@ pub fn extract_exports(
                     UseImport::NamedItems { names } => {
                         for item in names {
                             let local_name = match item.alias { some(a) => a, none => item.name }
-                            copy_exported_name(source, item.name, local_name,
+                            copy_exported_name(source, env, item.name, local_name,
                                 values, value_origins, value_binding_kinds,
                                 variant_ctor_origins,
                                 types, type_aliases, effects, effect_aliases, traits, sigs,
@@ -772,7 +826,7 @@ pub fn extract_exports(
                             match source.types.get(item.name) {
                                 some(TypeDef::EnumDef_(edef)) => {
                                     for v in edef.variants {
-                                        copy_exported_name(source, v.name, v.name,
+                                        copy_exported_name(source, env, v.name, v.name,
                                             values, value_origins, value_binding_kinds,
                                             variant_ctor_origins,
                                             types, type_aliases, effects, effect_aliases, traits, sigs,
@@ -796,7 +850,7 @@ pub fn extract_exports(
                         let mut sorted_names = names.to_list()
                         sorted_names.sort()
                         for name in sorted_names {
-                            copy_exported_name(source, name, name,
+                            copy_exported_name(source, env, name, name,
                                 values, value_origins, value_binding_kinds,
                                 variant_ctor_origins,
                                 types, type_aliases, effects, effect_aliases, traits, sigs,

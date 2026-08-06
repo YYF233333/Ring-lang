@@ -1546,9 +1546,14 @@ def matching_delimiter(masked: str, open_index: int,
 
 
 def ownership_shadow_layout_errors() -> List[str]:
-    """Validate Unit-1 ownership transport stays allocation/arity neutral."""
+    """Validate Unit-1 ownership transport representation and authority."""
     errors: List[str] = []
     source_contracts = (
+        (
+            "FnMeta", REPO / "compiler" / "types.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+FnMeta[ \t]*\{",
+            ("effects", "ownership_id"),
+        ),
         (
             "Type::FnType", REPO / "compiler" / "types.ring",
             r"(?m)^[ \t]*FnType[ \t]*\{",
@@ -1574,6 +1579,22 @@ def ownership_shadow_layout_errors() -> List[str]:
             "HParam", REPO / "compiler" / "hir.ring",
             r"(?m)^[ \t]*pub[ \t]+struct[ \t]+HParam[ \t]*\{",
             ("name", "ty", "def_id", "flags"),
+        ),
+        (
+            "HTraitMethod", REPO / "compiler" / "hir.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+HTraitMethod[ \t]*\{",
+            (
+                "name", "def_id", "params", "return_type", "effects",
+                "has_default", "body",
+            ),
+        ),
+        (
+            "TraitMethodDef", REPO / "compiler" / "env.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+TraitMethodDef[ \t]*\{",
+            (
+                "name", "def_id", "ty", "has_default",
+                "param_mutabilities", "method_type_params",
+            ),
         ),
     )
 
@@ -1607,83 +1628,7 @@ def ownership_shadow_layout_errors() -> List[str]:
             errors.append(
                 f"{label}: expected source fields {expected_fields}, found {fields}")
 
-    try:
-        generated = DIST_C_MAIN.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        errors.append(f"generated ownership layout: cannot read dist-c/main.c: {exc}")
-    else:
-        generated_contracts = (
-            (
-                "Type", "ringmod_ring__types_m_m__Type__", 3,
-                "FnType", 3,
-            ),
-            (
-                "HExpr", "ringmod_ring__hir_m_m__HExpr__", 8,
-                "Call", 8,
-            ),
-            (
-                "HDecl", "ringmod_ring__hir_m_m__HDecl__", 10,
-                "Fn", 10,
-            ),
-        )
-        generated_constructors: dict[str, dict[str, int]] = {
-            ";": {}, "{": {},
-        }
-        constructor_re = re.compile(
-            r"(?m)^void[ \t]*\*[ \t]+"
-            r"(ringmod_ring__(?:"
-            r"types_m_m__Type__[A-Za-z_][A-Za-z0-9_]*|"
-            r"hir_m_m__HExpr__[A-Za-z_][A-Za-z0-9_]*|"
-            r"hir_m_m__HDecl__[A-Za-z_][A-Za-z0-9_]*|"
-            r"hir_m_m__HParam))"
-            r"[ \t]*\(([^()\r\n]*?)\)[ \t]*(;|\{)[ \t]*\r?$",
-        )
-        for match in constructor_re.finditer(generated):
-            symbol, args, terminator = match.groups()
-            if symbol in generated_constructors[terminator]:
-                errors.append(
-                    f"generated ownership layout: duplicate {symbol!r} "
-                    f"{'prototype' if terminator == ';' else 'definition'}")
-                continue
-            generated_constructors[terminator][symbol] = (
-                0 if not args.strip() else len(args.split(",")))
-
-        for label, prefix, expected_max, max_variant, expected_variant in generated_contracts:
-            phase_arities: dict[str, dict[str, int]] = {}
-            for terminator, phase in ((";", "prototype"), ("{", "definition")):
-                arities = {
-                    symbol[len(prefix):]: arity
-                    for symbol, arity in generated_constructors[terminator].items()
-                    if symbol.startswith(prefix)
-                }
-                phase_arities[phase] = arities
-                if not arities:
-                    errors.append(f"{label}: no generated {phase}s found")
-                    continue
-                actual_max = max(arities.values())
-                if actual_max != expected_max:
-                    errors.append(
-                        f"{label}: expected generated {phase} max arity "
-                        f"{expected_max}, found {actual_max}")
-                actual_variant = arities.get(max_variant)
-                if actual_variant != expected_variant:
-                    errors.append(
-                        f"{label}::{max_variant}: expected generated {phase} "
-                        f"arity {expected_variant}, found {actual_variant}")
-            if phase_arities["prototype"] != phase_arities["definition"]:
-                errors.append(
-                    f"{label}: generated prototype/definition arities differ")
-
-        hparam_symbol = "ringmod_ring__hir_m_m__HParam"
-        hparam_arities = [
-            generated_constructors[terminator].get(hparam_symbol)
-            for terminator in (";", "{")
-        ]
-        if hparam_arities != [4, 4]:
-            errors.append(
-                "HParam: expected unique generated 4-argument prototype and "
-                f"definition, found {hparam_arities}")
-
+    all_compiler_sources: dict[Path, str] = {}
     compiler_sources: dict[Path, str] = {}
     for path in sorted((REPO / "compiler").glob("*.ring")):
         try:
@@ -1691,11 +1636,118 @@ def ownership_shadow_layout_errors() -> List[str]:
         except (OSError, UnicodeError) as exc:
             errors.append(f"dynamic descriptors: cannot read {display_path(path)}: {exc}")
             continue
+        masked_source = mask_ring_strings_and_comments(raw_source)
+        all_compiler_sources[path] = masked_source
         if (
             "CallableOwnershipDescriptor" in raw_source
             or "callable_descriptors" in raw_source
         ):
-            compiler_sources[path] = mask_ring_strings_and_comments(raw_source)
+            compiler_sources[path] = masked_source
+
+    body_inferred_writes: List[str] = []
+    for path, masked in all_compiler_sources.items():
+        for match in re.finditer(r"\bCALLABLE_SOURCE_BODY_INFERRED\b", masked):
+            prefix = masked[max(0, match.start() - 40):match.start()]
+            if path == REPO / "compiler" / "types.ring" and re.search(
+                r"pub[ \t]+const[ \t]*$", prefix
+            ):
+                continue
+            body_inferred_writes.append(
+                f"{display_path(path)}:{masked.count(chr(10), 0, match.start()) + 1}")
+    if body_inferred_writes:
+        errors.append(
+            "ownership provenance: BODY_INFERRED appears before the solver at "
+            + ", ".join(body_inferred_writes))
+
+    def function_body(path: Path, name: str) -> Optional[str]:
+        masked = all_compiler_sources.get(path, "")
+        match = re.search(
+            rf"(?m)^[ \t]*(?:pub[ \t]+)?fn[ \t]+{re.escape(name)}[ \t]*\(",
+            masked,
+        )
+        if match is None:
+            errors.append(
+                f"ownership authority: {display_path(path)}::{name} is missing")
+            return None
+        open_index = masked.find("{", match.end())
+        try:
+            close_index = matching_delimiter(masked, open_index, "{", "}")
+        except ValueError as exc:
+            errors.append(
+                f"ownership authority: {display_path(path)}::{name}: {exc}")
+            return None
+        return masked[open_index + 1:close_index]
+
+    register_path = REPO / "compiler" / "infer_register.ring"
+    for function_name in ("register_fn_common", "register_impl_method"):
+        body = function_body(register_path, function_name)
+        if body is not None:
+            if "interface_callable_ownership(params)" not in body:
+                errors.append(
+                    f"ownership authority: {function_name} does not consume the "
+                    "explicit parameter contract")
+            if "exact_prelude_extern_" in body or "ring_slot_" in body:
+                errors.append(
+                    f"ownership authority: {function_name} contains a raw-slot "
+                    "name fallback")
+
+    infer_decl_path = REPO / "compiler" / "infer_decl.ring"
+    registered_method_body = function_body(
+        infer_decl_path, "registered_impl_method_scheme")
+    if (
+        registered_method_body is not None
+        and not all(token in registered_method_body for token in (
+            "let scheme = match trait_name",
+            "some(value) => value",
+            "none => panic",
+        ))
+    ):
+        errors.append(
+            "ownership authority: missing impl callable registration can fall "
+            "back to a leaf binding")
+    impl_check_body = function_body(
+        infer_decl_path, "check_impl_decl_canonical")
+    if (
+        impl_check_body is not None
+        and impl_check_body.count("some(registration_scheme)") < 2
+    ):
+        errors.append(
+            "ownership authority: fn and extern impl methods do not both "
+            "consume their exact captured registration")
+    extern_check_body = function_body(
+        infer_decl_path, "check_extern_fn_decl")
+    if (
+        extern_check_body is not None
+        and "registration_override" not in extern_check_body
+    ):
+        errors.append(
+            "ownership authority: extern checking has no exact registration input")
+
+    prelude_body = function_body(
+        REPO / "compiler" / "checker.ring", "load_prelude")
+    if prelude_body is not None and not all(token in prelude_body for token in (
+        "exact_prelude_extern_ownership",
+        "exact_prelude_extern_source",
+        "update_local_callable_scheme",
+        "prelude_extern_identity",
+    )):
+        errors.append(
+            "ownership authority: exact prelude contract/origin rebind is incomplete")
+
+    reexport_body = function_body(
+        REPO / "compiler" / "exports.ring", "copy_exported_name")
+    if reexport_body is not None:
+        if "env.lookup(origin)" not in reexport_body:
+            errors.append(
+                "ownership re-export: canonical origin is not remapped through "
+                "the current environment")
+        if re.search(
+            r"values[ \t\r\n]*\.[ \t\r\n]*insert[ \t\r\n]*\("
+            r"[ \t\r\n]*local_name[ \t\r\n]*,[ \t\r\n]*scheme",
+            reexport_body,
+        ):
+            errors.append(
+                "ownership re-export: foreign TypeScheme is copied verbatim")
 
     types_path = REPO / "compiler" / "types.ring"
     types_masked = compiler_sources.get(types_path, "")
@@ -2769,7 +2821,11 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
         return
 
     ownership_label = "compiler.ownership_shadow_layout"
-    if matches_filter(ownership_label, name_filter):
+    explicit_ownership_probe = (
+        name_filter is not None
+        and matches_filter(ownership_label, name_filter)
+    )
+    if explicit_ownership_probe:
         ownership_errors = ownership_shadow_layout_errors()
         collector.add(TestResult(
             TestResult.PASS if not ownership_errors else TestResult.FAIL,
@@ -2801,6 +2857,13 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
                     ring_exe, temp_root, entry, fixtures)
             else:
                 errors = run_extern_rc_oracle(ring_exe, temp_root)
+                # The existing extern structural job already owns compiler/HIR
+                # ownership-boundary validation. Fold the shadow transport
+                # invariant into that result so the default runner gains no
+                # result, scheduling phase, or pre-job scan. The explicit
+                # filter above remains available for a cheap focused probe.
+                if not explicit_ownership_probe:
+                    errors.extend(ownership_shadow_layout_errors())
             if errors:
                 collector.add(TestResult(
                     TestResult.FAIL, suite, label, "; ".join(errors)))

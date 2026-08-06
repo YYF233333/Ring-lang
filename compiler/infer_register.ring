@@ -1,11 +1,12 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string,
     effect_to_string, nominal_display_name, fn_meta,
-    CALLABLE_BORROW_OWNED, CALLABLE_MOVE_OWNED,
+    CALLABLE_BORROW_OWNED, CALLABLE_MOVE_OWNED, CALLABLE_UNKNOWN,
     CALLABLE_FIRST_MUT_BORROW_OWNED, CALLABLE_MOVE_BORROW_OWNED,
+    CALLABLE_BORROW_MUT_BORROW_OWNED,
     CALLABLE_MUT_BORROW_MOVE_OWNED, CALLABLE_SLOT_MOVE_OWNED,
     CALLABLE_SOURCE_DECLARED, CALLABLE_SOURCE_BUILTIN,
-    record_callable_ownership}
+    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember,
     UseDecl, UseImport}
@@ -13,7 +14,8 @@ use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, Enu
     TraitDef, TraitMethodDef, ImplEntry, ImplDictBound, TypeAliasDef, FnBound, SigDef,
     EffectAliasDef, AssocTypeDef, MethodOrigin, mono, apply_subst, apply_subst_effect_map,
     apply_subst_map, add_impl, has_impl, find_impl, impl_origin, impl_decl_origin,
-    install_method_scheme, specialize_trait_method_scheme, build_type_var_map}
+    install_method_scheme, specialize_trait_method_scheme, build_type_var_map,
+    new_local_callable_scheme}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0501, E0502, E0503, E0504, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
 use hir::{compare_by_first, module_item_identity, variant_ctor_name, ValueBindingKind}
@@ -26,23 +28,33 @@ use infer_ctx::{InferCtx, FnBoundsEntry, CompileError, type_error, resolve_type_
 use infer_helpers::{is_value_type}
 
 fn interface_callable_ownership(params: List<Param>) -> Int {
+    let mut mutable_index = 0 - 1
+    let mut mutable_count = 0
+    let mut index = 0
     for param in params {
-        // `mut self` is an interface-visible receiver mutation. Other `mut`
-        // parameters describe the callee's local binding and remain Borrow
-        // until body analysis proves a stronger call mode.
-        if param.name == "self" && param.is_mutable {
-            return CALLABLE_FIRST_MUT_BORROW_OWNED
+        // `mut` is an interface-visible writeback contract for every parameter,
+        // not only receivers.  Unit 1 uses fixed descriptors where their shape
+        // is exact and fails closed for mixed shapes that need dynamic IDs.
+        if param.is_mutable {
+            mutable_index = index
+            mutable_count = mutable_count + 1
         }
+        index = index + 1
     }
-    CALLABLE_BORROW_OWNED
+    if mutable_count == 0 { return CALLABLE_BORROW_OWNED }
+    if mutable_count == 1 && mutable_index == 0 {
+        return CALLABLE_FIRST_MUT_BORROW_OWNED
+    }
+    if mutable_count == 1 && mutable_index == 1 && params.len() <= 3 {
+        return CALLABLE_BORROW_MUT_BORROW_OWNED
+    }
+    CALLABLE_UNKNOWN
 }
 
-// Raw slot bridges are the ownership boundary used by the pure-Ring
-// container implementations. This table lives at extern registration so all
-// later phases consume the contract from TypeScheme/HIR, never from a leaf.
-fn extern_callable_ownership(
-    name: Str, params: List<Param>
-) -> Int {
+// Called only by checker::load_prelude after it has resolved the final local
+// DefId and attached an unspellable prelude origin.  Generic extern
+// registration must never consult this raw ABI spelling table.
+pub fn exact_prelude_extern_ownership(name: Str, params: List<Param>) -> Int {
     if name == "ring_slot_alloc" {
         return CALLABLE_BORROW_OWNED
     }
@@ -73,7 +85,7 @@ fn extern_callable_ownership(
     interface_callable_ownership(params)
 }
 
-fn extern_callable_source(name: Str) -> Int {
+pub fn exact_prelude_extern_source(name: Str) -> Int {
     if name == "ring_slot_alloc" || name == "ring_slot_dealloc" ||
        name == "ring_slot_read" || name == "ring_slot_take" ||
        name == "ring_slot_write" || name == "ring_slot_replace" ||
@@ -82,19 +94,6 @@ fn extern_callable_source(name: Str) -> Int {
         CALLABLE_SOURCE_BUILTIN
     } else {
         CALLABLE_SOURCE_DECLARED
-    }
-}
-
-fn record_bound_callable(mut ctx: InferCtx, name: Str, source: Int) {
-    match ctx.env.lookup(name) {
-        some(scheme) => match (scheme.def_id, scheme.ty) {
-            (some(def_id), Type::FnType { meta, .. }) =>
-                record_callable_ownership(
-                    ctx.env.types.ownership_metadata, def_id,
-                    meta.ownership_id, source, none),
-            _ => {}
-        },
-        none => {}
     }
 }
 
@@ -1534,13 +1533,12 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                         params: variant.fields, return_type: enum_type,
                         meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
                     }
-                    if tv_ids.len() > 0 {
-                        ctx.env.bind(binding_name, TypeScheme { ty: fn_type, type_vars: tv_ids, bounds: [], def_id: none })
-                    } else {
-                        ctx.env.bind_mono(binding_name, fn_type)
-                    }
-                    record_bound_callable(
-                        ctx, binding_name, CALLABLE_SOURCE_DECLARED)
+                    let local_scheme = new_local_callable_scheme(ctx.env,
+                        TypeScheme {
+                            ty: fn_type, type_vars: tv_ids,
+                            bounds: [], def_id: none
+                        }, CALLABLE_SOURCE_DECLARED, none)
+                    ctx.env.bind(binding_name, local_scheme)
                 }
                 if !project_active {
                     // The single-file pipeline still binds the historical leaf
@@ -1548,14 +1546,20 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                     // payload without changing legacy visibility.
                     match ctx.env.lookup(variant.name) {
                         some(scheme) => {
-                            ctx.env.bind(ctor_payload, TypeScheme {
+                            let alias_scheme = TypeScheme {
                                 ty: scheme.ty,
                                 type_vars: scheme.type_vars,
                                 bounds: scheme.bounds,
                                 def_id: none
-                            })
-                            record_bound_callable(
-                                ctx, ctor_payload, CALLABLE_SOURCE_DECLARED)
+                            }
+                            let local_scheme = match scheme.ty {
+                                Type::FnType { .. } =>
+                                    new_local_callable_scheme(
+                                        ctx.env, alias_scheme,
+                                        CALLABLE_SOURCE_DECLARED, none),
+                                _ => alias_scheme
+                            }
+                            ctx.env.bind(ctor_payload, local_scheme)
                         },
                         none => {}
                     }
@@ -1795,7 +1799,20 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                     params: param_types, return_type: ret,
                     meta: fn_meta(method_effects, ownership)
                 }
-                trait_methods.push(TraitMethodDef { name: mname, ty: fn_type, has_default: !is_abstract, param_mutabilities: param_muts, method_type_params: method_tps })
+                let method_scheme = new_local_callable_scheme(ctx.env,
+                    TypeScheme {
+                        ty: fn_type, type_vars: [], bounds: [], def_id: none
+                    }, CALLABLE_SOURCE_DECLARED, none)
+                let method_def_id = match method_scheme.def_id {
+                    some(id) => id,
+                    none => panic("unreachable: trait method has no local DefId")
+                }
+                trait_methods.push(TraitMethodDef {
+                    name: mname, def_id: method_def_id, ty: method_scheme.ty,
+                    has_default: !is_abstract,
+                    param_mutabilities: param_muts,
+                    method_type_params: method_tps
+                })
             },
             _ => {}
         }
@@ -2073,13 +2090,17 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                     for trait_method in trait_def.methods {
                         if trait_method.has_default &&
                            !impl_method_names.contains(trait_method.name) {
+                            let specialized = specialize_trait_method_scheme(
+                                trait_def, trait_method, impl_self_type,
+                                trait_type_args, impl_tv_ids,
+                                assoc_type_map,
+                                impl_bounds.scheme_bounds)
                             exact_method_schemes.insert(
                                 trait_method.name,
-                                specialize_trait_method_scheme(
-                                    trait_def, trait_method, impl_self_type,
-                                    trait_type_args, impl_tv_ids,
-                                    assoc_type_map,
-                                    impl_bounds.scheme_bounds))
+                                new_local_callable_scheme(
+                                    ctx.env, specialized,
+                                    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE,
+                                    none))
                         }
                     }
 
@@ -2197,20 +2218,16 @@ fn register_impl_method(
         some(de) => resolve_declared_effects(ctx, de),
         none => infer_hof_effect_row(param_types)
     }
-    let ownership = if !is_extern {
-        interface_callable_ownership(params)
-    } else {
-        extern_callable_ownership(mname, params)
-    }
+    let ownership = interface_callable_ownership(params)
     let fn_type = Type::FnType {
         params: param_types, return_type: ret,
         meta: fn_meta(impl_m_effects, ownership)
     }
     collect_effect_tail_vars(fn_type, all_tvs)
-    let scheme = TypeScheme {
+    let scheme = new_local_callable_scheme(ctx.env, TypeScheme {
         ty: fn_type, type_vars: all_tvs,
         bounds: impl_scheme_bounds, def_id: none
-    }
+    }, CALLABLE_SOURCE_DECLARED, none)
 
     // Track mut self methods
     if params.len() > 0 {
@@ -2694,11 +2711,15 @@ fn register_delegate_traits(
                                     }
                                     match resolved_method_scheme {
                                         some(field_scheme) => {
-                                            let scheme = specialize_delegate_method_scheme(
+                                            let specialized = specialize_delegate_method_scheme(
                                                 ctx, field_scheme, field_var_map,
                                                 self_type, impl_tv_ids,
                                                 impl_scheme_bounds,
                                                 wrapper_fn_bounds, span)
+                                            let scheme = new_local_callable_scheme(
+                                                ctx.env, specialized,
+                                                CALLABLE_SOURCE_CONSERVATIVE_INTERFACE,
+                                                none)
                                             exact_method_schemes.insert(tm.name, scheme)
                                             let _ = install_method_scheme(
                                                 ctx.env.trait_reg, ctx.sink,
@@ -2994,11 +3015,7 @@ fn register_fn_common(
         some(de) => resolve_declared_effects(ctx, de),
         none => infer_hof_effect_row(param_types)
     }
-    let ownership = if track_fn_bounds {
-        interface_callable_ownership(params)
-    } else {
-        extern_callable_ownership(name, params)
-    }
+    let ownership = interface_callable_ownership(params)
     let fn_type = Type::FnType {
         params: param_types, return_type: ret,
         meta: fn_meta(effects, ownership)
@@ -3074,32 +3091,24 @@ fn register_fn_common(
     ctx.type_param_scope = saved
     ctx.qualified_assoc_scope = saved_qualified
 
-    if type_vars.len() > 0 {
-        ctx.env.bind(name, TypeScheme { ty: fn_type, type_vars: type_vars, bounds: scheme_bounds, def_id: none })
-    } else {
-        ctx.env.bind_mono(name, fn_type)
+    let raw_scheme = TypeScheme {
+        ty: fn_type,
+        type_vars: if type_vars.len() > 0 { type_vars } else { [] },
+        bounds: if type_vars.len() > 0 { scheme_bounds } else { [] },
+        def_id: none
     }
+    let local_scheme = new_local_callable_scheme(
+        ctx.env, raw_scheme, CALLABLE_SOURCE_DECLARED, none)
+    ctx.env.bind(name, local_scheme)
     let callable_kind = if track_fn_bounds {
         ValueBindingKind::DirectCallable
     } else {
         ValueBindingKind::ExternCallable
     }
     record_value_binding_kind(ctx, name, callable_kind)
-    match ctx.env.lookup(name) {
-        some(s) => match s.def_id {
-            some(did) => {
-                ctx.env.record_def_span(did, span)
-                record_callable_ownership(
-                    ctx.env.types.ownership_metadata, did, ownership,
-                    if track_fn_bounds {
-                        CALLABLE_SOURCE_DECLARED
-                    } else {
-                        extern_callable_source(name)
-                    }, none)
-            },
-            none => {}
-        },
-        none => {}
+    match local_scheme.def_id {
+        some(did) => ctx.env.record_def_span(did, span),
+        none => panic("unreachable: registered callable has no local DefId")
     }
 }
 
@@ -3205,7 +3214,10 @@ fn register_sig(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: 
             params: param_types, return_type: ret,
             meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
         }
-        sig_members.insert(m.name, TypeScheme { ty: fn_type, type_vars: type_vars, bounds: [], def_id: none })
+        sig_members.insert(m.name, new_local_callable_scheme(ctx.env,
+            TypeScheme {
+                ty: fn_type, type_vars: type_vars, bounds: [], def_id: none
+            }, CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, none))
         ctx.type_param_scope = msaved
     }
     ctx.type_param_scope = saved

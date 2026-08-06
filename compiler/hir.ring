@@ -367,6 +367,7 @@ pub struct HEffectOp {
 
 pub struct HTraitMethod {
     pub name: Str,
+    pub def_id: Int,
     pub params: List<HParam>,
     pub return_type: Type,
     pub effects: EffectRow,

@@ -1,5 +1,5 @@
 use types::{Type, UNIT, nominal_display_name,
-    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, record_callable_ownership,
+    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, CALLABLE_SOURCE_BUILTIN,
     callable_descriptors_equal}
 use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam, span_zero}
 use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImplFact,
@@ -10,15 +10,18 @@ use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImpl
     prelude_extern_identity,
     is_nullary_variant_ctor_ident}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, new_collecting_sink, make_diag}
-use env::{TypeEnv, TypeScheme, SigDef,
-    new_type_env, add_impl, find_impl, install_method_scheme}
+use env::{TypeEnv, TypeScheme, SigDef, ImplEntry, TraitDef, TraitMethodDef,
+    new_type_env, add_impl, find_impl, install_method_scheme,
+    new_local_callable_scheme, update_local_callable_scheme,
+    impl_method_origin}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_module_identity, check_prelude_decl}
 use dict_lower::{lower_dicts}
 use andor_lower::{lower_andor}
 use infer_ctx::{InferCtx, type_error, record_value_origin, record_variant_ctor_origin,
     record_value_binding_kind, install_project_namespace_plan}
-use infer_register::{register_decl_public}
+use infer_register::{register_decl_public,
+    exact_prelude_extern_ownership, exact_prelude_extern_source}
 use exports::{ModuleExports, TypeDef}
 use resolver::{ResolvedNamespacePlan, ModuleFramePlan, AstSite, ImportIssue,
     ImportIssueKind, NamespaceKind}
@@ -123,9 +126,22 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
             // receive distinct DefIds and cannot collide in backend registries.
             for decl in all_prelude_decls {
                 match decl {
-                    Decl::ExternFn { name, .. } => {
-                        record_value_origin(ctx, name,
-                            prelude_extern_identity(name))
+                    Decl::ExternFn { name, params, .. } => {
+                        let exact_origin = prelude_extern_identity(name)
+                        let source = exact_prelude_extern_source(name)
+                        if source == CALLABLE_SOURCE_BUILTIN {
+                            match ctx.env.lookup(name) {
+                                some(scheme) => {
+                                    let updated = update_local_callable_scheme(
+                                        ctx.env, scheme,
+                                        exact_prelude_extern_ownership(name, params),
+                                        source, none)
+                                    ctx.env.rebind(name, updated)
+                                },
+                                none => panic("unreachable: prelude extern registration is missing")
+                            }
+                        }
+                        record_value_origin(ctx, name, exact_origin)
                     },
                     _ => {}
                 }
@@ -563,7 +579,26 @@ fn report_hydrated_method_collision(
         "Ambiguous method '${method_name}' on '${nominal_display_name(target_type)}': dependency exports contain distinct implementation origins",
         span, DiagnosticContext::TraitError {
             detail: "same-origin re-exports dedupe, distinct origins collide"
-        })
+    })
+}
+
+fn localize_imported_callable_scheme(
+    mut ctx: InferCtx, exports: ModuleExports, scheme: TypeScheme
+) -> TypeScheme {
+    let state = match scheme.def_id {
+        some(exported_def_id) =>
+            exports.ownership_metadata.callable_state_by_def_id.get(
+                exported_def_id),
+        none => none
+    }
+    match state {
+        some(value) => new_local_callable_scheme(
+            ctx.env, TypeScheme { ..scheme, def_id: none },
+            value.source, value.inference_id),
+        none => new_local_callable_scheme(
+            ctx.env, TypeScheme { ..scheme, def_id: none },
+            CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, none)
+    }
 }
 
 fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
@@ -572,6 +607,9 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
     // same-leaf exports from unrelated modules may coexist, while each exact
     // value/constructor origin is installed once with a checker-local DefId.
     let mut hydrated_value_origins: Set<Str> = set_new()
+    let mut hydrated_method_schemes: Map<Str, TypeScheme> = map_new()
+    let mut hydrated_trait_methods: Map<Str, TraitMethodDef> = map_new()
+    let mut hydrated_sig_schemes: Map<Str, TypeScheme> = map_new()
     for mod_ in exports {
         // Ownership summaries do not participate in order-sensitive lookup;
         // avoid sorting an empty shadow map for every project module.
@@ -591,6 +629,53 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                 none => ctx.env.types.ownership_metadata.callable_descriptors.insert(
                     ownership_id, descriptor)
             }
+        }
+        let mut localized_impl_methods: Map<Str, Map<Str, TypeScheme>> = map_new()
+        let mut method_targets = mod_.impl_methods.entries()
+        method_targets.sort_by(compare_by_first)
+        for target_entry in method_targets {
+            let (target_type, methods) = target_entry
+            let origins = mod_.method_origins.get(target_type)
+            let mut localized_methods: Map<Str, TypeScheme> = map_new()
+            let mut method_entries = methods.entries()
+            method_entries.sort_by(compare_by_first)
+            for method_entry in method_entries {
+                let (method_name, scheme) = method_entry
+                match origins {
+                    some(origin_map) => match origin_map.get(method_name) {
+                        some(method_origin_) => {
+                            let key = impl_method_origin(
+                                method_origin_.origin, method_name)
+                            let local_scheme = match hydrated_method_schemes.get(key) {
+                                some(existing) => {
+                                    match (existing.ty, scheme.ty) {
+                                        (Type::FnType { meta: a, .. },
+                                         Type::FnType { meta: b, .. }) => {
+                                            if a.ownership_id != b.ownership_id {
+                                                panic("unreachable: same-origin imported method ownership differs")
+                                            }
+                                        },
+                                        _ => panic("unreachable: imported method is not callable")
+                                    }
+                                    existing
+                                },
+                                none => {
+                                    let localized = localize_imported_callable_scheme(
+                                        ctx, mod_, scheme)
+                                    hydrated_method_schemes.insert(key, localized)
+                                    localized
+                                }
+                            }
+                            localized_methods.insert(method_name, local_scheme)
+                        },
+                        none => report_hydrated_method_collision(
+                            ctx, target_type, method_name, span_zero())
+                    },
+                    none => report_hydrated_method_collision(
+                        ctx, target_type, method_name, span_zero())
+                }
+            }
+            localized_impl_methods.insert(target_type, localized_methods)
         }
         let mut sorted_values = mod_.values.entries()
         sorted_values.sort_by(compare_by_first)
@@ -612,34 +697,32 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                 none => {}
             }
             for origin in exact_origins {
-                if !hydrated_value_origins.contains(origin) {
-                    ctx.env.bind(origin, TypeScheme { ..scheme, def_id: none })
+                if hydrated_value_origins.contains(origin) {
+                    // A canonical origin may arrive through multiple facade
+                    // modules.  Reuse its first checker-local DefId, but fail
+                    // loudly if a later facade publishes a different callable
+                    // contract for that same origin.
                     match (ctx.env.lookup(origin), scheme.ty) {
-                        (some(local_scheme), Type::FnType { meta, .. }) =>
-                            match local_scheme.def_id {
-                                some(local_def_id) => {
-                                    let exported_state = match scheme.def_id {
-                                        some(exported_def_id) =>
-                                            mod_.ownership_metadata.callable_state_by_def_id.get(
-                                                exported_def_id),
-                                        none => none
-                                    }
-                                    match exported_state {
-                                        some(state) => record_callable_ownership(
-                                            ctx.env.types.ownership_metadata,
-                                            local_def_id, meta.ownership_id,
-                                            state.source, state.inference_id),
-                                        none => record_callable_ownership(
-                                            ctx.env.types.ownership_metadata,
-                                            local_def_id, meta.ownership_id,
-                                            CALLABLE_SOURCE_CONSERVATIVE_INTERFACE,
-                                            none)
-                                    }
-                                },
-                                none => {}
-                            },
-                        _ => {}
+                        (some(TypeScheme { ty: Type::FnType { meta: local_meta, .. }, .. }),
+                         Type::FnType { meta: exported_meta, .. }) => {
+                            if local_meta.ownership_id != exported_meta.ownership_id {
+                                panic("unreachable: same-origin imported callable ownership differs")
+                            }
+                        },
+                        (some(TypeScheme { ty: Type::FnType { .. }, .. }), _) |
+                        (some(TypeScheme { ty: _, .. }), Type::FnType { .. }) =>
+                            panic("unreachable: same-origin imported value kind differs"),
+                        (some(_), _) => {},
+                        (none, _) => panic(
+                            "unreachable: hydrated imported value is missing")
                     }
+                } else {
+                    let local_scheme = match scheme.ty {
+                        Type::FnType { .. } =>
+                            localize_imported_callable_scheme(ctx, mod_, scheme),
+                        _ => TypeScheme { ..scheme, def_id: none }
+                    }
+                    ctx.env.bind(origin, local_scheme)
                     let ultimate = match value_origin {
                         some(value) => value,
                         none => origin
@@ -707,8 +790,45 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
         let mut sorted_traits = mod_.traits.entries()
         sorted_traits.sort_by(compare_by_first)
         for entry in sorted_traits {
-            let (name, tdef) = entry
-            ctx.env.trait_reg.traits.insert(tdef.name, tdef)
+            let (_, tdef) = entry
+            let mut local_methods: List<TraitMethodDef> = []
+            for method in tdef.methods {
+                let key = "${tdef.name}::${method.name}"
+                let local_method = match hydrated_trait_methods.get(key) {
+                    some(existing) => {
+                        match (existing.ty, method.ty) {
+                            (Type::FnType { meta: a, .. },
+                             Type::FnType { meta: b, .. }) => {
+                                if a.ownership_id != b.ownership_id {
+                                    panic("unreachable: same imported trait method ownership differs")
+                                }
+                            },
+                            _ => panic("unreachable: trait method is not callable")
+                        }
+                        existing
+                    },
+                    none => {
+                        let scheme = localize_imported_callable_scheme(
+                            ctx, mod_, TypeScheme {
+                                ty: method.ty, type_vars: [], bounds: [],
+                                def_id: some(method.def_id)
+                            })
+                        let def_id = match scheme.def_id {
+                            some(id) => id,
+                            none => panic("unreachable: imported trait method has no local DefId")
+                        }
+                        let localized = TraitMethodDef {
+                            ..method, def_id: def_id, ty: scheme.ty
+                        }
+                        hydrated_trait_methods.insert(key, localized)
+                        localized
+                    }
+                }
+                local_methods.push(local_method)
+            }
+            ctx.env.trait_reg.traits.insert(tdef.name, TraitDef {
+                ..tdef, methods: local_methods
+            })
         }
         let mut sorted_sigs = mod_.sigs.entries()
         sorted_sigs.sort_by(compare_by_first)
@@ -716,27 +836,77 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             let (_, sigdef) = entry
             // Resolver bindings consume canonical payload identities. Display
             // and leaf aliases are transactional namespace-frame overlays.
-            ctx.env.types.sigs.insert(sigdef.name, sigdef)
+            let mut local_members: Map<Str, TypeScheme> = map_new()
+            let mut member_entries = sigdef.members.entries()
+            member_entries.sort_by(compare_by_first)
+            for member_entry in member_entries {
+                let (member_name, scheme) = member_entry
+                let key = "${sigdef.name}::${member_name}"
+                let local_scheme = match hydrated_sig_schemes.get(key) {
+                    some(existing) => existing,
+                    none => {
+                        let localized = localize_imported_callable_scheme(
+                            ctx, mod_, scheme)
+                        hydrated_sig_schemes.insert(key, localized)
+                        localized
+                    }
+                }
+                local_members.insert(member_name, local_scheme)
+            }
+            ctx.env.types.sigs.insert(sigdef.name, SigDef {
+                ..sigdef, members: local_members
+            })
         }
         for impl_ in mod_.trait_impls {
+            let mut local_method_schemes: Map<Str, TypeScheme> = map_new()
+            let mut exported_method_entries = impl_.method_schemes.entries()
+            exported_method_entries.sort_by(compare_by_first)
+            for method_entry in exported_method_entries {
+                let (method_name, exported_scheme) = method_entry
+                let key = impl_method_origin(impl_.origin, method_name)
+                let localized = match hydrated_method_schemes.get(key) {
+                    some(existing) => {
+                        match (existing.ty, exported_scheme.ty) {
+                            (Type::FnType { meta: a, .. },
+                             Type::FnType { meta: b, .. }) => {
+                                if a.ownership_id != b.ownership_id {
+                                    panic("unreachable: same-origin imported impl method ownership differs")
+                                }
+                            }
+                            _ => panic("unreachable: imported impl method is not callable")
+                        }
+                        existing
+                    },
+                    none => {
+                        let scheme = localize_imported_callable_scheme(
+                            ctx, mod_, exported_scheme)
+                        hydrated_method_schemes.insert(key, scheme)
+                        scheme
+                    }
+                }
+                local_method_schemes.insert(method_name, localized)
+            }
+            let local_impl = ImplEntry {
+                ..impl_, method_schemes: local_method_schemes
+            }
             match find_impl(
                 ctx.env.trait_reg,
-                impl_.target_type_name,
-                impl_.trait_name) {
+                local_impl.target_type_name,
+                local_impl.trait_name) {
                 some(existing) => {
-                    if existing.origin != impl_.origin {
+                    if existing.origin != local_impl.origin {
                         let _ = type_error(ctx.sink, E0504,
-                            "Duplicate impl '${nominal_display_name(impl_.trait_name)}' for '${nominal_display_name(impl_.target_type_name)}' from distinct dependency origins",
-                            impl_.span, DiagnosticContext::TraitError {
+                            "Duplicate impl '${nominal_display_name(local_impl.trait_name)}' for '${nominal_display_name(local_impl.target_type_name)}' from distinct dependency origins",
+                            local_impl.span, DiagnosticContext::TraitError {
                                 detail: "duplicate imported target/trait implementation"
                             })
                     }
                 },
                 none => {}
             }
-            add_impl(ctx.env.trait_reg, impl_)
+            add_impl(ctx.env.trait_reg, local_impl)
         }
-        let mut sorted_impl_methods = mod_.impl_methods.entries()
+        let mut sorted_impl_methods = localized_impl_methods.entries()
         sorted_impl_methods.sort_by(compare_by_first)
         for entry in sorted_impl_methods {
             let (type_name, methods) = entry

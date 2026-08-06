@@ -1,6 +1,7 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField,
     OwnershipMetadata, FnMeta, INT, new_ownership_metadata,
-    effects_match_kind, nominal_display_name}
+    effects_match_kind, nominal_display_name, record_callable_ownership,
+    fn_meta}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use ast::{Span, EffectExpr, TypeParam}
 use diagnostics::{CollectingSink, DiagnosticSink, DiagnosticContext, Severity,
@@ -98,6 +99,9 @@ pub struct EffectDef {
 
 pub struct TraitMethodDef {
     pub name: Str,
+    // Declaration-local callable identity.  Specializations allocate their own
+    // local DefIds; this ID continues to identify the trait declaration itself.
+    pub def_id: Int,
     pub ty: Type,
     pub has_default: Bool,
     pub param_mutabilities: List<Bool>,
@@ -252,6 +256,47 @@ pub struct TypeEnv {
 
 pub fn mono(ty: Type) -> TypeScheme {
     TypeScheme { ty: ty, type_vars: [], bounds: [], def_id: none }
+}
+
+// The sole constructor for a callable TypeScheme that is entering a local
+// registry.  DefIds are checker-local declaration identities: imported or
+// specialized schemes must never carry a foreign DefId into this map.
+pub fn new_local_callable_scheme(
+    mut env: TypeEnv, scheme: TypeScheme,
+    source: Int, inference_id: Int?
+) -> TypeScheme {
+    let def_id = env.fresh_def_id()
+    match scheme.ty {
+        Type::FnType { meta, .. } => record_callable_ownership(
+            env.types.ownership_metadata, def_id, meta.ownership_id,
+            source, inference_id),
+        _ => panic("unreachable: local callable scheme is not a function")
+    }
+    TypeScheme { ..scheme, def_id: some(def_id) }
+}
+
+// Replace the contract on an already-local callable without changing its
+// declaration identity.  Used by the prelude loader only after it has proven
+// the exact unspellable origin of a raw ABI declaration.
+pub fn update_local_callable_scheme(
+    mut env: TypeEnv, scheme: TypeScheme, ownership_id: Int,
+    source: Int, inference_id: Int?
+) -> TypeScheme {
+    let def_id = match scheme.def_id {
+        some(id) => id,
+        none => panic("unreachable: local callable scheme has no DefId")
+    }
+    let updated_type = match scheme.ty {
+        Type::FnType { params, return_type, meta } => Type::FnType {
+            params: params, return_type: return_type,
+            meta: fn_meta(meta.effects, ownership_id)
+        },
+        _ => panic("unreachable: local callable scheme is not a function")
+    }
+    record_callable_ownership(
+        env.types.ownership_metadata, def_id, ownership_id,
+        source, inference_id)
+    TypeScheme { ..scheme, ty: updated_type }
 }
 
 pub fn new_type_env() -> TypeEnv {

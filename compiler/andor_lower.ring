@@ -85,7 +85,8 @@ fn al_decl(d: HDecl) -> HDecl {
                     some(b) => some(al_expr(b)),
                     none => none,
                 }
-                new_methods.push(HTraitMethod { name: tm.name, params: tm.params,
+                new_methods.push(HTraitMethod { name: tm.name, def_id: tm.def_id,
+                    params: tm.params,
                     return_type: tm.return_type, effects: tm.effects,
                     has_default: tm.has_default, body: new_body })
             }

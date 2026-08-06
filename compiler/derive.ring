@@ -1,8 +1,10 @@
 use types::{Type, EffectRow, StructField, EnumVariant,
-    INT, STR, BOOL, EMPTY_ROW, CALLABLE_BORROW_OWNED, fn_meta}
+    INT, STR, BOOL, EMPTY_ROW, CALLABLE_BORROW_OWNED,
+    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, fn_meta}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     ImplEntry, ImplDictBound, MethodOrigin,
-    add_impl, has_impl, install_method_scheme}
+    add_impl, has_impl, install_method_scheme,
+    new_local_callable_scheme}
 use ast::{span_zero}
 use diagnostics::{CollectingSink}
 use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef,
@@ -647,6 +649,16 @@ fn register_derived_impl(
 
     let method_names = get_method_names(trait_name)
     register_trait_methods(methods, trait_name, self_type, type_var_ids, scheme_bounds)
+
+    let mut localized_methods: Map<Str, TypeScheme> = map_new()
+    let mut raw_methods = methods.entries()
+    raw_methods.sort_by(compare_by_first)
+    for entry in raw_methods {
+        let (method_name, scheme) = entry
+        localized_methods.insert(method_name, new_local_callable_scheme(
+            env, scheme, CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, none))
+    }
+    methods = localized_methods
 
     let origin = "<derive>:${di.type_name}:${trait_name}"
     let span = span_zero()

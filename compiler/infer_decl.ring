@@ -2,8 +2,7 @@ use types::{Type, Effect, EffectRow, RecordField,
     UNIT, EMPTY_ROW, type_to_string, effect_to_string,
     nominal_display_name, effects_match_kind, effect_kind_name, types_equal,
     PARAM_OWNERSHIP_BORROW, CALLABLE_BORROW_OWNED,
-    CALLABLE_SOURCE_BODY_INFERRED,
-    callable_param_ownership, record_callable_ownership, fn_meta}
+    callable_param_ownership, fn_meta}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, SigMember}
 use hir::{HDecl, HParam, HExpr, HStmt, HProgram, DerivedImpl, TraitBound, HAssocType,
@@ -91,7 +90,8 @@ fn check_decl_inner(
         Decl::Trait { name, type_params, methods, is_pub, span, .. } =>
             check_trait_decl(ctx, name, type_params, methods, is_pub, span),
         Decl::ExternFn { name, type_params, params, return_type, declared_effects, is_pub, span } =>
-            check_extern_fn_decl(ctx, name, type_params, params, declared_effects, is_pub, span),
+            check_extern_fn_decl(ctx, name, type_params, params,
+                declared_effects, is_pub, span, none),
         Decl::ExternType { name, type_params, is_pub, span } =>
             HDecl::ExternType { name: name, type_params: type_params, is_pub: is_pub, span: span },
         Decl::TypeAlias { name, is_pub, span, .. } => {
@@ -555,8 +555,8 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
 fn registered_impl_method_scheme(
     ctx: InferCtx, target_type: Str, trait_name: Str?,
     origin: Str, method_name: Str
-) -> TypeScheme? {
-    match trait_name {
+) -> TypeScheme {
+    let scheme = match trait_name {
         some(_) => match find_impl_by_origin(
             ctx.env.trait_reg, target_type, origin) {
             some(entry) => entry.method_schemes.get(method_name),
@@ -576,6 +576,11 @@ fn registered_impl_method_scheme(
             },
             none => none
         }
+    }
+    match scheme {
+        some(value) => value,
+        none => panic(
+            "unreachable: impl callable registration is missing for '${method_name}'")
     }
 }
 
@@ -755,8 +760,13 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
     let mut hmethods: List<HDecl> = []
     for method in ordered_methods {
         match method {
-            Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } =>
-                hmethods.push(check_extern_fn_decl(ctx, name, mtps, params, declared_effects, is_pub, mspan)),
+            Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } => {
+                let registration_scheme = registered_impl_method_scheme(
+                    ctx, target_type, trait_name, origin, name)
+                hmethods.push(check_extern_fn_decl(
+                    ctx, name, mtps, params, declared_effects,
+                    is_pub, mspan, some(registration_scheme)))
+            },
             Decl::Fn { name, type_params: mtps, params, return_type, declared_effects, body, is_pub, span: mspan, .. } => {
                 let registration_scheme = registered_impl_method_scheme(
                     ctx, target_type, trait_name, origin, name)
@@ -764,7 +774,7 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
                 let hdecl = check_fn_decl(
                     ctx, name, mtps, params, return_type, declared_effects,
                     body, is_pub, mspan, some(impl_self_type),
-                    registration_scheme, some(rebind_identity))
+                    some(registration_scheme), some(rebind_identity))
                 // #210: Also register fn_mut_params with qualified key for cross-module export.
                 // check_fn_decl inserts with unqualified `name`; exports.ring looks up
                 // with "${target_type}_${mname}", so we mirror that key here.
@@ -778,16 +788,13 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
                         name: mname, params: mparams,
                         return_type: mret, effects: meffects,
                         span: checked_span, ..
-                    } => match registration_scheme {
-                        some(scheme) => {
-                            let rebound = rebind_checked_fn_scheme(
-                                ctx, rebind_identity, scheme,
-                                mparams, mret, meffects, checked_span)
-                            store_rebound_impl_method_scheme(
-                                ctx, target_type, trait_name, origin,
-                                mname, rebound, checked_span)
-                        }
-                        none => {}
+                    } => {
+                        let rebound = rebind_checked_fn_scheme(
+                            ctx, rebind_identity, registration_scheme,
+                            mparams, mret, meffects, checked_span)
+                        store_rebound_impl_method_scheme(
+                            ctx, target_type, trait_name, origin,
+                            mname, rebound, checked_span)
                     },
                     _ => {}
                 }
@@ -1443,7 +1450,8 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         }
 
         hmethods.push(HTraitMethod {
-            name: m.name, params: hparams, return_type: fn_ret,
+            name: m.name, def_id: m.def_id,
+            params: hparams, return_type: fn_ret,
             effects: fn_effects,
             has_default: m.has_default, body: method_body
         })
@@ -1598,14 +1606,32 @@ fn find_ast_fn_by_name(methods: List<Decl>, name: Str) -> Decl? {
     })
 }
 
-fn check_extern_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, declared_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
-    let scheme = match ctx.env.lookup(name) {
-        some(s) => s,
-        none => {
-            let _ = type_error(ctx.sink, E0201, "extern fn not found: ${name}", span,
-                DiagnosticContext::OtherContext { detail: some("extern fn '${name}' was not registered") })
-            fail.raise(CompileError {})
+fn check_extern_fn_decl(
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    params: List<Param>, declared_effects: List<EffectExpr>?,
+    is_pub: Bool, span: Span, registration_override: TypeScheme?
+) -> HDecl {
+    // Impl externs live in the exact method registry, not the leaf value
+    // namespace. Consume the registration captured by impl origin so an
+    // unrelated top-level callable with the same spelling cannot donate its
+    // DefId or ownership contract.
+    let scheme = match registration_override {
+        some(value) => value,
+        none => match ctx.env.lookup(name) {
+            some(value) => value,
+            none => {
+                let _ = type_error(ctx.sink, E0201,
+                    "extern fn not found: ${name}", span,
+                    DiagnosticContext::OtherContext {
+                        detail: some("extern fn '${name}' was not registered")
+                    })
+                fail.raise(CompileError {})
+            }
         }
+    }
+    match scheme.def_id {
+        some(def_id) => ctx.env.record_def_span(def_id, span),
+        none => panic("unreachable: registered extern callable has no local DefId")
     }
     let fn_params: List<Type> = match scheme.ty {
         Type::FnType { params: fps, .. } => fps,
@@ -2310,15 +2336,15 @@ fn check_fn_decl_transaction(
         trait_bounds.push(TraitBound { type_param: fb.type_param_name, trait_name: fb.trait_name })
     }
 
-    let fn_scheme = ctx.env.lookup(name)
-    let fn_def_id = match fn_scheme { some(s) => s.def_id, none => none }
+    // The registration captured before entering parameter scope is the sole
+    // declaration identity. In particular, an impl method must never fall back
+    // to an unrelated same-spelled top-level binding.
+    let fn_def_id = match registration_scheme {
+        some(scheme) => scheme.def_id,
+        none => none
+    }
     match fn_def_id {
-        some(did) => {
-            ctx.env.record_def_span(did, span)
-            record_callable_ownership(
-                ctx.env.types.ownership_metadata, did, ownership_contract,
-                CALLABLE_SOURCE_BODY_INFERRED, none)
-        },
+        some(did) => ctx.env.record_def_span(did, span),
         none => {}
     }
 
