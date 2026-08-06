@@ -28,7 +28,7 @@ REPO_ROOT = BENCH_DIR.parents[1]
 DEFAULT_SCHEMA = BENCH_DIR / "disabled_path_gate.schema.json"
 EVIDENCE_SCHEMA = "ring.check-benchmark.disabled-path-gate.v1"
 SCHEMA_ID = "ring.check-benchmark.disabled-path-gate.schema.v1"
-SCHEMA_CANONICAL_SHA256 = "d829258ae57116e1c723a2ed327d82f7c5ceb3c7191faed64728264e07b9f2c6"
+SCHEMA_CANONICAL_SHA256 = "6a8105e93a78e60e9f0107e30882b5ebd19b06b80d31bbb409f270a1e2c495e0"
 
 SUBJECTS = ("base", "candidate")
 WARMUP_PAIRS = 5
@@ -43,6 +43,19 @@ RUNTIME_PATH = "ring_runtime.cpp"
 FIXTURE_PATH = "tests/cases/hello.ring"
 GATE_PATH = "bench/check/disabled_path_gate.py"
 SCHEMA_PATH = "bench/check/disabled_path_gate.schema.json"
+STD_PATHS = (
+    "std/io.ring",
+    "std/iterator.ring",
+    "std/list.ring",
+    "std/map.ring",
+    "std/set.ring",
+    "std/str.ring",
+    "std/num.ring",
+    "std/result.ring",
+    "std/fs.ring",
+    "std/path.ring",
+    "std/process.ring",
+)
 BUILD_TIMEOUT_SECONDS = 1200
 INVOCATION_TIMEOUT_SECONDS = 60
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
@@ -122,6 +135,7 @@ def _contract() -> dict[str, Any]:
         "expected_stderr_base64": "",
         "phase_environment_prefix": PHASE_ENV_PREFIX,
         "git_archive_core_autocrlf": "false",
+        "prelude_paths": list(STD_PATHS),
     }
 
 
@@ -194,6 +208,7 @@ def _stage_layout(evidence_root: Path) -> dict[str, str]:
         "subject_candidate": str(stage / "subjects" / "candidate" / "ring.exe"),
         "invocation_binary": str(stage / "invoke" / "ring.exe"),
         "fixture": str(stage / "fixture" / "hello.ring"),
+        "std": str(stage / "std"),
         "cwd": str(stage / "cwd"),
     }
 
@@ -302,6 +317,7 @@ def _require_archive_member_identity(
     inputs: Mapping[str, bytes],
 ) -> None:
     paths = [ANCHOR_PATH, RUNTIME_PATH, FIXTURE_PATH]
+    paths.extend(STD_PATHS)
     if subject == "candidate":
         paths.extend((GATE_PATH, SCHEMA_PATH))
     for path in paths:
@@ -318,6 +334,7 @@ def _verify_subjects(
         raise GateError("subjects must be ordered base then candidate")
     _require_archive_symmetry(subjects)
     fixture_bytes: list[bytes] = []
+    prelude_records: list[list[Mapping[str, Any]]] = []
     for index, subject in enumerate(subjects):
         commit = subject["commit"]
         git_path = tools["git"]["path"]
@@ -326,6 +343,12 @@ def _verify_subjects(
         fixture_bytes.append(
             _verify_source(repo, git_path, commit, subject["fixture"], FIXTURE_PATH)
         )
+        prelude = subject["prelude_files"]
+        if [record["path"] for record in prelude] != list(STD_PATHS):
+            raise GateError("subject prelude inventory path/order drifted")
+        for path, record in zip(STD_PATHS, prelude, strict=True):
+            _verify_source(repo, git_path, commit, record, path)
+        prelude_records.append(prelude)
         if index == 0:
             if subject["gate"] is not None or subject["schema_contract"] is not None:
                 raise GateError("base must not claim candidate gate/schema bytes")
@@ -340,11 +363,15 @@ def _verify_subjects(
                 raise GateError("current schema bytes differ from candidate ref")
     if fixture_bytes[0] != fixture_bytes[1]:
         raise GateError("base/candidate fixture archive bytes differ")
+    if prelude_records[0] != prelude_records[1]:
+        raise GateError("base/candidate prelude archive bytes differ")
 
 
 def _require_archive_symmetry(subjects: Sequence[Mapping[str, Any]]) -> None:
     if len(subjects) != 2 or subjects[0]["fixture"] != subjects[1]["fixture"]:
         raise GateError("base/candidate fixture archive bytes differ")
+    if subjects[0]["prelude_files"] != subjects[1]["prelude_files"]:
+        raise GateError("base/candidate prelude archive bytes differ")
 
 
 def _tool_record(path: str, version: str) -> dict[str, Any]:
@@ -634,7 +661,8 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
 
 
 def _archive_inputs(archive_path: Path, commit: str) -> dict[str, bytes]:
-    wanted = {ANCHOR_PATH, RUNTIME_PATH, FIXTURE_PATH, GATE_PATH, SCHEMA_PATH}
+    required = {ANCHOR_PATH, RUNTIME_PATH, FIXTURE_PATH, *STD_PATHS}
+    wanted = {GATE_PATH, SCHEMA_PATH, *required}
     result: dict[str, bytes] = {}
     with tarfile.open(archive_path, "r:") as archive:
         if archive.pax_headers.get("comment") != commit:
@@ -648,7 +676,7 @@ def _archive_inputs(archive_path: Path, commit: str) -> dict[str, bytes]:
                 if stream is None:
                     raise GateError(f"cannot read archive input {name}")
                 result[name] = stream.read()
-    missing = {ANCHOR_PATH, RUNTIME_PATH, FIXTURE_PATH} - result.keys()
+    missing = required - result.keys()
     if missing:
         raise GateError(f"archive lacks inputs {sorted(missing)}")
     return result
@@ -716,6 +744,7 @@ def _build_subject(
         "anchor": _input_record(ANCHOR_PATH, inputs[ANCHOR_PATH]),
         "runtime": _input_record(RUNTIME_PATH, inputs[RUNTIME_PATH]),
         "fixture": _input_record(FIXTURE_PATH, inputs[FIXTURE_PATH]),
+        "prelude_files": [_input_record(path, inputs[path]) for path in STD_PATHS],
         "gate": gate,
         "schema_contract": schema,
         "binary": binary,
@@ -784,6 +813,18 @@ def _record_pairs(
     return pairs, ordinal
 
 
+def _write_neutral_std(stage: Mapping[str, str], inputs: Mapping[str, bytes]) -> None:
+    std_dir = Path(stage["std"])
+    std_dir.mkdir(parents=True, exist_ok=False)
+    for path in STD_PATHS:
+        if path not in inputs:
+            raise GateError(f"neutral prelude input is missing: {path}")
+        target = std_dir / PurePosixPath(path).name
+        target.write_bytes(inputs[path])
+        if target.read_bytes() != inputs[path]:
+            raise GateError(f"neutral prelude copy changed bytes: {path}")
+
+
 def _prepare_output(output: Path, repo: Path) -> Path:
     root = output.resolve()
     _within(root, repo / "bench" / "check" / "results", "gate output")
@@ -842,6 +883,9 @@ def run_gate(base_ref: str, candidate_ref: str, output: Path, repo: Path = REPO_
         archived.append((name, commit, archive, inputs))
     if archived[0][3][FIXTURE_PATH] != archived[1][3][FIXTURE_PATH]:
         raise GateError("base/candidate fixture archive bytes differ")
+    for path in STD_PATHS:
+        if archived[0][3][path] != archived[1][3][path]:
+            raise GateError(f"base/candidate prelude archive bytes differ: {path}")
 
     subjects = [
         _build_subject(
@@ -860,7 +904,8 @@ def run_gate(base_ref: str, candidate_ref: str, output: Path, repo: Path = REPO_
     _require_archive_symmetry(subjects)
     fixture = Path(stage["fixture"])
     fixture.parent.mkdir(parents=True)
-    fixture.write_bytes(_archive_inputs(archive_dir / "candidate.tar", candidate)[FIXTURE_PATH])
+    fixture.write_bytes(archived[1][3][FIXTURE_PATH])
+    _write_neutral_std(stage, archived[1][3])
     Path(stage["cwd"]).mkdir()
 
     power_before = harness._windows_power()

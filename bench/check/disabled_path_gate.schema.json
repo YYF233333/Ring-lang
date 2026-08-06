@@ -40,7 +40,8 @@
         "expected_stdout_base64",
         "expected_stderr_base64",
         "phase_environment_prefix",
-        "git_archive_core_autocrlf"
+        "git_archive_core_autocrlf",
+        "prelude_paths"
       ],
       "properties": {
         "warmup_pairs": { "type": "integer", "const": 5 },
@@ -67,7 +68,14 @@
         "expected_stdout_base64": { "type": "string", "const": "T0sNCg==" },
         "expected_stderr_base64": { "type": "string", "const": "" },
         "phase_environment_prefix": { "type": "string", "const": "RING_PHASE_" },
-        "git_archive_core_autocrlf": { "type": "string", "const": "false" }
+        "git_archive_core_autocrlf": { "type": "string", "const": "false" },
+        "prelude_paths": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "std/[a-z]+\\.ring" }
+        }
       }
     },
     "repository": {
@@ -92,6 +100,7 @@
         "subject_candidate",
         "invocation_binary",
         "fixture",
+        "std",
         "cwd"
       ],
       "properties": {
@@ -103,6 +112,7 @@
         "subject_candidate": { "type": "string", "minLength": 1 },
         "invocation_binary": { "type": "string", "minLength": 1 },
         "fixture": { "type": "string", "minLength": 1 },
+        "std": { "type": "string", "minLength": 1 },
         "cwd": { "type": "string", "minLength": 1 }
       }
     },
@@ -317,6 +327,7 @@
         "anchor",
         "runtime",
         "fixture",
+        "prelude_files",
         "gate",
         "schema_contract",
         "binary",
@@ -329,6 +340,12 @@
         "anchor": { "$ref": "#/$defs/file" },
         "runtime": { "$ref": "#/$defs/file" },
         "fixture": { "$ref": "#/$defs/file" },
+        "prelude_files": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "items": { "$ref": "#/$defs/file" }
+        },
         "gate": { "$ref": "#/$defs/optional_file" },
         "schema_contract": { "$ref": "#/$defs/optional_file" },
         "binary": { "$ref": "#/$defs/binary" },

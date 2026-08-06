@@ -18,15 +18,21 @@ class DisabledPathGateTests(unittest.TestCase):
             "bytes": 7,
             "sha256": "f" * 64,
         }
+        prelude = [
+            {"path": path, "bytes": 7, "sha256": f"{index + 1:064x}"}
+            for index, path in enumerate(gate.STD_PATHS)
+        ]
         return [
             {
                 "subject": "base",
                 "fixture": copy.deepcopy(fixture),
+                "prelude_files": copy.deepcopy(prelude),
                 "binary": {"raw_sha256": "a" * 64},
             },
             {
                 "subject": "candidate",
                 "fixture": copy.deepcopy(fixture),
+                "prelude_files": copy.deepcopy(prelude),
                 "binary": {"raw_sha256": "b" * 64},
             },
         ]
@@ -188,6 +194,14 @@ class DisabledPathGateTests(unittest.TestCase):
                             "bytes": 1,
                             "sha256": "3" * 64,
                         },
+                        "prelude_files": [
+                            {
+                                "path": path,
+                                "bytes": 1,
+                                "sha256": f"{index + 10:064x}",
+                            }
+                            for index, path in enumerate(gate.STD_PATHS)
+                        ],
                         "gate": (
                             None
                             if name == "base"
@@ -272,6 +286,10 @@ class DisabledPathGateTests(unittest.TestCase):
             evidence["pairs"][0]["invocations"][0]["trusted_pass"] = True
             with self.assertRaisesRegex(harness.HarnessError, "unexpected key"):
                 harness.validate_json(evidence, schema)
+            del evidence["pairs"][0]["invocations"][0]["trusted_pass"]
+            del evidence["subjects"][0]["prelude_files"]
+            with self.assertRaisesRegex(harness.HarnessError, "missing required"):
+                harness.validate_json(evidence, schema)
 
     def test_run_preflight_rejects_dirty_or_ref_mismatched_candidate(self) -> None:
         base, candidate = "a" * 40, "b" * 40
@@ -297,6 +315,11 @@ class DisabledPathGateTests(unittest.TestCase):
         gate._require_archive_symmetry(subjects)
         subjects[1]["fixture"]["sha256"] = "0" * 64  # type: ignore[index]
         with self.assertRaisesRegex(gate.GateError, "fixture archive bytes differ"):
+            gate._require_archive_symmetry(subjects)
+
+        subjects = self._subjects()
+        subjects[1]["prelude_files"][0]["sha256"] = "e" * 64  # type: ignore[index]
+        with self.assertRaisesRegex(gate.GateError, "prelude archive bytes differ"):
             gate._require_archive_symmetry(subjects)
 
     def test_archive_recipe_disables_checkout_eol_conversion(self) -> None:
@@ -345,6 +368,7 @@ class DisabledPathGateTests(unittest.TestCase):
                 gate.FIXTURE_PATH,
                 gate.GATE_PATH,
                 gate.SCHEMA_PATH,
+                *gate.STD_PATHS,
             )
         }
         with mock.patch.object(gate, "_git_show", return_value=blob):
@@ -357,6 +381,36 @@ class DisabledPathGateTests(unittest.TestCase):
             ):
                 gate._require_archive_member_identity(
                     gate.REPO_ROOT, "git", "a" * 40, "candidate", inputs
+                )
+            inputs[gate.GATE_PATH] = blob
+            del inputs[gate.STD_PATHS[0]]
+            with self.assertRaisesRegex(
+                gate.GateError, "archive member bytes differ from Git object"
+            ):
+                gate._require_archive_member_identity(
+                    gate.REPO_ROOT, "git", "a" * 40, "candidate", inputs
+                )
+
+    def test_neutral_std_layout_contains_only_verified_prelude_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            stage = gate._stage_layout(root)
+            self.assertEqual(Path(stage["std"]), root / "stage" / "std")
+            self.assertEqual(Path(stage["cwd"]), root / "stage" / "cwd")
+            inputs = {
+                path: f"source:{path}\n".encode("utf-8") for path in gate.STD_PATHS
+            }
+            gate._write_neutral_std(stage, inputs)
+            actual = sorted(
+                path.relative_to(Path(stage["std"])).as_posix()
+                for path in Path(stage["std"]).rglob("*")
+                if path.is_file()
+            )
+            self.assertEqual(actual, sorted(Path(path).name for path in gate.STD_PATHS))
+            for path in gate.STD_PATHS:
+                self.assertEqual(
+                    (Path(stage["std"]) / Path(path).name).read_bytes(),
+                    inputs[path],
                 )
 
     def test_pair_count_and_order_tampering_are_rejected(self) -> None:

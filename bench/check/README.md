@@ -108,6 +108,11 @@ JSON plus small command/stdout/stderr sidecars; source identity is rechecked
 against `git show <commit>:<path>`, so a missing commit or object fails closed.
 The archive command pins `core.autocrlf=false`, making archived text bytes equal
 to the referenced Git blobs even when the Windows checkout enables AutoCRLF.
+Before either binary is sampled, the gate also proves that the exact 11
+`std/*.ring` files consumed by `checker.ring` are byte-identical across both
+archives and Git objects. It writes those verified candidate bytes to the
+neutral `stage/std` directory; both binaries run from the same sibling
+`stage/cwd`, so prelude discovery cannot depend on either subject source tree.
 
 ## Sample policy
 
