@@ -11,6 +11,8 @@
 
 当前主线目标是形成 **v0.1 developer-preview candidate**；实际公开 release、许可证与最终支持平台仍由用户在候选产物和证据齐备后拍板。Preview 可以明确标注未实现能力，但不得明知违反当前语言规范、ownership/safety 保证或用豁免降低门槛。
 
+**未发布期 clean-break 原则（2026-08-07 用户拍板）**：首次公开 preview/release 之前，一项公开语法、API、ABI 或语义变更一旦按授权边界拍板，就采用最简单的原子切换；兼容性本身不是增加 deprecated alias、双实现路径、旧 ABI fallback 或迁移 shim 的理由。仓内调用点、规范和测试在同一变更中整体迁移，并明确记录 break。此原则不授权降低 correctness、ownership/safety 或测试门槛，也不替代新语义本身的用户保留决定；首次公开发布后的版本兼容政策另行建立。
+
 处理顺序按五道门组织：
 
 1. **Critical 正确性底线**：先修当前 critical audit #260、#268、#269；执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。

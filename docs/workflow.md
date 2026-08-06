@@ -35,6 +35,8 @@
 
 边界不清时先采用“保持现有公开行为与保证”的可逆方案。若仍属于用户保留决定，写决策包；不得擅自扩大授权。
 
+**当前未发布期 standing decision（2026-08-07）**：对于已经依上述授权边界拍板的变更，Steward 应选择 clean break，不得仅为向后兼容追加 deprecated alias、双 ABI/双语义路径、旧行为 fallback 或迁移 shim；仓内消费者、规范和测试原子迁移。该 standing decision 只消除兼容层工作，不把尚未拍板的新语法、公开语义或保证变更转为 Steward 自主决定，也不允许降低 correctness、ownership/safety、验证或可移植性门槛。首次公开发布后重新建立版本兼容规则。
+
 修复违反既有公开语义或 safety/ownership 保证的 bug，不等于修改该保证：只要候选方案都恢复既有契约，Steward 经 Argument + 独立反驳后自主选择内部实现。只有接受已知违约、降低/豁免保证或改变契约本身才必须交由用户。
 
 ## 3. 持久状态
