@@ -1241,6 +1241,16 @@ extern fn read_all(path: Str) -> Str / io             // path is readonly
 
 函数类型中同样标注约定：`fn(T)` = borrow，`fn(mut T)` = mutable，`fn(move T)` = move。
 
+**ownership 实现真值（2026-08-06，#268/#269 Argument A′）**：
+
+- `Borrow / MutBorrow / Move` 与返回值的 owned/borrowed 属性是 callable type 的组成部分，必须进入 `FnType`、HIR param/call、trait/signature/extern、函数值和 module export；不得再由 checker、Perceus 或 backend 按 callee 名字各自猜测。模式不匹配默认拒绝，除非存在显式、可验证的 adapter。
+- 用户函数与 lambda 在类型推断完成后生成 mode constraints；直接调用、方法、函数值、高阶泛型、trait thunk、重导出和互递归 SCC 进入同一个有限 lattice fixed point。无函数体的接口使用显式 builtin/extern contract；没有契约时保持 borrow，不能暗中接管实参。
+- Drop 传播由 symbolic ownership shape 表达：nominal identity、直接 Drop、字段/类型参数依赖位与显式阻断边界。递归 nominal SCC 求最小不动点；tuple/record/Option/Result 结构传播，List/Map/Set 等隐藏 raw-slot owner 使用集中 override，Ptr 与未来 `Rc<T>` 等共享边界显式阻断。未解析 TypeVar 以 may-Drop 进入 checker，不允许因此复制潜在线性值。
+- 所有会合成调用的 lowering 完成后、Perceus 之前运行独立 ownership pass。该 pass 以稳定 binding `DefId` 建临时 CFG，区分 normal/return/break/continue/exceptional edge，以 `Available / Moved / MaybeMoved` 做 branch join 与 loop fixed point；重新赋值可恢复 Available，shadow/synthetic binding 不按裸名称合并。
+- 真正移交的完整 binding 在 HIR 中物化为 `Take`。C11 lowering 先把原值保存到临时量，再把源槽清为 null，最后交给目标；所有 cleanup-visible 槽在注册 cleanup 前初始化为 null，scope drop 始终按逆声明序无条件执行，null drop 为 no-op。Perceus 不再维护 block 级 moved-name 抑制表，verifier 独立核对 Take、调用契约、drop 与 moved-read，不盲信 annotation。
+- 当前不支持 partial move：field/index/pattern/destructure/spread 中移出 may-Drop 值必须给出单轮可修诊断；完整 binding 与 fresh temporary 可移交。普通 closure 只允许 borrow/mut capture；在 FnOnce/consume-closure 语义落地前，closure body 移交捕获值一律拒绝。
+- B-168 固定 C-native failure/control ABI 前，任何可能跨 `catch`/raise 边界修改外层 cleanup-visible 槽的 `Take` 一律 fail loud；不得把自动局部置空或 drop flag 带过现行 `setjmp` 边界。B-168 完成后由同一 ownership plan 接入选定的稳定存储/显式 failure edge。
+
 ### 7.4 别名追踪与 mutation 安全
 
 非 Drop 类型的 `let x = y` 创建别名（rc+1，同一对象）。编译器在函数内追踪别名关系，**mutation 后旧别名失效**：
@@ -1618,7 +1628,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 - match/catch 按源码 arm 顺序，穷尽失败 fail loud；Drop、cleanup 与 evidence 生命周期在嵌套函数边界隔离，并由共享 RC/verifier 契约审计。
 - 编译器进程只生成文本并调用外部编译器，不恢复 LLVM-C 式进程内 FFI/IR builder 信道。
 
-**收官与发布边界**：B-163 只剩 CLAUDE/README、clean-clone/远端 CI 与 worktree bookkeeping；完成后删除临时 plan。critical correctness 清零后，B-176/B-180 先恢复可接受的 check/验证反馈速度，再由 B-174/B-175 承担发布产品面；生成程序性能证据由 B-181 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
+**发布边界**：C-only 迁移、clean-clone 重复门与旧 worktree 收官已经完成。critical correctness 清零后，B-176/B-180 先恢复可接受的 check/验证反馈速度，再由 B-174/B-175 承担发布产品面；生成程序性能证据由 B-181 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
 
 **未来 LLVM target 重启门**：只有代表性负载证明 C 不可表达的性能瓶颈、Ring 级调试信息刚需，或目标平台缺少成熟 C 工具链时才重新立项。届时 C 后端永久保留为 reference/stage-0，LLVM 只能是第二信道，并且只发文本 `.ll`，不得恢复进程内 LLVM-C FFI。
 
@@ -1810,7 +1820,7 @@ HIR 契约 → Ring passes（RC/reuse、bounds、specialize、dead effect）
 
 ## 15. 编译器实现
 
-编译器已用 Ring 自举；前端、Perceus RC 与静态 verifier 共享，C11 codegen 生成 tracked `dist-c` 固定点。B-163 只跟踪一次性收官，长期后端契约以 §10.4 为准；历史 TypeScript/JS/LLVM 翻译过程与里程碑留在 Git/tag，不在设计真值重复维护。
+编译器已用 Ring 自举；前端、Perceus RC 与静态 verifier 共享，C11 codegen 生成 tracked `dist-c` 固定点。长期后端契约以 §10.4 为准；历史 TypeScript/JS/LLVM 翻译过程与里程碑留在 Git/tag，不在设计真值重复维护。
 
 **Koka 作为参考实现**：Effect 推断（`InferEffect.hs`）和 evidence passing（`Evidence.hs`）的算法翻译自 Koka 编译器（MIT 许可）。Perceus 引用计数已翻译其 POPL'21 实现落地（§7.11）。
 

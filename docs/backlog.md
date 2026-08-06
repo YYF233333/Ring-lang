@@ -11,14 +11,13 @@
 
 当前主线目标是形成 **v0.1 developer-preview candidate**；实际公开 release、许可证与最终支持平台仍由用户在候选产物和证据齐备后拍板。Preview 可以明确标注未实现能力，但不得明知违反当前语言规范、ownership/safety 保证或用豁免降低门槛。
 
-处理顺序按六道门组织：
+处理顺序按五道门组织：
 
-1. **C-only 收官**：B-163 只剩治理/用户文档、clean-clone 门禁、远端 CI 与 worktree 清理；代码迁移、`llvm-c-backend-final` tag、`dist-c` 固定点、LLVM/旧 anchor 删除已经完成。同步复测 #261：若 C-only 编译器不再出现 AV，以重复门证据关闭；若仍出现，立即升级为发布阻断。
-2. **Critical 正确性底线**：先修当前 critical audit #260、#255、#256、#268；#261 若在 C-only 重现则立即并入本门，执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受安全源码崩溃、静默资源泄漏或降低既有保证。
-3. **工具链反馈吞吐 P0**：2026-08-03 用户明确将“critical 清零后的第一优先级”改为 check/验证速度。B-176 可在 critical 修复期间提前采集不改变行为的基线；critical 清零后立即执行 B-176 → B-180，先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作。性能专项不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
-4. **其余正确性与语义/ABI 冻结**：随后处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257；再走 B-168 → B-169 → B-167 → B-152 → B-002 的 release critical path。B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。
-5. **发布产品面**：B-174 → B-175 得到可安装、可 `run/build/check/doctor` 的 Windows/Linux 候选包；B-181 建立生成程序的 runtime/内存/尺寸预算。随后 B-178 → B-016 补 formatter/LSP，B-177 → B-111 补版本化 agent contract 与可复现实验。
-6. **发布后能力**：先做 P1 correctness/ownership 与用户高频能力（B-110、B-172、B-173、B-149 等），再由 B-111 数据决定 refinement/async 的投入顺序。B-001/B-116→B-007 均在 RIIR/ABI 稳定后启动；GADT、dyn Trait、HKT/GAT、JIT、Debugger 等 P3 工作继续后置。
+1. **Critical 正确性底线**：先修当前 critical audit #260、#268、#269；执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。
+2. **工具链反馈吞吐 P0**：2026-08-03 用户明确将“critical 清零后的第一优先级”改为 check/验证速度。B-176 可在 critical 修复期间提前采集不改变行为的基线；critical 清零后立即执行 B-176 → B-180，先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作。性能专项不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
+3. **其余正确性与语义/ABI 冻结**：随后处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257；再走 B-168 → B-169 → B-167 → B-152 → B-002 的 release critical path。B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。
+4. **发布产品面**：B-174 → B-175 得到可安装、可 `run/build/check/doctor` 的 Windows/Linux 候选包；B-181 建立生成程序的 runtime/内存/尺寸预算。随后 B-178 → B-016 补 formatter/LSP，B-177 → B-111 补版本化 agent contract 与可复现实验。
+5. **发布后能力**：先做 P1 correctness/ownership 与用户高频能力（B-110、B-172、B-173、B-149 等），再由 B-111 数据决定 refinement/async 的投入顺序。B-001/B-116→B-007 均在 RIIR/ABI 稳定后启动；GADT、dyn Trait、HKT/GAT、JIT、Debugger 等 P3 工作继续后置。
 
 性能仍让位于 critical correctness，但现在明确越过其余非 critical 队列：B-176/B-180 先解决开发反馈回路；B-181 再决定 #262/B-079 等生成程序优化。B-105 只有在 B-180 证明 unchanged-module 重复工作仍是主导成本时启动，B-041 不进入 preview 路线。
 
@@ -281,7 +280,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 1. **编译器生成 cleanup stack + `setjmp`/`longjmp`**：raise 沿显式 cleanup record 逐帧执行 Drop，再跳转到 catch；核实 frame 生命周期、部分初始化、局部写入可见性与 callback/FFI 边界。
 2. **显式 failure-status/continuation lowering**：仅对可能 fail 的函数增加显式失败返回/continuation 路径，逐调用点传播并在边上执行 Drop；纯函数 ABI 不承担额外参数。核实跨模块/间接调用/effect row 单态化如何稳定标注 fail-capable prototype。
 
-平台私有 unwind、SEH-only、C++ exception 或重新依赖 LLVM 均不进入候选集：它们扩大 TCB、破坏 C11 可移植性，也与 B-163 的后端收口目标相反。
+平台私有 unwind、SEH-only、C++ exception 或重新依赖 LLVM 均不进入候选集：它们扩大 TCB、破坏 C11 可移植性，也与现行 C-only 后端契约相反。
 
 **必须回答的问题**：
 
@@ -295,8 +294,8 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 **探针范围 / 文件所有权**：
 
 - 共享层：`compiler/hir.ring`、`compiler/perceus.ring`、`compiler/verify_rc.ring`
-- C lowering：`compiler/codegen_c.ring`、`compiler/codegen_c_expr.ring`、`compiler/codegen_c_runtime.ring`（以 B-163 完成后的实际文件为准）
-- runtime：`ring_runtime.cpp` 或 B-163/RIIR 后承接该边界的 C runtime 文件
+- C lowering：`compiler/codegen_c.ring`、`compiler/codegen_c_expr.ring`、`compiler/codegen_c_runtime.ring`
+- runtime：`ring_runtime.cpp` 或后续 RIIR 承接该边界的 C runtime 文件
 - 证据：`tests/cases/` 的最小程序、Python runner 与生成 C/汇编/对象尺寸记录
 - 两候选原型必须位于隔离 worktree/实验分支；**不得把任一候选的行为改动并入 main**
 
@@ -357,7 +356,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 
 ### B-167 effectful function value 调用点动态 evidence ABI [refactor] [P0] [L] [judgment] [queued] [after: B-168+B-169]
 
-> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。LLVM 已退役、`dist-c/` 已成为唯一 bootstrap 锚；本项不再等待后端代码迁移，但仍须等 B-163 的 clean-clone/远端 CI 收官。**2026-07-29 前置更新**：B-168 必须先拍板 C-native failure/control ABI；B-169 随后固定 trait dictionary / effect evidence 的共享边界与用户面不变量。本项必须同时复用两者的 function-pointer、failure edge、typed evidence 与 RC 契约，不得另造平行 ABI。
+> 2026-07-28 Discussion 用户拍板“先 C 后 A”。audit #258 先以创建处词法 evidence 收口 checker soundness：handler 只消除显式 custom label，未知 open tail 原样向外传播。LLVM 已退役、`dist-c/` 已成为唯一 bootstrap 锚。**2026-07-29 前置更新**：B-168 必须先拍板 C-native failure/control ABI；B-169 随后固定 trait dictionary / effect evidence 的共享边界与用户面不变量。本项必须同时复用两者的 function-pointer、failure edge、typed evidence 与 RC 契约，不得另造平行 ABI。
 
 **目标语义**：effectful function value 在调用点接收当前 effect evidence。外部创建的 callback 传入 `with_mock_clock` / `with_mock_fs` / `capture_logs` 等高阶 handler 后，其 effect 由调用点内层 handler 截获，而不是继续使用 callback 创建处的旧 evidence。静态 effect row 仍是 capability 真值；调用点只传递签名要求的 evidence，未知 open tail 必须逐项转发，不能被机械消除。
 
@@ -377,7 +376,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 
 ## RIIR
 
-### B-152 RIIR 标准库收尾 [feature] [P1] [L] [judgment] [queued] [after: B-163]
+### B-152 RIIR 标准库收尾 [feature] [P1] [L] [judgment] [queued]
 
 List/Map/Set/StringBuilder 与 Str runtime 布局 Step 1 已完成；只剩 Str Step 2 与 P5。
 
@@ -439,7 +438,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [queued] [after: B-163] [before: B-180]
+### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [queued] [before: B-180]
 
 > **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
 
@@ -456,7 +455,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 ### B-180 `check` / runner 吞吐 2× 专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-168+B-174]
 
-**进入门**：#260、#255、#256、#268 已关闭；#261 若在 C-only 重现以及执行期间新增的 critical 也必须先关闭。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
+**进入门**：#260、#268、#269 已关闭；执行期间新增的 critical 也必须先关闭。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
 
 **实现范围 / 顺序**：
 
@@ -465,7 +464,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 3. 若进程启动/重复初始化主导，比较 bounded worker-process/batch-check 与普通进程池；任何复用方案必须以随机 case 顺序、重复运行和进程隔离对照证明无 global state 泄漏。daemon、常驻服务和新公共协议不作为首轮默认；
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
 
-**量化验收**：以 B-176 同机同 manifest 为基线，`compiler/main.ring check` median 与完整本地标准门 wall time 都降至基线的 **≤50%**；`check --verify-rc compiler/main.ring` 同样以 ≤50% 为目标，本项不得以只有 10–20% 改善宣告完成。tiny/大单文件/module check 的 p95 不得回退 >10%；串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。报告 cold/warm wall、CPU、peak aggregate/per-worker RSS；若为了 2× 需要 >25% peak aggregate RSS 增长，必须先给出内存上限、自适应 jobs 与低内存退化证据。完整 C/RC/ASan/self-host 门通过，#261 原始崩溃样本仍 fail loud。
+**量化验收**：以 B-176 同机同 manifest 为基线，`compiler/main.ring check` median 与完整本地标准门 wall time 都降至基线的 **≤50%**；`check --verify-rc compiler/main.ring` 同样以 ≤50% 为目标，本项不得以只有 10–20% 改善宣告完成。tiny/大单文件/module check 的 p95 不得回退 >10%；串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。报告 cold/warm wall、CPU、peak aggregate/per-worker RSS；若为了 2× 需要 >25% peak aggregate RSS 增长，必须先给出内存上限、自适应 jobs 与低内存退化证据。完整 C/RC/ASan/self-host 门通过，任何原始失败都必须 fail loud。
 
 ### B-181 生成程序 runtime / 内存 / 产物 release budget [infra] [P1] [M] [judgment] [queued] [after: B-180]
 
@@ -511,7 +510,7 @@ B-176/B-180 先解决编译器开发反馈；本项再建立用户程序性能�
 ### B-041 JIT 编译选型与热路径重编译 [feature] [P3] [XL] [judgment] [queued]
 在稳定 AOT native 基础上，用 runtime profile 重编译热路径。实现前先对 ORC、轻量 IR/解释器 tier 与外部 JIT runtime 做 Argument，不预先绑定已退役后端。
 
-- **前置依赖**：B-163 完成，基础 AOT pass 与性能基线稳定，并有实测热点证明 JIT 值得扩大 runtime/平台边界
+- **前置依赖**：C-only 基础 AOT pass 与性能基线稳定，并有实测热点证明 JIT 值得扩大 runtime/平台边界
 - **验收**：选型含跨平台、TCB、deopt、effect/refinement/linear 元数据和回滚成本；原型证明真实 workload 收益且不改变公开语义
 
 ### 类型系统驱动的控制力（远期愿景）
@@ -777,15 +776,7 @@ Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05
 
 **验收**：声明/字面量/索引/迭代/长度等式、越界、嵌套/FFI；不同 N 不混用，动态长度用 List；完整 C/self-host 回归。
 
-## C 后端迁移与退役遗留
-
-### B-163 C 后端迁移：codegen 从 LLVM-C API 改为 C 源码发射 [refactor] [P0] [XL] [mechanical] [doing: c-only-bookkeeping]
-
-代码迁移已经完成：C11 是唯一 codegen/bootstrapping lane，`compiler/dist-c/main.c` 是 tracked stage-0，`llvm-c-backend-final` tag 保留最后 LLVM 恢复点，main 已删除 LLVM-C/addon、`codegen_llvm*`、`dist/` 与 `dist-llvm/`；CI/runner 已切到 C-only gates。
-
-剩余工作严格限于收官：更新 `CLAUDE.md`/README/构建命令与项目结构，删除/重写全部 LLVM-only 文档与审计项；从 clean clone 重建 compiler，跑一次 C-only 全套与 fixed point；把 main 的本地提交批量 push 后取得远端 CI 证据；清理两个 B-163 worktree/branch；最后删除 `docs/plan-c-backend.md` 与本条。#261 在 clean C-only compiler 上按既有重复门复测，不能把 LLVM 时代随机 AV 结论直接带入或直接抹除。
-
-**验收**：clean clone 只需 Python + C/C++ clang toolchain即可重建；e2e/golden/RC/self-compile/structural/parity 全绿且 `dist-c` 字节固定；tag 可恢复；main/文档无 LLVM-C/addon/link/旧 dist 现行依赖；远端 CI 通过；workflow validator 通过。Push、远端 CI 与 branch/worktree 清理由后续 Steward 执行，当前 Discussion 不擅自发布或删除。
+## 增量编译（远期）
 
 ### B-105 增量 check / 原生编译（HIR cache + per-module object）[feature] [P3] [XL] [judgment] [queued] [after: B-180] [deferred: measured-build-cost]
 

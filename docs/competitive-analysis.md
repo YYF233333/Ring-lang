@@ -445,7 +445,6 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 ## 11. 相关工作项
 
-- **B-163**：完成 C-only 文档、clean-clone/远端 CI 与 worktree 收官；codegen/bootstrap 迁移本身已完成。
 - **B-174/B-175**：交付可安装、可运行、可诊断的 preview CLI 与 Windows/Linux candidate artifacts。
 - **B-176/B-180**：建立 `check`、RC/self-verify、runner/self-compile 的可复现 baseline，并以不减覆盖的 2× wall-time 改善恢复快速开发反馈。
 - **B-181**：单独建立生成程序 runtime、内存/分配与产物尺寸的 release baseline/budget。

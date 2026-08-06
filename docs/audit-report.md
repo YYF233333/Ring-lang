@@ -10,22 +10,6 @@
 
 ## 前端
 
-### #261 编译器自身间歇 AV（exit 3221225477）底噪 ~1 次/全量轮，先于 B-107 分支存在 [medium] [judgment] [open]
-
-2026-07-31 B-107 merge 门禁的 main 基线 ×3 实测定量：a511d50 时代 ring.exe（= B-107 分支分叉点）跑全量套件，AV 频次 round1=0 / round2=2（`closure_capture_loop`、`supertrait_evidence`）/ round3=1（`struct_basic`——最基础用例也能炸）；B-107 worktree 侧另有独立观测（`adversarial_method_set_all`、`effect_custom_typed` 各 1 次）。用例无规律、复跑即过——是编译器进程自身的间歇堆损坏，非被测程序缺陷；历史「间歇 AV 复跑即过」流程豁免对应的正是这个从未立案的问题。
-
-**影响**：CI/自编译假红；更深层是历史 compiler 曾存在真实内存错误，不能排除同根源有静默产物路径。旧 LLVM verify/emit finding 已随 lane 退役删除，不再作为当前归因候选；现只按下方 C-only 重分类门判断是退役信号还是共享层/RC blocker。
-
-> **2026-07-31 补充观测（B-107 merge 收官轮，merged 编译器）**：单轮 3 AV——`adversarial_dispatch_option_and_then`、`adversarial_effect_multi_delegate`、`generic_ord_dispatch`，全部 dict/dispatch 族聚集（B-107 动过 dict evidence 面），高于基线 ~1/轮但单轮样本不足定论；B-107 worktree 干净 ×3 的 AV 用例（effect/range/catch/reexport 族）无此聚集。#265 修复后的全量轮继续记录：若 dict 族聚集复现，优先用 ASan gating 跑该三用例。
-
-> **2026-08-01 takeover 补充观测（#266/#259 merged 编译器）**：聚合轮在 LLVM golden 的 `closure_capture_nonloop` 出现唯一一次无诊断 `0xC0000005`，随后同用例隔离 ×3 全绿；其余在外层 30 分钟限额前完成的 e2e / golden / RC / self-compile 前两轮累计 1338 pass / 7 contract skip，未见 dict 族聚集。信号与本条既有随机、复跑即过基线一致，原始失败保留，不以整轮重跑抹除。
-
-> **2026-08-01 tuple/structural merge 补充观测**：完整轮唯一失败为 LLVM golden `trait_default_method.ring` 无诊断 `0xC0000005`，隔离 ×3 全绿；全轮其余 1438 pass / 8 contract skip，self-compile 三代一致，未见 tuple/structural 或 dict 族聚集。原始失败与日志保留，不以隔离复跑替代全轮结论。
-
-> **2026-08-03 C-only 重分类门**：LLVM/`dist-llvm` 已从 main 退役，上述样本只能证明历史 lane 曾存在随机 AV，不能证明当前 `dist-c` compiler 仍受影响。B-163 收官先用 clean-clone C-only compiler 跑全套 ×3，并对历史高频 dict/effect/closure fixture 跑 ASan gating；零复现且进程/产物 hash 稳定则以“退役 lane 信号消亡”关闭，任一 C-only AV 或不稳定产物则立即升级为 critical release blocker 并保留 alloc/free 栈。
-
-发现者：Repository Steward main 基线 ×3 定量
-
 ### #267 Unit-return effect op 的 arm 值在 perform 点必然泄漏（EffectOp 保守不 drop 家族）[low] [judgment] [open]
 
 2026-07-31 #265 review 发现并记录：tail-resumptive handler 中 Unit-return op 的 arm 值（如 arm 尾值为 Str）按语句语义丢弃，但 arm body 以 escape=true 处理（perceus.ring:2519 附近，行号=立案时）owned 返回，perform 点的 EffectOp 值被 Perceus 有意不 drop（"leak, crash-free"）——豁免使该必然泄漏形态重新合法化。非新泄漏类：非 Unit op 的语句位丢弃同形态既有。与 #217（block-expr/IIFE 临时值无 HIR 层 drop）同族。
@@ -64,6 +48,8 @@
 2026-07-29 B-107 HOF 正式门禁发现并由 direct-call 对照确认：`std/io.ring` 与语言规范公开声明 `json_stringify<T>(value: T) -> Str`，但 native `ring_json_stringify(void*)` 除 null 外无条件把参数转成 `RingStr*`。当前 C-native 安全源码直接执行 `json_stringify(107)` 时，会把 tagged Int `0xD7` 当字符串指针解引用并以 `0xC0000005` 崩溃；不需要一等函数或字典传递即可触发。
 
 **修复约束**：公开签名与 native 实现必须一致。若保留 `<T>`，需设计可证明覆盖所承诺类型的序列化/type-evidence 或单态 type-directed lowering，并让直接调用与一等 extern wrapper 共用同一路径；若只支持 Str，则必须收窄标准库签名和规范，不能继续让 checker 接受会越界访问的安全程序。验收至少覆盖 Int/Float/Bool/Str、直接调用/一等函数值、C-native/structural/self-host，并对不支持的结构类型给出编译期诊断而非 runtime UB。任何收窄公开签名的候选先形成用户决策包。
+
+独立 Argument 已确认 runtime 猜值、primitive-only 隐式收窄与孤立选择性具体化都不能诚实恢复现有契约；公开支持域与兼容成本由 Steward Inbox D-001 等用户拍板，期间冻结本项实现并继续其他无阻塞工作。
 
 发现者：B-107 HOF implementation + independent review
 
@@ -110,23 +96,7 @@
 
 ## Native codegen 与 RC
 
-### #255 `impl Drop for <enum>` 的用户 drop 从不被调用 [critical] [judgment] [open]
-
-checker 对 enum 的 `impl Drop` 照常收进 `drop_types`（E0801 move 语义生效），但当前 C drop glue 的 enum 路径只做 payload 递归 drop，**用户 drop body 静默不执行**（用户以为 RAII 生效实则没有）。这是现行 C-only 产品路径的直接 correctness blocker，不再保留旧 oracle parity 叙述。
-
-**修复方向**（解法明确）：C enum drop fn 在 tag switch 前插入用户 drop 调用（对齐 struct 路径）并锁定 enum 变体持资源、用户 drop 与 payload drop 的精确顺序；与 B-168/B-002 的 failure cleanup 共享同一 Drop identity，不在 runtime 另造特判。
-
-发现者：step 7 worker（feedback 分诊）
-
-### #256 Result 壳 RC 归零时 payload 不递归释放 [critical] [judgment] [open]
-
-当前 C drop glue 对 `Result` 仍沿用“由 runtime 处理”的 skip，但 **runtime 没有 `drop_result`**（对照：Option 有固定 drop 路径）——Result 对象 RC 归零时只 free 外壳，ok/err payload 不递归 drop。
-
-**修复方向**：在“共享 enum drop glue”与“固定 runtime typeid drop”两候选间做 bounded Argument，优先减少 builtin 特例并与 B-152 RIIR 终态一致；无论选择哪条，Result/Option/普通 enum 的 drop identity 必须唯一，修复后跑 RC 泄漏敏感 golden ×3、ASan 与 self-host fixed point。
-
-发现者：step 7 worker（feedback 分诊）
-
-### #268 复合类型未传播 Drop-ness，默认安全路径可 double-drop 并损坏堆 [critical] [judgment] [open]
+### #268 复合类型未传播 Drop-ness，默认安全路径可 double-drop 并损坏堆 [critical] [judgment] [doing]
 
 `is_user_drop_type` 只判断名义 struct/enum 自身是否直接存在于 `drop_types`，不会把字段/variant payload 或泛型实参中的 `Drop` 语义传给外层类型。因而 `Wrapper { value: Resource }`、`Holder::Wrapped(Resource)` 等本应自动 derive Drop、保持 move-only 的复合值仍会被 Perceus Clone，并且默认 `check/build` 接受同一绑定被重复传入消费位。
 
@@ -134,7 +104,21 @@ checker 对 enum 的 `impl Drop` 照常收进 `drop_types`（E0801 move 语义�
 
 **修复方向**：建立一个由 checker/HIR 持有、对递归类型图有界并对泛型实参敏感的 transitive Drop predicate，让 move checker、Perceus 与 verify_rc 共用同一真值；struct/enum/tuple/Option/Result/List 等所有可持有 Drop 值的复合形态都必须传播 move-only，不能只给本次 probe 的两个叶名打补丁。回归至少覆盖直接/嵌套/泛型复合、递归类型、消费后再使用的稳定诊断、正常单次析构顺序、C/RC/ASan 与 self-host fixed point。
 
+2026-08-06 方向止损门：连续两轮独立 review 证明“共享类型 predicate + block 级 moved-name set”仍无法表达互斥分支合流、循环回边、closure capture 与参数 ownership mode；该实验分支冻结，不再追加控制流特例。#268 与 #269 转入共同 Argument：单一真值必须同时描述“类型是否可能持有 Drop”与“每条 HIR 边是否移交所有权”，checker、Perceus 与 verifier 只能消费该计划，不能各自重走表达式猜测。
+
 发现者：#255/#256 独立核验后 Repository Steward 对抗 probe
+
+### #269 参数 ownership mode 未推断，borrow 误拒且 move-return 默认路径重复析构 [critical] [judgment] [doing]
+
+`check_moves_expr` 处理 `HExpr::Call` 时会在检查每个实参后无条件调用 `try_consume_ident`，没有读取或推断 callee 参数的 ownership mode。该行为与 design §7.3“参数默认 borrow；仅函数体将参数返回、存入字段或跨 spawn 时推断 move”冲突。
+
+2026-08-06 在 `50a96a` 的 tracked C compiler 上验证出两侧违约：① `fn observe(value: Tracker) { print(value.tag) }` 只读参数，caller 调用后再次读取 `value.tag`，checker 错报 E0801；② `fn take(value: Tracker) -> Tracker { value }` 应推断 move，默认 `check/build` 却通过并生成 caller 原绑定与返回绑定的两次析构，运行打印第二次损坏值后以 `0xC0000374` 退出。显式 `--verify-rc` 能报 `uaf-escaped-borrow`，但默认安全门没有消费该证据。
+
+**修复方向**：ownership mode 必须由函数体推断并进入函数签名/HIR call identity，让 checker、Perceus 与 verifier 消费同一模式；普通/方法/函数值/泛型/跨模块调用都按 borrow、mut 或 move 处理。不得按实参是否含 Drop 类型一律消费，也不得通过放宽 E0801 掩盖真正的 owning sink。验收覆盖只读参数后重复使用、参数返回/存字段后的 caller 失活、方法与函数值调用、跨分支/循环/closure 的状态合流、默认 checker 与 verifier 同结论、单次析构，以及 self-host fixed point。
+
+**Argument verdict（2026-08-06）**：采用 design §7.3 的 A′——symbolic ownership shape + callable mode fixed point + 临时 CFG 数据流 + 显式 HIR `Take`/源槽置空。永久 CFG/SSA ownership IR 暂不采用；direct-callee 白名单与大面积保守拒绝不能作为最终修复。实施必须删除 block 级 moved-name 抑制和调用名猜测；closure capture transfer、partial move 与 B-168 前跨 catch 的 outer-binding Take 先 fail loud。验收矩阵至少覆盖 direct/method/fn-value/HOF/trait/reexport、recursive SCC、互斥分支、零/N 次循环、break/continue/return、重新赋值、shadow、容器 ownership shape、borrow capture 重复调用、默认 checker/verifier 一致与 double bootstrap。
+
+发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]
 
