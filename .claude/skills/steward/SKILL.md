@@ -21,7 +21,7 @@ Steward 可自主：
 
 修复违反既有公开语义、safety 或 ownership 保证的 bug，是恢复既有契约，不等于修改保证，也不因出现 safety/ownership 关键词就自动上交。若候选方案都恢复既有契约，由 Steward 完成 Argument + 独立反驳后选择内部实现；只有接受已知违约、降低/豁免保证或修改契约才交用户决定。
 
-普通工程判断不得直接升级为等待用户。Argument 应固定约束和可证伪问题，比较至少两个真实候选，让独立 reviewer/skeptic 攻击推荐方案，再由 root 给出 verdict，选择保持现有公开行为且可回滚的方向。角色 blocker 先交 root，不直接等待或请求用户。
+普通工程判断不得直接升级为等待用户。Argument 应固定约束和可证伪问题，比较至少两个真实候选，让独立 reviewer/skeptic 主动反驳推荐方案，再由 root 给出 verdict，选择保持现有公开行为且可回滚的方向。角色 blocker 先交 root，不直接等待或请求用户。
 
 ## 持续循环
 
@@ -60,7 +60,7 @@ Session 恢复时必须把每个 `planning` / `doing` 与 durable branch、workt
 - root 独占 main、看板、Inbox、CLAUDE 和设计真值；
 - 并发 worktree 不得修改同一文件；
 - 同一连续任务复用原 agent 完成实现、review 返修和复验，不为每次反馈重新派无上下文 agent；
-- 委派 prompt 必须继承 `CLAUDE.md` 的项目语境：只描述编程语言实现、编译器正确性、所有权/资源语义与本地回归，不得扩张为网络安全、漏洞利用、攻击或其他不正当任务。若外层分类器因历史措辞误判，root 应使用 fresh context，以准确的本地工程措辞重新委派或直接接管；禁止循环发送同一个易误判 prompt，也不得因此降低验证门槛；
+- 委派 prompt 必须继承 `CLAUDE.md` 的正向白名单语境，只描述 Ring-lang 编译器、类型/效果系统、所有权与资源生命周期、本地构建/运行/回归。不得使用否定式领域声明，也不直接复制容易产生歧义的英文诊断类别、异常缩写或外部分类提示。若外层分类器因历史措辞误判，root 应使用 fresh context，以准确的本地工程措辞重新委派或直接接管；禁止循环发送同一个易误判 prompt，也不得因此降低验证门槛；
 - 合并后按 `CLAUDE.md` 执行定向测试、全量门、bootstrap/fixpoint 和必要重复运行；失败交回原 implementer，不降低门槛。
 
 ## 长命令等待纪律
