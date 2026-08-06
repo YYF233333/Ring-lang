@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 
@@ -217,6 +217,17 @@ class PhaseTimingTests(unittest.TestCase):
     def test_phase_timing_path_must_be_absolute(self) -> None:
         with self.assertRaises(argparse.ArgumentTypeError):
             runner._phase_timing_path("relative.jsonl")
+
+    def test_production_relative_case_identity_uses_forward_slashes(self) -> None:
+        relative = PureWindowsPath("negative", "join_non_str.ring")
+        self.assertEqual(
+            runner._phase_relative_identity(relative),
+            "negative/join_non_str.ring",
+        )
+        self.assertEqual(
+            runner._phase_relative_identity(relative, "neg:"),
+            "neg:negative/join_non_str.ring",
+        )
 
     def test_runtime_prepare_cache_hit_is_explicit_non_child(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

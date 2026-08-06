@@ -661,6 +661,11 @@ def _phase_file_identity(path: str) -> str:
         return Path(path).name
 
 
+def _phase_relative_identity(path: Path, prefix: str = "") -> str:
+    """Return a platform-independent identity for an already-relative case."""
+    return prefix + path.as_posix()
+
+
 def check_blocked_gap_reason(case_path) -> Optional[str]:
     """Return the frontend-blocker reason for a positive case, if any."""
     key = normalized_repo_path(case_path)
@@ -1385,7 +1390,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                                                   tmpdir,
                                                   expect_panic=expect_panic,
                                                   phase_suite=suite,
-                                                  phase_case=str(rel))
+                                                  phase_case=_phase_relative_identity(rel))
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, str(rel), detail))
                 continue
@@ -1433,7 +1438,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
         try:
             r = ring_check(
                 ring_exe, str(ring_file), phase_suite=suite,
-                phase_case=f"neg:{rel}",
+                phase_case=_phase_relative_identity(rel, "neg:"),
             )
         except subprocess.TimeoutExpired:
             collector.add(TestResult(TestResult.FAIL, suite, f"neg:{rel}", "check timed out"))
