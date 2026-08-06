@@ -64,6 +64,60 @@ Those values are descriptive only: the two lanes are not interleaved or matched
 by attempt, so their deltas and ratios are not an instrumentation-overhead
 estimate.
 
+### Disabled-default-path budget evidence
+
+A separate controlled AB/BA gate compares base commit
+`0c80598914a7d58210ba02bef7b94f49b6da6f8a` with the exact code snapshot
+`6f49af1f205e4f1e3b15765115b4820756abd6df`. Both inputs were extracted with
+`git archive` into the same absolute staging path and built in sequence with
+the same filenames, ThinLTO cache, and LLVM 22.1.6 toolchain. Input identities
+were:
+
+- base `main.c` / runtime SHA-256:
+  `60fc53609c5e4f48abc0638bd6e7bbb3e865aa014b8eaeb4332fa9b7cfc01e9e` /
+  `1d4ce3af88fd26d14de9426febbf9da0c572cfa86e55ece4fb6e448ce35e9b48`;
+- snapshot `main.c` / runtime SHA-256:
+  `1f38a28e81010983d8d5c3b09e84094aaf3a3a17bcd235a0e0d50ebd919da755` /
+  `f439108fefef20a4d74ed1bff174f9ba55456d2f1ca2799307901acd0aa39df0`.
+
+The compiler anchor used `clang -std=c11 -O3 -flto=thin`; the runtime used
+`clang++ -std=c++17 -D_CRT_SECURE_NO_WARNINGS -O3 -flto=thin`; linking used
+`clang`, ThinLTO/lld, `-lmsvcrt`, the 512 MiB stack setting, embedded manifest,
+`asInvoker`, and the manifest's ThinLTO cache policy. The host was Windows
+10.0.26200 on an AMD Ryzen AI 9 H 365, with the Balanced power scheme.
+
+The raw base and snapshot binaries were respectively
+`398939a073dda6482b571822beba2745dc04d2aaba973b6f8f6042c69cad6d71`
+(5,481,984 bytes) and
+`242563e6105dee429ff5888ad2af5d5f56027ac36bc8c0d79d9330be8c42751e`
+(5,510,144 bytes). lld writes a COFF timestamp at byte offset 128, so raw
+rebuild hashes vary. Zeroing only those four bytes gives normalized hashes
+`0f30b98586bffb5295fffbfe80d201c5b0d53901fe271f13d64cc0f7f674ce12`
+for base and
+`a66b1150da4f510221c46b891c8eb28af7a10593bc50377568278ae837cbb002`
+for the snapshot. A second base build had raw timestamp values 1786041929 and
+1786042006 but identical normalized bytes; the snapshot timestamp was
+1786041967. The older base binary
+`45f66a1ae14699ddd6993f1c1d4cac6b4332fdd8c55d6bb992649f33a19843da`
+is no longer available and was not reproduced by this timestamped link. It is
+superseded by the identities above and is not an oracle.
+
+Each invocation ran `<binary> check <absolute tests/cases/hello.ring>` with the
+same worktree cwd/environment and no phase flag, and required exit 0, stdout
+`OK\r\n`, and empty stderr. After five discarded warm-ups per binary, 41
+comparisons alternated base→snapshot for even indices and snapshot→base for odd
+indices. Python 3.11.9 `perf_counter_ns()` surrounded each `subprocess.run`;
+delta is always snapshot minus base. One fail-fast contract preflight before
+the formal warm-ups corrected the expected Windows newline and recorded no
+sample.
+
+The base median/MAD/empirical-p95 was 96.5862/0.8435/102.1316 ms; the snapshot
+was 96.2260/0.7942/100.9145 ms. Within-comparison delta median/MAD/p95 was
+-0.3065/0.4118/3.1132 ms, and median snapshot/base ratio was 0.9968612198. The
+preset gate required median ratio at most 1.02 and median delta at most 2 ms;
+it passed. This controlled gate is independent of the unpaired descriptive
+manifest control above.
+
 ## Sample policy
 
 - `direct_short`: retain one excluded warm-up, then require 21 valid samples.
