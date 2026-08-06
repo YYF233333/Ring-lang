@@ -203,7 +203,7 @@ fn main() -> Unit with {}                           // 纯函数——零 OS 交
 - `net` 是否需拆出 `net.dns` 子操作（DNS 解析有时独立于 TCP 连接）
 - `spawn` / `random` 是否从 `os` 独立（创建子进程/使用熵源是否特殊到需要独立可见）
 - formatter 策略：两项以内展开（`{fs, env}`），≥三项合并为 `{os}` 或始终展开——实现时按实证签名噪音决定
-- 迁移路径：旧 `io` 在 parser 层映射为 `{os}`（不 breaking），`net` 需标准库逐个标注
+- 迁移路径：按未发布期 clean-break 原则，在同一变更中把标准库、编译器、规范和测试原子迁移到 `{os}` / `{net}`；不保留旧 `io` 的 parser alias 或隐式映射。旧 `io` 直接报未知 effect，并可在诊断中提示选择 `os` 或 `net`
 
 ### 12.2 `alloc` 效果：堆分配可见化
 
