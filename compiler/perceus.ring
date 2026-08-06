@@ -92,7 +92,8 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
         boxed_vars: anf_program.boxed_vars,
         static_dicts: anf_program.static_dicts,
         extern_type_names: anf_program.extern_type_names,
-        drop_types: anf_program.drop_types
+        drop_types: anf_program.drop_types,
+        ownership_metadata: anf_program.ownership_metadata
     }
 }
 
@@ -189,7 +190,8 @@ fn anf_normalize(program: HProgram, externs: Set<Str>) -> HProgram {
         boxed_vars: program.boxed_vars,
         static_dicts: program.static_dicts,
         extern_type_names: program.extern_type_names,
-        drop_types: program.drop_types
+        drop_types: program.drop_types,
+        ownership_metadata: program.ownership_metadata
     }
 }
 

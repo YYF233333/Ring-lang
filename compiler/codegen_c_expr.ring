@@ -13,7 +13,8 @@
 // Step 6 adds effect handlers (tail-resumptive + abort), try/catch and
 // default evidence — see the "Step 6" section below for the mechanism notes.
 //
-use types::{Type, EffectRow, EMPTY_ROW, type_to_builtin_name, BUILTIN_RANGE}
+use types::{Type, EffectRow, PARAM_OWNERSHIP_BORROW, EMPTY_ROW,
+    type_to_builtin_name, BUILTIN_RANGE}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
     HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
@@ -21,7 +22,7 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
     trait_dict_name, trait_bound_param_name, evidence_param_name,
     effect_name_from_evidence_param, is_extern_handle_type,
-    slot_bridge_runtime_name}
+    slot_bridge_runtime_name, hparam_flags}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_param, c_mangle_fn,
     c_resolve_fn,
@@ -318,7 +319,8 @@ fn gen_c_extern_closure_wrapper(
         panic("C codegen: extern closure wrapper for '${name}' received ${dict_refs.len()} dicts")
     }
     let (param_types, return_type, fn_effects) = match ty {
-        Type::FnType { params, return_type, effects } => (params, return_type, effects),
+        Type::FnType { params, return_type, meta } =>
+            (params, return_type, meta.effects),
         _ => panic("C codegen: extern closure wrapper for non-function '${name}'"),
     }
 
@@ -1142,7 +1144,8 @@ fn extend_c_handler_capture_params(
     match resume_name {
         some(rn) => {
             extended.push(HParam {
-                name: rn, ty: Type::ErrorType, def_id: none, is_mutable: false
+                name: rn, ty: Type::ErrorType, def_id: none,
+                flags: hparam_flags(false, PARAM_OWNERSHIP_BORROW)
             })
         },
         none => {},

@@ -1,5 +1,6 @@
 use ast::{Span, Pattern, BinOp, UnaryOp, TypeParam}
-use types::{Type, EffectRow, StructField, EnumVariant, RecordField}
+use types::{Type, EffectRow, StructField, EnumVariant, RecordField,
+    OwnershipMetadata, PARAM_OWNERSHIP_UNKNOWN}
 
 pub use types::{BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
@@ -140,7 +141,26 @@ pub struct HParam {
     pub name: Str,
     pub ty: Type,
     pub def_id: Int?,
-    pub is_mutable: Bool
+    // Bit 0 is local binding mutability; the remaining bits are the independent
+    // caller/callee ownership mode. Packing keeps HParam at four fields.
+    pub flags: Int
+}
+
+pub fn hparam_flags(is_mutable: Bool, ownership: Int) -> Int {
+    ownership * 2 + if is_mutable { 1 } else { 0 }
+}
+
+pub fn hparam_is_mutable(param: HParam) -> Bool {
+    param.flags % 2 == 1
+}
+
+pub fn hparam_ownership(param: HParam) -> Int {
+    let mode = param.flags / 2
+    if mode >= 0 && mode <= PARAM_OWNERSHIP_UNKNOWN {
+        mode
+    } else {
+        PARAM_OWNERSHIP_UNKNOWN
+    }
 }
 
 // B-104 D4 (#151): dict evidence is FIRST-CLASS in HIR.  Three reference forms:
@@ -449,7 +469,10 @@ pub struct HProgram {
     pub extern_type_names: Set<Str>,
     // B-002p1: types with user `impl Drop` — perceus skips dup (move semantics),
     // codegen calls user drop body in ring_drop_T, move checker prevents UAM.
-    pub drop_types: Set<Str>
+    pub drop_types: Set<Str>,
+    // Shadow descriptors/DefId contracts/provenance and symbolic type shapes.
+    // drop_types remains until the final atomic ownership consumer cutover.
+    pub ownership_metadata: OwnershipMetadata
 }
 
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case

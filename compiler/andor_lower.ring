@@ -49,7 +49,8 @@ pub fn lower_andor(program: HProgram) -> HProgram {
         boxed_vars: program.boxed_vars,
         static_dicts: program.static_dicts,
         extern_type_names: program.extern_type_names,
-        drop_types: program.drop_types
+        drop_types: program.drop_types,
+        ownership_metadata: program.ownership_metadata
     }
 }
 
@@ -85,7 +86,8 @@ fn al_decl(d: HDecl) -> HDecl {
                     none => none,
                 }
                 new_methods.push(HTraitMethod { name: tm.name, params: tm.params,
-                    return_type: tm.return_type, effects: tm.effects, has_default: tm.has_default, body: new_body })
+                    return_type: tm.return_type, effects: tm.effects,
+                    has_default: tm.has_default, body: new_body })
             }
             HDecl::Trait { name: name, type_params: type_params, methods: new_methods,
                 supertraits: supertraits, assoc_types: assoc_types, is_pub: is_pub, span: span }

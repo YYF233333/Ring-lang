@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, nominal_display_name, types_equal,
-    type_to_builtin_name}
+    type_to_builtin_name, CALLABLE_BORROW_OWNED, fn_meta}
 use ast::{Expr, Pattern, Span, NamedPatternField}
 use hir::{HExpr, HStmt, TraitDispatch, DictRef, ValueBindingKind,
     trait_dict_name, trait_bound_param_name,
@@ -720,7 +720,8 @@ pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
             match kind {
                 ValueBindingKind::ConstGetter => {
                     let getter_ty = Type::FnType {
-                        params: [], return_type: ty, effects: EMPTY_ROW
+                        params: [], return_type: ty,
+                        meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
                     }
                     let getter = HExpr::Ident {
                         name: name, resolved_name: none, def_id: def_id,

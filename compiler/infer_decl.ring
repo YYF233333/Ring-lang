@@ -1,11 +1,17 @@
-use types::{Type, Effect, EffectRow, RecordField, UNIT, EMPTY_ROW, type_to_string, effect_to_string, nominal_display_name, effects_match_kind, effect_kind_name, types_equal}
+use types::{Type, Effect, EffectRow, RecordField,
+    UNIT, EMPTY_ROW, type_to_string, effect_to_string,
+    nominal_display_name, effects_match_kind, effect_kind_name, types_equal,
+    PARAM_OWNERSHIP_BORROW, CALLABLE_BORROW_OWNED,
+    CALLABLE_SOURCE_BODY_INFERRED,
+    callable_param_ownership, record_callable_ownership, fn_meta}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, SigMember}
 use hir::{HDecl, HParam, HExpr, HStmt, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
-    collect_extern_type_names, compare_by_first, extern_abi_leaf}
+    collect_extern_type_names, compare_by_first, extern_abi_leaf,
+    hparam_flags, hparam_is_mutable}
 use env::{TypeScheme, SchemeBound, MethodOrigin,
     apply_subst, apply_subst_map, apply_subst_row_map,
     find_impl, find_impl_by_origin, has_impl, impl_origin, impl_decl_origin,
@@ -35,6 +41,13 @@ use infer::{infer_block, infer_expr,
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block, zonk_expr}
 use derive::{run_derive_pass}
 use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names, collect_self_method_callees}
+
+fn ownership_from_fn_type(ty: Type, param_count: Int) -> Int {
+    match ty {
+        Type::FnType { meta, .. } => meta.ownership_id,
+        _ => CALLABLE_BORROW_OWNED
+    }
+}
 
 // ============================================================
 // Pass 2: Check declarations (from infer.ts)
@@ -429,7 +442,10 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
                 },
                 none => "p${pi.to_str()}"
             }
-            op_params.push(HParam { name: p_name, ty: pt, def_id: none, is_mutable: false })
+            op_params.push(HParam {
+                name: p_name, ty: pt, def_id: none,
+                flags: hparam_flags(false, PARAM_OWNERSHIP_BORROW)
+            })
             pi = pi + 1
         }
         // Type-check default body if present
@@ -1064,7 +1080,13 @@ fn expand_delegate_impls(
                                         none => none
                                     }
                                     match tm.ty {
-                                        Type::FnType { params: trait_params, return_type: trait_ret_ty, effects: trait_eff } => {
+                                        Type::FnType {
+                                            params: trait_params,
+                                            return_type: trait_ret_ty,
+                                            meta: trait_meta
+                                        } => {
+                                            let trait_eff = trait_meta.effects
+                                            let trait_ownership = trait_meta.ownership_id
                                             // Use resolved return type and effects from field type's method
                                             // if available (concrete assoc types), else fall back to trait def
                                             let ret_ty = match resolved_method_scheme {
@@ -1076,10 +1098,15 @@ fn expand_delegate_impls(
                                             }
                                             let eff = match resolved_method_scheme {
                                                 some(rs) => match rs.ty {
-                                                    Type::FnType { effects: resolved_eff, .. } => resolved_eff,
+                                                    Type::FnType { meta, .. } => meta.effects,
                                                     _ => trait_eff
                                                 },
                                                 none => trait_eff
+                                            }
+                                            let method_ownership = match resolved_method_scheme {
+                                                some(rs) => ownership_from_fn_type(
+                                                    rs.ty, trait_params.len()),
+                                                none => trait_ownership
                                             }
                                             // Build resolved param types from field method (skipping self)
                                             let resolved_non_self_params = match resolved_method_scheme {
@@ -1097,7 +1124,14 @@ fn expand_delegate_impls(
                                                 some(m) => m,
                                                 none => false
                                             }
-                                            hparams.push(HParam { name: "self", ty: exact_self_type, def_id: some(def_id_self), is_mutable: self_is_mut })
+                                            hparams.push(HParam {
+                                                name: "self", ty: exact_self_type,
+                                                def_id: some(def_id_self),
+                                                flags: hparam_flags(self_is_mut,
+                                                    callable_param_ownership(
+                                                        ctx.env.types.ownership_metadata,
+                                                        method_ownership, 0))
+                                            })
 
                                             // Determine the trait's Self type (first param) for binary method detection
                                             let trait_self_type = match trait_params.first() {
@@ -1140,7 +1174,14 @@ fn expand_delegate_impls(
                                                 }
                                                 // For binary Self-typed params, use self_type; otherwise use resolved type
                                                 let param_ty = if is_self_typed { exact_self_type } else { resolved_pty }
-                                                hparams.push(HParam { name: pname, ty: param_ty, def_id: some(pid), is_mutable: p_is_mut })
+                                                hparams.push(HParam {
+                                                    name: pname, ty: param_ty,
+                                                    def_id: some(pid),
+                                                    flags: hparam_flags(p_is_mut,
+                                                        callable_param_ownership(
+                                                            ctx.env.types.ownership_metadata,
+                                                            method_ownership, pi))
+                                                })
 
                                                 if is_self_typed {
                                                     // Forward: __p0.field (access the delegated field from the arg)
@@ -1350,9 +1391,10 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
             _ => UNIT
         }
         let fn_effects = match m.ty {
-            Type::FnType { effects, .. } => effects,
+            Type::FnType { meta, .. } => meta.effects,
             _ => EMPTY_ROW
         }
+        let fn_ownership = ownership_from_fn_type(m.ty, fn_params.len())
         let ast_params = match ast_method {
             some(am) => match am { Decl::Fn { params, .. } => some(params), _ => none },
             none => none
@@ -1369,7 +1411,11 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
                 some(aps) => match aps.get(pi) { some(ap) => ap.is_mutable, none => false },
                 none => false
             }
-            hparams.push(HParam { name: p_name, ty: param_type, def_id: none, is_mutable: p_mutable })
+            hparams.push(HParam {
+                name: p_name, ty: param_type, def_id: none,
+                flags: hparam_flags(p_mutable, callable_param_ownership(
+                    ctx.env.types.ownership_metadata, fn_ownership, pi))
+            })
             pi = pi + 1
         }
 
@@ -1396,7 +1442,11 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
             }
         }
 
-        hmethods.push(HTraitMethod { name: m.name, params: hparams, return_type: fn_ret, effects: fn_effects, has_default: m.has_default, body: method_body })
+        hmethods.push(HTraitMethod {
+            name: m.name, params: hparams, return_type: fn_ret,
+            effects: fn_effects,
+            has_default: m.has_default, body: method_body
+        })
     }
 
     // Build HAssocType list from trait def
@@ -1464,7 +1514,7 @@ fn check_trait_default_body(
 
     for p in hparams {
         ctx.env.bind_mono(p.name, p.ty)
-        if p.is_mutable {
+        if hparam_is_mutable(p) {
             match ctx.env.lookup(p.name) {
                 some(ps) => match ps.def_id {
                     some(did) => { ctx.env.scope.mutable_vars.insert(did) },
@@ -1565,6 +1615,7 @@ fn check_extern_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypePara
         Type::FnType { return_type, .. } => return_type,
         _ => UNIT
     }
+    let ownership = ownership_from_fn_type(scheme.ty, fn_params.len())
     let mut hparams: List<HParam> = []
     let mut i = 0
     for p in params {
@@ -1572,7 +1623,11 @@ fn check_extern_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypePara
         // Preserve the declared mutability as project-link metadata. Genuine
         // FFI marshalling ignores this field, while an exact internal extern
         // forward must distinguish `mut T` from `T`.
-        hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: p.is_mutable })
+        hparams.push(HParam {
+            name: p.name, ty: ptype, def_id: none,
+            flags: hparam_flags(p.is_mutable, callable_param_ownership(
+                ctx.env.types.ownership_metadata, ownership, i))
+        })
         i = i + 1
     }
     let extern_effects = match declared_effects {
@@ -1808,8 +1863,9 @@ fn capture_assoc_rebind_provenance(
         Type::FnType {
             params: registration_params,
             return_type: registration_return,
-            effects: registration_effects
+            meta: registration_meta
         } => {
+            let registration_effects = registration_meta.effects
             // First map each check-time owner (T/U/...) back to the corresponding
             // registration-time owner using the ordinary function shape.
             let mut owner_mapping: Map<Int, Type> = map_new()
@@ -1960,6 +2016,10 @@ fn check_fn_decl_transaction(
         some(scheme) => some(scheme),
         none => ctx.env.lookup(name)
     }
+    let ownership_contract = match registration_scheme {
+        some(scheme) => ownership_from_fn_type(scheme.ty, params.len()),
+        none => CALLABLE_BORROW_OWNED
+    }
     let provenance_key = match rebind_identity {
         some(identity) => identity,
         none => name
@@ -2014,6 +2074,7 @@ fn check_fn_decl_transaction(
 
     let mut hparams: List<HParam> = []
     let mut param_types: List<Type> = []
+    let mut ownership_param_index = 0
     for p in params {
         let ptype = match p.type_annotation {
             some(ta) => resolve_type_expr(ctx, ta),
@@ -2049,11 +2110,24 @@ fn check_fn_decl_transaction(
                     },
                     none => {}
                 }
-                hparams.push(HParam { name: p.name, ty: ptype, def_id: ps.def_id, is_mutable: p.is_mutable })
+                hparams.push(HParam {
+                    name: p.name, ty: ptype, def_id: ps.def_id,
+                    flags: hparam_flags(p.is_mutable,
+                        callable_param_ownership(
+                            ctx.env.types.ownership_metadata,
+                            ownership_contract, ownership_param_index))
+                })
             },
-            none => hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: p.is_mutable })
+            none => hparams.push(HParam {
+                name: p.name, ty: ptype, def_id: none,
+                flags: hparam_flags(p.is_mutable,
+                    callable_param_ownership(
+                        ctx.env.types.ownership_metadata,
+                        ownership_contract, ownership_param_index))
+            })
         }
         param_types.push(ptype)
+        ownership_param_index = ownership_param_index + 1
     }
 
     // B-069: Infer default value expressions and store in hparams
@@ -2239,7 +2313,12 @@ fn check_fn_decl_transaction(
     let fn_scheme = ctx.env.lookup(name)
     let fn_def_id = match fn_scheme { some(s) => s.def_id, none => none }
     match fn_def_id {
-        some(did) => ctx.env.record_def_span(did, span),
+        some(did) => {
+            ctx.env.record_def_span(did, span)
+            record_callable_ownership(
+                ctx.env.types.ownership_metadata, did, ownership_contract,
+                CALLABLE_SOURCE_BODY_INFERRED, none)
+        },
         none => {}
     }
 
@@ -2822,7 +2901,7 @@ fn audit_fail_payload_type(
                 ctx, fn_name, id, name, mapping, original_scheme_vars,
                 unsafe_vars, diagnosed_vars, span
             ),
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             for param in params {
                 audit_fail_payload_type(
                     ctx, fn_name, param, mapping, original_scheme_vars,
@@ -2833,7 +2912,7 @@ fn audit_fail_payload_type(
                 ctx, fn_name, return_type, mapping, original_scheme_vars,
                 unsafe_vars, diagnosed_vars, span
             )
-            for eff in effects.effects {
+            for eff in meta.effects.effects {
                 match eff {
                     Effect::FailEffect { error_type } =>
                         audit_fail_payload_type(
@@ -2938,12 +3017,12 @@ fn audit_fail_payload_type(
 fn type_contains_exact(ty: Type, needle: Type) -> Bool {
     if types_equal(ty, needle) { return true }
     match ty {
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             for param in params {
                 if type_contains_exact(param, needle) { return true }
             }
             if type_contains_exact(return_type, needle) { return true }
-            for eff in effects.effects {
+            for eff in meta.effects.effects {
                 match eff {
                     Effect::FailEffect { error_type } => {
                         if type_contains_exact(error_type, needle) { return true }
@@ -3091,9 +3170,9 @@ fn audit_fail_rows_in_type(
     span: Span
 ) {
     match ty {
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             audit_fail_row(
-                ctx, fn_name, effects, mapping, original_scheme_vars,
+                ctx, fn_name, meta.effects, mapping, original_scheme_vars,
                 unsafe_vars, diagnosed_vars, span
             )
             for param in params {
@@ -3180,10 +3259,11 @@ fn rebind_param_fn_rows(
 ) -> Type {
     match (reg_ty, check_ty) {
         (Type::TypeVar { id, name },
-         Type::FnType { params: check_params, return_type: check_ret, effects: check_effects }) => {
+         Type::FnType { params: check_params, return_type: check_ret, meta: check_meta }) => {
             let registered = Type::TypeVar { id: id, name: name }
             let checked = Type::FnType {
-                params: check_params, return_type: check_ret, effects: check_effects
+                params: check_params, return_type: check_ret,
+                meta: check_meta
             }
             if original_type_vars.contains(id) {
                 report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
@@ -3231,13 +3311,17 @@ fn rebind_param_fn_rows(
             }
             registered
         },
-        (Type::FnType { params: reg_params, return_type: reg_ret, effects: reg_effects },
-         Type::FnType { params: check_params, return_type: check_ret, effects: check_effects }) => {
+        (Type::FnType { params: reg_params, return_type: reg_ret, meta: reg_meta },
+         Type::FnType { params: check_params, return_type: check_ret, meta: check_meta }) => {
+            let reg_effects = reg_meta.effects
+            let check_effects = check_meta.effects
             let registered = Type::FnType {
-                params: reg_params, return_type: reg_ret, effects: reg_effects
+                params: reg_params, return_type: reg_ret,
+                meta: reg_meta
             }
             let checked = Type::FnType {
-                params: check_params, return_type: check_ret, effects: check_effects
+                params: check_params, return_type: check_ret,
+                meta: check_meta
             }
             if reg_params.len() != check_params.len() {
                 report_rebind_shape_mismatch(ctx, fn_name, registered, checked, span)
@@ -3284,7 +3368,7 @@ fn rebind_param_fn_rows(
             Type::FnType {
                 params: rebound_params,
                 return_type: rebound_ret,
-                effects: mapped_effects
+                meta: fn_meta(mapped_effects, reg_meta.ownership_id)
             }
         },
         (Type::StructType { name: reg_name, type_params: reg_args },
@@ -3491,7 +3575,11 @@ fn rebind_checked_fn_scheme(
         }
     }
     match scheme.ty {
-            Type::FnType { params: reg_params, return_type: reg_ret, effects: reg_effects } => {
+            Type::FnType {
+                params: reg_params, return_type: reg_ret,
+                meta: reg_meta
+            } => {
+                let reg_effects = reg_meta.effects
                 // Build mapping: check-time var id → registration-time var id
                 // by comparing resolved params with registered params position-by-position.
                 let mut var_mapping: Map<Int, Type> = map_new()
@@ -3674,7 +3762,8 @@ fn rebind_checked_fn_scheme(
                 }
 
                 let new_type = Type::FnType {
-                    params: mapped_params, return_type: mapped_ret, effects: mapped_effects
+                    params: mapped_params, return_type: mapped_ret,
+                    meta: fn_meta(mapped_effects, reg_meta.ownership_id)
                 }
                 TypeScheme {
                     ..scheme,
@@ -3739,8 +3828,8 @@ fn build_var_mapping(
         (Type::TypeVar { id: check_id, .. }, _) => {
             record_var_mapping(check_id, reg_ty, mapping, conflicts)
         },
-        (Type::FnType { params: cp, return_type: cr, effects: ce },
-         Type::FnType { params: rp, return_type: rr, effects: re }) => {
+        (Type::FnType { params: cp, return_type: cr, meta: cm },
+         Type::FnType { params: rp, return_type: rr, meta: rm }) => {
             let mut i = 0
             for c in cp {
                 match rp.get(i) {
@@ -3750,7 +3839,7 @@ fn build_var_mapping(
                 i = i + 1
             }
             build_var_mapping(cr, rr, mapping, conflicts)
-            build_effect_var_mapping(ce, re, mapping, conflicts)
+            build_effect_var_mapping(cm.effects, rm.effects, mapping, conflicts)
         },
         (Type::StructType { name: cn, type_params: ct },
          Type::StructType { name: rn, type_params: rt }) => {
@@ -4177,7 +4266,12 @@ fn check_registered_body(
             }
         }
     }
-    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars, static_dicts: [], extern_type_names: extern_names, drop_types: ctx.drop_types }
+    HProgram {
+        decls: hdecls, derived_impls: derived_impls,
+        boxed_vars: ctx.boxed_vars, static_dicts: [],
+        extern_type_names: extern_names, drop_types: ctx.drop_types,
+        ownership_metadata: ctx.env.types.ownership_metadata
+    }
 }
 
 pub fn resolve_type_expr_public(mut ctx: InferCtx, texpr: TypeExpr) -> Type {

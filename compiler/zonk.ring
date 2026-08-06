@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, StructField, RecordField,
-    type_to_string}
+    type_to_string, fn_meta}
 use ast::{Pattern, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HForInDestructure,
@@ -52,11 +52,12 @@ fn label_vars(names: Map<Int, Str>, t: Type) -> Type {
                 none => t,
             }
         },
-        Type::FnType { params, return_type, effects } =>
+        Type::FnType { params, return_type, meta } =>
             Type::FnType {
                 params: params.map(fn(p) { label_vars(names, p) }),
                 return_type: label_vars(names, return_type),
-                effects: label_effect_row(names, effects)
+                meta: fn_meta(
+                    label_effect_row(names, meta.effects), meta.ownership_id)
             },
         Type::StructType { name, type_params } =>
             Type::StructType {
@@ -112,7 +113,10 @@ pub fn zonk_row(ctx: ZonkCtx, r: EffectRow) -> EffectRow {
 }
 
 pub fn zonk_param(ctx: ZonkCtx, p: HParam) -> HParam {
-    HParam { name: p.name, ty: zonk_type(ctx, p.ty), def_id: p.def_id, is_mutable: p.is_mutable }
+    HParam {
+        name: p.name, ty: zonk_type(ctx, p.ty), def_id: p.def_id,
+        flags: p.flags
+    }
 }
 
 fn zonk_dispatch(ctx: ZonkCtx, dispatch: TraitDispatch?) -> TraitDispatch? {

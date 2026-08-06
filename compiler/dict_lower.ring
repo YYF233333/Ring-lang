@@ -63,7 +63,8 @@ pub fn lower_dicts(program: HProgram) -> HProgram {
         boxed_vars: program.boxed_vars,
         static_dicts: defs,
         extern_type_names: program.extern_type_names,
-        drop_types: program.drop_types
+        drop_types: program.drop_types,
+        ownership_metadata: program.ownership_metadata
     }
 }
 
@@ -168,7 +169,8 @@ fn dl_decl(d: HDecl, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
                     none => none,
                 }
                 new_methods.push(HTraitMethod { name: tm.name, params: tm.params,
-                    return_type: tm.return_type, effects: tm.effects, has_default: tm.has_default, body: new_body })
+                    return_type: tm.return_type, effects: tm.effects,
+                    has_default: tm.has_default, body: new_body })
             }
             HDecl::Trait { name: name, type_params: type_params, methods: new_methods,
                 supertraits: supertraits, assoc_types: assoc_types, is_pub: is_pub, span: span }

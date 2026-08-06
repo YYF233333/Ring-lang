@@ -17,6 +17,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
     default_method_self_name, scan_trait_method_order, collect_all_supertraits,
     type_contains_extern_handle,
+    hparam_is_mutable,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef, TypeKind,
     DERIVED_HASH_SEED}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
@@ -1307,7 +1308,7 @@ fn c_is_value_type(t: Type) -> Bool {
 fn mut_param_flags_c(params: List<HParam>) -> List<Bool> {
     let mut flags: List<Bool> = []
     for p in params {
-        if p.name == "self" || !p.is_mutable {
+        if p.name == "self" || !hparam_is_mutable(p) {
             flags.push(false)
         } else {
             flags.push(c_is_value_type(p.ty))

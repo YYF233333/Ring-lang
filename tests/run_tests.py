@@ -1545,6 +1545,215 @@ def matching_delimiter(masked: str, open_index: int,
     raise ValueError(f"unclosed {opening!r} at offset {open_index}")
 
 
+def ownership_shadow_layout_errors() -> List[str]:
+    """Validate Unit-1 ownership transport stays allocation/arity neutral."""
+    errors: List[str] = []
+    source_contracts = (
+        (
+            "Type::FnType", REPO / "compiler" / "types.ring",
+            r"(?m)^[ \t]*FnType[ \t]*\{",
+            ("params", "return_type", "meta"),
+        ),
+        (
+            "HExpr::Call", REPO / "compiler" / "hir.ring",
+            r"(?m)^[ \t]*Call[ \t]*\{[ \t]*callee[ \t]*:",
+            (
+                "callee", "args", "type_args", "resolved_dicts",
+                "dict_dispatch", "ty", "effects", "span",
+            ),
+        ),
+        (
+            "HDecl::Fn", REPO / "compiler" / "hir.ring",
+            r"(?m)^[ \t]*Fn[ \t]*\{[ \t]*name[ \t]*:",
+            (
+                "name", "def_id", "type_params", "params", "return_type",
+                "effects", "body", "is_pub", "trait_bounds", "span",
+            ),
+        ),
+        (
+            "HParam", REPO / "compiler" / "hir.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+HParam[ \t]*\{",
+            ("name", "ty", "def_id", "flags"),
+        ),
+    )
+
+    source_cache: dict[Path, str] = {}
+    for label, path, header_pattern, expected_fields in source_contracts:
+        try:
+            source = source_cache.setdefault(
+                path, path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"{label}: cannot read {display_path(path)}: {exc}")
+            continue
+        masked = mask_ring_strings_and_comments(source)
+        matches = list(re.finditer(header_pattern, masked))
+        if len(matches) != 1:
+            errors.append(f"{label}: source declaration found {len(matches)} times")
+            continue
+        open_index = masked.find("{", matches[0].start(), matches[0].end())
+        try:
+            close_index = matching_delimiter(masked, open_index, "{", "}")
+        except ValueError as exc:
+            errors.append(f"{label}: {exc}")
+            continue
+        body = masked[open_index + 1:close_index]
+        fields = tuple(match.group(1) for match in re.finditer(
+            r"(?:^|,)[ \t\r\n]*(?:pub[ \t]+)?"
+            r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*:",
+            body,
+            re.MULTILINE,
+        ))
+        if fields != expected_fields:
+            errors.append(
+                f"{label}: expected source fields {expected_fields}, found {fields}")
+
+    try:
+        generated = DIST_C_MAIN.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        errors.append(f"generated ownership layout: cannot read dist-c/main.c: {exc}")
+    else:
+        generated_contracts = (
+            (
+                "Type", "ringmod_ring__types_m_m__Type__", 3,
+                "FnType", 3,
+            ),
+            (
+                "HExpr", "ringmod_ring__hir_m_m__HExpr__", 8,
+                "Call", 8,
+            ),
+            (
+                "HDecl", "ringmod_ring__hir_m_m__HDecl__", 10,
+                "Fn", 10,
+            ),
+        )
+        generated_constructors: dict[str, dict[str, int]] = {
+            ";": {}, "{": {},
+        }
+        constructor_re = re.compile(
+            r"(?m)^void[ \t]*\*[ \t]+"
+            r"(ringmod_ring__(?:"
+            r"types_m_m__Type__[A-Za-z_][A-Za-z0-9_]*|"
+            r"hir_m_m__HExpr__[A-Za-z_][A-Za-z0-9_]*|"
+            r"hir_m_m__HDecl__[A-Za-z_][A-Za-z0-9_]*|"
+            r"hir_m_m__HParam))"
+            r"[ \t]*\(([^()\r\n]*?)\)[ \t]*(;|\{)[ \t]*\r?$",
+        )
+        for match in constructor_re.finditer(generated):
+            symbol, args, terminator = match.groups()
+            if symbol in generated_constructors[terminator]:
+                errors.append(
+                    f"generated ownership layout: duplicate {symbol!r} "
+                    f"{'prototype' if terminator == ';' else 'definition'}")
+                continue
+            generated_constructors[terminator][symbol] = (
+                0 if not args.strip() else len(args.split(",")))
+
+        for label, prefix, expected_max, max_variant, expected_variant in generated_contracts:
+            phase_arities: dict[str, dict[str, int]] = {}
+            for terminator, phase in ((";", "prototype"), ("{", "definition")):
+                arities = {
+                    symbol[len(prefix):]: arity
+                    for symbol, arity in generated_constructors[terminator].items()
+                    if symbol.startswith(prefix)
+                }
+                phase_arities[phase] = arities
+                if not arities:
+                    errors.append(f"{label}: no generated {phase}s found")
+                    continue
+                actual_max = max(arities.values())
+                if actual_max != expected_max:
+                    errors.append(
+                        f"{label}: expected generated {phase} max arity "
+                        f"{expected_max}, found {actual_max}")
+                actual_variant = arities.get(max_variant)
+                if actual_variant != expected_variant:
+                    errors.append(
+                        f"{label}::{max_variant}: expected generated {phase} "
+                        f"arity {expected_variant}, found {actual_variant}")
+            if phase_arities["prototype"] != phase_arities["definition"]:
+                errors.append(
+                    f"{label}: generated prototype/definition arities differ")
+
+        hparam_symbol = "ringmod_ring__hir_m_m__HParam"
+        hparam_arities = [
+            generated_constructors[terminator].get(hparam_symbol)
+            for terminator in (";", "{")
+        ]
+        if hparam_arities != [4, 4]:
+            errors.append(
+                "HParam: expected unique generated 4-argument prototype and "
+                f"definition, found {hparam_arities}")
+
+    compiler_sources: dict[Path, str] = {}
+    for path in sorted((REPO / "compiler").glob("*.ring")):
+        try:
+            raw_source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"dynamic descriptors: cannot read {display_path(path)}: {exc}")
+            continue
+        if (
+            "CallableOwnershipDescriptor" in raw_source
+            or "callable_descriptors" in raw_source
+        ):
+            compiler_sources[path] = mask_ring_strings_and_comments(raw_source)
+
+    types_path = REPO / "compiler" / "types.ring"
+    types_masked = compiler_sources.get(types_path, "")
+    init_matches = list(re.finditer(
+        r"callable_descriptors[ \t]*:[ \t]*map_new[ \t]*\([ \t]*\)",
+        types_masked,
+    ))
+    if len(init_matches) != 1:
+        errors.append(
+            "dynamic descriptors: expected one empty callable_descriptors "
+            f"initializer, found {len(init_matches)}")
+
+    descriptor_values: List[str] = []
+    descriptor_writes: List[str] = []
+    for path, masked in compiler_sources.items():
+        for match in re.finditer(r"\bCallableOwnershipDescriptor[ \t]*\{", masked):
+            line_start = masked.rfind("\n", 0, match.start()) + 1
+            prefix = masked[line_start:match.start()]
+            if not re.search(r"\bpub[ \t]+struct[ \t]*$", prefix):
+                descriptor_values.append(
+                    f"{display_path(path)}:{masked.count(chr(10), 0, match.start()) + 1}")
+        for match in re.finditer(
+            r"\bcallable_descriptors[ \t\r\n]*\.[ \t\r\n]*insert[ \t\r\n]*\(",
+            masked,
+        ):
+            descriptor_writes.append(
+                f"{display_path(path)}:{masked.count(chr(10), 0, match.start()) + 1}")
+    if descriptor_values:
+        errors.append(
+            "dynamic descriptors: Unit 1 constructs descriptor values at "
+            + ", ".join(descriptor_values))
+
+    checker_path = REPO / "compiler" / "checker.ring"
+    expected_write_prefix = f"{display_path(checker_path)}:"
+    if len(descriptor_writes) != 1 or not descriptor_writes[0].startswith(
+        expected_write_prefix
+    ):
+        errors.append(
+            "dynamic descriptors: expected only checker hydration to write the "
+            f"table, found {descriptor_writes}")
+    checker_masked = compiler_sources.get(checker_path, "")
+    hydration_copy = re.search(
+        r"for[ \t]+entry[ \t]+in[ \t]+mod_\.ownership_metadata\."
+        r"callable_descriptors\.entries\(\)[ \t\r\n]*\{.*?"
+        r"let[ \t]*\([ \t]*ownership_id,[ \t]*descriptor[ \t]*\)"
+        r"[ \t]*=[ \t]*entry.*?callable_descriptors\.insert\("
+        r"[ \t\r\n]*ownership_id,[ \t\r\n]*descriptor[ \t\r\n]*\)",
+        checker_masked,
+        re.DOTALL,
+    )
+    if hydration_copy is None:
+        errors.append(
+            "dynamic descriptors: checker write is not a copy from imported "
+            "ownership metadata")
+
+    return errors
+
+
 def extract_c_function_body(c_source: str, symbol: str) -> Tuple[Optional[str], Optional[str]]:
     """Extract one exact generated C function body using its definition symbol."""
     masked = mask_c_strings_and_comments(c_source)
@@ -2558,6 +2767,16 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
             collector.add(TestResult(
                 TestResult.FAIL, suite, f"fixture validation {index}", error))
         return
+
+    ownership_label = "compiler.ownership_shadow_layout"
+    if matches_filter(ownership_label, name_filter):
+        ownership_errors = ownership_shadow_layout_errors()
+        collector.add(TestResult(
+            TestResult.PASS if not ownership_errors else TestResult.FAIL,
+            suite,
+            ownership_label,
+            "; ".join(ownership_errors),
+        ))
 
     jobs = []
     for case_name, entry, fixtures in C_LINE_BUILD_CASES:

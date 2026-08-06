@@ -1,4 +1,5 @@
-use types::{Type, EnumVariant, EMPTY_ROW}
+use types::{Type, EnumVariant, OwnershipMetadata, EMPTY_ROW,
+    CALLABLE_MOVE_OWNED, fn_meta}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use hir::{HProgram, HDecl, ValueBindingKind, ModuleImplFact, compare_by_first,
     variant_ctor_name}
@@ -36,7 +37,10 @@ pub struct ModuleExports {
     pub struct_field_orders: Map<Str, List<Str>>,
     pub extern_values: Set<Str>,
     pub mut_methods: Map<Str, Set<Str>>,
-    pub fn_mut_params: Map<Str, List<Bool>>
+    pub fn_mut_params: Map<Str, List<Bool>>,
+    // One shadow bundle carries callable descriptors/contracts/provenance and
+    // nominal shapes across module boundaries.
+    pub ownership_metadata: OwnershipMetadata
 }
 
 pub enum TypeDef {
@@ -134,7 +138,10 @@ fn variant_ctor_scheme(def: EnumDef, variant: EnumVariant) -> TypeScheme {
     let ctor_type = if variant.field_names.is_some() || variant.fields.len() == 0 {
         enum_type
     } else {
-        Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW }
+        Type::FnType {
+            params: variant.fields, return_type: enum_type,
+            meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
+        }
     }
     TypeScheme {
         ty: ctor_type,
@@ -852,7 +859,8 @@ pub fn extract_exports(
         struct_field_orders: struct_field_orders,
         extern_values: extern_values,
         mut_methods: mut_methods,
-        fn_mut_params: fn_mut_params
+        fn_mut_params: fn_mut_params,
+        ownership_metadata: env.types.ownership_metadata
     }
 }
 

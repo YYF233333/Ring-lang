@@ -4,7 +4,12 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, EMPTY_ROW,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL,
-    make_option_type, make_map_type}
+    make_option_type, make_map_type, fn_meta,
+    CALLABLE_BORROW_OWNED, CALLABLE_MOVE_OWNED,
+    CALLABLE_FIRST_MUT_BORROW_OWNED, CALLABLE_BORROW_BORROWED,
+    CALLABLE_MUT_MOVE_OWNED, CALLABLE_BORROW_MOVE_BORROWED,
+    CALLABLE_MOVE_BORROW_OWNED, CALLABLE_BORROW_MUT_BORROW_OWNED,
+    CALLABLE_SOURCE_BUILTIN, record_callable_ownership}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef,
     ImplEntry, ImplDictBound, MethodOrigin, mono, add_impl,
@@ -20,6 +25,19 @@ use diagnostics::{CollectingSink}
 struct OpenRow {
     eff: EffectRow,
     tail_id: Int
+}
+
+fn record_builtin_callable(mut env: TypeEnv, name: Str) {
+    match env.lookup(name) {
+        some(scheme) => match (scheme.def_id, scheme.ty) {
+            (some(def_id), Type::FnType { meta, .. }) =>
+                record_callable_ownership(
+                    env.types.ownership_metadata, def_id,
+                    meta.ownership_id, CALLABLE_SOURCE_BUILTIN, none),
+            _ => {}
+        },
+        none => {}
+    }
 }
 
 // ============================================================
@@ -261,11 +279,12 @@ fn register_cell(mut env: TypeEnv, sink: CollectingSink) {
         type_params: [ctor_t]
     }
     env.bind(BUILTIN_CELL, TypeScheme {
-        ty: Type::FnType { params: [ctor_t], return_type: ctor_ret, effects: EMPTY_ROW },
+        ty: Type::FnType { params: [ctor_t], return_type: ctor_ret, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) },
         type_vars: [ctor_t_id],
         bounds: [],
         def_id: none
     })
+    record_builtin_callable(env, BUILTIN_CELL)
 
     // Methods: get, set, update
     let m_t_id = env.fresh_var_id()
@@ -280,7 +299,7 @@ fn register_cell(mut env: TypeEnv, sink: CollectingSink) {
 
     // get: (Cell<T>) -> T / mut
     methods.insert("get", TypeScheme {
-        ty: Type::FnType { params: [self_type], return_type: m_t, effects: mut_row },
+        ty: Type::FnType { params: [self_type], return_type: m_t, meta: fn_meta(mut_row, CALLABLE_BORROW_OWNED) },
         type_vars: [m_t_id],
         bounds: [],
         def_id: none
@@ -288,16 +307,25 @@ fn register_cell(mut env: TypeEnv, sink: CollectingSink) {
 
     // set: (Cell<T>, T) -> () / mut
     methods.insert("set", TypeScheme {
-        ty: Type::FnType { params: [self_type, m_t], return_type: UNIT, effects: mut_row },
+        ty: Type::FnType {
+            params: [self_type, m_t], return_type: UNIT,
+            meta: fn_meta(mut_row, CALLABLE_MUT_MOVE_OWNED)
+        },
         type_vars: [m_t_id],
         bounds: [],
         def_id: none
     })
 
     // update: (Cell<T>, (T) -> T) -> () / mut
-    let update_cb = Type::FnType { params: [m_t], return_type: m_t, effects: EMPTY_ROW }
+    let update_cb = Type::FnType {
+        params: [m_t], return_type: m_t,
+        meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
+    }
     methods.insert("update", TypeScheme {
-        ty: Type::FnType { params: [self_type, update_cb], return_type: UNIT, effects: mut_row },
+        ty: Type::FnType {
+            params: [self_type, update_cb], return_type: UNIT,
+            meta: fn_meta(mut_row, CALLABLE_FIRST_MUT_BORROW_OWNED)
+        },
         type_vars: [m_t_id],
         bounds: [],
         def_id: none
@@ -337,11 +365,15 @@ fn register_option(mut env: TypeEnv, sink: CollectingSink) {
     let some_t_id = env.fresh_var_id()
     let some_t = Type::TypeVar { id: some_t_id, name: none }
     env.bind("some", TypeScheme {
-        ty: Type::FnType { params: [some_t], return_type: make_option_type(some_t), effects: EMPTY_ROW },
+        ty: Type::FnType {
+            params: [some_t], return_type: make_option_type(some_t),
+            meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
+        },
         type_vars: [some_t_id],
         bounds: [],
         def_id: none
     })
+    record_builtin_callable(env, "some")
     // `some` is a normal payload constructor. Preserve exact constructor
     // identity through its DefId so call lowering and sink classification do
     // not depend on a same-spelled local/global.
@@ -388,28 +420,34 @@ fn register_option(mut env: TypeEnv, sink: CollectingSink) {
     let self_type = make_option_type(t)
 
     methods.insert("is_some", TypeScheme {
-        ty: Type::FnType { params: [self_type], return_type: BOOL, effects: EMPTY_ROW },
+        ty: Type::FnType { params: [self_type], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id],
         bounds: [],
         def_id: none
     })
 
     methods.insert("is_none", TypeScheme {
-        ty: Type::FnType { params: [self_type], return_type: BOOL, effects: EMPTY_ROW },
+        ty: Type::FnType { params: [self_type], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id],
         bounds: [],
         def_id: none
     })
 
     methods.insert("unwrap_or", TypeScheme {
-        ty: Type::FnType { params: [self_type, t], return_type: t, effects: EMPTY_ROW },
+        ty: Type::FnType {
+            params: [self_type, t], return_type: t,
+            meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_BORROWED)
+        },
         type_vars: [t_id],
         bounds: [],
         def_id: none
     })
 
     methods.insert("unwrap", TypeScheme {
-        ty: Type::FnType { params: [self_type], return_type: t, effects: EMPTY_ROW },
+        ty: Type::FnType {
+            params: [self_type], return_type: t,
+            meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_BORROWED)
+        },
         type_vars: [t_id],
         bounds: [],
         def_id: none
@@ -420,7 +458,13 @@ fn register_option(mut env: TypeEnv, sink: CollectingSink) {
     let self_type2 = make_option_type(Type::TypeVar { id: t_id, name: none })
     let fail_eff = Effect::FailEffect { error_type: e }
     methods.insert("to_fail", TypeScheme {
-        ty: Type::FnType { params: [self_type2, e], return_type: Type::TypeVar { id: t_id, name: none }, effects: EffectRow { effects: [fail_eff], tail: none } },
+        ty: Type::FnType {
+            params: [self_type2, e],
+            return_type: Type::TypeVar { id: t_id, name: none },
+            meta: fn_meta(
+                EffectRow { effects: [fail_eff], tail: none },
+                CALLABLE_BORROW_MOVE_BORROWED)
+        },
         type_vars: [t_id, e_id],
         bounds: [],
         def_id: none
@@ -438,8 +482,8 @@ fn register_eq_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
-    let eq_fn = Type::FnType { params: [self_var, self_var], return_type: BOOL, effects: EMPTY_ROW }
-    let ne_fn = Type::FnType { params: [self_var, self_var], return_type: BOOL, effects: EMPTY_ROW }
+    let eq_fn = Type::FnType { params: [self_var, self_var], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
+    let ne_fn = Type::FnType { params: [self_var, self_var], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
 
     env.trait_reg.traits.insert("Eq", TraitDef {
         name: "Eq",
@@ -478,7 +522,7 @@ fn register_clone_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
-    let clone_fn = Type::FnType { params: [self_var], return_type: self_var, effects: EMPTY_ROW }
+    let clone_fn = Type::FnType { params: [self_var], return_type: self_var, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
 
     env.trait_reg.traits.insert("Clone", TraitDef {
         name: "Clone",
@@ -519,7 +563,10 @@ fn register_drop_trait(mut env: TypeEnv) {
 
     // drop(self) -> Unit, with {io} effect (allows flush/log/close)
     let io_row = EffectRow { effects: [Effect::IoEffect], tail: none }
-    let drop_fn = Type::FnType { params: [self_var], return_type: UNIT, effects: io_row }
+    let drop_fn = Type::FnType {
+        params: [self_var], return_type: UNIT,
+        meta: fn_meta(io_row, CALLABLE_MOVE_OWNED)
+    }
 
     env.trait_reg.traits.insert("Drop", TraitDef {
         name: "Drop",
@@ -552,7 +599,7 @@ fn register_ord_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
-    let cmp_fn = Type::FnType { params: [self_var, self_var], return_type: INT, effects: EMPTY_ROW }
+    let cmp_fn = Type::FnType { params: [self_var, self_var], return_type: INT, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
 
     env.trait_reg.traits.insert("Ord", TraitDef {
         name: "Ord",
@@ -578,7 +625,7 @@ fn register_debug_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
-    let debug_fn = Type::FnType { params: [self_var], return_type: STR, effects: EMPTY_ROW }
+    let debug_fn = Type::FnType { params: [self_var], return_type: STR, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
 
     env.trait_reg.traits.insert("Debug", TraitDef {
         name: "Debug",
@@ -634,7 +681,7 @@ fn register_hash_trait(mut env: TypeEnv, sink: CollectingSink) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
-    let hash_fn = Type::FnType { params: [self_var], return_type: INT, effects: EMPTY_ROW }
+    let hash_fn = Type::FnType { params: [self_var], return_type: INT, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
 
     env.trait_reg.traits.insert("Hash", TraitDef {
         name: "Hash",
@@ -665,9 +712,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     let mut u_id = env.fresh_var_id()
     let mut u = Type::TypeVar { id: u_id, name: none }
     let mut orow = open_row(env)
-    let mut cb = Type::FnType { params: [t], return_type: u, effects: orow.eff }
+    let mut cb = Type::FnType { params: [t], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("map", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(u), effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(u), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -677,9 +724,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("filter", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(t), effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(t), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -691,9 +738,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     u_id = env.fresh_var_id()
     u = Type::TypeVar { id: u_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: make_list_struct(u), effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: make_list_struct(u), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("flat_map", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(u), effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(u), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -705,9 +752,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     u_id = env.fresh_var_id()
     u = Type::TypeVar { id: u_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [u, t], return_type: u, effects: orow.eff }
+    cb = Type::FnType { params: [u, t], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("fold", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), u, cb], return_type: u, effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), u, cb], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -717,9 +764,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("any", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: BOOL, effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -729,9 +776,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("all", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: BOOL, effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -741,9 +788,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("find", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_option_type(t), effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_option_type(t), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -753,9 +800,9 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("find_index", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_option_type(INT), effects: orow.eff },
+        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_option_type(INT), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -765,9 +812,12 @@ fn register_list_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t, t], return_type: INT, effects: orow.eff }
+    cb = Type::FnType { params: [t, t], return_type: INT, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("sort_by", TypeScheme {
-        ty: Type::FnType { params: [make_list_struct(t), cb], return_type: UNIT, effects: orow.eff },
+        ty: Type::FnType {
+            params: [make_list_struct(t), cb], return_type: UNIT,
+            meta: fn_meta(orow.eff, CALLABLE_FIRST_MUT_BORROW_OWNED)
+        },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -792,9 +842,9 @@ fn register_map_hof(mut env: TypeEnv, sink: CollectingSink) {
     let mut u_id = env.fresh_var_id()
     let mut u = Type::TypeVar { id: u_id, name: none }
     let mut orow = open_row(env)
-    let mut cb = Type::FnType { params: [v], return_type: u, effects: orow.eff }
+    let mut cb = Type::FnType { params: [v], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("map_values", TypeScheme {
-        ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: make_map_type(k, u), effects: orow.eff },
+        ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: make_map_type(k, u), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [k_id, v_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -806,9 +856,9 @@ fn register_map_hof(mut env: TypeEnv, sink: CollectingSink) {
     v_id = env.fresh_var_id()
     v = Type::TypeVar { id: v_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [k, v], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [k, v], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("filter", TypeScheme {
-        ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: make_map_type(k, v), effects: orow.eff },
+        ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: make_map_type(k, v), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [k_id, v_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -822,9 +872,9 @@ fn register_map_hof(mut env: TypeEnv, sink: CollectingSink) {
     u_id = env.fresh_var_id()
     u = Type::TypeVar { id: u_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [u, k, v], return_type: u, effects: orow.eff }
+    cb = Type::FnType { params: [u, k, v], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("fold", TypeScheme {
-        ty: Type::FnType { params: [make_map_type(k, v), u, cb], return_type: u, effects: orow.eff },
+        ty: Type::FnType { params: [make_map_type(k, v), u, cb], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [k_id, v_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -836,9 +886,9 @@ fn register_map_hof(mut env: TypeEnv, sink: CollectingSink) {
     v_id = env.fresh_var_id()
     v = Type::TypeVar { id: v_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [k, v], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [k, v], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("any", TypeScheme {
-        ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: BOOL, effects: orow.eff },
+        ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [k_id, v_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -872,9 +922,9 @@ fn register_set_hof(mut env: TypeEnv, sink: CollectingSink) {
     let mut t_id = env.fresh_var_id()
     let mut t = Type::TypeVar { id: t_id, name: none }
     let mut orow = open_row(env)
-    let mut cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    let mut cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("filter", TypeScheme {
-        ty: Type::FnType { params: [make_set_struct(t), cb], return_type: make_set_struct(t), effects: orow.eff },
+        ty: Type::FnType { params: [make_set_struct(t), cb], return_type: make_set_struct(t), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [
             SchemeBound { type_var: t_id, trait_name: "Hash", assoc_constraints: [] },
@@ -889,9 +939,9 @@ fn register_set_hof(mut env: TypeEnv, sink: CollectingSink) {
     let u_id = env.fresh_var_id()
     let u = Type::TypeVar { id: u_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [u, t], return_type: u, effects: orow.eff }
+    cb = Type::FnType { params: [u, t], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("fold", TypeScheme {
-        ty: Type::FnType { params: [make_set_struct(t), u, cb], return_type: u, effects: orow.eff },
+        ty: Type::FnType { params: [make_set_struct(t), u, cb], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -901,9 +951,9 @@ fn register_set_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("any", TypeScheme {
-        ty: Type::FnType { params: [make_set_struct(t), cb], return_type: BOOL, effects: orow.eff },
+        ty: Type::FnType { params: [make_set_struct(t), cb], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -913,9 +963,9 @@ fn register_set_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("all", TypeScheme {
-        ty: Type::FnType { params: [make_set_struct(t), cb], return_type: BOOL, effects: orow.eff },
+        ty: Type::FnType { params: [make_set_struct(t), cb], return_type: BOOL, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -951,9 +1001,9 @@ fn register_option_hof(mut env: TypeEnv, sink: CollectingSink) {
     let mut u_id = env.fresh_var_id()
     let mut u = Type::TypeVar { id: u_id, name: none }
     let mut orow = open_row(env)
-    let mut cb = Type::FnType { params: [t], return_type: u, effects: orow.eff }
+    let mut cb = Type::FnType { params: [t], return_type: u, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("map", TypeScheme {
-        ty: Type::FnType { params: [make_option_type(t), cb], return_type: make_option_type(u), effects: orow.eff },
+        ty: Type::FnType { params: [make_option_type(t), cb], return_type: make_option_type(u), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -965,9 +1015,9 @@ fn register_option_hof(mut env: TypeEnv, sink: CollectingSink) {
     u_id = env.fresh_var_id()
     u = Type::TypeVar { id: u_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [t], return_type: make_option_type(u), effects: orow.eff }
+    cb = Type::FnType { params: [t], return_type: make_option_type(u), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("and_then", TypeScheme {
-        ty: Type::FnType { params: [make_option_type(t), cb], return_type: make_option_type(u), effects: orow.eff },
+        ty: Type::FnType { params: [make_option_type(t), cb], return_type: make_option_type(u), meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) },
         type_vars: [t_id, u_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -977,9 +1027,12 @@ fn register_option_hof(mut env: TypeEnv, sink: CollectingSink) {
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
     orow = open_row(env)
-    cb = Type::FnType { params: [], return_type: t, effects: orow.eff }
+    cb = Type::FnType { params: [], return_type: t, meta: fn_meta(orow.eff, CALLABLE_BORROW_OWNED) }
     methods.insert("unwrap_or_else", TypeScheme {
-        ty: Type::FnType { params: [make_option_type(t), cb], return_type: t, effects: orow.eff },
+        ty: Type::FnType {
+            params: [make_option_type(t), cb], return_type: t,
+            meta: fn_meta(orow.eff, CALLABLE_BORROW_BORROWED)
+        },
         type_vars: [t_id, orow.tail_id],
         bounds: [],
         def_id: none
@@ -1003,44 +1056,54 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let alloc_t = Type::TypeVar { id: alloc_t_id, name: none }
     let alloc_ptr = Type::PtrType { pointee: alloc_t }
     env.bind("alloc", TypeScheme {
-        ty: Type::FnType { params: [INT], return_type: alloc_ptr, effects: unsafe_row },
+        ty: Type::FnType { params: [INT], return_type: alloc_ptr, meta: fn_meta(unsafe_row, CALLABLE_BORROW_OWNED) },
         type_vars: [alloc_t_id],
         bounds: [],
         def_id: none
     })
+    record_builtin_callable(env, "alloc")
 
     // dealloc(p: Ptr<T>, count: Int) -> () / unsafe
     let dealloc_t_id = env.fresh_var_id()
     let dealloc_t = Type::TypeVar { id: dealloc_t_id, name: none }
     let dealloc_ptr = Type::PtrType { pointee: dealloc_t }
     env.bind("dealloc", TypeScheme {
-        ty: Type::FnType { params: [dealloc_ptr, INT], return_type: UNIT, effects: unsafe_row },
+        ty: Type::FnType {
+            params: [dealloc_ptr, INT], return_type: UNIT,
+            meta: fn_meta(unsafe_row, CALLABLE_MOVE_BORROW_OWNED)
+        },
         type_vars: [dealloc_t_id],
         bounds: [],
         def_id: none
     })
+    record_builtin_callable(env, "dealloc")
 
     // ptr_copy(src: Ptr<T>, dst: Ptr<T>, count: Int) -> () / unsafe
     let copy_t_id = env.fresh_var_id()
     let copy_t = Type::TypeVar { id: copy_t_id, name: none }
     let copy_ptr = Type::PtrType { pointee: copy_t }
     env.bind("ptr_copy", TypeScheme {
-        ty: Type::FnType { params: [copy_ptr, copy_ptr, INT], return_type: UNIT, effects: unsafe_row },
+        ty: Type::FnType {
+            params: [copy_ptr, copy_ptr, INT], return_type: UNIT,
+            meta: fn_meta(unsafe_row, CALLABLE_BORROW_MUT_BORROW_OWNED)
+        },
         type_vars: [copy_t_id],
         bounds: [],
         def_id: none
     })
+    record_builtin_callable(env, "ptr_copy")
 
     // ptr_from_addr(a: Int) -> Ptr<T> (safe)
     let from_t_id = env.fresh_var_id()
     let from_t = Type::TypeVar { id: from_t_id, name: none }
     let from_ptr = Type::PtrType { pointee: from_t }
     env.bind("ptr_from_addr", TypeScheme {
-        ty: Type::FnType { params: [INT], return_type: from_ptr, effects: EMPTY_ROW },
+        ty: Type::FnType { params: [INT], return_type: from_ptr, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) },
         type_vars: [from_t_id],
         bounds: [],
         def_id: none
     })
+    record_builtin_callable(env, "ptr_from_addr")
 
     // ---- Ptr<T> methods ----
 
@@ -1051,7 +1114,7 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let read_t = Type::TypeVar { id: read_t_id, name: none }
     let read_ptr = Type::PtrType { pointee: read_t }
     methods.insert("read", TypeScheme {
-        ty: Type::FnType { params: [read_ptr], return_type: read_t, effects: unsafe_row },
+        ty: Type::FnType { params: [read_ptr], return_type: read_t, meta: fn_meta(unsafe_row, CALLABLE_BORROW_OWNED) },
         type_vars: [read_t_id],
         bounds: [],
         def_id: none
@@ -1062,7 +1125,10 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let take_t = Type::TypeVar { id: take_t_id, name: none }
     let take_ptr = Type::PtrType { pointee: take_t }
     methods.insert("take", TypeScheme {
-        ty: Type::FnType { params: [take_ptr], return_type: take_t, effects: unsafe_row },
+        ty: Type::FnType {
+            params: [take_ptr], return_type: take_t,
+            meta: fn_meta(unsafe_row, CALLABLE_FIRST_MUT_BORROW_OWNED)
+        },
         type_vars: [take_t_id],
         bounds: [],
         def_id: none
@@ -1073,7 +1139,10 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let write_t = Type::TypeVar { id: write_t_id, name: none }
     let write_ptr = Type::PtrType { pointee: write_t }
     methods.insert("write", TypeScheme {
-        ty: Type::FnType { params: [write_ptr, write_t], return_type: UNIT, effects: unsafe_row },
+        ty: Type::FnType {
+            params: [write_ptr, write_t], return_type: UNIT,
+            meta: fn_meta(unsafe_row, CALLABLE_MUT_MOVE_OWNED)
+        },
         type_vars: [write_t_id],
         bounds: [],
         def_id: none
@@ -1084,7 +1153,10 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let off_t = Type::TypeVar { id: off_t_id, name: none }
     let off_ptr = Type::PtrType { pointee: off_t }
     methods.insert("offset", TypeScheme {
-        ty: Type::FnType { params: [off_ptr, INT], return_type: off_ptr, effects: unsafe_row },
+        ty: Type::FnType {
+            params: [off_ptr, INT], return_type: off_ptr,
+            meta: fn_meta(unsafe_row, CALLABLE_BORROW_BORROWED)
+        },
         type_vars: [off_t_id],
         bounds: [],
         def_id: none
@@ -1098,7 +1170,10 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let cast_ptr_t = Type::PtrType { pointee: cast_t }
     let cast_ptr_u = Type::PtrType { pointee: cast_u }
     methods.insert("cast", TypeScheme {
-        ty: Type::FnType { params: [cast_ptr_t], return_type: cast_ptr_u, effects: EMPTY_ROW },
+        ty: Type::FnType {
+            params: [cast_ptr_t], return_type: cast_ptr_u,
+            meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_BORROWED)
+        },
         type_vars: [cast_t_id, cast_u_id],
         bounds: [],
         def_id: none
@@ -1109,7 +1184,7 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let addr_t = Type::TypeVar { id: addr_t_id, name: none }
     let addr_ptr = Type::PtrType { pointee: addr_t }
     methods.insert("addr", TypeScheme {
-        ty: Type::FnType { params: [addr_ptr], return_type: INT, effects: EMPTY_ROW },
+        ty: Type::FnType { params: [addr_ptr], return_type: INT, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) },
         type_vars: [addr_t_id],
         bounds: [],
         def_id: none

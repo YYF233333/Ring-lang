@@ -1,5 +1,5 @@
 use types::{Type, EffectRow, StructField, EnumVariant,
-    INT, STR, BOOL, EMPTY_ROW}
+    INT, STR, BOOL, EMPTY_ROW, CALLABLE_BORROW_OWNED, fn_meta}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     ImplEntry, ImplDictBound, MethodOrigin,
     add_impl, has_impl, install_method_scheme}
@@ -705,25 +705,25 @@ fn register_trait_methods(
 ) {
     match trait_name {
         "Eq" => {
-            let eq_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, effects: EMPTY_ROW }
+            let eq_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
             methods.insert("eq", TypeScheme { ty: eq_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-            let ne_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, effects: EMPTY_ROW }
+            let ne_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
             methods.insert("ne", TypeScheme { ty: ne_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         "Clone" => {
-            let clone_fn = Type::FnType { params: [self_type], return_type: self_type, effects: EMPTY_ROW }
+            let clone_fn = Type::FnType { params: [self_type], return_type: self_type, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
             methods.insert("clone", TypeScheme { ty: clone_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         "Ord" => {
-            let cmp_fn = Type::FnType { params: [self_type, self_type], return_type: INT, effects: EMPTY_ROW }
+            let cmp_fn = Type::FnType { params: [self_type, self_type], return_type: INT, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
             methods.insert("cmp", TypeScheme { ty: cmp_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         "Debug" => {
-            let debug_fn = Type::FnType { params: [self_type], return_type: STR, effects: EMPTY_ROW }
+            let debug_fn = Type::FnType { params: [self_type], return_type: STR, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
             methods.insert("debug", TypeScheme { ty: debug_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         "Hash" => {
-            let hash_fn = Type::FnType { params: [self_type], return_type: INT, effects: EMPTY_ROW }
+            let hash_fn = Type::FnType { params: [self_type], return_type: INT, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
             methods.insert("hash", TypeScheme { ty: hash_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         _ => {},

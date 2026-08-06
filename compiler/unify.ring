@@ -1,4 +1,5 @@
-use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, effect_kind_name, effects_match_kind, UNIT}
+use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string,
+    effect_kind_name, effects_match_kind, UNIT}
 use union_find::{UnionFind, uf_bind, uf_find, uf_lookup, uf_insert, new_union_find}
 use env::{TypeEnv, apply_subst, apply_subst_row, apply_subst_map}
 
@@ -54,10 +55,10 @@ pub fn occurs_in(var_id: Int, t: Type, subst: UnionFind) -> Bool {
                 none => false
             }
         },
-        Type::FnType { params, return_type, effects } =>
+        Type::FnType { params, return_type, meta } =>
             params.any(fn(p) { occurs_in(var_id, p, subst) }) ||
             occurs_in(var_id, return_type, subst) ||
-            occurs_in_row(var_id, effects, subst),
+            occurs_in_row(var_id, meta.effects, subst),
         Type::StructType { type_params, .. } =>
             type_params.any(fn(p) { occurs_in(var_id, p, subst) }),
         Type::EnumType { type_params, .. } =>
@@ -498,9 +499,11 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, mut env: TypeEnv) -> UnionFin
         (Type::BoolType, Type::BoolType) => subst,
         (Type::UnitType, Type::UnitType) => subst,
 
-        // Function types
-        (Type::FnType { params: pa, return_type: ra, effects: ea },
-         Type::FnType { params: pb, return_type: rb, effects: eb }) => {
+        // Function types. Callable ownership is shadow metadata in Unit 1;
+        // the solver/finalization unit will enable its compatibility check
+        // atomically with ownership-aware checking and lowering.
+        (Type::FnType { params: pa, return_type: ra, meta: ma },
+         Type::FnType { params: pb, return_type: rb, meta: mb }) => {
             if pa.len() != pb.len() {
                 unify_error(t1, t2, some("parameter count mismatch: ${pa.len()} vs ${pb.len()}"))
             }
@@ -515,7 +518,7 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, mut env: TypeEnv) -> UnionFin
                 i = i + 1
             }
             s = unify(ra, rb, s, env)
-            s = unify_effect_rows(ea, eb, s, env)
+            s = unify_effect_rows(ma.effects, mb.effects, s, env)
             s
         },
 

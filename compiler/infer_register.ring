@@ -1,5 +1,11 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
-    EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string, effect_to_string, nominal_display_name}
+    EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string,
+    effect_to_string, nominal_display_name, fn_meta,
+    CALLABLE_BORROW_OWNED, CALLABLE_MOVE_OWNED,
+    CALLABLE_FIRST_MUT_BORROW_OWNED, CALLABLE_MOVE_BORROW_OWNED,
+    CALLABLE_MUT_BORROW_MOVE_OWNED, CALLABLE_SLOT_MOVE_OWNED,
+    CALLABLE_SOURCE_DECLARED, CALLABLE_SOURCE_BUILTIN,
+    record_callable_ownership}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember,
     UseDecl, UseImport}
@@ -18,6 +24,79 @@ use infer_ctx::{InferCtx, FnBoundsEntry, CompileError, type_error, resolve_type_
     enter_project_root_frame, enter_project_child_frame,
     refresh_project_namespace_frame, exit_project_namespace_frame}
 use infer_helpers::{is_value_type}
+
+fn interface_callable_ownership(params: List<Param>) -> Int {
+    for param in params {
+        // `mut self` is an interface-visible receiver mutation. Other `mut`
+        // parameters describe the callee's local binding and remain Borrow
+        // until body analysis proves a stronger call mode.
+        if param.name == "self" && param.is_mutable {
+            return CALLABLE_FIRST_MUT_BORROW_OWNED
+        }
+    }
+    CALLABLE_BORROW_OWNED
+}
+
+// Raw slot bridges are the ownership boundary used by the pure-Ring
+// container implementations. This table lives at extern registration so all
+// later phases consume the contract from TypeScheme/HIR, never from a leaf.
+fn extern_callable_ownership(
+    name: Str, params: List<Param>
+) -> Int {
+    if name == "ring_slot_alloc" {
+        return CALLABLE_BORROW_OWNED
+    }
+    if name == "ring_slot_dealloc" {
+        return CALLABLE_MOVE_BORROW_OWNED
+    }
+    if name == "ring_slot_read" {
+        return CALLABLE_BORROW_OWNED
+    }
+    if name == "ring_slot_take" {
+        return CALLABLE_FIRST_MUT_BORROW_OWNED
+    }
+    if name == "ring_slot_write" {
+        return CALLABLE_MUT_BORROW_MOVE_OWNED
+    }
+    if name == "ring_slot_replace" {
+        return CALLABLE_FIRST_MUT_BORROW_OWNED
+    }
+    if name == "ring_slot_swap" {
+        return CALLABLE_FIRST_MUT_BORROW_OWNED
+    }
+    if name == "ring_slot_move" {
+        return CALLABLE_SLOT_MOVE_OWNED
+    }
+    if name == "ring_slot_drop" {
+        return CALLABLE_FIRST_MUT_BORROW_OWNED
+    }
+    interface_callable_ownership(params)
+}
+
+fn extern_callable_source(name: Str) -> Int {
+    if name == "ring_slot_alloc" || name == "ring_slot_dealloc" ||
+       name == "ring_slot_read" || name == "ring_slot_take" ||
+       name == "ring_slot_write" || name == "ring_slot_replace" ||
+       name == "ring_slot_swap" || name == "ring_slot_move" ||
+       name == "ring_slot_drop" {
+        CALLABLE_SOURCE_BUILTIN
+    } else {
+        CALLABLE_SOURCE_DECLARED
+    }
+}
+
+fn record_bound_callable(mut ctx: InferCtx, name: Str, source: Int) {
+    match ctx.env.lookup(name) {
+        some(scheme) => match (scheme.def_id, scheme.ty) {
+            (some(def_id), Type::FnType { meta, .. }) =>
+                record_callable_ownership(
+                    ctx.env.types.ownership_metadata, def_id,
+                    meta.ownership_id, source, none),
+            _ => {}
+        },
+        none => {}
+    }
+}
 
 // ============================================================
 // Public entry points
@@ -1451,12 +1530,17 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                 } else if variant.fields.len() == 0 {
                     bind_variant_constructor(ctx, binding_name, enum_type, tv_ids)
                 } else {
-                    let fn_type = Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW }
+                    let fn_type = Type::FnType {
+                        params: variant.fields, return_type: enum_type,
+                        meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
+                    }
                     if tv_ids.len() > 0 {
                         ctx.env.bind(binding_name, TypeScheme { ty: fn_type, type_vars: tv_ids, bounds: [], def_id: none })
                     } else {
                         ctx.env.bind_mono(binding_name, fn_type)
                     }
+                    record_bound_callable(
+                        ctx, binding_name, CALLABLE_SOURCE_DECLARED)
                 }
                 if !project_active {
                     // The single-file pipeline still binds the historical leaf
@@ -1470,6 +1554,8 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                                 bounds: scheme.bounds,
                                 def_id: none
                             })
+                            record_bound_callable(
+                                ctx, ctor_payload, CALLABLE_SOURCE_DECLARED)
                         },
                         none => {}
                     }
@@ -1704,7 +1790,11 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                     some(de) => resolve_declared_effects(ctx, de),
                     none => EMPTY_ROW
                 }
-                let fn_type = Type::FnType { params: param_types, return_type: ret, effects: method_effects }
+                let ownership = interface_callable_ownership(params)
+                let fn_type = Type::FnType {
+                    params: param_types, return_type: ret,
+                    meta: fn_meta(method_effects, ownership)
+                }
                 trait_methods.push(TraitMethodDef { name: mname, ty: fn_type, has_default: !is_abstract, param_mutabilities: param_muts, method_type_params: method_tps })
             },
             _ => {}
@@ -2107,7 +2197,15 @@ fn register_impl_method(
         some(de) => resolve_declared_effects(ctx, de),
         none => infer_hof_effect_row(param_types)
     }
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_m_effects }
+    let ownership = if !is_extern {
+        interface_callable_ownership(params)
+    } else {
+        extern_callable_ownership(mname, params)
+    }
+    let fn_type = Type::FnType {
+        params: param_types, return_type: ret,
+        meta: fn_meta(impl_m_effects, ownership)
+    }
     collect_effect_tail_vars(fn_type, all_tvs)
     let scheme = TypeScheme {
         ty: fn_type, type_vars: all_tvs,
@@ -2203,7 +2301,7 @@ fn specialize_delegate_method_scheme(
 ) -> TypeScheme {
     let mapped_type = apply_subst_map(field_var_map, field_scheme.ty)
     let specialized_type = match mapped_type {
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             let mut forwarded_params: List<Type> = []
             let mut first = true
             for param in params {
@@ -2217,7 +2315,7 @@ fn specialize_delegate_method_scheme(
             Type::FnType {
                 params: forwarded_params,
                 return_type: return_type,
-                effects: effects
+                meta: meta
             }
         },
         _ => mapped_type
@@ -2715,8 +2813,8 @@ fn expand_effect_exprs(mut ctx: InferCtx, decl_effects: List<EffectExpr>, mut ex
 
 fn collect_effect_tail_vars(ty: Type, mut vars: List<Int>) {
     match ty {
-        Type::FnType { params, return_type, effects } => {
-            match effects.tail {
+        Type::FnType { params, return_type, meta } => {
+            match meta.effects.tail {
                 some(t_id) => {
                     if !vars.contains(t_id) { vars.push(t_id) }
                 },
@@ -2745,7 +2843,7 @@ fn collect_effect_tail_vars(ty: Type, mut vars: List<Int>) {
 fn infer_hof_effect_row(param_types: List<Type>) -> EffectRow {
     for pt in param_types {
         match pt {
-            Type::FnType { effects, .. } => match effects.tail {
+            Type::FnType { meta, .. } => match meta.effects.tail {
                 some(t_id) => { return EffectRow { effects: [], tail: some(t_id) } },
                 none => {}
             },
@@ -2896,7 +2994,15 @@ fn register_fn_common(
         some(de) => resolve_declared_effects(ctx, de),
         none => infer_hof_effect_row(param_types)
     }
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: effects }
+    let ownership = if track_fn_bounds {
+        interface_callable_ownership(params)
+    } else {
+        extern_callable_ownership(name, params)
+    }
+    let fn_type = Type::FnType {
+        params: param_types, return_type: ret,
+        meta: fn_meta(effects, ownership)
+    }
     collect_effect_tail_vars(fn_type, type_vars)
 
     let mut fn_bounds_list: List<FnBound> = []
@@ -2980,7 +3086,19 @@ fn register_fn_common(
     }
     record_value_binding_kind(ctx, name, callable_kind)
     match ctx.env.lookup(name) {
-        some(s) => match s.def_id { some(did) => ctx.env.record_def_span(did, span), none => {} },
+        some(s) => match s.def_id {
+            some(did) => {
+                ctx.env.record_def_span(did, span)
+                record_callable_ownership(
+                    ctx.env.types.ownership_metadata, did, ownership,
+                    if track_fn_bounds {
+                        CALLABLE_SOURCE_DECLARED
+                    } else {
+                        extern_callable_source(name)
+                    }, none)
+            },
+            none => {}
+        },
         none => {}
     }
 }
@@ -3083,7 +3201,10 @@ fn register_sig(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: 
             some(rt) => resolve_type_expr(ctx, rt),
             none => ctx.env.fresh_var()
         }
-        let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
+        let fn_type = Type::FnType {
+            params: param_types, return_type: ret,
+            meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
+        }
         sig_members.insert(m.name, TypeScheme { ty: fn_type, type_vars: type_vars, bounds: [], def_id: none })
         ctx.type_param_scope = msaved
     }

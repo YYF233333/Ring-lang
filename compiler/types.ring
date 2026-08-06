@@ -28,6 +28,82 @@ pub struct RecordField {
     pub ty: Type
 }
 
+// Callable ownership is a shadow-only, compact tag in Unit 1.  The hot Type
+// enum keeps three payload slots: effects and the ownership tag are grouped in
+// FnMeta, while descriptor/provenance data lives in OwnershipMetadata.  Legacy
+// equality, unification, rendering, acceptance and lowering intentionally
+// ignore the ownership tag until the solver and Take lowering cut over
+// atomically.
+pub const PARAM_OWNERSHIP_BORROW: Int = 0
+pub const PARAM_OWNERSHIP_MUT_BORROW: Int = 1
+pub const PARAM_OWNERSHIP_MOVE: Int = 2
+pub const PARAM_OWNERSHIP_UNKNOWN: Int = 3
+
+pub const RETURN_OWNERSHIP_OWNED: Int = 0
+pub const RETURN_OWNERSHIP_BORROWED: Int = 1
+pub const RETURN_OWNERSHIP_UNKNOWN: Int = 2
+
+pub const CALLABLE_SOURCE_BODY_INFERRED: Int = 0
+pub const CALLABLE_SOURCE_DECLARED: Int = 1
+pub const CALLABLE_SOURCE_BUILTIN: Int = 2
+pub const CALLABLE_SOURCE_CONSERVATIVE_INTERFACE: Int = 3
+pub const CALLABLE_SOURCE_CALL_CONSTRAINT: Int = 4
+
+// Canonical descriptor IDs. Uniform descriptors have no arity-sized list.
+// The non-uniform IDs cover the current builtin/slot boundaries exactly; user
+// interfaces use either uniform Borrow or first-MutBorrow/rest-Borrow.
+pub const CALLABLE_BORROW_OWNED: Int = 0
+pub const CALLABLE_MOVE_OWNED: Int = 1
+pub const CALLABLE_UNKNOWN: Int = 2
+pub const CALLABLE_FIRST_MUT_BORROW_OWNED: Int = 3
+pub const CALLABLE_BORROW_BORROWED: Int = 4
+pub const CALLABLE_MUT_MOVE_OWNED: Int = 5
+pub const CALLABLE_BORROW_MOVE_BORROWED: Int = 6
+pub const CALLABLE_MOVE_BORROW_OWNED: Int = 7
+pub const CALLABLE_BORROW_MUT_BORROW_OWNED: Int = 8
+pub const CALLABLE_MUT_BORROW_MOVE_OWNED: Int = 9
+pub const CALLABLE_SLOT_MOVE_OWNED: Int = 10
+
+// `rest_param >= 0` applies after the explicit prefix without storing an
+// arity-sized list. `rest_param == -1` makes the prefix exact; out-of-range
+// lookup then fails closed to Unknown.
+pub struct CallableOwnershipDescriptor {
+    pub prefix_params: List<Int>,
+    pub rest_param: Int,
+    pub result: Int
+}
+
+pub struct CallableOwnershipState {
+    pub source: Int,
+    pub inference_id: Int?
+}
+
+pub struct FnMeta {
+    pub effects: EffectRow,
+    pub ownership_id: Int
+}
+
+// Symbolic ownership shape for one nominal type constructor.  `may_own`
+// means every instantiation may directly/transitively contain a user Drop
+// value; `param_deps[i]` means the answer additionally depends on whether the
+// i-th actual type argument may own one.  This finite bit-vector is the fixed
+// point exported between modules.
+pub struct OwnershipShape {
+    pub may_own: Bool,
+    pub param_deps: List<Bool>
+}
+
+// One transport bundle crosses TypeEnv, HProgram and ModuleExports. DefIds are
+// the only declaration identity: no name-keyed fallback is permitted. Solver
+// state remains separate from canonical descriptors so singleton contracts do
+// not multiply by source, call count or arity.
+pub struct OwnershipMetadata {
+    pub callable_descriptors: Map<Int, CallableOwnershipDescriptor>,
+    pub callable_by_def_id: Map<Int, Int>,
+    pub callable_state_by_def_id: Map<Int, CallableOwnershipState>,
+    pub ownership_shapes: Map<Str, OwnershipShape>
+}
+
 pub enum Type {
     IntType,
     FloatType,
@@ -37,7 +113,7 @@ pub enum Type {
     NeverType,
     AnyType,
     TypeVar { id: Int, name: Str? },
-    FnType { params: List<Type>, return_type: Type, effects: EffectRow },
+    FnType { params: List<Type>, return_type: Type, meta: FnMeta },
     StructType { name: Str, type_params: List<Type> },
     EnumType { name: Str, type_params: List<Type> },
     GenericType { base: Type, args: List<Type> },
@@ -75,6 +151,144 @@ pub const NEVER: Type = Type::NeverType
 pub const ANY: Type = Type::AnyType
 
 pub const EMPTY_ROW: EffectRow = EffectRow { effects: [], tail: none }
+
+pub fn fn_meta(effects: EffectRow, ownership_id: Int) -> FnMeta {
+    FnMeta { effects: effects, ownership_id: ownership_id }
+}
+
+pub fn new_ownership_metadata() -> OwnershipMetadata {
+    OwnershipMetadata {
+        // Canonical 0..10 descriptors are decoded without Map/List allocation.
+        // This table is reserved for genuinely dynamic mixed solver results.
+        callable_descriptors: map_new(),
+        callable_by_def_id: map_new(),
+        callable_state_by_def_id: map_new(),
+        ownership_shapes: map_new()
+    }
+}
+
+pub fn is_canonical_callable_ownership(ownership_id: Int) -> Bool {
+    ownership_id >= CALLABLE_BORROW_OWNED &&
+        ownership_id <= CALLABLE_SLOT_MOVE_OWNED
+}
+
+pub fn callable_descriptors_equal(
+    a: CallableOwnershipDescriptor, b: CallableOwnershipDescriptor
+) -> Bool {
+    if a.rest_param != b.rest_param || a.result != b.result ||
+       a.prefix_params.len() != b.prefix_params.len() {
+        return false
+    }
+    let mut index = 0
+    while index < a.prefix_params.len() {
+        if a.prefix_params.get(index) != b.prefix_params.get(index) {
+            return false
+        }
+        index = index + 1
+    }
+    true
+}
+
+pub fn record_callable_ownership(
+    mut metadata: OwnershipMetadata, def_id: Int, ownership_id: Int,
+    source: Int, inference_id: Int?
+) {
+    if !is_canonical_callable_ownership(ownership_id) &&
+       !metadata.callable_descriptors.contains_key(ownership_id) {
+        panic("unreachable: callable ownership descriptor is not registered")
+    }
+    metadata.callable_by_def_id.insert(def_id, ownership_id)
+    metadata.callable_state_by_def_id.insert(def_id, CallableOwnershipState {
+        source: source, inference_id: inference_id
+    })
+}
+
+pub fn callable_param_ownership(
+    metadata: OwnershipMetadata, ownership_id: Int, index: Int
+) -> Int {
+    if ownership_id == CALLABLE_BORROW_OWNED ||
+       ownership_id == CALLABLE_BORROW_BORROWED {
+        return PARAM_OWNERSHIP_BORROW
+    }
+    if ownership_id == CALLABLE_MOVE_OWNED {
+        return PARAM_OWNERSHIP_MOVE
+    }
+    if ownership_id == CALLABLE_UNKNOWN {
+        return PARAM_OWNERSHIP_UNKNOWN
+    }
+    if ownership_id == CALLABLE_FIRST_MUT_BORROW_OWNED {
+        return if index == 0 {
+            PARAM_OWNERSHIP_MUT_BORROW
+        } else {
+            PARAM_OWNERSHIP_BORROW
+        }
+    }
+    if ownership_id == CALLABLE_MUT_MOVE_OWNED {
+        if index == 0 { return PARAM_OWNERSHIP_MUT_BORROW }
+        if index == 1 { return PARAM_OWNERSHIP_MOVE }
+        return PARAM_OWNERSHIP_UNKNOWN
+    }
+    if ownership_id == CALLABLE_BORROW_MOVE_BORROWED {
+        if index == 0 { return PARAM_OWNERSHIP_BORROW }
+        if index == 1 { return PARAM_OWNERSHIP_MOVE }
+        return PARAM_OWNERSHIP_UNKNOWN
+    }
+    if ownership_id == CALLABLE_MOVE_BORROW_OWNED {
+        if index == 0 { return PARAM_OWNERSHIP_MOVE }
+        if index == 1 { return PARAM_OWNERSHIP_BORROW }
+        return PARAM_OWNERSHIP_UNKNOWN
+    }
+    if ownership_id == CALLABLE_BORROW_MUT_BORROW_OWNED {
+        if index == 0 || index == 2 { return PARAM_OWNERSHIP_BORROW }
+        if index == 1 { return PARAM_OWNERSHIP_MUT_BORROW }
+        return PARAM_OWNERSHIP_UNKNOWN
+    }
+    if ownership_id == CALLABLE_MUT_BORROW_MOVE_OWNED {
+        if index == 0 { return PARAM_OWNERSHIP_MUT_BORROW }
+        if index == 1 { return PARAM_OWNERSHIP_BORROW }
+        if index == 2 { return PARAM_OWNERSHIP_MOVE }
+        return PARAM_OWNERSHIP_UNKNOWN
+    }
+    if ownership_id == CALLABLE_SLOT_MOVE_OWNED {
+        if index == 0 || index == 2 {
+            return PARAM_OWNERSHIP_MUT_BORROW
+        }
+        if index == 1 || index == 3 || index == 4 {
+            return PARAM_OWNERSHIP_BORROW
+        }
+        return PARAM_OWNERSHIP_UNKNOWN
+    }
+    match metadata.callable_descriptors.get(ownership_id) {
+        some(descriptor) => match descriptor.prefix_params.get(index) {
+            some(mode) => mode,
+            none => if descriptor.rest_param >= 0 {
+                descriptor.rest_param
+            } else {
+                PARAM_OWNERSHIP_UNKNOWN
+            }
+        },
+        none => PARAM_OWNERSHIP_UNKNOWN
+    }
+}
+
+pub fn callable_return_ownership(
+    metadata: OwnershipMetadata, ownership_id: Int
+) -> Int {
+    if ownership_id == CALLABLE_UNKNOWN {
+        return RETURN_OWNERSHIP_UNKNOWN
+    }
+    if ownership_id == CALLABLE_BORROW_BORROWED ||
+       ownership_id == CALLABLE_BORROW_MOVE_BORROWED {
+        return RETURN_OWNERSHIP_BORROWED
+    }
+    if is_canonical_callable_ownership(ownership_id) {
+        return RETURN_OWNERSHIP_OWNED
+    }
+    match metadata.callable_descriptors.get(ownership_id) {
+        some(descriptor) => descriptor.result,
+        none => RETURN_OWNERSHIP_UNKNOWN
+    }
+}
 
 pub fn effect_kind_name(e: Effect) -> Str {
     match e {
@@ -275,6 +489,39 @@ fn optional_ids_equal(a: Int?, b: Int?) -> Bool {
     }
 }
 
+pub fn param_ownership_compatible(a: Int, b: Int) -> Bool {
+    a == b || a == PARAM_OWNERSHIP_UNKNOWN || b == PARAM_OWNERSHIP_UNKNOWN
+}
+
+pub fn return_ownership_compatible(a: Int, b: Int) -> Bool {
+    a == b || a == RETURN_OWNERSHIP_UNKNOWN || b == RETURN_OWNERSHIP_UNKNOWN
+}
+
+// Solver-only relation. Keeping it separate prevents Unknown from becoming a
+// wildcard in the language's ordinary equivalence relation.
+pub fn callable_ownership_compatible(
+    metadata: OwnershipMetadata, a: Int, b: Int, param_count: Int
+) -> Bool {
+    let mut index = 0
+    while index < param_count {
+        if !param_ownership_compatible(
+            callable_param_ownership(metadata, a, index),
+            callable_param_ownership(metadata, b, index)) {
+            return false
+        }
+        index = index + 1
+    }
+    return_ownership_compatible(
+        callable_return_ownership(metadata, a),
+        callable_return_ownership(metadata, b))
+}
+
+// Canonical IDs make exact shadow equality O(1). This remains intentionally
+// disconnected from ordinary Type equality and unification in Unit 1.
+pub fn callable_ownership_exact_equal(a: Int, b: Int) -> Bool {
+    a == b
+}
+
 pub fn effects_equal(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
@@ -309,15 +556,17 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
             Type::TypeVar { id: id_b, .. } => id_a == id_b,
             _ => false
         },
-        Type::FnType { params: pa, return_type: ra, effects: ea } => match b {
-            Type::FnType { params: pb, return_type: rb, effects: eb } =>
+        // Unit 1 compatibility gate: ownership is transported in shadow but
+        // does not change the legacy accepted program set.
+        Type::FnType { params: pa, return_type: ra, meta: ma } => match b {
+            Type::FnType { params: pb, return_type: rb, meta: mb } =>
                 type_lists_equal(pa, pb) && types_equal(ra, rb)
-                    && effects_list_equal(ea.effects, eb.effects)
+                    && effects_list_equal(ma.effects.effects, mb.effects.effects)
                     // Open effect row tails are compared by exact TypeVar ID (structural equality).
                     // Two different open tails (?N1, ?N2) are structurally distinct even though both
                     // represent "open row" semantically. Semantic equivalence is handled by unification,
                     // not types_equal — this function is for error messages and debug output.
-                    && optional_ids_equal(ea.tail, eb.tail),
+                    && optional_ids_equal(ma.effects.tail, mb.effects.tail),
             _ => false
         },
         Type::StructType { name: na, type_params: tpa, .. } => match b {
@@ -386,10 +635,10 @@ pub fn type_to_string(t: Type) -> Str {
             some(n) => n,
             none => "?${id.to_str()}"
         },
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             let ps = params.map(fn(p) { type_to_string(p) }).join(", ")
             let ret = type_to_string(return_type)
-            let eff = effect_row_to_string(effects)
+            let eff = effect_row_to_string(meta.effects)
             if eff.len() > 0 { "(${ps}) -> ${ret} / ${eff}" }
             else { "(${ps}) -> ${ret}" }
         },

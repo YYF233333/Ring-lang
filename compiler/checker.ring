@@ -1,4 +1,6 @@
-use types::{Type, UNIT, nominal_display_name}
+use types::{Type, UNIT, nominal_display_name,
+    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, record_callable_ownership,
+    callable_descriptors_equal}
 use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam, span_zero}
 use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImplFact,
     HStringInterpPart, HEffectHandler, ValueBindingKind,
@@ -314,7 +316,7 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     // B-104 D7: lower `&&`/`||` to if-else (andor_lower), then B-104 D4:
     // first-class the dict evidence (static singleton set + local
     // constructions for dynamic wrapped dicts) — both before perceus/codegen.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types }
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types, ownership_metadata: hprogram.ownership_metadata }
     // B-002p1: check for use-after-move on Drop types (before lowering)
     if assembled.drop_types.len() > 0 {
         check_drop_moves(assembled, ctx.sink)
@@ -539,7 +541,7 @@ pub fn check_module(
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
     // B-104 D7 + D4: see check() above.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types }
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types, ownership_metadata: hprogram.ownership_metadata }
     // B-002p1: check for use-after-move on Drop types (before lowering)
     if assembled.drop_types.len() > 0 {
         check_drop_moves(assembled, ctx.sink)
@@ -571,6 +573,25 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
     // value/constructor origin is installed once with a checker-local DefId.
     let mut hydrated_value_origins: Set<Str> = set_new()
     for mod_ in exports {
+        // Ownership summaries do not participate in order-sensitive lookup;
+        // avoid sorting an empty shadow map for every project module.
+        for entry in mod_.ownership_metadata.ownership_shapes.entries() {
+            let (type_identity, shape) = entry
+            ctx.env.types.ownership_metadata.ownership_shapes.insert(
+                type_identity, shape)
+        }
+        for entry in mod_.ownership_metadata.callable_descriptors.entries() {
+            let (ownership_id, descriptor) = entry
+            match ctx.env.types.ownership_metadata.callable_descriptors.get(
+                ownership_id) {
+                some(existing) => if !callable_descriptors_equal(
+                    existing, descriptor) {
+                    panic("unreachable: colliding callable ownership descriptor ID")
+                },
+                none => ctx.env.types.ownership_metadata.callable_descriptors.insert(
+                    ownership_id, descriptor)
+            }
+        }
         let mut sorted_values = mod_.values.entries()
         sorted_values.sort_by(compare_by_first)
         for entry in sorted_values {
@@ -593,6 +614,32 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             for origin in exact_origins {
                 if !hydrated_value_origins.contains(origin) {
                     ctx.env.bind(origin, TypeScheme { ..scheme, def_id: none })
+                    match (ctx.env.lookup(origin), scheme.ty) {
+                        (some(local_scheme), Type::FnType { meta, .. }) =>
+                            match local_scheme.def_id {
+                                some(local_def_id) => {
+                                    let exported_state = match scheme.def_id {
+                                        some(exported_def_id) =>
+                                            mod_.ownership_metadata.callable_state_by_def_id.get(
+                                                exported_def_id),
+                                        none => none
+                                    }
+                                    match exported_state {
+                                        some(state) => record_callable_ownership(
+                                            ctx.env.types.ownership_metadata,
+                                            local_def_id, meta.ownership_id,
+                                            state.source, state.inference_id),
+                                        none => record_callable_ownership(
+                                            ctx.env.types.ownership_metadata,
+                                            local_def_id, meta.ownership_id,
+                                            CALLABLE_SOURCE_CONSERVATIVE_INTERFACE,
+                                            none)
+                                    }
+                                },
+                                none => {}
+                            },
+                        _ => {}
+                    }
                     let ultimate = match value_origin {
                         some(value) => value,
                         none => origin

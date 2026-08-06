@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, nominal_display_name, types_equal, make_option_type, type_to_builtin_name,
-    row_merge, effects_match_kind}
+    row_merge, effects_match_kind, CALLABLE_BORROW_OWNED, fn_meta}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr,
     UseDecl, UseImport}
 use hir::{HExpr, HStmt, HParam, DictRef, ValueBindingKind,
@@ -982,14 +982,14 @@ pub fn collect_free_vars(t: Type, mut result: Set<Int>) {
         Type::AnyType => {},
         Type::ErrorType => {},
         Type::TypeVar { id, .. } => { result.insert(id) },
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             for p in params { collect_free_vars(p, result) }
             collect_free_vars(return_type, result)
-            match effects.tail {
+            match meta.effects.tail {
                 some(tail_id) => { result.insert(tail_id) },
                 none => {}
             }
-            for e in effects.effects {
+            for e in meta.effects.effects {
                 match e {
                     Effect::FailEffect { error_type } => collect_free_vars(error_type, result),
                     Effect::MutEffect { state_type } => collect_free_vars(state_type, result),
@@ -1099,8 +1099,11 @@ pub fn generalize(env: TypeEnv, t: Type, subst: UnionFind) -> TypeScheme {
 pub fn update_fn_effects(mut env: TypeEnv, name: Str, effects: EffectRow) {
     match env.lookup(name) {
         some(scheme) => match scheme.ty {
-            Type::FnType { params, return_type, .. } => {
-                let new_type = Type::FnType { params: params, return_type: return_type, effects: effects }
+            Type::FnType { params, return_type, meta } => {
+                let new_type = Type::FnType {
+                    params: params, return_type: return_type,
+                    meta: fn_meta(effects, meta.ownership_id)
+                }
                 env.rebind(name, TypeScheme { ..scheme, ty: new_type })
             },
             _ => {}
@@ -1193,10 +1196,10 @@ pub fn value_binding_kind(ctx: InferCtx, def_id: Int?) -> ValueBindingKind {
 fn type_has_error(t: Type) -> Bool {
     match t {
         Type::ErrorType => true,
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             for p in params { if type_has_error(p) { return true } }
             if type_has_error(return_type) { return true }
-            for eff in effects.effects {
+            for eff in meta.effects.effects {
                 match eff {
                     Effect::FailEffect { error_type } =>
                         if type_has_error(error_type) { return true },
@@ -1965,7 +1968,10 @@ pub fn resolve_type_expr(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
                 let tail_id = ctx.env.fresh_var_id()
                 EffectRow { effects: [], tail: some(tail_id) }
             }
-            Type::FnType { params: resolved_params, return_type: ret, effects: eff_row }
+            Type::FnType {
+                params: resolved_params, return_type: ret,
+                meta: fn_meta(eff_row, CALLABLE_BORROW_OWNED)
+            }
         },
         TypeExpr::OptionType { inner, .. } =>
             make_option_type(resolve_type_expr(ctx, inner)),

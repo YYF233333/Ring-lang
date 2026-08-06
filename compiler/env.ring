@@ -1,4 +1,5 @@
-use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT,
+use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField,
+    OwnershipMetadata, FnMeta, INT, new_ownership_metadata,
     effects_match_kind, nominal_display_name}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use ast::{Span, EffectExpr, TypeParam}
@@ -205,7 +206,10 @@ pub struct TypeRegistry {
     pub variant_ctor_origins: Map<Int, Str>,
     pub type_aliases: Map<Str, TypeAliasDef>,
     pub sigs: Map<Str, SigDef>,
-    pub effect_aliases: Map<Str, EffectAliasDef>
+    pub effect_aliases: Map<Str, EffectAliasDef>,
+    // Compact callable descriptors, exact DefId contracts, provenance/solver
+    // state and nominal ownership shapes travel as one bundle.
+    pub ownership_metadata: OwnershipMetadata
 }
 
 pub struct TraitRegistry {
@@ -262,7 +266,8 @@ pub fn new_type_env() -> TypeEnv {
             variant_ctor_origins: map_new(),
             type_aliases: map_new(),
             sigs: map_new(),
-            effect_aliases: map_new()
+            effect_aliases: map_new(),
+            ownership_metadata: new_ownership_metadata()
         },
         trait_reg: TraitRegistry {
             traits: map_new(),
@@ -597,11 +602,14 @@ pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
         Type::NeverType => Type::NeverType,
         Type::AnyType => Type::AnyType,
         Type::TypeVar { id, .. } => chase_type_var_map(subst, id, 0),
-        Type::FnType { params, return_type, effects } =>
+        Type::FnType { params, return_type, meta } =>
             Type::FnType {
                 params: params.map(fn(p) { apply_subst_map(subst, p) }),
                 return_type: apply_subst_map(subst, return_type),
-                effects: apply_subst_row_map(subst, effects)
+                meta: FnMeta {
+                    effects: apply_subst_row_map(subst, meta.effects),
+                    ownership_id: meta.ownership_id
+                }
             },
         Type::StructType { name, type_params } =>
             Type::StructType {
@@ -800,11 +808,11 @@ fn collect_var_mappings(
             },
         Type::FnType {
             params: source_params, return_type: source_return,
-            effects: source_effects
+            meta: source_meta
         } => match target_type {
             Type::FnType {
                 params: target_params, return_type: target_return,
-                effects: target_effects
+                meta: target_meta
             } => {
                 let mut i = 0
                 while i < source_params.len() && i < target_params.len() {
@@ -820,7 +828,7 @@ fn collect_var_mappings(
                 collect_var_mappings(
                     source_return, target_return, source_vars, result)
                 collect_effect_var_mappings(
-                    source_effects, target_effects, source_vars, result)
+                    source_meta.effects, target_meta.effects, source_vars, result)
             },
             _ => {}
         },
@@ -924,13 +932,13 @@ pub fn build_scheme_var_map(
 fn collect_type_var_ids(t: Type, mut result: Set<Int>) {
     match t {
         Type::TypeVar { id, .. } => { result.insert(id) },
-        Type::FnType { params, return_type, effects } => {
+        Type::FnType { params, return_type, meta } => {
             for param in params { collect_type_var_ids(param, result) }
             collect_type_var_ids(return_type, result)
-            match effects.tail {
+            match meta.effects.tail {
                 some(id) => { result.insert(id) }, none => {}
             }
-            for eff in effects.effects {
+            for eff in meta.effects.effects {
                 match eff {
                     Effect::FailEffect { error_type } =>
                         collect_type_var_ids(error_type, result),
@@ -1072,11 +1080,14 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
                 Type::TypeVar { id: root, name: name }
             }
         },
-        Type::FnType { params, return_type, effects } =>
+        Type::FnType { params, return_type, meta } =>
             Type::FnType {
                 params: params.map(fn(p) { apply_subst(subst, p) }),
                 return_type: apply_subst(subst, return_type),
-                effects: apply_subst_row(subst, effects)
+                meta: FnMeta {
+                    effects: apply_subst_row(subst, meta.effects),
+                    ownership_id: meta.ownership_id
+                }
             },
         Type::StructType { name, type_params } =>
             Type::StructType {

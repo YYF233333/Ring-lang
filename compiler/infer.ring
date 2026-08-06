@@ -1,7 +1,8 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, make_option_type, is_option_type, option_inner,
-    type_to_builtin_name, effect_row, nominal_display_name}
+    type_to_builtin_name, effect_row, nominal_display_name, fn_meta,
+    PARAM_OWNERSHIP_BORROW, CALLABLE_BORROW_OWNED, CALLABLE_UNKNOWN}
 use ast::{Program, Decl, Expr, Stmt, Param, MatchArm, StructFieldInit,
     EffectHandler, StringInterpPart, Pattern, BinOp, UnaryOp, TypeExpr,
     TypeParam, TypeBound, Span, UseDecl, DestructureBinding, span_zero,
@@ -13,7 +14,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     HForInDestructure, HLetDestructureBinding, ValueBindingKind,
     trait_bound_param_name,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
-    hexpr_type, hexpr_effects, hexpr_span, map_index_helper_identity}
+    hexpr_type, hexpr_effects, hexpr_span, map_index_helper_identity,
+    hparam_flags}
 use diagnostics::{DiagnosticContext, DiagnosticNote, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0206, E0301, E0303, E0304, E0305, E0306,
     E0307, E0308, E0309, E0402, E0411, E0503, E0601, E0705, W0001}
@@ -1423,13 +1425,16 @@ fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, 
             let expected_fn = Type::FnType {
                 params: [apply_subst(s, recv_type), key_type],
                 return_type: apply_subst(s, result_ty),
-                effects: EffectRow { effects: [], tail: some(effect_tail) }
+                meta: fn_meta(
+                    EffectRow { effects: [], tail: some(effect_tail) },
+                    CALLABLE_UNKNOWN)
             }
             s = unify_at(ctx.sink, ctx.env, hexpr_type(callee), expected_fn, s, span)
 
             match apply_subst(s, hexpr_type(callee)) {
-                Type::FnType { effects: fn_effects, .. } => {
-                    let me2 = merge_effects(ctx.sink, ctx.env, combined_effects, fn_effects, s, span)
+                Type::FnType { meta, .. } => {
+                    let me2 = merge_effects(ctx.sink, ctx.env,
+                        combined_effects, meta.effects, s, span)
                     combined_effects = me2.0
                     s = me2.1
                 },
@@ -1640,7 +1645,9 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     let expected_fn = Type::FnType {
         params: arg_types,
         return_type: ret_var,
-        effects: EffectRow { effects: [], tail: some(effect_tail) }
+        meta: fn_meta(
+            EffectRow { effects: [], tail: some(effect_tail) },
+            CALLABLE_UNKNOWN)
     }
 
     let callee_name_for_note: Str = match callee { Expr::Ident { name: cn, .. } => cn, _ => "<expression>" }
@@ -1649,9 +1656,9 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     ]
     s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(callee_r.hexpr), expected_fn, s, span, call_notes)
     let resolved_callee_type = apply_subst(s, hexpr_type(callee_r.hexpr))
-
     match resolved_callee_type {
-        Type::FnType { params: callee_params, effects: fn_effects, .. } => {
+        Type::FnType { params: callee_params, meta, .. } => {
+            let fn_effects = meta.effects
             let me = merge_effects(ctx.sink, ctx.env, effects, fn_effects, s, span)
             effects = me.0
             s = me.1
@@ -1956,7 +1963,8 @@ fn infer_method_call_from_receiver(
     let mut result_type: Type = ctx.env.fresh_var()
     match method_type {
         some(mt) => match mt {
-            Type::FnType { params: mt_params, return_type: mt_ret, effects: mt_effects, .. } => {
+            Type::FnType { params: mt_params, return_type: mt_ret, meta } => {
+                let mt_effects = meta.effects
                 let mut i = 0
                 for harg in hargs {
                     if i + 1 < mt_params.len() {
@@ -2042,7 +2050,8 @@ fn infer_method_call_from_receiver(
         hexpr: HExpr::Call {
             callee: HExpr::FieldAccess { receiver: recv_r.hexpr, field: method, ty: callee_type, effects: EMPTY_ROW, span: span },
             args: hargs, type_args: [], resolved_dicts: resolved_dicts,
-            dict_dispatch: dict_dispatch, ty: result_type, effects: effects, span: span
+            dict_dispatch: dict_dispatch,
+            ty: result_type, effects: effects, span: span
         },
         subst: s, effects: effects
     }
@@ -3096,7 +3105,10 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                     }
                 }
                 ctx.env.bind_mono(p.name, pt)
-                hparams.push(HParam { name: p.name, ty: pt, def_id: none, is_mutable: false })
+                hparams.push(HParam {
+                    name: p.name, ty: pt, def_id: none,
+                    flags: hparam_flags(false, PARAM_OWNERSHIP_BORROW)
+                })
                 hi = hi + 1
             }
 
@@ -3107,7 +3119,10 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                         none => ctx.env.fresh_var()
                     }
                     let resume_ret = ctx.env.fresh_var()
-                    ctx.env.bind_mono(rn, Type::FnType { params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW })
+                    ctx.env.bind_mono(rn, Type::FnType {
+                        params: [resume_param], return_type: resume_ret,
+                        meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
+                    })
                 },
                 none => {}
             }
@@ -3261,6 +3276,7 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
     let mut s = subst
     let mut hparams: List<HParam> = []
     let mut param_types: List<Type> = []
+    let lambda_ownership = CALLABLE_BORROW_OWNED
 
     let mut pi = 0
     for p in params {
@@ -3296,10 +3312,16 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
                     },
                     none => {}
                 }
-                hparams.push(HParam { name: p.name, ty: pt, def_id: ls.def_id, is_mutable: p.is_mutable })
+                hparams.push(HParam {
+                    name: p.name, ty: pt, def_id: ls.def_id,
+                    flags: hparam_flags(p.is_mutable, PARAM_OWNERSHIP_BORROW)
+                })
             },
             none => {
-                hparams.push(HParam { name: p.name, ty: pt, def_id: none, is_mutable: p.is_mutable })
+                hparams.push(HParam {
+                    name: p.name, ty: pt, def_id: none,
+                    flags: hparam_flags(p.is_mutable, PARAM_OWNERSHIP_BORROW)
+                })
             }
         }
         param_types.push(pt)
@@ -3317,11 +3339,17 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
             for pt in param_types { applied_params.push(apply_subst(s, pt)) }
             let applied_ret = apply_subst(s, hexpr_type(body_r.hexpr))
 
-            let fn_type = Type::FnType { params: applied_params, return_type: applied_ret, effects: body_r.effects }
+            let fn_type = Type::FnType {
+                params: applied_params, return_type: applied_ret,
+                meta: fn_meta(body_r.effects, lambda_ownership)
+            }
 
             let mut final_hparams: List<HParam> = []
             for hp in hparams {
-                final_hparams.push(HParam { name: hp.name, ty: apply_subst(s, hp.ty), def_id: hp.def_id, is_mutable: hp.is_mutable })
+                final_hparams.push(HParam {
+                    name: hp.name, ty: apply_subst(s, hp.ty),
+                    def_id: hp.def_id, flags: hp.flags
+                })
             }
 
             InferResult {
