@@ -585,11 +585,11 @@ handle {
 
 **范围 / 文件**：`.github/workflows/`、`compiler/scripts/`、release manifest/NOTICE、安装与卸载脚本、README/quickstart、artifact smoke tests。
 
-- 用户选定许可证后，bundle 包含 compiler、版本匹配的 std/runtime 资产、license/NOTICE、quickstart 与 checksum；不依赖源码仓库结构；
+- D-002 已固定 `MIT OR Apache-2.0` 双许可与 `Yufeng Ying` holder；bundle 包含 compiler、版本匹配的 std/runtime 资产、两份官方 license、SPDX expression、NOTICE/provenance、quickstart 与 checksum，不依赖源码仓库结构；
 - clean checkout 从 tracked `dist-c/main.c` 构建，clean unpack 能运行 `ring doctor`、hello、多文件 project 与 self-compile fixed point；
 - Windows/Linux 各跑 e2e/golden/RC/structural/parity/self-compile；Linux 同时验证 clang 与 gcc 的 C11 编译，平台差异限制在 runtime/driver 边界；
 - artifact 名、版本、target triple、toolchain requirements、SHA-256 与 provenance manifest 确定；同输入重建差异必须可解释；
-- 尽早形成许可证/支持范围短 dossier；许可证选择、最终支持声明、tag 与 GitHub Release 属用户保留决定。选择前可验证私有 candidate pipeline，但不得生成对外可分发的无许可证包；选择后才完成正式 candidate packaging，仍不代用户发布。
+- 对 compiler/runtime/std/generated template 做 provenance inventory，贡献说明固定“提交即按同一双许可提供”；纯用户源码生成物不附加 Ring 许可，实际复制/链接的 runtime/std/template 仍由 manifest 明示相应 license/NOTICE。最终支持声明、tag 与 GitHub Release 仍属用户保留决定；完成许可 packaging 也不代用户发布。
 
 **发布阻断**：全部 critical finding 清零；当前排序列出的 silent wrong-code/heap/RC blockers 关闭；B-167/B-152/B-002/B-156/B-133 gate 完成；C-only 全量门和至少一轮 clean-clone CI 全绿；文档不得宣称 async/refinement/LSP 等未发货能力。
 

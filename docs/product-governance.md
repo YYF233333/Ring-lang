@@ -88,7 +88,17 @@ GitHub description 的候选英文文案：
 
 每份 release note 分为 `shipped`、`fixed`、`known limitations`、`evidence` 四栏。Roadmap 不混进 shipped。安全与 agent 效率主张必须链接本账本的具体 claim ID。
 
-## 7. 维护责任与触发器
+## 7. 许可与生成物边界（2026-08-07 D-002）
+
+Ring 采用 `MIT OR Apache-2.0` 双许可，copyright holder 为 `Yufeng Ying`；现有 Git history 中 `Yufeng Ying` 与 `Yyf2333` 两个 author identity 均纳入同一权利人的授权。`OR` 表示使用者可以任选 MIT 或 Apache-2.0，而非必须同时遵守两份许可证。
+
+默认许可范围覆盖 Ring 自有的 compiler、runtime、std、文档和生成模板；第三方来源保持其原许可并进入 NOTICE/provenance manifest。外部 contribution 在未显式声明 `Not a Contribution` 时按同一双许可提交；若未来需要 CLA 或改变贡献条款，必须另行由用户决定。
+
+项目不对只表达用户源码的生成 C/object/executable 主张额外版权许可。若生成物实际复制、静态包含或链接 Ring runtime、std、模板或其他受许可材料，其相应 MIT/Apache-2.0 与第三方 notice 义务仍然存在，并由 release manifest 明示；不能用“编译器输出不附加许可”抹去真实捆绑内容。
+
+本决定只固定许可政策，不等于许可证已经落地或授权公开 release。B-175 负责 provenance inventory、两份官方许可证原文、SPDX expression、NOTICE、贡献说明和 artifact 许可 smoke；最终支持声明、tag 与 GitHub Release 仍由用户另行拍板。
+
+## 8. 维护责任与触发器
 
 Repository Steward 维护本账本；用户保留 release、公开 campaign 和保证边界决定。以下事件触发同步，而不是按日制造文档 churn：
 
