@@ -1954,25 +1954,6 @@ extern "C" void* ring_delete_file(void* path) {
 }
 
 // ============================================================================
-// Collection clone / from
-// ============================================================================
-
-// B-152 P2: renamed to avoid duplicate symbol with the Ring list_clone function
-// (which the codegen mangles to ring_list_clone).  Kept for bootstrap compat.
-extern "C" void* ring_list_clone_rt(void* list) {
-    RingList* src = as_list(list);
-    int64_t ln = list_len(src);
-    void* data = make_ring_list(ln);
-    RingList* dst = as_list(data);
-    if (ln > 0) {
-        memmove(dst->buf, src->buf, (size_t)ln * sizeof(void*));
-        list_set_len(dst, ln);
-        for (int64_t i = 0; i < ln; i++) ring_dup(dst->buf[i]);
-    }
-    return data;
-}
-
-// ============================================================================
 // String operations (additional)
 // ============================================================================
 
