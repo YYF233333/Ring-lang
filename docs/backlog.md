@@ -438,9 +438,11 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [queued] [before: B-180]
+### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [doing] [before: B-180]
 
 > **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
+
+当前测量完整性框架已合入；正在补齐 opt-in compiler phase timing，随后在 clean worktree 执行正式 cold/warm baseline、形成 top-3 构成与 B-180 逐项预算后收口。
 
 本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。critical 修复期间可以提前准备采样/只读 instrumentation；任何会改变 compiler/runner 行为的优化由 B-180 在 critical 清零后实施。
 
