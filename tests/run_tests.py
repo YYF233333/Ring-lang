@@ -29,9 +29,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -145,6 +146,14 @@ TIMEOUT_RUN = 30       # seconds, per test program execution
 TIMEOUT_SELFCOMPILE = 1200  # seconds, for self-compile / rc self-verify (900 was
                             # exceeded after B-170; clean builds take ~18 min)
 
+PHASE_TIMING_SCHEMA = "ring.test-runner-phase.v1"
+PHASE_TIMING_VERSION = 1
+PHASE_TIMING_FIELDS = frozenset({
+    "schema", "version", "sequence", "suite", "case", "stage",
+    "duration_ns", "executed", "complete", "outcome", "exit_code",
+    "command_category",
+})
+
 # Every retained gap carries an actionable reason instead of a bare skip name.
 SHARED_POSITIVE_GAPS = {}
 
@@ -231,6 +240,262 @@ class ResultCollector:
 
 
 # ---------------------------------------------------------------------------
+# Opt-in phase timing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _SuitePhaseState:
+    name: str
+    started_ns: int
+    child_duration_ns: int = 0
+
+
+class PhaseTimingTrace:
+    """Monotonic JSONL trace for the explicitly enabled timing mode."""
+
+    def __init__(self, output_path: str) -> None:
+        self._stream = open(output_path, "w", encoding="utf-8", newline="\n")
+        self._sequence = 0
+        self._runner_started_ns = time.perf_counter_ns()
+        self._runner_accounted_ns = 0
+        self._suite_state: Optional[_SuitePhaseState] = None
+        self._finished = False
+
+    @property
+    def current_suite(self) -> Optional[str]:
+        if self._suite_state is None:
+            return None
+        return self._suite_state.name
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def _emit(
+        self,
+        *,
+        suite: Optional[str],
+        case: Optional[str],
+        stage: str,
+        duration_ns: int,
+        executed: bool,
+        complete: bool,
+        outcome: str,
+        exit_code: Optional[int],
+        command_category: Optional[str],
+    ) -> None:
+        self._sequence += 1
+        record = {
+            "schema": PHASE_TIMING_SCHEMA,
+            "version": PHASE_TIMING_VERSION,
+            "sequence": self._sequence,
+            "suite": suite,
+            "case": case,
+            "stage": stage,
+            "duration_ns": max(0, duration_ns),
+            "executed": executed,
+            "complete": complete,
+            "outcome": outcome,
+            "exit_code": exit_code,
+            "command_category": command_category,
+        }
+        self._stream.write(json.dumps(
+            record, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ))
+        self._stream.write("\n")
+        self._stream.flush()
+
+    def _account_child(self, suite: Optional[str], duration_ns: int) -> None:
+        if self._suite_state is not None and suite == self._suite_state.name:
+            self._suite_state.child_duration_ns += duration_ns
+        else:
+            self._runner_accounted_ns += duration_ns
+
+    def record_stage(
+        self,
+        *,
+        suite: Optional[str],
+        case: Optional[str],
+        stage: str,
+        duration_ns: int,
+        executed: bool,
+        complete: bool,
+        outcome: str,
+        exit_code: Optional[int] = None,
+        command_category: Optional[str] = None,
+    ) -> None:
+        """Record a non-overlapping stage measured by runner orchestration."""
+        self._account_child(suite, duration_ns)
+        self._emit(
+            suite=suite, case=case, stage=stage, duration_ns=duration_ns,
+            executed=executed, complete=complete, outcome=outcome,
+            exit_code=exit_code, command_category=command_category,
+        )
+
+    def run_subprocess(
+        self,
+        stage: str,
+        command: Sequence[str],
+        *,
+        suite: Optional[str],
+        case: Optional[str],
+        command_category: str,
+        run_kwargs: Dict[str, Any],
+    ) -> subprocess.CompletedProcess:
+        started_ns = time.perf_counter_ns()
+        try:
+            result = subprocess.run(command, **run_kwargs)
+        except subprocess.TimeoutExpired:
+            duration_ns = time.perf_counter_ns() - started_ns
+            self._account_child(suite, duration_ns)
+            self._emit(
+                suite=suite, case=case, stage=stage, duration_ns=duration_ns,
+                executed=True, complete=False, outcome="timeout",
+                exit_code=None, command_category=command_category,
+            )
+            raise
+        except subprocess.CalledProcessError as exc:
+            duration_ns = time.perf_counter_ns() - started_ns
+            self._account_child(suite, duration_ns)
+            self._emit(
+                suite=suite, case=case, stage=stage, duration_ns=duration_ns,
+                executed=True, complete=True, outcome="nonzero",
+                exit_code=exc.returncode, command_category=command_category,
+            )
+            raise
+        except OSError:
+            duration_ns = time.perf_counter_ns() - started_ns
+            self._account_child(suite, duration_ns)
+            self._emit(
+                suite=suite, case=case, stage=stage, duration_ns=duration_ns,
+                executed=False, complete=False, outcome="spawn-error",
+                exit_code=None, command_category=command_category,
+            )
+            raise
+        except BaseException:
+            duration_ns = time.perf_counter_ns() - started_ns
+            self._account_child(suite, duration_ns)
+            self._emit(
+                suite=suite, case=case, stage=stage, duration_ns=duration_ns,
+                executed=True, complete=False, outcome="exception",
+                exit_code=None, command_category=command_category,
+            )
+            raise
+
+        duration_ns = time.perf_counter_ns() - started_ns
+        self._account_child(suite, duration_ns)
+        exit_code = result.returncode
+        self._emit(
+            suite=suite, case=case, stage=stage, duration_ns=duration_ns,
+            executed=True, complete=True,
+            outcome="success" if exit_code == 0 else "nonzero",
+            exit_code=exit_code, command_category=command_category,
+        )
+        return result
+
+    def run_suite(self, suite: str, callback: Callable[[], None]) -> None:
+        if self._suite_state is not None:
+            raise RuntimeError("phase-timed suites must not be nested")
+        state = _SuitePhaseState(suite, time.perf_counter_ns())
+        self._suite_state = state
+        complete = False
+        outcome = "exception"
+        exit_code: Optional[int] = None
+        try:
+            callback()
+            complete = True
+            outcome = "completed"
+        except subprocess.TimeoutExpired:
+            outcome = "timeout"
+            raise
+        except subprocess.CalledProcessError as exc:
+            outcome = "nonzero"
+            exit_code = exc.returncode
+            raise
+        finally:
+            duration_ns = time.perf_counter_ns() - state.started_ns
+            self._suite_state = None
+            residual_ns = max(0, duration_ns - state.child_duration_ns)
+            self._emit(
+                suite=suite, case=None, stage="orchestration_residual",
+                duration_ns=residual_ns, executed=True, complete=complete,
+                outcome=outcome, exit_code=exit_code, command_category=None,
+            )
+            self._emit(
+                suite=suite, case=None, stage="suite_total",
+                duration_ns=duration_ns, executed=True, complete=complete,
+                outcome=outcome, exit_code=exit_code, command_category=None,
+            )
+            self._runner_accounted_ns += duration_ns
+
+    def finish(self, *, complete: bool, outcome: str,
+               exit_code: Optional[int]) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        duration_ns = time.perf_counter_ns() - self._runner_started_ns
+        residual_ns = max(0, duration_ns - self._runner_accounted_ns)
+        self._emit(
+            suite=None, case="runner", stage="orchestration_residual",
+            duration_ns=residual_ns, executed=True, complete=complete,
+            outcome=outcome, exit_code=exit_code, command_category=None,
+        )
+        self._emit(
+            suite=None, case="runner", stage="runner_total",
+            duration_ns=duration_ns, executed=True, complete=complete,
+            outcome=outcome, exit_code=exit_code, command_category=None,
+        )
+
+
+_PHASE_TRACER: Optional[PhaseTimingTrace] = None
+
+
+def _phase_timing_path(value: str) -> str:
+    if not os.path.isabs(value):
+        raise argparse.ArgumentTypeError(
+            "--phase-timing requires an absolute output path")
+    return value
+
+
+def _phase_command_category(stage: str) -> str:
+    if stage in {"ring_check", "ring_build"}:
+        return "ring"
+    if stage == "run_exe":
+        return "generated-program"
+    return "clang"
+
+
+def _run_subprocess(
+    stage: str,
+    command: Sequence[str],
+    *,
+    phase_suite: Optional[str] = None,
+    phase_case: Optional[str] = None,
+    **run_kwargs: Any,
+) -> subprocess.CompletedProcess:
+    """Run one child, adding timing only when the trace is explicitly enabled."""
+    tracer = _PHASE_TRACER
+    if tracer is None:
+        return subprocess.run(command, **run_kwargs)
+    suite = phase_suite if phase_suite is not None else tracer.current_suite
+    case = phase_case if phase_case is not None else (
+        "runner" if suite is None else None
+    )
+    return tracer.run_subprocess(
+        stage, command, suite=suite, case=case,
+        command_category=_phase_command_category(stage),
+        run_kwargs=run_kwargs,
+    )
+
+
+def _run_timed_suite(suite: str, callback: Callable[[], None]) -> None:
+    tracer = _PHASE_TRACER
+    if tracer is None:
+        callback()
+        return
+    tracer.run_suite(suite, callback)
+
+
+# ---------------------------------------------------------------------------
 # Tool discovery
 # ---------------------------------------------------------------------------
 
@@ -260,7 +525,8 @@ def find_ring_exe() -> Optional[str]:
 
     try:
         THINLTO_CACHE.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
+        _run_subprocess(
+            "compiler_anchor_compile",
             [
                 clang, "-std=c11", *COMPILER_COMPILE_FLAGS,
                 "-c", str(DIST_C_MAIN),
@@ -284,7 +550,8 @@ def find_ring_exe() -> Optional[str]:
                 "-D_CRT_SECURE_NO_WARNINGS", "-c", str(RUNTIME_CPP),
                 "-o", runtime_object_path,
             ]
-        subprocess.run(
+        _run_subprocess(
+            "compiler_runtime_compile",
             runtime_cmd,
             check=True,
             capture_output=True,
@@ -295,7 +562,8 @@ def find_ring_exe() -> Optional[str]:
             clang, object_path, runtime_object_path, "-o", exe_path,
             *CLANG_LINK_FLAGS, *COMPILER_LINK_FLAGS,
         ]
-        subprocess.run(
+        _run_subprocess(
+            "compiler_link",
             link_cmd, check=True, capture_output=True,
             timeout=TIMEOUT_COMPILER_LINK,
             cwd=str(REPO),
@@ -313,10 +581,26 @@ def find_ring_exe() -> Optional[str]:
 
 def ensure_runtime(clang: str) -> bool:
     """Build ring_runtime.o from ring_runtime.cpp if missing or stale."""
+    tracer = _PHASE_TRACER
+    prepare_started_ns = (
+        time.perf_counter_ns() if tracer is not None else None
+    )
     if not RUNTIME_CPP.is_file():
+        if tracer is not None and prepare_started_ns is not None:
+            tracer.record_stage(
+                suite=None, case="runner", stage="runtime_prepare",
+                duration_ns=time.perf_counter_ns() - prepare_started_ns,
+                executed=False, complete=False, outcome="missing-input",
+            )
         return False
     if RUNTIME_O.is_file():
         if RUNTIME_O.stat().st_mtime >= RUNTIME_CPP.stat().st_mtime:
+            if tracer is not None and prepare_started_ns is not None:
+                tracer.record_stage(
+                    suite=None, case="runner", stage="runtime_prepare",
+                    duration_ns=time.perf_counter_ns() - prepare_started_ns,
+                    executed=False, complete=True, outcome="cached",
+                )
             return True
     cmd = [
         clang, "-c", str(RUNTIME_CPP), "-o", str(RUNTIME_O),
@@ -332,8 +616,10 @@ def ensure_runtime(clang: str) -> bool:
         else:
             # Fall back to clang -x c++
             cpp_cmd = [clang, "-x", "c++"] + cmd[1:]
-        subprocess.run(cpp_cmd, check=True, capture_output=True, timeout=TIMEOUT_COMPILE,
-                       cwd=str(REPO))
+        _run_subprocess(
+            "runtime_prepare", cpp_cmd, check=True, capture_output=True,
+            timeout=TIMEOUT_COMPILE, cwd=str(REPO),
+        )
         return RUNTIME_O.is_file()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
         return False
@@ -365,6 +651,14 @@ def normalized_repo_path(path) -> str:
     if not candidate.is_absolute():
         candidate = REPO / candidate
     return candidate.resolve().relative_to(REPO.resolve()).as_posix()
+
+
+def _phase_file_identity(path: str) -> str:
+    """Return a stable case identity without exposing file contents."""
+    try:
+        return normalized_repo_path(path)
+    except ValueError:
+        return Path(path).name
 
 
 def check_blocked_gap_reason(case_path) -> Optional[str]:
@@ -412,7 +706,9 @@ def case_expects_panic(ring_file: Path, expected_raw: str) -> bool:
 def ring_build(ring_exe: str, ring_file: str, *,
                out_dir: Optional[str] = None,
                extra_args: Optional[List[str]] = None,
-               timeout: int = TIMEOUT_COMPILE) -> subprocess.CompletedProcess:
+               timeout: int = TIMEOUT_COMPILE,
+               phase_suite: Optional[str] = None,
+               phase_case: Optional[str] = None) -> subprocess.CompletedProcess:
     """Run the C-only ring.exe build with optional extra flags."""
     cmd = [ring_exe, "build", ring_file, "--target=c"]
     if out_dir:
@@ -421,38 +717,53 @@ def ring_build(ring_exe: str, ring_file: str, *,
         cmd.append(f"--out-dir={out_dir}")
     if extra_args:
         cmd.extend(extra_args)
-    return subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    if _PHASE_TRACER is not None and phase_case is None:
+        phase_case = _phase_file_identity(ring_file)
+    return _run_subprocess(
+        "ring_build", cmd,
+        phase_suite=phase_suite, phase_case=phase_case,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=timeout, cwd=str(REPO),
     )
 
 
 def ring_check(ring_exe: str, ring_file: str, *,
                extra_args: Optional[List[str]] = None,
-               timeout: int = TIMEOUT_COMPILE) -> subprocess.CompletedProcess:
+               timeout: int = TIMEOUT_COMPILE,
+               phase_suite: Optional[str] = None,
+               phase_case: Optional[str] = None) -> subprocess.CompletedProcess:
     """Run ring.exe check <file> [extra_args...]."""
     cmd = [ring_exe, "check", ring_file]
     if extra_args:
         cmd.extend(extra_args)
-    return subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    if _PHASE_TRACER is not None and phase_case is None:
+        phase_case = _phase_file_identity(ring_file)
+    return _run_subprocess(
+        "ring_check", cmd, phase_suite=phase_suite, phase_case=phase_case,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=timeout, cwd=str(REPO),
     )
 
 
-def clang_link(clang: str, o_file: str, exe_file: str) -> subprocess.CompletedProcess:
+def clang_link(clang: str, o_file: str, exe_file: str, *,
+               phase_suite: Optional[str] = None,
+               phase_case: Optional[str] = None) -> subprocess.CompletedProcess:
     """Link .o + runtime into an executable."""
     cmd = [clang, o_file, str(RUNTIME_O), "-o", exe_file, *CLANG_LINK_FLAGS]
-    return subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    return _run_subprocess(
+        "clang_link", cmd, phase_suite=phase_suite, phase_case=phase_case,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=TIMEOUT_LINK, cwd=str(REPO),
     )
 
 
-def run_exe(exe_path: str, timeout: int = TIMEOUT_RUN) -> subprocess.CompletedProcess:
+def run_exe(exe_path: str, timeout: int = TIMEOUT_RUN, *,
+            phase_suite: Optional[str] = None,
+            phase_case: Optional[str] = None) -> subprocess.CompletedProcess:
     """Execute a linked test binary."""
-    return subprocess.run(
-        [exe_path], capture_output=True, text=True, encoding="utf-8",
+    return _run_subprocess(
+        "run_exe", [exe_path], phase_suite=phase_suite, phase_case=phase_case,
+        capture_output=True, text=True, encoding="utf-8",
         errors="replace", timeout=timeout, cwd=str(REPO),
     )
 
@@ -463,7 +774,9 @@ def run_exe(exe_path: str, timeout: int = TIMEOUT_RUN) -> subprocess.CompletedPr
 
 def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
                      tmpdir: str, *,
-                     expect_panic: bool = False) -> Tuple[bool, str, str]:
+                     expect_panic: bool = False,
+                     phase_suite: Optional[str] = None,
+                     phase_case: Optional[str] = None) -> Tuple[bool, str, str]:
     """Compile a .ring file, link, run, return (ok, stdout, error_detail).
 
     On success, ok=True and stdout contains the program output.
@@ -479,7 +792,10 @@ def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
 
     # Compile
     try:
-        r = ring_build(ring_exe, ring_file, out_dir=out_dir)
+        r = ring_build(
+            ring_exe, ring_file, out_dir=out_dir,
+            phase_suite=phase_suite, phase_case=phase_case,
+        )
     except subprocess.TimeoutExpired:
         return False, "", "compile timed out"
 
@@ -495,7 +811,10 @@ def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
     # Link
     exe_file = os.path.join(tmpdir, base + ".exe")
     try:
-        r = clang_link(clang_path, o_file, exe_file)
+        r = clang_link(
+            clang_path, o_file, exe_file,
+            phase_suite=phase_suite, phase_case=phase_case,
+        )
     except subprocess.TimeoutExpired:
         return False, "", "link timed out"
 
@@ -504,7 +823,9 @@ def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
 
     # Run
     try:
-        r = run_exe(exe_file)
+        r = run_exe(
+            exe_file, phase_suite=phase_suite, phase_case=phase_case,
+        )
     except subprocess.TimeoutExpired:
         return False, "", "execution timed out (30s)"
 
@@ -640,7 +961,10 @@ def run_cli_diagnostic_contracts(
             ))
             return
         try:
-            result = ring_check(ring_exe, str(fixture), extra_args=args)
+            result = ring_check(
+                ring_exe, str(fixture), extra_args=args,
+                phase_suite=suite, phase_case=label,
+            )
         except subprocess.TimeoutExpired:
             collector.add(TestResult(TestResult.FAIL, suite, label, "check timed out"))
             return
@@ -963,6 +1287,8 @@ def run_native_real_program_contract(
                 ring_exe,
                 str(NATIVE_REAL_PROGRAM),
                 extra_args=list(rc_contract.args),
+                phase_suite=suite,
+                phase_case=label,
             )
         except subprocess.TimeoutExpired:
             collector.add(TestResult(TestResult.FAIL, suite, label, "check timed out"))
@@ -979,6 +1305,8 @@ def run_native_real_program_contract(
     with tempfile.TemporaryDirectory(prefix="ring_real_program_") as tmpdir:
         ok, stdout, detail = compile_link_run(
             ring_exe, clang_path, str(NATIVE_REAL_PROGRAM), tmpdir,
+            phase_suite=suite,
+            phase_case="native-real-program:execute 1/3",
         )
         first_failure = detail if not ok else None
         if ok and norm(stdout) != expected:
@@ -1001,7 +1329,9 @@ def run_native_real_program_contract(
         for run_number in (2, 3):
             label = f"native-real-program:execute {run_number}/3"
             try:
-                result = run_exe(executable)
+                result = run_exe(
+                    executable, phase_suite=suite, phase_case=label,
+                )
             except subprocess.TimeoutExpired:
                 collector.add(TestResult(TestResult.FAIL, suite, label, "execution timed out"))
                 continue
@@ -1053,7 +1383,9 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
 
             ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file),
                                                   tmpdir,
-                                                  expect_panic=expect_panic)
+                                                  expect_panic=expect_panic,
+                                                  phase_suite=suite,
+                                                  phase_case=str(rel))
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, str(rel), detail))
                 continue
@@ -1099,7 +1431,10 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
         contract = error_file.read_text(encoding="utf-8")
 
         try:
-            r = ring_check(ring_exe, str(ring_file))
+            r = ring_check(
+                ring_exe, str(ring_file), phase_suite=suite,
+                phase_case=f"neg:{rel}",
+            )
         except subprocess.TimeoutExpired:
             collector.add(TestResult(TestResult.FAIL, suite, f"neg:{rel}", "check timed out"))
             continue
@@ -1139,6 +1474,7 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             os.makedirs(case_dir, exist_ok=True)
             ok, stdout, detail = compile_link_run(
                 ring_exe, clang_path, str(main_file), case_dir,
+                phase_suite=suite, phase_case=f"mod:{mod_name}",
             )
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, f"mod:{mod_name}", detail))
@@ -1167,7 +1503,10 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
         contract = error_file.read_text(encoding="utf-8")
 
         try:
-            r = ring_check(ring_exe, str(main_file))
+            r = ring_check(
+                ring_exe, str(main_file), phase_suite=suite,
+                phase_case=f"mod-neg:{mod_name}",
+            )
         except subprocess.TimeoutExpired:
             collector.add(TestResult(TestResult.FAIL, suite, f"mod-neg:{mod_name}", "timed out"))
             continue
@@ -1224,7 +1563,8 @@ def run_golden(ring_exe: str, clang_path: str, collector: ResultCollector,
                 continue
 
             ok, stdout, detail = compile_link_run(ring_exe, clang_path, str(ring_file),
-                                                  tmpdir)
+                                                  tmpdir, phase_suite=suite,
+                                                  phase_case=name)
             if not ok:
                 collector.add(TestResult(TestResult.FAIL, suite, name, detail))
                 continue
@@ -2312,6 +2652,7 @@ def build_c_artifacts_fresh(
     temp_root: Path,
     *,
     no_c_lines: bool,
+    phase_case: Optional[str] = None,
 ) -> Tuple[Optional[Path], Optional[Path], Optional[str]]:
     """Build into a newly-created empty dir and require fresh .c/.o outputs."""
     mode = "off" if no_c_lines else "default"
@@ -2323,7 +2664,8 @@ def build_c_artifacts_fresh(
     try:
         result = ring_build(
             ring_exe, str(entry), out_dir=str(out_dir),
-            extra_args=extra_args)
+            extra_args=extra_args, phase_suite="structural",
+            phase_case=phase_case)
     except subprocess.TimeoutExpired:
         return None, None, f"{mode} C build timed out for {entry_text}"
     if result.returncode != 0:
@@ -2430,6 +2772,7 @@ def run_c_line_oracle(
     temp_root: Path,
     entry: str,
     fixtures: Tuple[str, ...],
+    phase_case: Optional[str] = None,
 ) -> List[str]:
     """Build one line-directive fixture in both modes and compare artifacts."""
     markers: List[Tuple[Path, str, int]] = []
@@ -2443,11 +2786,13 @@ def run_c_line_oracle(
         return [f"{entry}: expected one real-code marker, found {len(markers)}"]
 
     default_c, _, error = build_c_artifacts_fresh(
-        ring_exe, entry, temp_root, no_c_lines=False)
+        ring_exe, entry, temp_root, no_c_lines=False,
+        phase_case=phase_case)
     if error:
         return [error]
     off_c, _, error = build_c_artifacts_fresh(
-        ring_exe, entry, temp_root, no_c_lines=True)
+        ring_exe, entry, temp_root, no_c_lines=True,
+        phase_case=phase_case)
     if error:
         return [error]
     marker_path, marker_id, marker_line = markers[0]
@@ -2465,11 +2810,13 @@ def exact_rc_error(symbol: str, body: str,
     return None
 
 
-def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
+def run_extern_rc_oracle(ring_exe: str, temp_root: Path,
+                         phase_case: Optional[str] = None) -> List[str]:
     """Inspect local generated-C bodies without executing any raw handle."""
     errors = c_probe_mutation_matrix_errors()
     c_path, _, error = build_c_artifacts_fresh(
-        ring_exe, EXTERN_RC_FIXTURE, temp_root, no_c_lines=True)
+        ring_exe, EXTERN_RC_FIXTURE, temp_root, no_c_lines=True,
+        phase_case=phase_case)
     if error:
         return [error]
     try:
@@ -2579,9 +2926,9 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
         for label, kind, entry, fixtures in jobs:
             if kind == "line":
                 errors = run_c_line_oracle(
-                    ring_exe, temp_root, entry, fixtures)
+                    ring_exe, temp_root, entry, fixtures, label)
             else:
-                errors = run_extern_rc_oracle(ring_exe, temp_root)
+                errors = run_extern_rc_oracle(ring_exe, temp_root, label)
             if errors:
                 collector.add(TestResult(
                     TestResult.FAIL, suite, label, "; ".join(errors)))
@@ -3444,7 +3791,9 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
         try:
             r = ring_check(ring_exe, str(compiler_main),
                            extra_args=["--verify-rc"],
-                           timeout=TIMEOUT_SELFCOMPILE)
+                           timeout=TIMEOUT_SELFCOMPILE,
+                           phase_suite=suite,
+                           phase_case="self-verify (compiler/main.ring)")
             contract = RcInvocationContract(
                 name="self-verify (compiler/main.ring)",
                 fixture="compiler/main.ring",
@@ -3478,7 +3827,10 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
                 collector.add(TestResult(TestResult.SKIP, suite, name, blocked))
                 continue
             try:
-                r = ring_check(ring_exe, str(ring_file), extra_args=["--verify-rc"])
+                r = ring_check(
+                    ring_exe, str(ring_file), extra_args=["--verify-rc"],
+                    phase_suite=suite, phase_case=name,
+                )
             except subprocess.TimeoutExpired:
                 collector.add(TestResult(TestResult.FAIL, suite, name, "timed out"))
                 continue
@@ -3620,6 +3972,8 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
                 ring_exe,
                 str(ring_file),
                 extra_args=list(contract.args),
+                phase_suite=suite,
+                phase_case=name,
             )
         except subprocess.TimeoutExpired:
             collector.add(TestResult(TestResult.FAIL, suite, name, "timed out"))
@@ -3664,6 +4018,8 @@ def run_self_compile(ring_exe: str, collector: ResultCollector, *,
                 out_dir=tmpdir,
                 extra_args=["--no-c-lines"],
                 timeout=TIMEOUT_SELFCOMPILE,
+                phase_suite=suite,
+                phase_case="regenerate",
             )
         except subprocess.TimeoutExpired:
             collector.add(TestResult(
@@ -3740,25 +4096,7 @@ def print_summary(collector: ResultCollector) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Ring-lang Python test runner (B-151 P2)")
-    parser.add_argument(
-        "--suite",
-        choices=[
-            "e2e", "golden", "rc", "self-compile", "structural", "parity",
-        ],
-        action="append", dest="suites",
-        help="Test suite(s) to run. Omit for all C-native suites.")
-    parser.add_argument(
-        "--filter", dest="name_filter", metavar="SUBSTR", default=None,
-        help="Only run cases whose name contains SUBSTR (case-insensitive, "
-             "applies to all suites).")
-    parser.add_argument(
-        "--update-golden", action="store_true",
-        help="Regenerate .expected golden snapshots instead of comparing.")
-    args = parser.parse_args()
-
+def _run_selected(args: argparse.Namespace) -> int:
     suites = args.suites or [
         "e2e", "golden", "rc", "self-compile", "structural", "parity",
     ]
@@ -3802,25 +4140,37 @@ def main() -> int:
     collector = ResultCollector()
 
     if "e2e" in suites:
-        run_e2e(ring_exe, clang_path or "", collector,
-                name_filter=args.name_filter)
+        _run_timed_suite("e2e", lambda: run_e2e(
+            ring_exe, clang_path or "", collector,
+            name_filter=args.name_filter,
+        ))
 
     if "golden" in suites:
-        run_golden(ring_exe, clang_path or "", collector,
-                   update_golden=args.update_golden,
-                   name_filter=args.name_filter)
+        _run_timed_suite("golden", lambda: run_golden(
+            ring_exe, clang_path or "", collector,
+            update_golden=args.update_golden,
+            name_filter=args.name_filter,
+        ))
 
     if "rc" in suites:
-        run_rc(ring_exe, collector, name_filter=args.name_filter)
+        _run_timed_suite("rc", lambda: run_rc(
+            ring_exe, collector, name_filter=args.name_filter,
+        ))
 
     if "self-compile" in suites:
-        run_self_compile(ring_exe, collector, name_filter=args.name_filter)
+        _run_timed_suite("self-compile", lambda: run_self_compile(
+            ring_exe, collector, name_filter=args.name_filter,
+        ))
 
     if "structural" in suites:
-        run_structural(ring_exe, collector, name_filter=args.name_filter)
+        _run_timed_suite("structural", lambda: run_structural(
+            ring_exe, collector, name_filter=args.name_filter,
+        ))
 
     if "parity" in suites:
-        run_parity(collector, name_filter=args.name_filter)
+        _run_timed_suite("parity", lambda: run_parity(
+            collector, name_filter=args.name_filter,
+        ))
 
     if args.name_filter and not collector.results:
         collector.add(TestResult(
@@ -3829,6 +4179,80 @@ def main() -> int:
 
     print_summary(collector)
     return 1 if collector.failures > 0 else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Ring-lang Python test runner (B-151 P2)")
+    parser.add_argument(
+        "--suite",
+        choices=[
+            "e2e", "golden", "rc", "self-compile", "structural", "parity",
+        ],
+        action="append", dest="suites",
+        help="Test suite(s) to run. Omit for all C-native suites.")
+    parser.add_argument(
+        "--filter", dest="name_filter", metavar="SUBSTR", default=None,
+        help="Only run cases whose name contains SUBSTR (case-insensitive, "
+             "applies to all suites).")
+    parser.add_argument(
+        "--update-golden", action="store_true",
+        help="Regenerate .expected golden snapshots instead of comparing.")
+    parser.add_argument(
+        "--phase-timing", type=_phase_timing_path, metavar="ABSOLUTE_JSONL",
+        default=None,
+        help="Write opt-in monotonic phase timings as JSONL to an absolute path.")
+    args = parser.parse_args()
+
+    if args.phase_timing is None:
+        return _run_selected(args)
+
+    try:
+        tracer = PhaseTimingTrace(args.phase_timing)
+    except OSError as exc:
+        parser.error(f"cannot open --phase-timing output: {exc}")
+
+    global _PHASE_TRACER
+    _PHASE_TRACER = tracer
+    try:
+        try:
+            exit_code = _run_selected(args)
+        except BaseException as exc:
+            outcome = "exception"
+            trace_exit_code: Optional[int] = None
+            if isinstance(exc, subprocess.TimeoutExpired):
+                outcome = "timeout"
+            elif isinstance(exc, subprocess.CalledProcessError):
+                outcome = "nonzero"
+                trace_exit_code = exc.returncode
+            elif isinstance(exc, KeyboardInterrupt):
+                outcome = "interrupted"
+            try:
+                tracer.finish(
+                    complete=False, outcome=outcome,
+                    exit_code=trace_exit_code,
+                )
+            except Exception:
+                # Preserve the original runner failure if trace finalization also
+                # fails; successfully emitted records have already been flushed.
+                pass
+            try:
+                tracer.close()
+            except Exception:
+                pass
+            raise
+
+        try:
+            tracer.finish(
+                complete=True,
+                outcome="success" if exit_code == 0 else "failure",
+                exit_code=exit_code,
+            )
+        finally:
+            tracer.close()
+        return exit_code
+    finally:
+        _PHASE_TRACER = None
 
 
 if __name__ == "__main__":
