@@ -51,6 +51,7 @@ DIST_C_MAIN = DIST_C_DIR / "main.c"
 THINLTO_CACHE = Path(tempfile.gettempdir()) / "ring-lang-thinlto-cache"
 PARITY_MATRIX = REPO / "tests" / "parity_matrix.json"
 STRUCTURAL_DIR = CASES_DIR / "structural"
+CODEGEN_C_SOURCE = REPO / "compiler" / "codegen_c.ring"
 NATIVE_REAL_PROGRAM = REPO / "tests" / "native" / "real_program.ring"
 NATIVE_REAL_PROGRAM_EXPECTED = NATIVE_REAL_PROGRAM.with_suffix(".expected")
 
@@ -1152,6 +1153,23 @@ def run_cli_diagnostic_contracts(
             return f"expected first LLM diagnostic to be a parse error, got {first_code!r}"
         return None
 
+    def json_derive_span_failure(
+        result: subprocess.CompletedProcess,
+    ) -> Optional[str]:
+        diagnostic, failure = llm_error(result, "E0503")
+        if failure is not None or diagnostic is None:
+            return failure
+        if diagnostic.get("message") != (
+            "Cannot derive Json for 'JsonFieldMissing': every field must "
+            "provide Json evidence"
+        ):
+            return f"unexpected first E0503: {diagnostic.get('message')!r}"
+        span = diagnostic.get("span")
+        expected = {"line": 4, "col": 0, "end_line": 4, "end_col": 13}
+        if span != expected:
+            return f"expected exact @derive(Json) span {expected!r}, got {span!r}"
+        return None
+
     def clean_llm_failure(result: subprocess.CompletedProcess) -> Optional[str]:
         if result.returncode != 0:
             return f"expected clean check exit 0, got {result.returncode}"
@@ -1235,6 +1253,12 @@ def run_cli_diagnostic_contracts(
         CASES_DIR / "error_multi_parse.ring",
         ["--error-format=llm"],
         parse_llm_failure,
+    )
+    execute(
+        "diagnostic:json-derive-E0503-span-llm",
+        CASES_DIR / "error_json_derive_field_missing.ring",
+        ["--error-format=llm"],
+        json_derive_span_failure,
     )
     execute(
         "diagnostic:clean-check-llm",
@@ -1802,6 +1826,27 @@ def structural_fixture_integrity_errors() -> List[str]:
         errors.append(f"cannot read {EXTERN_RC_FIXTURE}: {exc}")
     else:
         errors.extend(extern_fixture_source_errors(extern_source))
+
+    # Json enum metadata mismatch is an internal compiler invariant that cannot
+    # be triggered by a well-formed source fixture. Keep a source-level oracle:
+    # codegen must fail while compiling and must never invent declaration-order
+    # tags for a missing CEnumVariantInfo entry.
+    try:
+        codegen_source = CODEGEN_C_SOURCE.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        errors.append(f"cannot read {display_path(CODEGEN_C_SOURCE)}: {exc}")
+    else:
+        masked_codegen = mask_ring_strings_and_comments(codegen_source)
+        if re.search(r"\bfallback_tag\b", masked_codegen):
+            errors.append("Json enum codegen still contains fallback_tag")
+        fail_loud = re.search(
+            r"enum_info\.variants\.get\s*\(\s*variant\.name\s*\)"
+            r"[\s\S]{0,240}?none\s*=>\s*panic\s*\(",
+            masked_codegen,
+        )
+        if fail_loud is None:
+            errors.append(
+                "Json enum missing-variant metadata is not compile-time fail-loud")
 
     return errors
 

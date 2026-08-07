@@ -11,6 +11,103 @@ struct ManualRecord {
     count: Int
 }
 
+@derive(Json)
+struct DerivedRecord {
+    label: Str,
+    count: Int
+}
+
+@derive(Json)
+struct DerivedBox<T> {
+    value: T
+}
+
+// Runtime evidence order is B:Json, then A:Json (field declaration order),
+// not generic argument order A/B.
+@derive(Json)
+struct Reordered<A, B> {
+    second: B,
+    first: A
+}
+
+fn call_reordered_json(
+    f: fn(Reordered<Int, Str>) -> Str,
+    value: Reordered<Int, Str>
+) -> Str {
+    f(value)
+}
+
+@derive(Json)
+struct Phantom<T> {
+    marker: Int
+}
+
+struct EqOnly<T> {
+    value: T
+}
+
+// Existing structural Eq derivation applies, but Json remains explicit opt-in.
+struct EqOnlyPayload {
+    id: Int
+}
+
+impl<T: Eq> Json for EqOnly<T> {
+    fn to_json(self) -> Str {
+        "\"eq-only\""
+    }
+}
+
+@derive(Json)
+struct EqOuter<T> {
+    wrapped: EqOnly<T>
+}
+
+struct ManualMixed<A, B, C> {
+    left: A,
+    right: B,
+    phantom: Phantom<C>
+}
+
+// Exact runtime predicate order is A:Eq, A:Hash, B:Json; C is phantom.
+impl<A: Eq + Hash, B: Json, C> Json for ManualMixed<A, B, C> {
+    fn to_json(self) -> Str {
+        json_stringify(self.right)
+    }
+}
+
+@derive(Json)
+struct MixedOuter<X, Y, Z> {
+    wrapped: ManualMixed<Y, X, Z>
+}
+
+@derive(Json)
+enum DerivedEvent {
+    Empty,
+    Count(Int),
+    Named { label: Str, values: List<Int> }
+}
+
+@derive(Json)
+enum JsonTree {
+    Leaf(Int),
+    Branch(List<JsonTree>)
+}
+
+@derive(Json)
+enum JsonLeft<A, B> {
+    LeftDone,
+    LeftNext(JsonRight<A, B>),
+    // First round discovers A here; the peer exposes B before A later.
+    LeftOwn(A)
+}
+
+@derive(Json)
+enum JsonRight<A, B> {
+    // The SCC's propagated predicate order must be B:Json, then A:Json.
+    RightEnd(B, A),
+    RightNext(JsonLeft<A, B>)
+}
+
 impl Json for ManualRecord {
     fn to_json(self) -> Str {
         let mut out = string_builder()
@@ -25,6 +122,10 @@ impl Json for ManualRecord {
 
 fn encode<T: Json>(value: T) -> Str {
     json_stringify(value)
+}
+
+fn phantom_for<T>(sample: T) -> Phantom<T> {
+    Phantom { marker: 9 }
 }
 
 fn ascii_byte(code: Int) -> Str {
@@ -71,6 +172,49 @@ fn main() {
     assert(encode(ManualRecord { label: "generic", count: 3 }) ==
         "{\"label\":\"generic\",\"count\":3}",
         "generic Json bound forwards evidence")
+    assert(json_stringify(DerivedRecord { label: "item", count: 2 }) ==
+        "{\"label\":\"item\",\"count\":2}",
+        "derived struct preserves field order")
+    assert(json_stringify(DerivedBox { value: [4, 5] }) ==
+        "{\"value\":[4,5]}",
+        "generic derived struct forwards field evidence")
+    let reordered = Reordered { second: "two", first: 1 }
+    assert(json_stringify(reordered) ==
+        "{\"second\":\"two\",\"first\":1}",
+        "derived bounds follow B/A field order")
+    assert(call_reordered_json(json_stringify,
+        Reordered { second: "closure", first: 2 }) ==
+        "{\"second\":\"closure\",\"first\":2}",
+        "first-class Json retains reordered wrapped evidence")
+    assert(json_stringify(phantom_for(fn(x) { x + 1 })) ==
+        "{\"marker\":9}",
+        "phantom generic parameter adds no Json bound")
+    assert(json_stringify(EqOuter {
+        wrapped: EqOnly { value: EqOnlyPayload { id: 1 } }
+    }) ==
+        "{\"wrapped\":\"eq-only\"}",
+        "manual Json impl can require Eq rather than Json")
+    assert(json_stringify(MixedOuter {
+        wrapped: ManualMixed {
+            left: 7,
+            right: "value",
+            phantom: phantom_for(fn(x) { x + 1 })
+        }
+    }) == "{\"wrapped\":\"value\"}",
+        "partial multi-trait bounds preserve exact ABI order")
+    assert(json_stringify(Empty) == "{\"_tag\":\"Empty\"}",
+        "derived fieldless enum preserves tag shape")
+    assert(json_stringify(Count(3)) == "{\"_tag\":\"Count\",\"_0\":3}",
+        "derived positional enum preserves positional key")
+    assert(json_stringify(Named { label: "n", values: [1, 2] }) ==
+        "{\"_tag\":\"Named\",\"label\":\"n\",\"values\":[1,2]}",
+        "derived named enum preserves field keys")
+    assert(json_stringify(Branch([Leaf(1), Branch([Leaf(2)])])) ==
+        "{\"_tag\":\"Branch\",\"_0\":[{\"_tag\":\"Leaf\",\"_0\":1},{\"_tag\":\"Branch\",\"_0\":[{\"_tag\":\"Leaf\",\"_0\":2}]}]}",
+        "recursive Json derive resolves its own dictionary")
+    assert(json_stringify(LeftNext(RightEnd("done", 7))) ==
+        "{\"_tag\":\"LeftNext\",\"_0\":{\"_tag\":\"RightEnd\",\"_0\":\"done\",\"_1\":7}}",
+        "mutually-recursive Json SCC terminates with stable B/A evidence order")
 
     assert(call_str_json(json_stringify, "raw") == "\"raw\"",
         "first-class Json function retains Str evidence")

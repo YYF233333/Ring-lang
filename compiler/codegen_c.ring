@@ -87,7 +87,7 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     // after every fn was declared).
     c_declare_struct_ctors(ctx, program.decls)
 
-    // Derived trait impls (Eq/Clone/Ord/Debug) BEFORE the body pass — method
+    // Derived trait impls (Eq/Clone/Ord/Debug/Json) BEFORE the body pass — method
     // calls in bodies need ring_<Type>_clone etc. registered (LLVM parity:
     // emit_builtin_derived_impls + emit_derived_impls_llvm run here).
     emit_c_builtin_derived_impls(ctx)
@@ -181,10 +181,16 @@ pub fn generate_c_project(
     }
 
     // Derived trait impls before the body pass (builtin Option + per-module).
+    // Register every Json method/builder/getter across the project before any
+    // Json body is emitted, so declaration order cannot select a fallback.
     emit_c_builtin_derived_impls(ctx)
     for m in modules {
         let (_prefix, program, _uses) = m
-        emit_c_derived_impls(ctx, program.derived_impls)
+        predeclare_c_json_derived_impls(ctx, program.derived_impls)
+    }
+    for m in modules {
+        let (_prefix, program, _uses) = m
+        emit_c_derived_impl_bodies(ctx, program.derived_impls)
     }
 
     // Second pass: per-module body emission.  module_prefix / boxed_vars /
@@ -1758,6 +1764,11 @@ fn emit_c_default_method_stubs(mut ctx: CCtx, target_type: Str, trait_name: Str,
 // ============================================================
 
 pub fn emit_c_derived_impls(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
+    predeclare_c_json_derived_impls(ctx, derived_impls)
+    emit_c_derived_impl_bodies(ctx, derived_impls)
+}
+
+fn emit_c_derived_impl_bodies(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
     for di in derived_impls {
         match di.trait_name {
             "Eq" => emit_c_derived_eq(ctx, di),
@@ -1765,6 +1776,7 @@ pub fn emit_c_derived_impls(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
             "Debug" => emit_c_derived_debug(ctx, di),
             "Ord" => emit_c_derived_ord(ctx, di),
             "Hash" => emit_c_derived_hash(ctx, di),
+            "Json" => emit_c_derived_json(ctx, di),
             _ => {},
         }
     }
@@ -1854,15 +1866,36 @@ struct CDerivedFn {
     saved: CEmitState
 }
 
-// Collect dict param names for a derived impl filtered by trait.
-fn collect_c_trait_dict_params(bounds: List<TraitBound>, trait_name: Str) -> List<Str> {
+// Collect every bound's type parameter and trait in exact registered ABI order.
+fn collect_c_derived_dict_params(bounds: List<TraitBound>) -> List<Str> {
     let mut params: List<Str> = []
     for b in bounds {
-        if b.trait_name == trait_name {
-            params.push(trait_bound_param_name(b.type_param, b.trait_name))
-        }
+        params.push(trait_bound_param_name(b.type_param, b.trait_name))
     }
     params
+}
+
+fn predeclare_c_derived_fn(
+    mut ctx: CCtx, type_name: Str, method_name: Str,
+    is_binary: Bool, bounds: List<TraitBound>
+) {
+    let mangled = c_mangle_method(type_name, method_name)
+    if ctx.functions.contains_key(mangled) { return }
+    let dict_params = collect_c_derived_dict_params(bounds)
+    let base = if is_binary { 2 } else { 1 }
+    let total = base + dict_params.len()
+    let c_name = if is_runtime_symbol(mangled) { "${mangled}__ring" } else { mangled }
+    ctx.functions.insert(mangled, CFnInfo {
+        c_name: c_name,
+        total_params: total
+    })
+    ctx.predeclared_derived_fns.insert(mangled)
+    let mut no_ev: List<Str> = []
+    ctx.fn_evidence_params.insert(mangled, no_ev)
+    ctx.fn_trait_bounds.insert(mangled, bounds)
+    let mut ps: List<Str> = []
+    for _i in 0..total { ps.push("void*") }
+    ctx.fn_protos.push("void* ${c_name}(${ps.join(", ")});")
 }
 
 // Begin a derived method fn: register + prototype + nested push + param
@@ -1870,15 +1903,25 @@ fn collect_c_trait_dict_params(bounds: List<TraitBound>, trait_name: Str) -> Lis
 // Returns none when the method already exists (manual impl wins).
 fn begin_c_derived_fn(mut ctx: CCtx, type_name: Str, method_name: Str, trait_name: Str, is_binary: Bool, bounds: List<TraitBound>) -> CDerivedFn? {
     let mangled = c_mangle_method(type_name, method_name)
-    if ctx.functions.contains_key(mangled) { return none }
+    if !ctx.predeclared_derived_fns.contains(mangled) {
+        if ctx.functions.contains_key(mangled) { return none }
+        predeclare_c_derived_fn(ctx, type_name, method_name, is_binary, bounds)
+    }
 
-    let dict_params = collect_c_trait_dict_params(bounds, trait_name)
+    let fn_info = match ctx.functions.get(mangled) {
+        some(found) => found,
+        none => return none
+    }
+    if ctx.emitted_fns.contains(fn_info.c_name) { return none }
+    ctx.emitted_fns.insert(fn_info.c_name)
+
+    let dict_params = collect_c_derived_dict_params(bounds)
     let base = if is_binary { 2 } else { 1 }
     let total = base + dict_params.len()
-    let c_name = if is_runtime_symbol(mangled) { "${mangled}__ring" } else { mangled }
-    ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: total })
-    let mut no_ev: List<Str> = []
-    ctx.fn_evidence_params.insert(mangled, no_ev)
+    if fn_info.total_params != total {
+        panic("C codegen invariant: derived method ABI changed after predeclaration")
+    }
+    let c_name = fn_info.c_name
 
     let saved = c_push_fn(ctx, c_name)
     let mut sig_parts: List<Str> = []
@@ -1896,7 +1939,6 @@ fn begin_c_derived_fn(mut ctx: CCtx, type_name: Str, method_name: Str, trait_nam
         sig_parts.push("void* ${dv}")
     }
     let params_str = sig_parts.join(", ")
-    ctx.fn_protos.push("void* ${c_name}(${params_str});")
     some(CDerivedFn { c_name: c_name, params_str: params_str, self_var: self_var, other_var: other_var, saved: saved })
 }
 
@@ -2736,13 +2778,175 @@ fn emit_c_enum_variant_debug_str(mut ctx: CCtx, self_var: Str, variant: DerivedV
     res
 }
 
+// ── Json ────────────────────────────────────────────────────
+// Historical JSON shape: structs are objects in declaration order; enums are
+// objects beginning with the textual `_tag`, followed by named fields or
+// positional `_0`, `_1`, ... fields. Every value is encoded through ordinary
+// Json dictionary evidence, never through runtime representation guessing.
+
+fn emit_c_derived_json(mut ctx: CCtx, di: DerivedImpl) {
+    match di.type_kind {
+        TypeKind::StructKind => match di.struct_fields {
+            some(fields) => emit_c_struct_json_fn(ctx, di.type_name, fields, di.bounds),
+            none => {}
+        },
+        TypeKind::EnumKind => match di.enum_variants {
+            some(variants) => emit_c_enum_json_fn(ctx, di.type_name, variants, di.bounds),
+            none => {}
+        }
+    }
+}
+
+// Json SCC prepass. The derive pass has already registered the whole nominal
+// SCC in TypeEnv; mirror that atomicity in C registries before any field action
+// can ask for a peer dictionary.
+fn predeclare_c_json_derived_impls(
+    mut ctx: CCtx, derived_impls: List<DerivedImpl>
+) {
+    for di in derived_impls {
+        if di.trait_name == "Json" {
+            predeclare_c_derived_fn(
+                ctx, di.type_name, "to_json", false, di.bounds)
+            predeclare_c_derived_trait_dict(ctx, di.type_name, "Json")
+        }
+    }
+    // All builders are known before any getter selects its route.
+    for di in derived_impls {
+        if di.trait_name == "Json" {
+            let _getter = ensure_c_dict_getter(
+                ctx, trait_dict_name(di.type_name, "Json"))
+        }
+    }
+}
+
+fn emit_c_json_field_str(mut ctx: CCtx, value: Str, action: FieldAction) -> Str {
+    match action {
+        FieldAction::Call { dict_name, extra_dicts } =>
+            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [value]),
+        // Json derivation only produces Call actions. Keep the backend
+        // fail-loud if a future derive rule violates that evidence boundary.
+        _ => {
+            rt_use(ctx, "ring_panic", 1)
+            let msg = c_derived_str_lit(ctx, "invalid Json derive field action")
+            c_emit(ctx, "ring_panic(${msg});")
+            c_derived_str_lit(ctx, "null")
+        }
+    }
+}
+
+fn emit_c_struct_json_fn(mut ctx: CCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
+    let scaffold_opt = begin_c_derived_fn(ctx, type_name, "to_json", "Json", false, bounds)
+    if scaffold_opt.is_none() { return }
+    let scaffold = scaffold_opt.unwrap()
+    emit_c_derived_trait_dict(ctx, type_name, "Json")
+    let struct_info_opt = ctx.struct_types.get(type_name)
+    if struct_info_opt.is_none() {
+        rt_use(ctx, "ring_panic", 1)
+        let msg = c_derived_str_lit(ctx, "Json derive missing struct layout")
+        c_emit(ctx, "return ring_panic(${msg});")
+        end_c_derived_fn(ctx, scaffold)
+        return
+    }
+    let struct_info = struct_info_opt.unwrap()
+    rt_use(ctx, "ring_sb_new", 0)
+    rt_use(ctx, "ring_sb_add", 2)
+    rt_use(ctx, "ring_sb_to_str", 1)
+    rt_use(ctx, "ring_drop", 1)
+    let sb = fresh_tmp(ctx)
+    c_emit(ctx, "${sb} = ring_sb_new();")
+    emit_c_sb_add_lit(ctx, sb, "{")
+    let mut first = true
+    for field in fields {
+        let field_idx = c_find_field_index(struct_info.field_names, field.name)
+        if field_idx < 0 {
+            rt_use(ctx, "ring_panic", 1)
+            let msg = c_derived_str_lit(ctx, "Json derive field is absent from struct layout")
+            c_emit(ctx, "return ring_panic(${msg});")
+        } else {
+            if first {
+                emit_c_sb_add_lit(ctx, sb, "\"${field.name}\":")
+                first = false
+            } else {
+                emit_c_sb_add_lit(ctx, sb, ",\"${field.name}\":")
+            }
+            let field_value = fresh_tmp(ctx)
+            c_emit(ctx, "${field_value} = ((void**)${scaffold.self_var})[${field_idx}];")
+            let encoded = emit_c_json_field_str(ctx, field_value, field.action)
+            c_emit(ctx, "ring_sb_add(${sb}, ${encoded});")
+            c_emit(ctx, "ring_drop(${encoded});")
+        }
+    }
+    emit_c_sb_add_lit(ctx, sb, "}")
+    let result = fresh_tmp(ctx)
+    c_emit(ctx, "${result} = ring_sb_to_str(${sb});")
+    c_emit(ctx, "ring_drop(${sb});")
+    c_emit(ctx, "return ${result};")
+    end_c_derived_fn(ctx, scaffold)
+}
+
+fn emit_c_enum_json_fn(mut ctx: CCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
+    let scaffold_opt = begin_c_derived_fn(ctx, type_name, "to_json", "Json", false, bounds)
+    if scaffold_opt.is_none() { return }
+    let scaffold = scaffold_opt.unwrap()
+    emit_c_derived_trait_dict(ctx, type_name, "Json")
+    let enum_info_opt = ctx.enum_types.get(type_name)
+    if enum_info_opt.is_none() {
+        rt_use(ctx, "ring_panic", 1)
+        let msg = c_derived_str_lit(ctx, "Json derive missing enum layout")
+        c_emit(ctx, "return ring_panic(${msg});")
+        end_c_derived_fn(ctx, scaffold)
+        return
+    }
+    let enum_info = enum_info_opt.unwrap()
+    let tag = fresh_i64(ctx)
+    c_emit(ctx, "${tag} = *(int64_t*)${scaffold.self_var};")
+    for variant in variants {
+        let runtime_tag = match enum_info.variants.get(variant.name) {
+            some(vinfo) => vinfo.tag,
+            none => panic("C codegen invariant: Json derive variant '${type_name}::${variant.name}' is absent from enum metadata")
+        }
+        c_emit(ctx, "if (${tag} == ${runtime_tag}) {")
+        ctx.indent = ctx.indent + 1
+        rt_use(ctx, "ring_sb_new", 0)
+        rt_use(ctx, "ring_sb_add", 2)
+        rt_use(ctx, "ring_sb_to_str", 1)
+        rt_use(ctx, "ring_drop", 1)
+        let sb = fresh_tmp(ctx)
+        c_emit(ctx, "${sb} = ring_sb_new();")
+        emit_c_sb_add_lit(ctx, sb, "{\"_tag\":\"${variant.name}\"")
+        for field_index in 0..variant.fields.len() {
+            match variant.fields.get(field_index) {
+                some(field) => {
+                    emit_c_sb_add_lit(ctx, sb, ",\"${field.name}\":")
+                    let field_value = fresh_tmp(ctx)
+                    c_emit(ctx, "${field_value} = ((void**)${scaffold.self_var})[${field_index + 1}];")
+                    let encoded = emit_c_json_field_str(ctx, field_value, field.action)
+                    c_emit(ctx, "ring_sb_add(${sb}, ${encoded});")
+                    c_emit(ctx, "ring_drop(${encoded});")
+                },
+                none => {}
+            }
+        }
+        emit_c_sb_add_lit(ctx, sb, "}")
+        let result = fresh_tmp(ctx)
+        c_emit(ctx, "${result} = ring_sb_to_str(${sb});")
+        c_emit(ctx, "ring_drop(${sb});")
+        c_emit(ctx, "return ${result};")
+        ctx.indent = ctx.indent - 1
+        c_emit(ctx, "}")
+    }
+    rt_use(ctx, "ring_panic", 1)
+    let msg = c_derived_str_lit(ctx, "invalid enum tag in Json derive")
+    c_emit(ctx, "return ring_panic(${msg});")
+    end_c_derived_fn(ctx, scaffold)
+}
+
 // ── derived trait dict ───────────────────────────────────────
 // Build fn + memoised getter for a derived impl's dict.  A user-written impl
 // dict (pre-registered in the forward pass) wins — skip.
 
 fn emit_c_derived_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str) {
     let dict_name = trait_dict_name(target_type, trait_name)
-    if ctx.dict_build_fns.contains(dict_name) { return }
     let method_order_opt = ctx.trait_method_order.get(trait_name)
     if method_order_opt.is_none() { return }
     let method_order = method_order_opt.unwrap()
@@ -2750,9 +2954,12 @@ fn emit_c_derived_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str) {
     if method_count == 0 { return }
 
     let build_fn_name = "ring_dict_build_${c_symbol_fragment(dict_name)}"
-    ctx.dict_build_fns.insert(dict_name)
+    if ctx.emitted_fns.contains(build_fn_name) { return }
     ctx.emitted_fns.insert(build_fn_name)
-    ctx.fn_protos.push("void* ${build_fn_name}(void);")
+    if !ctx.dict_build_fns.contains(dict_name) {
+        ctx.dict_build_fns.insert(dict_name)
+        ctx.fn_protos.push("void* ${build_fn_name}(void);")
+    }
 
     let saved = c_push_fn(ctx, build_fn_name)
     rt_use(ctx, "ring_alloc", 2)
@@ -2771,4 +2978,22 @@ fn emit_c_derived_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str) {
     c_pop_fn(ctx, build_fn_name, "void", saved)
 
     let _g = ensure_c_dict_getter(ctx, dict_name)
+}
+
+fn predeclare_c_derived_trait_dict(
+    mut ctx: CCtx, target_type: Str, trait_name: Str
+) {
+    let method_order = match ctx.trait_method_order.get(trait_name) {
+        some(found) => found,
+        none => panic("C codegen invariant: derived trait '${trait_name}' has no method metadata")
+    }
+    if method_order.len() == 0 {
+        panic("C codegen invariant: derived trait '${trait_name}' has an empty dictionary")
+    }
+    let dict_name = trait_dict_name(target_type, trait_name)
+    if !ctx.dict_build_fns.contains(dict_name) {
+        ctx.dict_build_fns.insert(dict_name)
+        ctx.fn_protos.push(
+            "void* ring_dict_build_${c_symbol_fragment(dict_name)}(void);")
+    }
 }

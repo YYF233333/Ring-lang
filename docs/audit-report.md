@@ -43,15 +43,6 @@
 ## Runtime
 
 
-### #260 `json_stringify<T>` 的 native runtime 无条件按 Str 解引用 [critical] [judgment] [doing]
-
-2026-07-29 B-107 HOF 正式门禁发现并由 direct-call 对照确认：`std/io.ring` 与语言规范公开声明 `json_stringify<T>(value: T) -> Str`，但 native `ring_json_stringify(void*)` 除 null 外无条件把参数转成 `RingStr*`。当前 C-native 安全源码直接执行 `json_stringify(107)` 时，会把 tagged Int `0xD7` 当字符串指针解引用并以 `0xC0000005` 崩溃；不需要一等函数或字典传递即可触发。
-
-**已拍板修复约束（2026-08-06 D-001）**：新增公开 `Json` trait，API 改为 `json_stringify<T: Json>`；Int/Float/Bool/Str 与 `List<T: Json>` 提供标准实现，struct/enum 通过显式 `Json` derive opt-in；历史字段、enum `_tag` 与 Float 编码规则保持为公开行为。缺少 evidence 的类型必须编译期拒绝，复用普通 trait dictionary，禁止 runtime 类型猜测或 unknown fallback。验收至少覆盖 Int/Float/Bool/Str、List、derived struct/enum、缺失 evidence 反例、直接调用/一等函数值、C-native/structural/self-host，并验证结构化输出兼容。本项据此解除设计冻结。
-
-发现者：B-107 HOF implementation + independent review
-
-
 ### #227 drop_closure_env / drop_dict / drop_evidence 三函数体完全相同 [medium] [mechanical] [open]
 
 `ring_runtime.cpp:3212-3276`：三个 drop 函数实现逐字节相同——读 count-prefixed 数组，逐 slot 调 ring_drop。每个约 8 行，总共 24 行做同一件事。

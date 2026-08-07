@@ -25,6 +25,14 @@ pub fn span_zero() -> Span {
     }
 }
 
+// An explicit derive request retains the source attribute range.  Derive-time
+// diagnostics are emitted after registration, so the declaration's ordinary
+// span alone is not precise enough to identify the opt-in that failed.
+pub struct DeriveAttribute {
+    pub trait_name: Str,
+    pub span: Span
+}
+
 // ============================================================
 // Type Expressions (syntactic — before type inference)
 // ============================================================
@@ -279,8 +287,8 @@ pub struct SigMember {
 
 pub enum Decl {
     Fn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, is_abstract: Bool, span: Span },
-    Struct { name: Str, type_params: List<TypeParam>, fields: List<StructFieldDecl>, is_pub: Bool, span: Span },
-    Enum { name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>, is_pub: Bool, span: Span },
+    Struct { name: Str, type_params: List<TypeParam>, fields: List<StructFieldDecl>, derive_attrs: List<DeriveAttribute>, is_pub: Bool, span: Span },
+    Enum { name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>, derive_attrs: List<DeriveAttribute>, is_pub: Bool, span: Span },
     Impl { target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span },
     Effect { name: Str, type_params: List<TypeParam>, ops: List<EffectOpDecl>, is_pub: Bool, span: Span },
     Test { description: Str, body: Expr, span: Span },

@@ -2283,40 +2283,6 @@ extern "C" void* ring_assert(int64_t cond, void* msg) {
     return nullptr;
 }
 
-// JSON-stringify a value. The bootstrap compiler only ever calls this on Str
-// (to emit JS string literals), so the value is treated as a std::string and
-// rendered as a quoted, escaped JSON string. (General <T> serialization would
-// require runtime type tags, which the uniform-boxing runtime does not carry.)
-extern "C" void* ring_json_stringify(void* val) {
-    if (!val) {
-        return make_ring_str("null", 4);
-    }
-    RingStr* s = as_str(val);
-    std::string out = "\"";
-    for (int64_t i = 0; i < s->len; i++) {
-        unsigned char c = (unsigned char)s->buf[i];
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    out += buf;
-                } else {
-                    out += (char)c;
-                }
-        }
-    }
-    out += "\"";
-    return make_ring_str(out.c_str(), (int64_t)out.size());
-}
-
 // ============================================================================
 // Builtin primitive trait dictionaries (Eq for Str/Int/Float/Bool).
 // The bootstrap LLVM backend does not emit Ring impls for primitive Eq, so a

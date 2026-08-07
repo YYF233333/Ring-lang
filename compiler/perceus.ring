@@ -1427,7 +1427,7 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //     allocs a NEW 1-char string — FRESH; classified per-receiver by D1 rule ③:
 //     is_owner_bearing / anf_should_materialize special-case Str-receiver
 //     IndexExpr as fresh, see is_str_index) / ring_list_join /
-//     ring_json_stringify / ring_cwd / ring_read_file / ring_path_join / resolve
+//     ring_cwd / ring_read_file / ring_path_join / resolve
 //     / dirname / basename / extname.
 //   Option builders (fresh 2-slot block; payload dup'd or ownership-transferred):
 //     ring_list_get_opt and pure Ring Map.get (dup payload),
