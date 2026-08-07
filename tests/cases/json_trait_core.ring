@@ -11,6 +11,30 @@ struct ManualRecord {
     count: Int
 }
 
+@derive(Json)
+struct DerivedRecord {
+    label: Str,
+    count: Int
+}
+
+@derive(Json)
+struct DerivedBox<T> {
+    value: T
+}
+
+@derive(Json)
+enum DerivedEvent {
+    Empty,
+    Count(Int),
+    Named { label: Str, values: List<Int> }
+}
+
+@derive(Json)
+enum JsonTree {
+    Leaf(Int),
+    Branch(List<JsonTree>)
+}
+
 impl Json for ManualRecord {
     fn to_json(self) -> Str {
         let mut out = string_builder()
@@ -71,6 +95,22 @@ fn main() {
     assert(encode(ManualRecord { label: "generic", count: 3 }) ==
         "{\"label\":\"generic\",\"count\":3}",
         "generic Json bound forwards evidence")
+    assert(json_stringify(DerivedRecord { label: "item", count: 2 }) ==
+        "{\"label\":\"item\",\"count\":2}",
+        "derived struct preserves field order")
+    assert(json_stringify(DerivedBox { value: [4, 5] }) ==
+        "{\"value\":[4,5]}",
+        "generic derived struct forwards field evidence")
+    assert(json_stringify(Empty) == "{\"_tag\":\"Empty\"}",
+        "derived fieldless enum preserves tag shape")
+    assert(json_stringify(Count(3)) == "{\"_tag\":\"Count\",\"_0\":3}",
+        "derived positional enum preserves positional key")
+    assert(json_stringify(Named { label: "n", values: [1, 2] }) ==
+        "{\"_tag\":\"Named\",\"label\":\"n\",\"values\":[1,2]}",
+        "derived named enum preserves field keys")
+    assert(json_stringify(Branch([Leaf(1), Branch([Leaf(2)])])) ==
+        "{\"_tag\":\"Branch\",\"_0\":[{\"_tag\":\"Leaf\",\"_0\":1},{\"_tag\":\"Branch\",\"_0\":[{\"_tag\":\"Leaf\",\"_0\":2}]}]}",
+        "recursive Json derive resolves its own dictionary")
 
     assert(call_str_json(json_stringify, "raw") == "\"raw\"",
         "first-class Json function retains Str evidence")

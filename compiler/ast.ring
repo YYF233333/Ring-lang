@@ -279,8 +279,8 @@ pub struct SigMember {
 
 pub enum Decl {
     Fn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, is_abstract: Bool, span: Span },
-    Struct { name: Str, type_params: List<TypeParam>, fields: List<StructFieldDecl>, is_pub: Bool, span: Span },
-    Enum { name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>, is_pub: Bool, span: Span },
+    Struct { name: Str, type_params: List<TypeParam>, fields: List<StructFieldDecl>, derive_traits: List<Str>, is_pub: Bool, span: Span },
+    Enum { name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>, derive_traits: List<Str>, is_pub: Bool, span: Span },
     Impl { target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span },
     Effect { name: Str, type_params: List<TypeParam>, ops: List<EffectOpDecl>, is_pub: Bool, span: Span },
     Test { description: Str, body: Expr, span: Span },

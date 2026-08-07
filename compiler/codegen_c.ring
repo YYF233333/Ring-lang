@@ -87,7 +87,7 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     // after every fn was declared).
     c_declare_struct_ctors(ctx, program.decls)
 
-    // Derived trait impls (Eq/Clone/Ord/Debug) BEFORE the body pass — method
+    // Derived trait impls (Eq/Clone/Ord/Debug/Json) BEFORE the body pass — method
     // calls in bodies need ring_<Type>_clone etc. registered (LLVM parity:
     // emit_builtin_derived_impls + emit_derived_impls_llvm run here).
     emit_c_builtin_derived_impls(ctx)
@@ -1764,6 +1764,7 @@ pub fn emit_c_derived_impls(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
             "Debug" => emit_c_derived_debug(ctx, di),
             "Ord" => emit_c_derived_ord(ctx, di),
             "Hash" => emit_c_derived_hash(ctx, di),
+            "Json" => emit_c_derived_json(ctx, di),
             _ => {},
         }
     }
@@ -2733,6 +2734,149 @@ fn emit_c_enum_variant_debug_str(mut ctx: CCtx, self_var: Str, variant: DerivedV
     c_emit(ctx, "${res} = ring_sb_to_str(${sb});")
     c_emit(ctx, "ring_drop(${sb});")
     res
+}
+
+// ── Json ────────────────────────────────────────────────────
+// Historical JSON shape: structs are objects in declaration order; enums are
+// objects beginning with the textual `_tag`, followed by named fields or
+// positional `_0`, `_1`, ... fields. Every value is encoded through ordinary
+// Json dictionary evidence, never through runtime representation guessing.
+
+fn emit_c_derived_json(mut ctx: CCtx, di: DerivedImpl) {
+    match di.type_kind {
+        TypeKind::StructKind => match di.struct_fields {
+            some(fields) => emit_c_struct_json_fn(ctx, di.type_name, fields, di.bounds),
+            none => {}
+        },
+        TypeKind::EnumKind => match di.enum_variants {
+            some(variants) => emit_c_enum_json_fn(ctx, di.type_name, variants, di.bounds),
+            none => {}
+        }
+    }
+}
+
+fn emit_c_json_field_str(mut ctx: CCtx, value: Str, action: FieldAction) -> Str {
+    match action {
+        FieldAction::Call { dict_name, extra_dicts } =>
+            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [value]),
+        // Json derivation only produces Call actions. Keep the backend
+        // fail-loud if a future derive rule violates that evidence boundary.
+        _ => {
+            rt_use(ctx, "ring_panic", 1)
+            let msg = c_derived_str_lit(ctx, "invalid Json derive field action")
+            c_emit(ctx, "ring_panic(${msg});")
+            c_derived_str_lit(ctx, "null")
+        }
+    }
+}
+
+fn emit_c_struct_json_fn(mut ctx: CCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
+    let scaffold_opt = begin_c_derived_fn(ctx, type_name, "to_json", "Json", false, bounds)
+    if scaffold_opt.is_none() { return }
+    let scaffold = scaffold_opt.unwrap()
+    emit_c_derived_trait_dict(ctx, type_name, "Json")
+    let struct_info_opt = ctx.struct_types.get(type_name)
+    if struct_info_opt.is_none() {
+        rt_use(ctx, "ring_panic", 1)
+        let msg = c_derived_str_lit(ctx, "Json derive missing struct layout")
+        c_emit(ctx, "return ring_panic(${msg});")
+        end_c_derived_fn(ctx, scaffold)
+        return
+    }
+    let struct_info = struct_info_opt.unwrap()
+    rt_use(ctx, "ring_sb_new", 0)
+    rt_use(ctx, "ring_sb_add", 2)
+    rt_use(ctx, "ring_sb_to_str", 1)
+    rt_use(ctx, "ring_drop", 1)
+    let sb = fresh_tmp(ctx)
+    c_emit(ctx, "${sb} = ring_sb_new();")
+    emit_c_sb_add_lit(ctx, sb, "{")
+    let mut first = true
+    for field in fields {
+        let field_idx = c_find_field_index(struct_info.field_names, field.name)
+        if field_idx < 0 {
+            rt_use(ctx, "ring_panic", 1)
+            let msg = c_derived_str_lit(ctx, "Json derive field is absent from struct layout")
+            c_emit(ctx, "return ring_panic(${msg});")
+        } else {
+            if first {
+                emit_c_sb_add_lit(ctx, sb, "\"${field.name}\":")
+                first = false
+            } else {
+                emit_c_sb_add_lit(ctx, sb, ",\"${field.name}\":")
+            }
+            let field_value = fresh_tmp(ctx)
+            c_emit(ctx, "${field_value} = ((void**)${scaffold.self_var})[${field_idx}];")
+            let encoded = emit_c_json_field_str(ctx, field_value, field.action)
+            c_emit(ctx, "ring_sb_add(${sb}, ${encoded});")
+            c_emit(ctx, "ring_drop(${encoded});")
+        }
+    }
+    emit_c_sb_add_lit(ctx, sb, "}")
+    let result = fresh_tmp(ctx)
+    c_emit(ctx, "${result} = ring_sb_to_str(${sb});")
+    c_emit(ctx, "ring_drop(${sb});")
+    c_emit(ctx, "return ${result};")
+    end_c_derived_fn(ctx, scaffold)
+}
+
+fn emit_c_enum_json_fn(mut ctx: CCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
+    let scaffold_opt = begin_c_derived_fn(ctx, type_name, "to_json", "Json", false, bounds)
+    if scaffold_opt.is_none() { return }
+    let scaffold = scaffold_opt.unwrap()
+    emit_c_derived_trait_dict(ctx, type_name, "Json")
+    let enum_info_opt = ctx.enum_types.get(type_name)
+    if enum_info_opt.is_none() {
+        rt_use(ctx, "ring_panic", 1)
+        let msg = c_derived_str_lit(ctx, "Json derive missing enum layout")
+        c_emit(ctx, "return ring_panic(${msg});")
+        end_c_derived_fn(ctx, scaffold)
+        return
+    }
+    let enum_info = enum_info_opt.unwrap()
+    let tag = fresh_i64(ctx)
+    c_emit(ctx, "${tag} = *(int64_t*)${scaffold.self_var};")
+    let mut fallback_tag = 0
+    for variant in variants {
+        let runtime_tag = match enum_info.variants.get(variant.name) {
+            some(vinfo) => vinfo.tag,
+            none => fallback_tag
+        }
+        fallback_tag = fallback_tag + 1
+        c_emit(ctx, "if (${tag} == ${runtime_tag}) {")
+        ctx.indent = ctx.indent + 1
+        rt_use(ctx, "ring_sb_new", 0)
+        rt_use(ctx, "ring_sb_add", 2)
+        rt_use(ctx, "ring_sb_to_str", 1)
+        rt_use(ctx, "ring_drop", 1)
+        let sb = fresh_tmp(ctx)
+        c_emit(ctx, "${sb} = ring_sb_new();")
+        emit_c_sb_add_lit(ctx, sb, "{\"_tag\":\"${variant.name}\"")
+        for field_index in 0..variant.fields.len() {
+            match variant.fields.get(field_index) {
+                some(field) => {
+                    emit_c_sb_add_lit(ctx, sb, ",\"${field.name}\":")
+                    let field_value = fresh_tmp(ctx)
+                    c_emit(ctx, "${field_value} = ((void**)${scaffold.self_var})[${field_index + 1}];")
+                    let encoded = emit_c_json_field_str(ctx, field_value, field.action)
+                    c_emit(ctx, "ring_sb_add(${sb}, ${encoded});")
+                    c_emit(ctx, "ring_drop(${encoded});")
+                },
+                none => {}
+            }
+        }
+        emit_c_sb_add_lit(ctx, sb, "}")
+        let result = fresh_tmp(ctx)
+        c_emit(ctx, "${result} = ring_sb_to_str(${sb});")
+        c_emit(ctx, "ring_drop(${sb});")
+        c_emit(ctx, "return ${result};")
+        ctx.indent = ctx.indent - 1
+        c_emit(ctx, "}")
+    }
+    rt_use(ctx, "ring_panic", 1)
+    let msg = c_derived_str_lit(ctx, "invalid enum tag in Json derive")
+    c_emit(ctx, "return ring_panic(${msg});")
+    end_c_derived_fn(ctx, scaffold)
 }
 
 // ── derived trait dict ───────────────────────────────────────

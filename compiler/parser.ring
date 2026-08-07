@@ -96,7 +96,7 @@ fn is_decl_start(k: TokenKind) -> Bool {
         TkFn => true, TkStruct => true, TkEnum => true,
         TkEffect => true, TkTrait => true, TkImpl => true,
         TkExtern => true, TkUse => true, TkPub => true, TkTest => true,
-        TkConst => true, TkMod => true, TkSig => true,
+        TkConst => true, TkMod => true, TkSig => true, TkAt => true,
         _ => false
     }
 }
@@ -819,14 +819,35 @@ impl Parser {
     }
 
     fn parse_decl(mut self) -> Decl? {
+        let mut derive_traits: List<Str> = []
+        while self.try_consume(TokenKind::TkAt) {
+            let attribute = self.expect(TokenKind::TkIdent)
+            if attribute.value != "derive" {
+                self.error("Unknown declaration attribute '@${attribute.value}'")
+            }
+            self.expect(TokenKind::TkLParen)
+            if self.check(TokenKind::TkRParen) {
+                self.error("@derive requires at least one trait name")
+            }
+            derive_traits.push(self.parse_qualified_ident())
+            while self.try_consume(TokenKind::TkComma) {
+                if self.check(TokenKind::TkRParen) { break }
+                derive_traits.push(self.parse_qualified_ident())
+            }
+            self.expect(TokenKind::TkRParen)
+        }
         let is_pub = self.try_consume(TokenKind::TkPub)
         let tok = self.peek()
+        if derive_traits.len() > 0 && tok.kind != TokenKind::TkStruct && tok.kind != TokenKind::TkEnum {
+            self.report_error(E0101, "@derive is only valid on struct or enum declarations", some(tok.span))
+            return none
+        }
 
         match tok.kind {
             TkMod => some(self.parse_mod_block(is_pub)),
             TkFn => some(self.parse_fn_decl(is_pub, false)),
-            TkStruct => some(self.parse_struct_decl(is_pub)),
-            TkEnum => some(self.parse_enum_decl(is_pub)),
+            TkStruct => some(self.parse_struct_decl(is_pub, derive_traits)),
+            TkEnum => some(self.parse_enum_decl(is_pub, derive_traits)),
             TkImpl => some(self.parse_impl_decl()),
             TkEffect => some(self.parse_effect_decl(is_pub)),
             TkTest => some(self.parse_test_decl()),
@@ -1056,7 +1077,7 @@ impl Parser {
         }
     }
 
-    fn parse_struct_decl(mut self, is_pub: Bool) -> Decl {
+    fn parse_struct_decl(mut self, is_pub: Bool, derive_traits: List<Str>) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkStruct)
         let name = self.expect(TokenKind::TkIdent).value
@@ -1103,12 +1124,13 @@ impl Parser {
             name: name,
             type_params: type_params,
             fields: fields,
+            derive_traits: derive_traits,
             is_pub: is_pub,
             span: self.make_span(start, rbrace.span.end)
         }
     }
 
-    fn parse_enum_decl(mut self, is_pub: Bool) -> Decl {
+    fn parse_enum_decl(mut self, is_pub: Bool, derive_traits: List<Str>) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkEnum)
         let name = self.expect(TokenKind::TkIdent).value
@@ -1158,6 +1180,7 @@ impl Parser {
             name: name,
             type_params: type_params,
             variants: variants,
+            derive_traits: derive_traits,
             is_pub: is_pub,
             span: self.make_span(start, rbrace.span.end)
         }

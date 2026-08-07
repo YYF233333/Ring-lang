@@ -33,7 +33,7 @@ pub enum TokenKind {
     // Delimiters
     TkLParen, TkRParen, TkLBrace, TkRBrace, TkLBracket, TkRBracket,
     TkComma, TkColon, TkColonColon, TkDot, TkDotDot, TkDotDotEq,
-    TkFatArrow, TkArrow, TkQuestion,
+    TkFatArrow, TkArrow, TkQuestion, TkAt,
 
     // Semicolons
     TkSemi,
@@ -69,7 +69,7 @@ pub fn token_kind_value(k: TokenKind) -> Str {
         TkLBracket => "[", TkRBracket => "]",
         TkComma => ",", TkColon => ":", TkColonColon => "::",
         TkDot => ".", TkDotDot => "..", TkDotDotEq => "..=",
-        TkFatArrow => "=>", TkArrow => "->", TkQuestion => "?",
+        TkFatArrow => "=>", TkArrow => "->", TkQuestion => "?", TkAt => "@",
         TkSemi => ";",
         TkEof => "eof", TkError => "error_token"
     }
@@ -455,6 +455,7 @@ impl Lexer {
         }
         if ch == ";" { return self.make_token(TokenKind::TkSemi, ";", start, self.current_position()) }
         if ch == "?" { return self.make_token(TokenKind::TkQuestion, "?", start, self.current_position()) }
+        if ch == "@" { return self.make_token(TokenKind::TkAt, "@", start, self.current_position()) }
         if ch == "." {
             if self.peek() == "." {
                 self.advance()

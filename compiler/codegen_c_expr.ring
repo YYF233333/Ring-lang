@@ -2457,7 +2457,7 @@ fn gen_c_runtime_call(mut ctx: CCtx, name: Str, args: List<Str>) -> Str {
 
 // Send a proven extern ABI leaf through the complete legacy direct-call
 // pipeline. Many std extern spellings map implicitly to `ring_<leaf>` rather
-// than appearing in extern_fn_to_runtime_c (notably assert/json_stringify).
+// than appearing in extern_fn_to_runtime_c (notably assert).
 // Only after both known runtime paths miss is the raw foreign symbol valid.
 fn gen_c_extern_abi_call(mut ctx: CCtx, abi_name: Str, arg_vals: List<Str>) -> Str {
     match extern_fn_to_runtime_c(abi_name) {

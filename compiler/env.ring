@@ -52,6 +52,7 @@ pub struct StructDef {
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
     pub fields: List<StructField>,
+    pub derive_traits: List<Str>,
     // True for opaque extern (FFI) types registered as zero-field structs.
     // Carries cross-module via TypeDef::StructDef_ so both the declaring and
     // consuming modules can exclude it from trait derivation (B-074).
@@ -63,6 +64,7 @@ pub struct EnumDef {
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
     pub variants: List<EnumVariant>,
+    pub derive_traits: List<Str>,
     pub variant_index: Map<Str, Int>
 }
 

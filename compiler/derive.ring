@@ -4,7 +4,8 @@ use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     ImplEntry, ImplDictBound, MethodOrigin,
     add_impl, has_impl, install_method_scheme}
 use ast::{span_zero}
-use diagnostics::{CollectingSink}
+use diagnostics::{CollectingSink, Severity, DiagnosticContext, make_diag}
+use codes::{E0503}
 use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef,
     TraitBound, TypeKind, trait_dict_name, trait_bound_param_name, compare_by_first}
 
@@ -45,6 +46,7 @@ pub fn run_derive_pass(
     derive_trait(env, sink, all_types, "Clone", derived_impls)
     derive_trait(env, sink, all_types, "Ord", derived_impls)
     derive_trait(env, sink, all_types, "Debug", derived_impls)
+    derive_json_trait(env, sink, all_types, derived_impls)
     derived_impls
 }
 
@@ -66,7 +68,8 @@ struct UserType {
     name: Str,
     type_kind: TypeKind,
     struct_def: StructDef?,
-    enum_def: EnumDef?
+    enum_def: EnumDef?,
+    derive_traits: List<Str>
 }
 
 fn collect_user_types(env: TypeEnv) -> List<UserType> {
@@ -82,7 +85,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         // type-checking, but they have no observable runtime structure to derive.
         if def.is_extern { continue }
         if builtins.contains(name) == false {
-            result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none })
+            result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none, derive_traits: def.derive_traits })
         }
     }
     let mut sorted_enums = env.types.enums.entries()
@@ -92,7 +95,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         // Skip mod aliases to avoid duplicate derives
         if name != def.name { continue }
         if builtins.contains(name) == false {
-            result.push(UserType { name: name, type_kind: TypeKind::EnumKind, struct_def: none, enum_def: some(def) })
+            result.push(UserType { name: name, type_kind: TypeKind::EnumKind, struct_def: none, enum_def: some(def), derive_traits: def.derive_traits })
         }
     }
     result
@@ -201,6 +204,75 @@ fn derive_hash_trait(
 
 fn has_manual_impl(env: TypeEnv, type_name: Str, trait_name: Str) -> Bool {
     has_impl(env.trait_reg, type_name, trait_name)
+}
+
+fn requests_derive(ut: UserType, trait_name: Str) -> Bool {
+    for requested in ut.derive_traits {
+        if requested == trait_name { return true }
+    }
+    false
+}
+
+// Json is deliberately opt-in. Unlike the historical auto-derived traits,
+// only an explicit @derive(Json) declaration enters this fixpoint.
+fn derive_json_trait(
+    mut env: TypeEnv, mut sink: CollectingSink,
+    all_types: List<UserType>, mut derived_impls: List<DerivedImpl>
+) {
+    let mut known: Set<Str> = set_new()
+    let mut sorted_impls = env.trait_reg.trait_impls.entries()
+    sorted_impls.sort_by(compare_by_first)
+    for entry in sorted_impls {
+        let (_target, impls) = entry
+        for imp in impls {
+            if imp.trait_name == "Json" { known.insert(imp.target_type_name) }
+        }
+    }
+    known.insert("Int")
+    known.insert("Float")
+    known.insert("Str")
+    known.insert("Bool")
+
+    for ut in all_types {
+        for requested in ut.derive_traits {
+            if requested != "Json" {
+                let detail = "unsupported explicit derive trait '${requested}'"
+                sink.report(make_diag(E0503, Severity::SevError,
+                    "@derive currently supports Json; '${requested}' is not an explicit derive target",
+                    span_zero(), DiagnosticContext::TraitError { detail: detail }))
+            }
+        }
+    }
+
+    let mut changed = true
+    while changed {
+        changed = false
+        for ut in all_types {
+            if requests_derive(ut, "Json") && !known.contains(ut.name) {
+                let result = try_derive(env, ut, "Json", known)
+                match result {
+                    some(di) => {
+                        known.insert(ut.name)
+                        register_derived_impl(env, sink, di, "Json")
+                        derived_impls.push(di)
+                        changed = true
+                    },
+                    none => {}
+                }
+            }
+        }
+    }
+
+    for ut in all_types {
+        if requests_derive(ut, "Json") && !known.contains(ut.name) {
+            let display = ut.name
+            sink.report(make_diag(E0503, Severity::SevError,
+                "Cannot derive Json for '${display}': every field must provide Json evidence",
+                span_zero(), DiagnosticContext::TraitError {
+                    detail: "Json derive field evidence is missing"
+                }))
+        }
+    }
 }
 
 // ================================================================
@@ -347,6 +419,11 @@ fn resolve_field_action(
             env, field_type, type_param_vars, type_param_names,
             known, self_type_name, bounds)
     }
+    if trait_name == "Json" {
+        return resolve_json_field_action(
+            env, field_type, type_param_vars, type_param_names,
+            known, self_type_name, bounds)
+    }
     match field_type {
         Type::IntType => some(FieldAction::Identity),
         Type::FloatType => some(FieldAction::FloatIdentity),
@@ -432,6 +509,67 @@ fn resolve_field_action(
         Type::AnyType => some(FieldAction::Identity),
         Type::NeverType => some(FieldAction::Identity),
         _ => none,
+    }
+}
+
+fn resolve_json_field_action(
+    env: TypeEnv,
+    field_type: Type,
+    type_param_vars: List<Int>,
+    type_param_names: List<Str>,
+    known: Set<Str>,
+    self_type_name: Str,
+    mut bounds: List<TraitBound>
+) -> FieldAction? {
+    match field_type {
+        Type::IntType => some(FieldAction::Call {
+            dict_name: trait_dict_name("Int", "Json"), extra_dicts: []
+        }),
+        Type::FloatType => some(FieldAction::Call {
+            dict_name: trait_dict_name("Float", "Json"), extra_dicts: []
+        }),
+        Type::StrType => some(FieldAction::Call {
+            dict_name: trait_dict_name("Str", "Json"), extra_dicts: []
+        }),
+        Type::BoolType => some(FieldAction::Call {
+            dict_name: trait_dict_name("Bool", "Json"), extra_dicts: []
+        }),
+        Type::TypeVar { id, .. } => {
+            let param_idx = index_of_int(type_param_vars, id)
+            if param_idx < 0 { return none }
+            let param_name = str_at(type_param_names, param_idx)
+            if !has_bound(bounds, param_name, "Json") {
+                bounds.push(TraitBound { type_param: param_name, trait_name: "Json" })
+            }
+            some(FieldAction::Call {
+                dict_name: trait_bound_param_name(param_name, "Json"), extra_dicts: []
+            })
+        },
+        Type::StructType { name, type_params, .. } => {
+            if name != self_type_name && !known.contains(name) { return none }
+            match resolve_extra_dicts(
+                type_params, type_param_vars, type_param_names,
+                "Json", known, self_type_name, bounds) {
+                some(extra_dicts) => some(FieldAction::Call {
+                    dict_name: trait_dict_name(name, "Json"),
+                    extra_dicts: extra_dicts
+                }),
+                none => none
+            }
+        },
+        Type::EnumType { name, type_params, .. } => {
+            if name != self_type_name && !known.contains(name) { return none }
+            match resolve_extra_dicts(
+                type_params, type_param_vars, type_param_names,
+                "Json", known, self_type_name, bounds) {
+                some(extra_dicts) => some(FieldAction::Call {
+                    dict_name: trait_dict_name(name, "Json"),
+                    extra_dicts: extra_dicts
+                }),
+                none => none
+            }
+        },
+        _ => none
     }
 }
 
@@ -556,7 +694,7 @@ fn resolve_type_arg_dict(
         Type::StrType => some(DictRef::Static(trait_dict_name("Str", trait_name))),
         Type::BoolType => some(DictRef::Static(trait_dict_name("Bool", trait_name))),
         Type::UnitType => {
-            if trait_name == "Hash" {
+            if trait_name == "Hash" || trait_name == "Json" {
                 none
             } else {
                 some(DictRef::Static(trait_dict_name("Unit", trait_name)))
@@ -685,6 +823,7 @@ fn get_method_names(trait_name: Str) -> List<Str> {
         "Debug" => ["debug"],
         "Ord" => ["cmp"],
         "Hash" => ["hash"],
+        "Json" => ["to_json"],
         _ => [],
     }
 }
@@ -725,6 +864,10 @@ fn register_trait_methods(
         "Hash" => {
             let hash_fn = Type::FnType { params: [self_type], return_type: INT, effects: EMPTY_ROW }
             methods.insert("hash", TypeScheme { ty: hash_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
+        },
+        "Json" => {
+            let json_fn = Type::FnType { params: [self_type], return_type: STR, effects: EMPTY_ROW }
+            methods.insert("to_json", TypeScheme { ty: json_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         _ => {},
     }

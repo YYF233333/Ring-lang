@@ -869,7 +869,6 @@ fn rt_sig(name: Str) -> Str? {
     if name == "ring_parse_float" { return some("p>p") }
     // Misc
     if name == "ring_assert" { return some("ip>p") }
-    if name == "ring_json_stringify" { return some("p>p") }
     if name == "ring_match_fail" { return some("piip>p") }
     // Trait dicts (step 5)
     if name == "ring_get_builtin_dict" { return some("p>p") }
