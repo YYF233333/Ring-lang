@@ -37,6 +37,8 @@
 
 **当前未发布期 standing decision（2026-08-07）**：对于已经依上述授权边界拍板的变更，Steward 应选择 clean break，不得仅为向后兼容追加 deprecated alias、双 ABI/双语义路径、旧行为 fallback 或迁移 shim；仓内消费者、规范和测试原子迁移。该 standing decision 只消除兼容层工作，不把尚未拍板的新语法、公开语义或保证变更转为 Steward 自主决定，也不允许降低 correctness、ownership/safety、验证或可移植性门槛。首次公开发布后重新建立版本兼容规则。
 
+**GitHub 竞品雷达 standing authorization（2026-08-08）**：用户将公开的 [`Ring-lang` Star List](https://github.com/stars/YYF233333/lists/ring-lang) 交由 Steward 持续维护。Steward 可按 `docs/competitive-analysis.md` 的口径读取该清单、为纳入清单而 Star 官方仓库、更新清单描述，并自主增删清单成员；这项授权不扩展到其他 GitHub 外部状态、私有资源、付费资源、发布或仓库权限。移出 `Ring-lang` 清单默认只删除清单成员关系，不取消用户已有 Star，除非用户另行明确授权。清单是研究雷达与复查入口，不是产品事实或采用度证据，也不替代用户保留的语言方向与 release 决定。
+
 修复违反既有公开语义或 safety/ownership 保证的 bug，不等于修改该保证：只要候选方案都恢复既有契约，Steward 经 Argument + 独立反驳后自主选择内部实现。只有接受已知违约、降低/豁免保证或改变契约本身才必须交由用户。
 
 ## 3. 持久状态
