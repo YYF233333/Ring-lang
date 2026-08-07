@@ -74,6 +74,12 @@ trait Collection {
 }
 ```
 
+### 1.1a JSON 编码支持域（2026-08-06 D-001）
+
+`json_stringify` 的公开支持域由公开 `Json` trait 裁决，签名为 `json_stringify<T: Json>(value: T) -> Str`，不再承诺无约束的任意 `T`。Int、Float、Bool、Str 与 `List<T: Json>` 提供标准实现；用户 struct/enum 只有在显式请求 `Json` derive 时才获得结构化实现，不做无提示的全局 auto-derive。
+
+结构化编码保持历史字段、enum `_tag` 形状与 Float 编码规则；这些输出属于可回归的公开行为。调用点缺少 `Json` evidence 时必须在编译期拒绝。实现复用普通 trait dictionary 作为类型证据，native runtime 不按值表示猜测类型，也不为 unknown 类型提供 fallback。显式 derive 的具体表面语法与实现分层在 #260 planning/review 中对齐现有 trait/derive 机制，但不得改变上述支持域和 fail-closed 边界。
+
 ### 1.1b Union Type（匿名 enum 语法糖，2026-05-25 决策）
 
 `A | B | C` 是匿名 enum 的语法糖。纯编译期展开，不引入子类型，HM 推断不受影响。

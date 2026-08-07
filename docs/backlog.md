@@ -11,6 +11,10 @@
 
 当前主线目标是形成 **v0.1 developer-preview candidate**；实际公开 release、许可证与最终支持平台仍由用户在候选产物和证据齐备后拍板。Preview 可以明确标注未实现能力，但不得明知违反当前语言规范、ownership/safety 保证或用豁免降低门槛。
 
+**未发布期 clean-break 原则（2026-08-07 用户拍板）**：首次公开 preview/release 之前，一项公开语法、API、ABI 或语义变更一旦按授权边界拍板，就采用最简单的原子切换；兼容性本身不是增加 deprecated alias、双实现路径、旧 ABI fallback 或迁移 shim 的理由。仓内调用点、规范和测试在同一变更中整体迁移，并明确记录 break。此原则不授权降低 correctness、ownership/safety 或测试门槛，也不替代新语义本身的用户保留决定；首次公开发布后的版本兼容政策另行建立。
+
+**近期 break 审核门**：任何修改公开语法、签名、ABI 或可观察语义的 item，在实现前必须标成“已拍板 clean break”“等待 decision dossier”或“仅内部、非 breaking”之一。已拍板的 #260 `Json` API、#268/#269 ownership 真值与 B-167 调用点 evidence 采用一次性切换；旧 runtime extern、旧 ownership 猜测/传播路径和创建处 evidence ABI 必须在各自原子变更中删除，不形成双轨。B-168/B-169 的探针结论，以及 B-152、B-156、B-171、B-133 和 `io` effect 拆分等潜在用户面变化，在进入实现前显式核对 break 边界；需要新的公开语义决定时仍提交 dossier。每个已拍板 break 的验收都必须列出被删除的旧路径、同步迁移的仓内消费者/规范/测试，并在旧形式仍可表达时用负例证明它不会经 alias、fallback 或旧 ABI 继续生效。
+
 处理顺序按五道门组织：
 
 1. **Critical 正确性底线**：先修当前 critical audit #260、#268、#269；执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。
@@ -438,9 +442,11 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [queued] [before: B-180]
+### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [doing] [before: B-180]
 
 > **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
+
+当前测量完整性框架已合入；正在补齐 opt-in compiler phase timing，随后在 clean worktree 执行正式 cold/warm baseline、形成 top-3 构成与 B-180 逐项预算后收口。
 
 本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。critical 修复期间可以提前准备采样/只读 instrumentation；任何会改变 compiler/runner 行为的优化由 B-180 在 critical 清零后实施。
 
@@ -583,11 +589,11 @@ handle {
 
 **范围 / 文件**：`.github/workflows/`、`compiler/scripts/`、release manifest/NOTICE、安装与卸载脚本、README/quickstart、artifact smoke tests。
 
-- 用户选定许可证后，bundle 包含 compiler、版本匹配的 std/runtime 资产、license/NOTICE、quickstart 与 checksum；不依赖源码仓库结构；
+- D-002 已固定 `MIT OR Apache-2.0` 双许可与 `Yufeng Ying` holder；bundle 包含 compiler、版本匹配的 std/runtime 资产、两份官方 license、SPDX expression、NOTICE/provenance、quickstart 与 checksum，不依赖源码仓库结构；
 - clean checkout 从 tracked `dist-c/main.c` 构建，clean unpack 能运行 `ring doctor`、hello、多文件 project 与 self-compile fixed point；
 - Windows/Linux 各跑 e2e/golden/RC/structural/parity/self-compile；Linux 同时验证 clang 与 gcc 的 C11 编译，平台差异限制在 runtime/driver 边界；
 - artifact 名、版本、target triple、toolchain requirements、SHA-256 与 provenance manifest 确定；同输入重建差异必须可解释；
-- 尽早形成许可证/支持范围短 dossier；许可证选择、最终支持声明、tag 与 GitHub Release 属用户保留决定。选择前可验证私有 candidate pipeline，但不得生成对外可分发的无许可证包；选择后才完成正式 candidate packaging，仍不代用户发布。
+- 对 compiler/runtime/std/generated template 做 provenance inventory，贡献说明固定“提交即按同一双许可提供”；纯用户源码生成物不附加 Ring 许可，实际复制/链接的 runtime/std/template 仍由 manifest 明示相应 license/NOTICE。最终支持声明、tag 与 GitHub Release 仍属用户保留决定；完成许可 packaging 也不代用户发布。
 
 **发布阻断**：全部 critical finding 清零；当前排序列出的 silent wrong-code/heap/RC blockers 关闭；B-167/B-152/B-002/B-156/B-133 gate 完成；C-only 全量门和至少一轮 clean-clone CI 全绿；文档不得宣称 async/refinement/LSP 等未发货能力。
 
@@ -647,6 +653,20 @@ source-map 支持 + 断点调试。
 - 失败案例归类（语法迁移 / 类型 / effect / std API），形成修缮清单回流 backlog
 - 至少 5 题属于预注册的行为契约子集；两语言输入信息量差异逐题可审计
 - 发布可重放 manifest 与逐轮原始记录；报告明确列出 null/负向结果、无效 run 和已知混杂因素
+
+### B-182 证据携带补丁验收系统（低成本 agent 安全委派）[infra] [P1] [XL] [judgment] [queued] [after: B-111]
+
+B-111 回答语言层的核心赌注；本项随后验证仓库层的有界主张：在预先声明的任务与风险包络内，提议模型的能力只影响产出率、重试次数和成本，不能降低补丁的接受标准。它不把当前“CI 绿色”直接解释成正确性证明，而是要求每个被接受的补丁携带与风险等级相称、可独立重放的证据。
+
+**范围 / 文件**：以 B-111 的原始 traces、失败分类和成本基线为输入，在 `eval/` 建立仓库任务 replay/calibration corpus，在 `.agents/scripts/` 建立 acceptance contract、oracle 与校准工具，并把稳定的确定性门接入 `tests/run_tests.py` / `.github/workflows/`；风险分层、升级权限和证据保留规则写入 `docs/workflow.md`。编译器可判定的不变量仍由各自 compiler backlog 收敛，本项不复制类型/effect/ownership/RC 权威逻辑。
+
+**约束**：候选补丁声明 base SHA、允许路径、行为/非变化 claim、风险等级与所需证据；不受信任的提议者不能在同一候选中改写验收策略、隐藏 oracle 或其他 acceptance TCB。确定性检查、差分/property/fuzz/mutation 与隐藏行为 oracle 优先；模型只处理剩余的 spec/意图判断，输出 `blocker / clear / unknown`，其中 unknown、冲突、高风险或 TCB 变更一律 fail closed 并升级到强模型/用户保留边界。强模型主要用于建立永久 oracle、校准和抽样审计，而不是无限重复验收同一类低风险补丁。具体任务分层、模型组合、抽样率和统计阈值待 B-111 完成后 planning，不提前冻结。
+
+**验收标准**：
+- 每个 accepted patch 都有版本化 acceptance contract、完整 gate 结果和可从固定 snapshot 重放的证据包；缺证据、结果冲突或验证器版本不匹配不得静默通过；
+- 预注册的历史缺陷补丁与 seeded mutation calibration corpus 均被阻断或明确升级，不得作为低风险绿色补丁漏出；修改 gate/oracle/TCB 的候选自动进入高风险路径；
+- 在一批预注册外围任务上，以同一接受标准比较低成本与强模型，报告 accepted yield、重试/token/成本、隐藏 oracle 逃逸及统计上界；允许 null/负向结论，未达到预注册阈值不得扩大委派范围；
+- 对 compiler/type/effect/ownership/RC/runtime ABI/bootstrap/verifier/CI gate 等 acceptance TCB 保留独立强审，不因外围试验成功而自动降级。
 
 ## 设计验证（Stabilize 前置）
 

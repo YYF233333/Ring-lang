@@ -43,13 +43,11 @@
 ## Runtime
 
 
-### #260 `json_stringify<T>` 的 native runtime 无条件按 Str 解引用 [critical] [judgment] [open]
+### #260 `json_stringify<T>` 的 native runtime 无条件按 Str 解引用 [critical] [judgment] [doing]
 
 2026-07-29 B-107 HOF 正式门禁发现并由 direct-call 对照确认：`std/io.ring` 与语言规范公开声明 `json_stringify<T>(value: T) -> Str`，但 native `ring_json_stringify(void*)` 除 null 外无条件把参数转成 `RingStr*`。当前 C-native 安全源码直接执行 `json_stringify(107)` 时，会把 tagged Int `0xD7` 当字符串指针解引用并以 `0xC0000005` 崩溃；不需要一等函数或字典传递即可触发。
 
-**修复约束**：公开签名与 native 实现必须一致。若保留 `<T>`，需设计可证明覆盖所承诺类型的序列化/type-evidence 或单态 type-directed lowering，并让直接调用与一等 extern wrapper 共用同一路径；若只支持 Str，则必须收窄标准库签名和规范，不能继续让 checker 接受会越界访问的安全程序。验收至少覆盖 Int/Float/Bool/Str、直接调用/一等函数值、C-native/structural/self-host，并对不支持的结构类型给出编译期诊断而非 runtime UB。任何收窄公开签名的候选先形成用户决策包。
-
-独立 Argument 已确认 runtime 猜值、primitive-only 隐式收窄与孤立选择性具体化都不能诚实恢复现有契约；公开支持域与兼容成本由 Steward Inbox D-001 等用户拍板，期间冻结本项实现并继续其他无阻塞工作。
+**已拍板修复约束（2026-08-06 D-001）**：新增公开 `Json` trait，API 改为 `json_stringify<T: Json>`；Int/Float/Bool/Str 与 `List<T: Json>` 提供标准实现，struct/enum 通过显式 `Json` derive opt-in；历史字段、enum `_tag` 与 Float 编码规则保持为公开行为。缺少 evidence 的类型必须编译期拒绝，复用普通 trait dictionary，禁止 runtime 类型猜测或 unknown fallback。验收至少覆盖 Int/Float/Bool/Str、List、derived struct/enum、缺失 evidence 反例、直接调用/一等函数值、C-native/structural/self-host，并验证结构化输出兼容。本项据此解除设计冻结。
 
 发现者：B-107 HOF implementation + independent review
 
