@@ -1,17 +1,17 @@
 {
-  "schema": "ring.check-benchmark.manifest.v1",
+  "schema": "ring.check-benchmark.manifest.v3",
   "description": "B-176 bounded check and validation feedback lanes. Every template expands into separately run cold and warm cache lanes.",
   "fingerprint_flags": {
     "compiler": ["-std=c11", "-O3", "-flto=thin"],
     "runtime": ["-std=c++17", "-D_CRT_SECURE_NO_WARNINGS", "-O3", "-flto=thin"],
     "runner_runtime": ["-std=c++17", "-O2", "-D_CRT_SECURE_NO_WARNINGS"],
     "link": [
-      "-flto=thin",
-      "-fuse-ld=lld",
       "-lmsvcrt",
       "-Wl,/STACK:536870912",
       "-Wl,/MANIFEST:EMBED",
       "-Wl,/MANIFESTUAC:level='asInvoker'",
+      "-flto=thin",
+      "-fuse-ld=lld",
       "-Wl,/lldltocachepolicy:cache_size_bytes=1073741824:cache_size_files=4096:prune_after=168h"
     ]
   },
@@ -26,7 +26,24 @@
       "timeout_seconds": 60,
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
+      "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
+      "artifacts": [],
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
+    },
+    {
+      "case_id": "tiny_hello_check_no_phase",
+      "description": "unpaired descriptive tiny direct check with compiler phase timing disabled",
+      "policy": "direct_short",
+      "cache_states": ["cold", "warm"],
+      "argv": ["{ring}", "check", "{repo}/tests/cases/hello.ring"],
+      "cwd": "{repo}",
+      "timeout_seconds": 60,
+      "expected_exit_codes": [0],
+      "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
+      "runner_summary": null,
+      "compiler_phase_timing": false,
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -40,9 +57,11 @@
       "timeout_seconds": 60,
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/golden/abort_handler_arm.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
+      "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "diamond_dep_check",
@@ -54,9 +73,11 @@
       "timeout_seconds": 60,
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/modules/diamond_dep/main.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
+      "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "error_undefined_llm_check",
@@ -68,9 +89,11 @@
       "timeout_seconds": 60,
       "expected_exit_codes": [1],
       "requires": ["tool:ring", "path:{repo}/tests/cases/error_undefined.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
+      "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "tiny_hello_rc_check",
@@ -82,9 +105,11 @@
       "timeout_seconds": 60,
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
+      "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "resource_plan_verify", "command_total"],
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "compiler_main_check",
@@ -96,9 +121,11 @@
       "timeout_seconds": 1200,
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
+      "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "compiler_main_rc_check",
@@ -110,9 +137,11 @@
       "timeout_seconds": 1200,
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
+      "compiler_phase_timing": true,
+      "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "resource_plan_verify", "command_total"],
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
     },
     {
       "case_id": "hello_build",
@@ -130,21 +159,32 @@
       "timeout_seconds": 60,
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "tool:clang", "path:{repo}/tests/cases/hello.ring"],
-      "runner_summary": false,
+      "runner_summary": null,
       "artifacts": ["{sample_dir}/hello.c", "{sample_dir}/hello.o"],
       "phase_trace_paths": []
     },
     {
-      "case_id": "filtered_e2e_hello",
-      "description": "one filtered e2e case including isolated compiler construction",
+      "case_id": "filtered_e2e_bool_ops",
+      "description": "one uniquely filtered bool_ops e2e case including isolated compiler construction",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e", "--filter", "hello.ring"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e", "--filter", "bool_ops.ring"],
       "cwd": "{repo}",
       "timeout_seconds": 300,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 1,
+        "expected_status_counts": {"pass": 1, "fail": 0, "skip": 0},
+        "expected_suite_counts": {
+          "e2e": {"pass": 1, "fail": 0, "skip": 0}
+        },
+        "expected_cases_sha256": "3df33c0e37cd2bec720e432441dd1d09a0750beb28b0061b19de05b47c2e8503",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
@@ -159,7 +199,18 @@
       "timeout_seconds": 1800,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 630,
+        "expected_status_counts": {"pass": 630, "fail": 0, "skip": 0},
+        "expected_suite_counts": {
+          "e2e": {"pass": 630, "fail": 0, "skip": 0}
+        },
+        "expected_cases_sha256": "7d8e8a19103851cc33b23c3a76e36bf80ca85448dbba6c488194b8aa3be6b65a",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
@@ -174,7 +225,18 @@
       "timeout_seconds": 1800,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 239,
+        "expected_status_counts": {"pass": 239, "fail": 0, "skip": 0},
+        "expected_suite_counts": {
+          "golden": {"pass": 239, "fail": 0, "skip": 0}
+        },
+        "expected_cases_sha256": "c1a306e53f5d4fa15d577105ed3e9faafcd83606e7d9154be9f4df689b308cb4",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
@@ -189,7 +251,18 @@
       "timeout_seconds": 2400,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 590,
+        "expected_status_counts": {"pass": 589, "fail": 0, "skip": 1},
+        "expected_suite_counts": {
+          "rc": {"pass": 589, "fail": 0, "skip": 1}
+        },
+        "expected_cases_sha256": "2f0a06a5e1bbfb3ce3533323581abfdd645d765f2468bda60a4bbadc79a13260",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -203,7 +276,18 @@
       "timeout_seconds": 1800,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 3,
+        "expected_status_counts": {"pass": 3, "fail": 0, "skip": 0},
+        "expected_suite_counts": {
+          "structural": {"pass": 3, "fail": 0, "skip": 0}
+        },
+        "expected_cases_sha256": "3ff7ba79cfc784ed524a8535c93673856771ab6613484634c7b9c5947a20870f",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -217,7 +301,18 @@
       "timeout_seconds": 300,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 92,
+        "expected_status_counts": {"pass": 92, "fail": 0, "skip": 0},
+        "expected_suite_counts": {
+          "parity": {"pass": 92, "fail": 0, "skip": 0}
+        },
+        "expected_cases_sha256": "ae4ee4b1e28d27e79ea6143a199ead811e680bb3d097a19068904744af43c744",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -231,7 +326,18 @@
       "timeout_seconds": 2400,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 2,
+        "expected_status_counts": {"pass": 2, "fail": 0, "skip": 0},
+        "expected_suite_counts": {
+          "self-compile": {"pass": 2, "fail": 0, "skip": 0}
+        },
+        "expected_cases_sha256": "9f0035d2c3dec96c0c5f702722da3302dce7a4c4afbc62ded164fcab9257151e",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -245,7 +351,23 @@
       "timeout_seconds": 5400,
       "expected_exit_codes": [0],
       "requires": ["tool:python", "tool:clang", "tool:clangxx", "path:{repo}/tests/run_tests.py"],
-      "runner_summary": true,
+      "runner_summary": {
+        "schema": "ring.check-benchmark.runner-summary-contract.v2",
+        "expected_total": 1556,
+        "expected_status_counts": {"pass": 1555, "fail": 0, "skip": 1},
+        "expected_suite_counts": {
+          "e2e": {"pass": 630, "fail": 0, "skip": 0},
+          "golden": {"pass": 239, "fail": 0, "skip": 0},
+          "rc": {"pass": 589, "fail": 0, "skip": 1},
+          "self-compile": {"pass": 2, "fail": 0, "skip": 0},
+          "structural": {"pass": 3, "fail": 0, "skip": 0},
+          "parity": {"pass": 92, "fail": 0, "skip": 0}
+        },
+        "expected_cases_sha256": "2a5806e6b037289e9456efa616c61dee966d6e4e51ed451dc4ab5f3ef8bc4dad",
+        "skip_policy": "exact",
+        "fail_policy": "zero",
+        "reported_exit_policy": "required_match_raw"
+      },
       "isolate_runner_runtime": true,
       "artifacts": [],
       "phase_trace_paths": []
@@ -266,6 +388,8 @@
         "{clang}",
         "--clangxx",
         "{clangxx}",
+        "--lld-link",
+        "{lld_link}",
         "--cache",
         "{thinlto_cache}"
       ],
@@ -276,15 +400,19 @@
         "tool:python",
         "tool:clang",
         "tool:clangxx",
+        "tool:lld_link",
         "path:{repo}/bench/check/bootstrap.py",
         "path:{repo}/compiler/dist-c/main.c",
         "path:{repo}/ring_runtime.cpp"
       ],
-      "runner_summary": false,
+      "runner_summary": null,
       "artifacts": [
         "{sample_dir}/bootstrap/ring_compiler_lto.o",
         "{sample_dir}/bootstrap/ring_runtime_lto.o",
         "{sample_dir}/bootstrap/ring.exe",
+        "{sample_dir}/bootstrap/linker-binding.json",
+        "{sample_dir}/bootstrap/linker-probe.stdout.txt",
+        "{sample_dir}/bootstrap/linker-probe.stderr.txt",
         "{sample_dir}/bootstrap/phase-trace.jsonl"
       ],
       "phase_trace_paths": ["{sample_dir}/bootstrap/phase-trace.jsonl"]

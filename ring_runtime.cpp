@@ -15,6 +15,7 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
+#include <chrono>
 
 #include <cctype>
 #include <sstream>
@@ -683,6 +684,22 @@ extern "C" void* ring_box_int(int64_t val) {
     // B-080: tagged pointer — no heap allocation.
     // Encoding: (val << 1) | 1.  63-bit signed range.
     return (void*)(((uintptr_t)val << 1) | 1);
+}
+
+// Compiler-internal B-176 measurement clock. This deliberately has no std
+// declaration: only compiler/phase_timing.ring can opt into it. A process-local
+// steady-clock origin keeps the boxed result inside Ring's signed 63-bit Int
+// representation; saturation preserves monotonicity in the theoretical limit.
+extern "C" void* ring_bench_monotonic_ns() {
+    using Clock = std::chrono::steady_clock;
+    static const Clock::time_point origin = Clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        Clock::now() - origin).count();
+    constexpr int64_t ring_int_max = INT64_MAX >> 1;
+    const int64_t bounded = elapsed < 0
+        ? 0
+        : (elapsed > ring_int_max ? ring_int_max : (int64_t)elapsed);
+    return ring_box_int(bounded);
 }
 
 extern "C" int64_t ring_unbox_int(void* p) {
