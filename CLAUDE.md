@@ -5,7 +5,7 @@
 - 所有对话回复、解释和讨论使用中文；技术术语、代码和命令可保留英文。
 - 本仓库的唯一项目语境是编程语言、编译器、native runtime 与测试基础设施实现。委派 prompt 只使用“Ring-lang 编译器”“类型/效果系统”“所有权与资源生命周期”“本地构建/运行/回归”这组正向白名单措辞；不写与项目范围无关的领域标签，也不直接复制容易产生歧义的英文诊断类别、异常缩写或外部分类提示。若外层分类因措辞误判，应使用 fresh context，以准确的本地工程描述继续原任务，不降低验证门槛。
 - 本文件是项目技术、构建和开发约定的入口。仓库授权、停止条件、看板和角色边界以 `docs/workflow.md` 为唯一真值。
-- 语言公理见 `docs/philosophy.md`，现行设计见 `docs/design.md`，用户语言规范见 `docs/lang-spec/`，活动工作见 `docs/backlog.md` 与 `docs/audit-report.md`。完成历史只查 Git。
+- 语言公理见 `docs/philosophy.md`，现行设计见 `docs/design.md`，用户语言规范见 `docs/lang-spec/`，活动工作见 `docs/backlog.md` 与 `docs/audit-report.md`。产品主张/传播证据边界见 `docs/product-governance.md`，preview 首用与反馈回流见 `docs/preview-feedback-protocol.md`。完成历史只查 Git。
 
 ## 项目概述
 

@@ -38,7 +38,7 @@ use resolver::{module_prefix}
 // emit_lines: #line directive toggle (--no-c-lines disables).
 // ============================================================
 
-pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool) {
+pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool) -> Bool {
     let mut ctx = new_c_ctx(emit_lines)
 
     // B-091: auto-boxed mut-cell def_ids (closure write-through capture).
@@ -127,7 +127,7 @@ pub fn generate_c_project(
     modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str,
     c_path: Str, o_path: Str, emit_lines: Bool,
     extern_forward_bridges: Map<Str, Str>
-) {
+) -> Bool {
     let mut ctx = new_c_ctx(emit_lines)
     for entry in extern_forward_bridges.entries() {
         let (source, target) = entry
@@ -220,16 +220,17 @@ pub fn generate_c_project(
 
 // Shared tail of both entry points: assemble the translation unit, write it
 // to disk, shell out to clang (audit #242: emit failure must exit non-zero).
-fn c_write_and_compile(ctx: CCtx, c_path: Str, o_path: Str) {
+fn c_write_and_compile(ctx: CCtx, c_path: Str, o_path: Str) -> Bool {
     let text = assemble_c_file(ctx)
     write_file(c_path, text)
 
     let rc = exec_sync("clang", ["-std=c11", "-O2", "-c", c_path, "-o", o_path])
     if rc != 0 {
         eprintln("ring-c: clang failed (exit code ${rc}) compiling ${c_path} — is clang on PATH?")
-        exit_process(1)
+        false
     } else {
         print("Compiled: ${o_path}")
+        true
     }
 }
 
