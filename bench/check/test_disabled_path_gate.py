@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
+import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -372,6 +375,89 @@ class DisabledPathGateTests(unittest.TestCase):
             ],
         )
 
+    def test_execution_closure_git_materializations_are_identical_lf(self) -> None:
+        closure = (
+            "bench/check/manifest.json",
+            gate.HARNESS_PATH,
+            gate.WINDOWS_JOB_PATH,
+            gate.GATE_PATH,
+            gate.SCHEMA_PATH,
+        )
+        for path in closure:
+            attributes = subprocess.run(
+                [
+                    "git", "-C", str(gate.REPO_ROOT), "check-attr", "text", "eol",
+                    "--", path,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=True,
+            ).stdout
+            self.assertIn("text: set", attributes, path)
+            self.assertIn("eol: lf", attributes, path)
+
+        head = subprocess.run(
+            ["git", "-C", str(gate.REPO_ROOT), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="ascii",
+            check=True,
+        ).stdout.strip()
+        archive_data = subprocess.run(
+            [
+                "git", "-C", str(gate.REPO_ROOT), "archive", "--format=tar",
+                head, "--", *closure,
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
+        with tarfile.open(fileobj=io.BytesIO(archive_data), mode="r:") as archive:
+            archived = {}
+            for path in closure:
+                stream = archive.extractfile(path)
+                self.assertIsNotNone(stream, path)
+                assert stream is not None
+                archived[path] = stream.read()
+
+        with tempfile.TemporaryDirectory() as temp:
+            checkout = Path(temp) / "checkout"
+            subprocess.run(
+                [
+                    "git", "clone", "--quiet", "--shared", "--no-checkout",
+                    str(gate.REPO_ROOT), str(checkout),
+                ],
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(checkout), "config", "core.autocrlf", "true"],
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(checkout), "checkout", "--quiet", "--detach", head],
+                capture_output=True,
+                check=True,
+            )
+            for path in closure:
+                committed = subprocess.run(
+                    ["git", "-C", str(gate.REPO_ROOT), "show", f"{head}:{path}"],
+                    capture_output=True,
+                    check=True,
+                ).stdout
+                indexed = subprocess.run(
+                    ["git", "-C", str(gate.REPO_ROOT), "show", f":{path}"],
+                    capture_output=True,
+                    check=True,
+                ).stdout
+                working = (gate.REPO_ROOT / path).read_bytes()
+                checked_out = (checkout / path).read_bytes()
+                values = (committed, indexed, archived[path], working, checked_out)
+                self.assertEqual(len({harness._sha256_bytes(value) for value in values}), 1, path)
+                self.assertNotIn(b"\r\n", committed, path)
+
     def test_contract_blob_preflight_runs_before_archive_work(self) -> None:
         def committed(_repo: Path, _git: str, _commit: str, path: str) -> bytes:
             return (gate.REPO_ROOT / path).read_bytes()
@@ -480,14 +566,20 @@ class DisabledPathGateTests(unittest.TestCase):
             gate._require_archive_member_identity(
                 gate.REPO_ROOT, "git", "a" * 40, "candidate", inputs
             )
-            inputs[gate.GATE_PATH] = b"line\r\n"
-            with self.assertRaisesRegex(
-                gate.GateError, "archive member bytes differ from Git object"
+            for path in (
+                gate.GATE_PATH,
+                gate.SCHEMA_PATH,
+                gate.HARNESS_PATH,
+                gate.WINDOWS_JOB_PATH,
             ):
-                gate._require_archive_member_identity(
-                    gate.REPO_ROOT, "git", "a" * 40, "candidate", inputs
-                )
-            inputs[gate.GATE_PATH] = blob
+                changed = dict(inputs)
+                changed[path] = b"line\r\n"
+                with self.subTest(path=path), self.assertRaisesRegex(
+                    gate.GateError, "archive member bytes differ from Git object"
+                ):
+                    gate._require_archive_member_identity(
+                        gate.REPO_ROOT, "git", "a" * 40, "candidate", changed
+                    )
             del inputs[gate.STD_PATHS[0]]
             with self.assertRaisesRegex(
                 gate.GateError, "archive member bytes differ from Git object"
