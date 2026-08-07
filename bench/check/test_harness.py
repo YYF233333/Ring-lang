@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -53,8 +54,46 @@ class ManifestAndPolicyTests(unittest.TestCase):
         ):
             self.assertEqual(timed[field], control[field])
         self.assertTrue(timed["compiler_phase_timing"])
+        self.assertFalse(timed["runner_phase_timing"])
         self.assertFalse(control["compiler_phase_timing"])
+        self.assertFalse(control["runner_phase_timing"])
         self.assertEqual(control["phase_trace_paths"], [])
+
+        runner_ids = {
+            "filtered_e2e_bool_ops",
+            "suite_e2e",
+            "suite_golden",
+            "suite_rc",
+            "suite_structural",
+            "suite_parity",
+            "suite_self_compile",
+            "full_gate",
+        }
+        self.assertEqual(
+            {
+                lane["case_id"]
+                for lane in manifest["lanes"]
+                if lane["runner_phase_timing"]
+            },
+            runner_ids,
+        )
+        for lane in manifest["lanes"]:
+            self.assertFalse(
+                sum(
+                    lane[field]
+                    for field in (
+                        "compiler_phase_timing",
+                        "runner_phase_timing",
+                        "bootstrap_phase_timing",
+                    )
+                ) > 1
+            )
+            if lane["case_id"] in runner_ids:
+                self.assertEqual(
+                    lane["argv"][-1],
+                    f"--phase-timing={harness.RUNNER_TRACE_PATH}",
+                )
+                self.assertEqual(lane["phase_trace_paths"], [harness.RUNNER_TRACE_PATH])
 
     def test_formal_manifest_is_exact_byte_pinned(self) -> None:
         harness.validate_formal_manifest_bytes(harness.DEFAULT_MANIFEST)
@@ -94,6 +133,47 @@ class ManifestAndPolicyTests(unittest.TestCase):
                     harness.HarnessError, "formal manifest bytes differ"
                 ):
                     harness.validate_formal_manifest_bytes(path)
+
+    def test_manifest_rejects_ambiguous_or_unowned_phase_timing(self) -> None:
+        manifest = harness._load_json(harness.DEFAULT_MANIFEST)
+        ambiguous = json.loads(json.dumps(manifest))
+        runner_lane = next(
+            lane
+            for lane in ambiguous["lanes"]
+            if lane["case_id"] == "suite_parity"
+        )
+        runner_lane["compiler_phase_timing"] = True
+        with self.assertRaisesRegex(harness.HarnessError, "cannot enable"):
+            harness.validate_manifest(ambiguous)
+
+        unowned = json.loads(json.dumps(manifest))
+        runner_lane = next(
+            lane
+            for lane in unowned["lanes"]
+            if lane["case_id"] == "suite_parity"
+        )
+        runner_lane["runner_phase_timing"] = False
+        with self.assertRaisesRegex(harness.HarnessError, "exactly one timing mode"):
+            harness.validate_manifest(unowned)
+
+        arbitrary = json.loads(json.dumps(manifest))
+        lane = next(
+            lane for lane in arbitrary["lanes"] if lane["case_id"] == "hello_build"
+        )
+        lane["bootstrap_phase_timing"] = True
+        lane["phase_trace_paths"] = ["{sample_dir}/arbitrary.jsonl"]
+        with self.assertRaisesRegex(harness.HarnessError, "reserved"):
+            harness.validate_manifest(arbitrary)
+
+        drifted = json.loads(json.dumps(manifest))
+        lane = next(
+            lane
+            for lane in drifted["lanes"]
+            if lane["case_id"] == "tracked_bootstrap_build"
+        )
+        lane["artifacts"] = lane["artifacts"][:-1]
+        with self.assertRaisesRegex(harness.HarnessError, "recipe boundary"):
+            harness.validate_manifest(drifted)
 
     def test_explicit_ring_is_probe_only(self) -> None:
         with self.assertRaisesRegex(harness.HarnessError, "restricted to --probe"):
@@ -281,6 +361,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
                 "e2e",
                 "--filter",
                 "bool_ops.ring",
+                "--phase-timing={sample_dir}/runner-phase-timing.jsonl",
             ],
         )
         self.assertEqual(lane["runner_summary"]["expected_total"], 1)
@@ -1340,6 +1421,65 @@ class PhaseTimingTests(unittest.TestCase):
             )
         )
 
+    def test_explicit_trace_mode_selects_bootstrap_only_when_both_flags_are_false(self) -> None:
+        rows = [
+            {
+                "schema": harness.BOOTSTRAP_PHASE_SCHEMA,
+                "phase": phase,
+                "argv": ["tool", phase],
+                "wall_ns": 10,
+                "exit_code": 0,
+            }
+            for phase in harness.BOOTSTRAP_PHASE_ORDER
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            sample_dir = Path(temp).resolve()
+            path = sample_dir / "trace.jsonl"
+            wrappers = [
+                {
+                    "path": str(path),
+                    "line": index,
+                    "value": row,
+                    "read_error": None,
+                }
+                for index, row in enumerate(rows, 1)
+            ]
+            classified = harness._classify_phase_trace_records(
+                wrappers,
+                paths=[path],
+                sample_dir=sample_dir,
+                lane={
+                    "case_id": "bootstrap_cold",
+                    "compiler_phase_timing": False,
+                    "runner_phase_timing": False,
+                    "bootstrap_phase_timing": True,
+                },
+                environment={},
+                expected_entry_file="",
+                exit_code=0,
+                wall_ns=40,
+            )
+            self.assertEqual(phase_errors(classified), [])
+
+            implicit = harness._classify_phase_trace_records(
+                wrappers,
+                paths=[path],
+                sample_dir=sample_dir,
+                lane={
+                    "case_id": "bootstrap_cold",
+                    "compiler_phase_timing": False,
+                    "runner_phase_timing": False,
+                    "bootstrap_phase_timing": False,
+                },
+                environment={},
+                expected_entry_file="",
+                exit_code=0,
+                wall_ns=40,
+            )
+            self.assertTrue(
+                any("exactly one explicit" in error for error in implicit.hard_errors)
+            )
+
     def test_timing_is_hidden_opt_in_and_defaults_to_no_state(self) -> None:
         cli = (harness.REPO_ROOT / "compiler" / "cli.ring").read_text(encoding="utf-8")
         timing = (harness.REPO_ROOT / "compiler" / "phase_timing.ring").read_text(
@@ -1416,6 +1556,267 @@ class PhaseTimingTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, disabled)
+
+
+class RunnerPhaseTimingTests(unittest.TestCase):
+    @staticmethod
+    def _row(
+        sequence: int,
+        *,
+        suite: str | None,
+        case: str | None,
+        stage: str,
+        duration_ns: int,
+        executed: bool,
+        complete: bool,
+        outcome: str,
+        exit_code: int | None,
+        command_category: str | None,
+    ) -> dict:
+        return {
+            "schema": harness.RUNNER_PHASE_SCHEMA,
+            "version": 1,
+            "sequence": sequence,
+            "suite": suite,
+            "case": case,
+            "stage": stage,
+            "duration_ns": duration_ns,
+            "executed": executed,
+            "complete": complete,
+            "outcome": outcome,
+            "exit_code": exit_code,
+            "command_category": command_category,
+        }
+
+    def _e2e_rows(self) -> list[dict]:
+        rows = [
+            self._row(
+                1, suite=None, case="runner",
+                stage="compiler_anchor_compile", duration_ns=10,
+                executed=True, complete=True, outcome="success", exit_code=0,
+                command_category="clang",
+            ),
+            self._row(
+                2, suite=None, case="runner",
+                stage="compiler_runtime_compile", duration_ns=20,
+                executed=True, complete=True, outcome="success", exit_code=0,
+                command_category="clang",
+            ),
+            self._row(
+                3, suite=None, case="runner",
+                stage="compiler_link", duration_ns=30,
+                executed=True, complete=True, outcome="success", exit_code=0,
+                command_category="clang",
+            ),
+            self._row(
+                4, suite=None, case="runner", stage="runtime_prepare",
+                duration_ns=2, executed=False, complete=True, outcome="cached",
+                exit_code=None, command_category=None,
+            ),
+            # A non-zero child is a legal negative test event.  Only the final
+            # runner result determines whether the invocation succeeded.
+            self._row(
+                5, suite="e2e", case="negative/example.ring",
+                stage="ring_check", duration_ns=40, executed=True,
+                complete=True, outcome="nonzero", exit_code=1,
+                command_category="ring",
+            ),
+            self._row(
+                6, suite="e2e", case=None, stage="orchestration_residual",
+                duration_ns=8, executed=True, complete=True,
+                outcome="completed", exit_code=None, command_category=None,
+            ),
+            self._row(
+                7, suite="e2e", case=None, stage="suite_total",
+                duration_ns=48, executed=True, complete=True,
+                outcome="completed", exit_code=None, command_category=None,
+            ),
+            self._row(
+                8, suite=None, case="runner", stage="orchestration_residual",
+                duration_ns=3, executed=True, complete=True, outcome="success",
+                exit_code=0, command_category=None,
+            ),
+            self._row(
+                9, suite=None, case="runner", stage="runner_total",
+                duration_ns=113, executed=True, complete=True, outcome="success",
+                exit_code=0, command_category=None,
+            ),
+        ]
+        return rows
+
+    def _classify(self, rows: list[dict], *, wall_ns: int = 120) -> harness.PhaseValidation:
+        return harness._classify_runner_phase_rows(
+            rows,
+            expected_suites=("e2e",),
+            expected_exit_code=0,
+            wall_ns=wall_ns,
+        )
+
+    def _insert_early_runner_summary(self, *, pair: bool) -> list[dict]:
+        rows = self._e2e_rows()
+        early = [
+            self._row(
+                0, suite=None, case="runner", stage="orchestration_residual",
+                duration_ns=0, executed=True, complete=True, outcome="success",
+                exit_code=0, command_category=None,
+            )
+        ]
+        if pair:
+            early.append(
+                self._row(
+                    0, suite=None, case="runner", stage="runner_total",
+                    duration_ns=0, executed=True, complete=True, outcome="success",
+                    exit_code=0, command_category=None,
+                )
+            )
+        rows[4:4] = early
+        for sequence, row in enumerate(rows, 1):
+            row["sequence"] = sequence
+        return rows
+
+    def test_validator_schema_and_fields_match_runner_source(self) -> None:
+        runner = runpy.run_path(str(harness.REPO_ROOT / "tests" / "run_tests.py"))
+        self.assertEqual(runner["PHASE_TIMING_SCHEMA"], harness.RUNNER_PHASE_SCHEMA)
+        self.assertEqual(runner["PHASE_TIMING_FIELDS"], harness.RUNNER_PHASE_FIELDS)
+        self.assertEqual(len(harness.RUNNER_PHASE_FIELDS), 12)
+
+    def test_valid_runner_trace_and_negative_child_are_eligible(self) -> None:
+        classified = self._classify(self._e2e_rows())
+        self.assertEqual(classified.hard_errors, ())
+        self.assertEqual(classified.eligibility_errors, ())
+
+    def test_unknown_schema_or_extra_thirteenth_field_is_hard(self) -> None:
+        for name, mutate in (
+            (
+                "schema",
+                lambda rows: rows[0].__setitem__("schema", "unknown.runner.v1"),
+            ),
+            (
+                "field",
+                lambda rows: rows[0].__setitem__("unexpected_thirteenth", True),
+            ),
+        ):
+            rows = self._e2e_rows()
+            mutate(rows)
+            with self.subTest(name=name):
+                classified = self._classify(rows)
+                self.assertTrue(classified.hard_errors)
+
+    def test_non_string_or_unknown_stage_is_hard_without_classifier_exception(self) -> None:
+        for stage in ([], {}, "future_stage"):
+            rows = self._e2e_rows()
+            rows[4]["stage"] = stage
+            with self.subTest(stage=repr(stage)):
+                classified = self._classify(rows)
+                self.assertTrue(
+                    any("unknown stage" in error for error in classified.hard_errors)
+                )
+
+    def test_sequence_gap_is_hard(self) -> None:
+        rows = self._e2e_rows()
+        rows[4]["sequence"] = 6
+        self.assertTrue(
+            any("sequence" in error for error in self._classify(rows).hard_errors)
+        )
+
+    def test_early_runner_summary_pair_or_single_is_hard(self) -> None:
+        for pair in (True, False):
+            rows = self._insert_early_runner_summary(pair=pair)
+            with self.subTest(pair=pair):
+                classified = self._classify(rows)
+                self.assertTrue(
+                    any(
+                        "unique terminal" in error
+                        for error in classified.hard_errors
+                    )
+                )
+                with self.assertRaisesRegex(harness.HarnessError, "unique terminal"):
+                    harness._summarize_runner_phase_timing(
+                        [
+                            {
+                                "included": True,
+                                "wall_ns": 120,
+                                "phase_traces": [
+                                    {
+                                        "path": "runner.jsonl",
+                                        "line": index,
+                                        "value": row,
+                                        "read_error": None,
+                                    }
+                                    for index, row in enumerate(rows, 1)
+                                ],
+                            }
+                        ]
+                    )
+
+    def test_missing_incomplete_and_accounting_are_eligibility_failures(self) -> None:
+        rows = self._e2e_rows()[:-1]
+        classified = self._classify(rows)
+        self.assertFalse(classified.hard_errors)
+        self.assertTrue(
+            any("missing its final" in error for error in classified.eligibility_errors)
+        )
+
+        rows = self._e2e_rows()
+        rows[4].update(
+            complete=False, outcome="timeout", exit_code=None
+        )
+        classified = self._classify(rows)
+        self.assertFalse(classified.hard_errors)
+        self.assertTrue(
+            any("incomplete" in error for error in classified.eligibility_errors)
+        )
+
+        rows = self._e2e_rows()
+        rows[6]["duration_ns"] += 1
+        classified = self._classify(rows)
+        self.assertFalse(classified.hard_errors)
+        self.assertTrue(
+            any("accounting mismatch" in error for error in classified.eligibility_errors)
+        )
+
+    def test_runner_total_must_fit_job_wall(self) -> None:
+        classified = self._classify(self._e2e_rows(), wall_ns=112)
+        self.assertTrue(
+            any("exceeds job wall" in error for error in classified.eligibility_errors)
+        )
+
+    def test_runner_summary_is_per_lane_and_retains_accounting_axes(self) -> None:
+        rows = self._e2e_rows()
+        record = {
+            "included": True,
+            "wall_ns": 120,
+            "phase_traces": [
+                {
+                    "path": "runner.jsonl",
+                    "line": index,
+                    "value": row,
+                    "read_error": None,
+                }
+                for index, row in enumerate(rows, 1)
+            ],
+        }
+        summary = harness._summarize_runner_phase_timing([record])
+        assert summary is not None
+        self.assertEqual(summary["sample_count"], 1)
+        self.assertEqual(summary["compiler_construction"]["duration_ns"]["median"], 60)
+        self.assertEqual(summary["runner_total_ns"]["median"], 113)
+        self.assertEqual(summary["outside_runner_wall_ns"]["median"], 7)
+        self.assertEqual(
+            summary["accounting"]["suites"]["e2e"]["balance_ns"]["median"],
+            0,
+        )
+        self.assertEqual(
+            summary["accounting"]["runner"]["balance_ns"]["median"], 0
+        )
+        self.assertTrue(
+            any(
+                item["stage"] == "ring_check"
+                and item["command_category"] == "ring"
+                and item["suite"] == "e2e"
+                for item in summary["stage_category_suite"]
+            )
+        )
 
 
 _PHASE_TEST_COMPILER = os.environ.get("RING_PHASE_TEST_COMPILER", "")

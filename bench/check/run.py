@@ -28,11 +28,12 @@ BENCH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BENCH_DIR.parents[1]
 DEFAULT_MANIFEST = BENCH_DIR / "manifest.json"
 DEFAULT_RESULT_SCHEMA = BENCH_DIR / "result.schema.json"
-MANIFEST_SCHEMA = "ring.check-benchmark.manifest.v3"
+MANIFEST_SCHEMA = "ring.check-benchmark.manifest.v4"
 RESULT_SCHEMA = "ring.check-benchmark.invocation.v3"
 ENVIRONMENT_SCHEMA = "ring.check-benchmark.environment.v2"
 SUMMARY_SCHEMA = "ring.check-benchmark.summary.v1"
 COMPILER_PHASE_SCHEMA = "ring.compiler-phase-timing.v1"
+RUNNER_PHASE_SCHEMA = "ring.test-runner-phase.v1"
 BOOTSTRAP_PHASE_SCHEMA = "ring.check-benchmark.bootstrap-phase.v1"
 RUNNER_SUMMARY_CONTRACT_SCHEMA = "ring.check-benchmark.runner-summary-contract.v2"
 WARM_CACHE_RECEIPT_SCHEMA = "ring.check-benchmark.warm-cache-seed.v2"
@@ -41,7 +42,7 @@ WARM_CACHE_RECEIPT_SCHEMA = "ring.check-benchmark.warm-cache-seed.v2"
 RESULT_SCHEMA_CANONICAL_SHA256 = "79fec93925e6cc703b89a55e0162a20ab4a81654b2930e9e659a8dfa7d0b055e"
 # Formal runs and the baseline combiner accept only these exact checked-in
 # manifest bytes.  The value is updated mechanically with manifest.json.
-CANONICAL_MANIFEST_SHA256 = "68e96b4758ba847f9dcf5001ed2212b762a3ed93a65d3777745f9bfea794e129"
+CANONICAL_MANIFEST_SHA256 = "c1e179aec7d9d43ee2c9a2bc200a2b2bd1602bb31963d76f493b0cec9b3aebc2"
 COMPILER_PHASE_ORDER = (
     "input_entry_load",
     "entry_parse",
@@ -51,6 +52,79 @@ COMPILER_PHASE_ORDER = (
     "command_total",
 )
 BOOTSTRAP_PHASE_ORDER = ("anchor_compile", "runtime_compile", "link")
+BOOTSTRAP_TRACE_PATH = "{sample_dir}/bootstrap/phase-trace.jsonl"
+BOOTSTRAP_ARGV = (
+    "{python}",
+    "{repo}/bench/check/bootstrap.py",
+    "--repo",
+    "{repo}",
+    "--output-dir",
+    "{sample_dir}/bootstrap",
+    "--clang",
+    "{clang}",
+    "--clangxx",
+    "{clangxx}",
+    "--lld-link",
+    "{lld_link}",
+    "--cache",
+    "{thinlto_cache}",
+)
+BOOTSTRAP_REQUIRES = (
+    "tool:python",
+    "tool:clang",
+    "tool:clangxx",
+    "tool:lld_link",
+    "path:{repo}/bench/check/bootstrap.py",
+    "path:{repo}/compiler/dist-c/main.c",
+    "path:{repo}/ring_runtime.cpp",
+)
+BOOTSTRAP_ARTIFACTS = (
+    "{sample_dir}/bootstrap/ring_compiler_lto.o",
+    "{sample_dir}/bootstrap/ring_runtime_lto.o",
+    "{sample_dir}/bootstrap/ring.exe",
+    "{sample_dir}/bootstrap/linker-binding.json",
+    "{sample_dir}/bootstrap/linker-probe.stdout.txt",
+    "{sample_dir}/bootstrap/linker-probe.stderr.txt",
+    BOOTSTRAP_TRACE_PATH,
+)
+RUNNER_PHASE_FIELDS = frozenset({
+    "schema",
+    "version",
+    "sequence",
+    "suite",
+    "case",
+    "stage",
+    "duration_ns",
+    "executed",
+    "complete",
+    "outcome",
+    "exit_code",
+    "command_category",
+})
+RUNNER_SUITES = (
+    "e2e",
+    "golden",
+    "rc",
+    "self-compile",
+    "structural",
+    "parity",
+)
+RUNNER_COMPILER_SUITES = frozenset(
+    {"e2e", "golden", "rc", "self-compile", "structural"}
+)
+RUNNER_RUNTIME_SUITES = frozenset({"e2e", "golden"})
+RUNNER_COMPILER_STAGES = (
+    "compiler_anchor_compile",
+    "compiler_runtime_compile",
+    "compiler_link",
+)
+RUNNER_CHILD_STAGE_CATEGORY = {
+    "ring_build": "ring",
+    "ring_check": "ring",
+    "clang_link": "clang",
+    "run_exe": "generated-program",
+}
+RUNNER_TRACE_PATH = "{sample_dir}/runner-phase-timing.jsonl"
 RING_INT_MAX = (1 << 62) - 1
 ALLOWED_POLICIES = {"direct_short", "adaptive", "full_gate"}
 ALLOWED_CACHE_STATES = {"cold", "warm"}
@@ -347,6 +421,48 @@ def _validate_runner_summary_contract(
         )
 
 
+def _runner_suites_from_argv(argv: Sequence[str], prefix: str) -> tuple[str, ...]:
+    """Return the exact suite order selected by a test-runner invocation."""
+
+    if len(argv) < 2 or list(argv[:2]) != [
+        "{python}",
+        "{repo}/tests/run_tests.py",
+    ]:
+        raise HarnessError(
+            f"{prefix} requires the canonical Python test-runner argv prefix"
+        )
+    suites: list[str] = []
+    index = 2
+    phase_flags = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--suite":
+            if index + 1 >= len(argv) or argv[index + 1] not in RUNNER_SUITES:
+                raise HarnessError(f"{prefix} has an invalid --suite argument")
+            suites.append(argv[index + 1])
+            index += 2
+            continue
+        if argument == "--filter":
+            if index + 1 >= len(argv) or not argv[index + 1]:
+                raise HarnessError(f"{prefix} has an invalid --filter argument")
+            index += 2
+            continue
+        if argument == f"--phase-timing={RUNNER_TRACE_PATH}":
+            phase_flags += 1
+            index += 1
+            continue
+        raise HarnessError(f"{prefix} has unsupported runner argument {argument!r}")
+    selected = tuple(suites) if suites else RUNNER_SUITES
+    if len(selected) != len(set(selected)):
+        raise HarnessError(f"{prefix} selects a runner suite more than once")
+    canonical = tuple(suite for suite in RUNNER_SUITES if suite in selected)
+    if selected != canonical:
+        raise HarnessError(f"{prefix} runner suites must use canonical order")
+    if phase_flags != 1:
+        raise HarnessError(f"{prefix} requires exactly one owned --phase-timing flag")
+    return selected
+
+
 def validate_manifest(manifest: Mapping[str, Any]) -> None:
     if manifest.get("schema") != MANIFEST_SCHEMA:
         raise HarnessError(f"manifest schema must be {MANIFEST_SCHEMA!r}")
@@ -378,6 +494,9 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             "expected_exit_codes",
             "requires",
             "runner_summary",
+            "compiler_phase_timing",
+            "runner_phase_timing",
+            "bootstrap_phase_timing",
             "artifacts",
             "phase_trace_paths",
         }
@@ -422,10 +541,24 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             lane["isolate_runner_runtime"], bool
         ):
             raise HarnessError(f"{prefix}.isolate_runner_runtime must be boolean")
-        if "compiler_phase_timing" in lane and not isinstance(
-            lane["compiler_phase_timing"], bool
-        ):
+        if not isinstance(lane["compiler_phase_timing"], bool):
             raise HarnessError(f"{prefix}.compiler_phase_timing must be boolean")
+        if not isinstance(lane["runner_phase_timing"], bool):
+            raise HarnessError(f"{prefix}.runner_phase_timing must be boolean")
+        if not isinstance(lane["bootstrap_phase_timing"], bool):
+            raise HarnessError(f"{prefix}.bootstrap_phase_timing must be boolean")
+        timing_modes = sum(
+            lane[field]
+            for field in (
+                "compiler_phase_timing",
+                "runner_phase_timing",
+                "bootstrap_phase_timing",
+            )
+        )
+        if timing_modes > 1:
+            raise HarnessError(
+                f"{prefix} cannot enable more than one phase timing mode"
+            )
         for field in ("artifacts", "phase_trace_paths"):
             if not isinstance(lane[field], list) or not all(
                 isinstance(item, str) for item in lane[field]
@@ -449,7 +582,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
                 raise HarnessError(
                     f"{prefix}: phase trace paths may use only {{sample_dir}}"
                 )
-        if lane.get("compiler_phase_timing", False):
+        if lane["phase_trace_paths"] and timing_modes != 1:
+            raise HarnessError(
+                f"{prefix} must enable exactly one timing mode for a phase trace"
+            )
+        if not lane["phase_trace_paths"] and timing_modes != 0:
+            raise HarnessError(
+                f"{prefix} cannot enable phase timing without a declared trace"
+            )
+        if lane["compiler_phase_timing"]:
             if (
                 len(lane["argv"]) < 3
                 or lane["argv"][0] != "{ring}"
@@ -494,6 +635,49 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             raise HarnessError(
                 f"{prefix}.expected_executed_phases requires compiler_phase_timing"
             )
+        if lane["runner_phase_timing"]:
+            if lane["runner_summary"] is None:
+                raise HarnessError(
+                    f"{prefix}.runner_phase_timing requires a runner_summary contract"
+                )
+            if lane["phase_trace_paths"] != [RUNNER_TRACE_PATH]:
+                raise HarnessError(
+                    f"{prefix}.runner_phase_timing requires the canonical trace path"
+                )
+            selected_suites = _runner_suites_from_argv(
+                lane["argv"], f"{prefix}.runner_phase_timing"
+            )
+            if tuple(lane["runner_summary"]["expected_suite_counts"]) != selected_suites:
+                raise HarnessError(
+                    f"{prefix}.runner_summary suites disagree with runner argv"
+                )
+        elif any(
+            argument.startswith("--phase-timing") for argument in lane["argv"]
+        ):
+            raise HarnessError(
+                f"{prefix}: runner phase timing flag requires runner_phase_timing"
+            )
+        if lane["bootstrap_phase_timing"]:
+            if lane["case_id"] != "tracked_bootstrap_build":
+                raise HarnessError(
+                    f"{prefix}.bootstrap_phase_timing is reserved for tracked_bootstrap_build"
+                )
+            expected = {
+                "argv": list(BOOTSTRAP_ARGV),
+                "cwd": "{repo}",
+                "policy": "adaptive",
+                "timeout_seconds": 600,
+                "expected_exit_codes": [0],
+                "requires": list(BOOTSTRAP_REQUIRES),
+                "runner_summary": None,
+                "artifacts": list(BOOTSTRAP_ARTIFACTS),
+                "phase_trace_paths": [BOOTSTRAP_TRACE_PATH],
+            }
+            drifted = [field for field, value in expected.items() if lane[field] != value]
+            if drifted:
+                raise HarnessError(
+                    f"{prefix} bootstrap recipe boundary differs in {drifted}"
+                )
 
 
 def expand_lanes(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -511,6 +695,8 @@ def expand_lanes(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
             }
             lane.setdefault("isolate_runner_runtime", False)
             lane.setdefault("compiler_phase_timing", False)
+            lane.setdefault("runner_phase_timing", False)
+            lane.setdefault("bootstrap_phase_timing", False)
             expanded.append(lane)
     return expanded
 
@@ -1879,6 +2065,376 @@ def _classify_compiler_phase_rows(
     return PhaseValidation(tuple(hard), tuple(eligibility))
 
 
+def _runner_expected_setup_stages(suites: Sequence[str]) -> tuple[str, ...]:
+    stages: list[str] = []
+    if any(suite in RUNNER_COMPILER_SUITES for suite in suites):
+        stages.extend(RUNNER_COMPILER_STAGES)
+    if any(suite in RUNNER_RUNTIME_SUITES for suite in suites):
+        stages.append("runtime_prepare")
+    return tuple(stages)
+
+
+def _runner_subprocess_outcome_is_valid(row: Mapping[str, Any]) -> bool:
+    outcome = row["outcome"]
+    executed = row["executed"]
+    complete = row["complete"]
+    exit_code = row["exit_code"]
+    if outcome == "success":
+        return executed is True and complete is True and exit_code == 0
+    if outcome == "nonzero":
+        return (
+            executed is True
+            and complete is True
+            and _is_trace_int(exit_code)
+            and exit_code != 0
+        )
+    if outcome in {"timeout", "exception"}:
+        return executed is True and complete is False and exit_code is None
+    if outcome == "spawn-error":
+        return executed is False and complete is False and exit_code is None
+    return False
+
+
+def _runner_summary_outcome_is_valid(
+    row: Mapping[str, Any], *, runner: bool
+) -> bool:
+    outcome = row["outcome"]
+    executed = row["executed"]
+    complete = row["complete"]
+    exit_code = row["exit_code"]
+    if executed is not True:
+        return False
+    if runner:
+        if outcome == "success":
+            return complete is True and exit_code == 0
+        if outcome == "failure":
+            return (
+                complete is True
+                and _is_trace_int(exit_code)
+                and exit_code != 0
+            )
+        if outcome == "nonzero":
+            return (
+                complete is False
+                and _is_trace_int(exit_code)
+                and exit_code != 0
+            )
+        if outcome in {"timeout", "exception", "interrupted"}:
+            return complete is False and exit_code is None
+        return False
+    if outcome == "completed":
+        return complete is True and exit_code is None
+    if outcome == "nonzero":
+        return (
+            complete is False
+            and _is_trace_int(exit_code)
+            and exit_code != 0
+        )
+    if outcome in {"timeout", "exception"}:
+        return complete is False and exit_code is None
+    return False
+
+
+def _classify_runner_phase_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    expected_suites: Sequence[str],
+    expected_exit_code: int | None,
+    wall_ns: int | None,
+) -> PhaseValidation:
+    """Validate one test-runner trace without treating negative children as failure."""
+
+    hard: list[str] = []
+    eligibility: list[str] = []
+    expected_suite_tuple = tuple(expected_suites)
+    expected_suite_set = set(expected_suite_tuple)
+    allowed_stages = {
+        *RUNNER_COMPILER_STAGES,
+        "runtime_prepare",
+        *RUNNER_CHILD_STAGE_CATEGORY,
+        "orchestration_residual",
+        "suite_total",
+        "runner_total",
+    }
+    valid_rows: list[Mapping[str, Any]] = []
+    for index, row in enumerate(rows, 1):
+        prefix = f"runner phase row {index}"
+        if set(row) != RUNNER_PHASE_FIELDS:
+            hard.append(
+                f"{prefix} fields differ: "
+                f"missing={sorted(RUNNER_PHASE_FIELDS - set(row))}, "
+                f"unknown={sorted(set(row) - RUNNER_PHASE_FIELDS)}"
+            )
+            continue
+        topology_safe = True
+        if row["schema"] != RUNNER_PHASE_SCHEMA or row["version"] != 1 or not (
+            _is_trace_int(row["version"])
+        ):
+            hard.append(f"{prefix} has unsupported schema/version")
+        if not _is_trace_int(row["sequence"]) or row["sequence"] < 1:
+            hard.append(f"{prefix} sequence must be a positive integer")
+        suite = row["suite"]
+        if suite is not None and (not isinstance(suite, str) or not suite):
+            hard.append(f"{prefix} suite must be null or a non-empty string")
+            topology_safe = False
+        elif isinstance(suite, str) and suite not in expected_suite_set:
+            hard.append(f"{prefix} suite {suite!r} is not selected by this lane")
+        case = row["case"]
+        if case is not None and (not isinstance(case, str) or not case):
+            hard.append(f"{prefix} case must be null or a non-empty string")
+            topology_safe = False
+        stage = row["stage"]
+        if not isinstance(stage, str) or stage not in allowed_stages:
+            hard.append(f"{prefix} has unknown stage {stage!r}")
+            topology_safe = False
+        duration = row["duration_ns"]
+        if not _is_trace_int(duration) or duration < 0:
+            hard.append(f"{prefix} duration_ns must be a non-negative integer")
+        if not isinstance(row["executed"], bool):
+            hard.append(f"{prefix} executed must be boolean")
+        if not isinstance(row["complete"], bool):
+            hard.append(f"{prefix} complete must be boolean")
+        elif row["complete"] is False:
+            eligibility.append(f"{prefix} is incomplete")
+        if not isinstance(row["outcome"], str) or not row["outcome"]:
+            hard.append(f"{prefix} outcome must be a non-empty string")
+        if row["exit_code"] is not None and not _is_trace_int(row["exit_code"]):
+            hard.append(f"{prefix} exit_code must be null or an integer")
+        category = row["command_category"]
+        if category is not None and (
+            not isinstance(category, str)
+            or category not in {"ring", "clang", "generated-program"}
+        ):
+            hard.append(f"{prefix} has unknown command_category {category!r}")
+            topology_safe = False
+
+        if not topology_safe:
+            continue
+        valid_rows.append(row)
+
+        is_setup = stage in {*RUNNER_COMPILER_STAGES, "runtime_prepare"}
+        is_child = stage in RUNNER_CHILD_STAGE_CATEGORY
+        is_suite_summary = stage in {"orchestration_residual", "suite_total"} and (
+            isinstance(suite, str)
+        )
+        is_runner_summary = (
+            stage in {"orchestration_residual", "runner_total"}
+            and suite is None
+            and case == "runner"
+        )
+        if is_setup:
+            if suite is not None or case != "runner":
+                hard.append(f"{prefix} compiler construction must be runner-scoped")
+            if stage == "runtime_prepare" and category is None:
+                if (
+                    row["outcome"] == "cached"
+                    and row["executed"] is False
+                    and row["complete"] is True
+                    and row["exit_code"] is None
+                ):
+                    pass
+                elif (
+                    row["outcome"] == "missing-input"
+                    and row["executed"] is False
+                    and row["complete"] is False
+                    and row["exit_code"] is None
+                ):
+                    pass
+                else:
+                    hard.append(f"{prefix} has an invalid cached-runtime combination")
+            elif category != "clang" or not _runner_subprocess_outcome_is_valid(row):
+                hard.append(f"{prefix} has an invalid compiler-stage combination")
+        elif is_child:
+            if (
+                not isinstance(suite, str)
+                or suite not in expected_suite_set
+                or not isinstance(case, str)
+                or not case
+                or category != RUNNER_CHILD_STAGE_CATEGORY[stage]
+                or not _runner_subprocess_outcome_is_valid(row)
+            ):
+                hard.append(f"{prefix} has an invalid suite-child combination")
+        elif is_suite_summary:
+            if case is not None or category is not None or not (
+                _runner_summary_outcome_is_valid(row, runner=False)
+            ):
+                hard.append(f"{prefix} has an invalid suite-summary combination")
+        elif is_runner_summary:
+            if category is not None or not _runner_summary_outcome_is_valid(
+                row, runner=True
+            ):
+                hard.append(f"{prefix} has an invalid runner-summary combination")
+        else:
+            hard.append(f"{prefix} stage/suite/case combination is invalid")
+
+    if not valid_rows:
+        eligibility.append("runner phase trace has no valid rows")
+        return PhaseValidation(tuple(hard), tuple(eligibility))
+
+    sequences = [row["sequence"] for row in valid_rows]
+    if all(_is_trace_int(sequence) for sequence in sequences) and sequences != list(
+        range(1, len(valid_rows) + 1)
+    ):
+        hard.append(
+            "runner phase sequence must be unique and contiguous from 1"
+        )
+
+    final_pair_complete = (
+        len(valid_rows) >= 2
+        and valid_rows[-2]["stage"] == "orchestration_residual"
+        and valid_rows[-2]["suite"] is None
+        and valid_rows[-2]["case"] == "runner"
+        and valid_rows[-1]["stage"] == "runner_total"
+        and valid_rows[-1]["suite"] is None
+        and valid_rows[-1]["case"] == "runner"
+    )
+    if not final_pair_complete:
+        eligibility.append("runner phase trace is missing its final residual/total")
+        trailing_partial = (
+            valid_rows[-1]["suite"] is None
+            and valid_rows[-1]["case"] == "runner"
+            and valid_rows[-1]["stage"]
+            in {"orchestration_residual", "runner_total"}
+        )
+        body = valid_rows[:-1] if trailing_partial else valid_rows
+        final_pair: Sequence[Mapping[str, Any]] = ()
+    else:
+        body = valid_rows[:-2]
+        final_pair = valid_rows[-2:]
+        if any(
+            row[key] != final_pair[1][key]
+            for row in final_pair[:1]
+            for key in ("complete", "outcome", "exit_code")
+        ):
+            hard.append("runner residual/total outcome fields disagree")
+        if any(row["exit_code"] != expected_exit_code for row in final_pair):
+            eligibility.append("runner trace exit code disagrees with the job exit")
+
+    early_runner_summaries = [
+        row
+        for row in body
+        if row["suite"] is None
+        and row["case"] == "runner"
+        and row["stage"] in {"orchestration_residual", "runner_total"}
+    ]
+    if early_runner_summaries:
+        hard.append("runner summary must be one unique terminal residual/total pair")
+
+    setup_stage_set = {*RUNNER_COMPILER_STAGES, "runtime_prepare"}
+    setup_rows = [
+        row
+        for row in body
+        if row["suite"] is None and row["stage"] in setup_stage_set
+    ]
+    suite_rows = [row for row in body if row["suite"] is not None]
+    if suite_rows:
+        first_suite = body.index(suite_rows[0])
+        if any(
+            row["suite"] is None and row["stage"] in setup_stage_set
+            for row in body[first_suite:]
+        ):
+            hard.append("runner setup stages must precede every suite")
+    expected_setup = _runner_expected_setup_stages(expected_suite_tuple)
+    actual_setup = tuple(row["stage"] for row in setup_rows)
+    if actual_setup != expected_setup:
+        if actual_setup == expected_setup[: len(actual_setup)]:
+            eligibility.append(
+                f"runner setup stages are incomplete: expected {list(expected_setup)}, "
+                f"got {list(actual_setup)}"
+            )
+        else:
+            hard.append(
+                f"runner setup stage order/coverage mismatch: expected "
+                f"{list(expected_setup)}, got {list(actual_setup)}"
+            )
+
+    actual_suite_order: list[str] = []
+    for row in suite_rows:
+        suite = row["suite"]
+        if not isinstance(suite, str):
+            continue
+        if not actual_suite_order or actual_suite_order[-1] != suite:
+            actual_suite_order.append(suite)
+    if tuple(actual_suite_order) != expected_suite_tuple:
+        if tuple(actual_suite_order) == expected_suite_tuple[: len(actual_suite_order)]:
+            eligibility.append(
+                f"runner suites are incomplete: expected {list(expected_suite_tuple)}, "
+                f"got {actual_suite_order}"
+            )
+        else:
+            hard.append(
+                f"runner suite order/coverage mismatch: expected "
+                f"{list(expected_suite_tuple)}, got {actual_suite_order}"
+            )
+
+    suite_totals: list[int] = []
+    accounting_available = True
+    for suite in actual_suite_order:
+        group = [row for row in suite_rows if row["suite"] == suite]
+        has_tail = (
+            len(group) >= 2
+            and group[-2]["stage"] == "orchestration_residual"
+            and group[-1]["stage"] == "suite_total"
+        )
+        if not has_tail:
+            eligibility.append(
+                f"runner suite {suite} is missing its residual/total"
+            )
+            accounting_available = False
+            continue
+        if any(
+            row["stage"] in {"orchestration_residual", "suite_total", "runner_total"}
+            for row in group[:-2]
+        ):
+            hard.append(f"runner suite {suite} has a misplaced summary stage")
+        residual, total = group[-2:]
+        if any(
+            residual[key] != total[key]
+            for key in ("complete", "outcome", "exit_code")
+        ):
+            hard.append(f"runner suite {suite} residual/total outcome fields disagree")
+        durations = [row["duration_ns"] for row in group]
+        if all(_is_trace_int(value) and value >= 0 for value in durations):
+            child_sum = sum(row["duration_ns"] for row in group[:-2])
+            accounted = child_sum + residual["duration_ns"]
+            if accounted != total["duration_ns"]:
+                eligibility.append(
+                    f"runner suite {suite} accounting mismatch: "
+                    f"children+residual={accounted}, total={total['duration_ns']}"
+                )
+            suite_totals.append(total["duration_ns"])
+        else:
+            accounting_available = False
+
+    if final_pair:
+        residual, total = final_pair
+        setup_durations = [row["duration_ns"] for row in setup_rows]
+        if (
+            accounting_available
+            and len(suite_totals) == len(actual_suite_order)
+            and all(
+                _is_trace_int(value) and value >= 0
+                for value in [*setup_durations, residual["duration_ns"], total["duration_ns"]]
+            )
+        ):
+            accounted = sum(setup_durations) + sum(suite_totals) + residual["duration_ns"]
+            if accounted != total["duration_ns"]:
+                eligibility.append(
+                    f"runner accounting mismatch: stages+suites+residual={accounted}, "
+                    f"total={total['duration_ns']}"
+                )
+        else:
+            eligibility.append("runner accounting is unavailable")
+        runner_total = total["duration_ns"]
+        if wall_ns is None or not _is_trace_int(wall_ns):
+            eligibility.append("job wall time is unavailable for runner phase validation")
+        elif _is_trace_int(runner_total) and runner_total > wall_ns:
+            eligibility.append(
+                f"runner total {runner_total} exceeds job wall time {wall_ns}"
+            )
+    return PhaseValidation(tuple(hard), tuple(eligibility))
+
+
 def _classify_bootstrap_phase_rows(
     rows: Sequence[Mapping[str, Any]], *, wall_ns: int | None
 ) -> PhaseValidation:
@@ -1960,7 +2516,29 @@ def _classify_phase_trace_records(
         grouped[path].append(record)
 
     compiler_expected = lane.get("compiler_phase_timing", False)
-    expected_schema = COMPILER_PHASE_SCHEMA if compiler_expected else BOOTSTRAP_PHASE_SCHEMA
+    runner_expected = lane.get("runner_phase_timing", False)
+    bootstrap_expected = lane.get("bootstrap_phase_timing", False)
+    timing_modes = sum(
+        value is True
+        for value in (compiler_expected, runner_expected, bootstrap_expected)
+    )
+    if timing_modes > 1:
+        hard.append("phase timing modes must be mutually exclusive")
+        return PhaseValidation(tuple(hard), tuple(eligibility))
+    if paths and timing_modes != 1:
+        hard.append("declared phase trace requires exactly one explicit timing mode")
+        return PhaseValidation(tuple(hard), tuple(eligibility))
+    if not paths and timing_modes != 0:
+        hard.append("enabled phase timing mode has no declared trace path")
+        return PhaseValidation(tuple(hard), tuple(eligibility))
+    if compiler_expected:
+        expected_schema = COMPILER_PHASE_SCHEMA
+    elif runner_expected:
+        expected_schema = RUNNER_PHASE_SCHEMA
+    elif bootstrap_expected:
+        expected_schema = BOOTSTRAP_PHASE_SCHEMA
+    else:
+        return PhaseValidation(tuple(hard), tuple(eligibility))
     for path, wrappers in grouped.items():
         if not wrappers:
             eligibility.append(f"phase trace {path} has no rows")
@@ -2031,6 +2609,22 @@ def _classify_phase_trace_records(
                     expected_executed_phases=lane["expected_executed_phases"],
                     wall_ns=wall_ns,
                 )
+            hard.extend(classified.hard_errors)
+            eligibility.extend(classified.eligibility_errors)
+        elif runner_expected:
+            try:
+                selected_suites = _runner_suites_from_argv(
+                    lane["argv"], f"runner lane {lane['case_id']}"
+                )
+            except (HarnessError, KeyError) as exc:
+                hard.append(str(exc))
+                continue
+            classified = _classify_runner_phase_rows(
+                rows,
+                expected_suites=selected_suites,
+                expected_exit_code=exit_code,
+                wall_ns=wall_ns,
+            )
             hard.extend(classified.hard_errors)
             eligibility.extend(classified.eligibility_errors)
         else:
@@ -2792,6 +3386,186 @@ def _summarize_compiler_phase_timing(
     }
 
 
+def _runner_rows_for_record(record: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    rows = [
+        item["value"]
+        for item in record.get("phase_traces", [])
+        if isinstance(item.get("value"), dict)
+        and item["value"].get("schema") == RUNNER_PHASE_SCHEMA
+    ]
+    return sorted(rows, key=lambda row: row["sequence"])
+
+
+def _runner_terminal_pair(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    if (
+        len(rows) < 2
+        or rows[-2]["stage"] != "orchestration_residual"
+        or rows[-2]["suite"] is not None
+        or rows[-2]["case"] != "runner"
+        or rows[-1]["stage"] != "runner_total"
+        or rows[-1]["suite"] is not None
+        or rows[-1]["case"] != "runner"
+        or any(
+            row["suite"] is None
+            and row["case"] == "runner"
+            and row["stage"] in {"orchestration_residual", "runner_total"}
+            for row in rows[:-2]
+        )
+    ):
+        raise HarnessError(
+            "runner summary requires one unique terminal residual/total pair"
+        )
+    return rows[-2], rows[-1]
+
+
+def _summarize_runner_phase_timing(
+    records: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    samples = [
+        (record, rows)
+        for record in records
+        if (rows := _runner_rows_for_record(record))
+    ]
+    if not samples:
+        return None
+
+    keys = sorted(
+        {
+            (row["stage"], row["command_category"], row["suite"])
+            for _record, rows in samples
+            for row in rows
+        },
+        key=lambda key: (
+            key[2] is not None,
+            key[2] or "",
+            key[1] or "",
+            key[0],
+        ),
+    )
+    stage_category_suite: list[dict[str, Any]] = []
+    for stage, category, suite in keys:
+        duration_values: list[int] = []
+        event_counts: list[int] = []
+        for _record, rows in samples:
+            matched = [
+                row
+                for row in rows
+                if (
+                    row["stage"],
+                    row["command_category"],
+                    row["suite"],
+                )
+                == (stage, category, suite)
+            ]
+            if matched:
+                duration_values.append(sum(row["duration_ns"] for row in matched))
+                event_counts.append(len(matched))
+        stage_category_suite.append(
+            {
+                "stage": stage,
+                "command_category": category,
+                "suite": suite,
+                "sample_count": len(duration_values),
+                "event_count": _metric_stats(event_counts),
+                "duration_ns": _metric_stats(duration_values),
+            }
+        )
+
+    compiler_construction: list[int] = []
+    runner_totals: list[int] = []
+    outside_runner_wall: list[int] = []
+    runner_setup_sums: list[int] = []
+    runner_suite_sums: list[int] = []
+    runner_residuals: list[int] = []
+    runner_accounted: list[int] = []
+    runner_balances: list[int] = []
+    suite_accounting: dict[str, dict[str, list[int]]] = {}
+    for record, rows in samples:
+        compiler_construction.append(
+            sum(
+                row["duration_ns"]
+                for row in rows
+                if row["suite"] is None and row["stage"] in RUNNER_COMPILER_STAGES
+            )
+        )
+        runner_residual, runner_total = _runner_terminal_pair(rows)
+        suite_names: list[str] = []
+        for row in rows:
+            suite = row["suite"]
+            if isinstance(suite, str) and suite not in suite_names:
+                suite_names.append(suite)
+        suite_total_sum = 0
+        for suite in suite_names:
+            group = [row for row in rows if row["suite"] == suite]
+            residual = group[-2]
+            total = group[-1]
+            child_sum = sum(row["duration_ns"] for row in group[:-2])
+            accounted = child_sum + residual["duration_ns"]
+            values = suite_accounting.setdefault(
+                suite,
+                {
+                    "child_stage_sum_ns": [],
+                    "orchestration_residual_ns": [],
+                    "accounted_ns": [],
+                    "suite_total_ns": [],
+                    "balance_ns": [],
+                },
+            )
+            values["child_stage_sum_ns"].append(child_sum)
+            values["orchestration_residual_ns"].append(residual["duration_ns"])
+            values["accounted_ns"].append(accounted)
+            values["suite_total_ns"].append(total["duration_ns"])
+            values["balance_ns"].append(total["duration_ns"] - accounted)
+            suite_total_sum += total["duration_ns"]
+        setup_sum = sum(
+            row["duration_ns"]
+            for row in rows
+            if row["suite"] is None
+            and row["stage"] in {*RUNNER_COMPILER_STAGES, "runtime_prepare"}
+        )
+        accounted = setup_sum + suite_total_sum + runner_residual["duration_ns"]
+        total_ns = runner_total["duration_ns"]
+        runner_totals.append(total_ns)
+        outside_runner_wall.append(record["wall_ns"] - total_ns)
+        runner_setup_sums.append(setup_sum)
+        runner_suite_sums.append(suite_total_sum)
+        runner_residuals.append(runner_residual["duration_ns"])
+        runner_accounted.append(accounted)
+        runner_balances.append(total_ns - accounted)
+
+    return {
+        "schema": RUNNER_PHASE_SCHEMA,
+        "unit": "ns",
+        "sample_count": len(samples),
+        "stage_category_suite": stage_category_suite,
+        "compiler_construction": {
+            "stages": list(RUNNER_COMPILER_STAGES),
+            "duration_ns": _metric_stats(compiler_construction),
+        },
+        "runner_total_ns": _metric_stats(runner_totals),
+        "outside_runner_wall_ns": _metric_stats(outside_runner_wall),
+        "accounting": {
+            "runner": {
+                "setup_stage_sum_ns": _metric_stats(runner_setup_sums),
+                "suite_total_sum_ns": _metric_stats(runner_suite_sums),
+                "orchestration_residual_ns": _metric_stats(runner_residuals),
+                "accounted_ns": _metric_stats(runner_accounted),
+                "runner_total_ns": _metric_stats(runner_totals),
+                "balance_ns": _metric_stats(runner_balances),
+            },
+            "suites": {
+                suite: {
+                    field: _metric_stats(values)
+                    for field, values in fields.items()
+                }
+                for suite, fields in suite_accounting.items()
+            },
+        },
+    }
+
+
 def summarize_lane(
     lane: Mapping[str, Any],
     records: Sequence[Mapping[str, Any]],
@@ -2855,6 +3629,7 @@ def summarize_lane(
         "resource_quality": resource_quality,
         "metrics": metrics,
         "compiler_phase_timing": _summarize_compiler_phase_timing(included),
+        "runner_phase_timing": _summarize_runner_phase_timing(included),
     }
 
 

@@ -51,7 +51,72 @@ class StrictCombineTests(unittest.TestCase):
             for phase in harness.COMPILER_PHASE_ORDER
         ]
 
-    def _manifest(self) -> dict:
+    def _manifest(self, *, runner: bool = False) -> dict:
+        if runner:
+            stdout = (
+                "[PASS] parity: fixture\n"
+                "Exit code: 0 (all 1 tests passed)\n"
+            )
+            cases_sha = harness.runner_cases_contract(stdout)["sha256"]
+            return {
+                "schema": harness.MANIFEST_SCHEMA,
+                "description": "runner combine fixture",
+                "fingerprint_flags": {
+                    "compiler": ["-O3"],
+                    "runtime": ["-O3"],
+                    "runner_runtime": ["-O2"],
+                    "link": [
+                        "-flto=thin",
+                        "-fuse-ld=lld",
+                        (
+                            "-Wl,/lldltocachepolicy:cache_size_bytes=1073741824:"
+                            "cache_size_files=4096:prune_after=168h"
+                        ),
+                    ],
+                },
+                "lanes": [
+                    {
+                        "case_id": "fixture",
+                        "description": "runner fixture",
+                        "policy": "full_gate",
+                        "cache_states": ["cold", "warm"],
+                        "argv": [
+                            "{python}",
+                            "{repo}/tests/run_tests.py",
+                            "--suite",
+                            "parity",
+                            "--filter",
+                            "fixture",
+                            f"--phase-timing={harness.RUNNER_TRACE_PATH}",
+                        ],
+                        "cwd": "{repo}",
+                        "timeout_seconds": 10,
+                        "expected_exit_codes": [0],
+                        "requires": ["tool:python"],
+                        "runner_summary": {
+                            "schema": harness.RUNNER_SUMMARY_CONTRACT_SCHEMA,
+                            "expected_total": 1,
+                            "expected_status_counts": {
+                                "pass": 1,
+                                "fail": 0,
+                                "skip": 0,
+                            },
+                            "expected_suite_counts": {
+                                "parity": {"pass": 1, "fail": 0, "skip": 0}
+                            },
+                            "expected_cases_sha256": cases_sha,
+                            "skip_policy": "exact",
+                            "fail_policy": "zero",
+                            "reported_exit_policy": "required_match_raw",
+                        },
+                        "compiler_phase_timing": False,
+                        "runner_phase_timing": True,
+                        "bootstrap_phase_timing": False,
+                        "artifacts": [],
+                        "phase_trace_paths": [harness.RUNNER_TRACE_PATH],
+                    }
+                ],
+            }
         return {
             "schema": harness.MANIFEST_SCHEMA,
             "description": "combine fixture",
@@ -80,6 +145,9 @@ class StrictCombineTests(unittest.TestCase):
                     "expected_exit_codes": [0],
                     "requires": ["tool:ring"],
                     "runner_summary": None,
+                    "compiler_phase_timing": False,
+                    "runner_phase_timing": False,
+                    "bootstrap_phase_timing": False,
                     "artifacts": ["{sample_dir}/artifact.bin"],
                     "phase_trace_paths": [],
                 }
@@ -210,6 +278,7 @@ class StrictCombineTests(unittest.TestCase):
         source_sha: str,
         manifest_sha: str,
         run_dir: Path,
+        runner: bool = False,
     ) -> dict:
         sample_id = f"{case_id}-{index:03d}-{index:08x}"
         sample_dir = (run_dir / "samples" / case_id / sample_id).resolve()
@@ -217,9 +286,109 @@ class StrictCombineTests(unittest.TestCase):
         stdout_path = sample_dir / "stdout.txt"
         stderr_path = sample_dir / "stderr.txt"
         artifact_path = sample_dir / "artifact.bin"
-        stdout_path.write_bytes(b"")
+        stdout_path.write_text(
+            (
+                "[PASS] parity: fixture\n"
+                "Exit code: 0 (all 1 tests passed)\n"
+            )
+            if runner
+            else "",
+            encoding="utf-8",
+        )
         stderr_path.write_bytes(b"")
-        artifact_path.write_bytes(b"artifact")
+        if not runner:
+            artifact_path.write_bytes(b"artifact")
+        if runner:
+            trace_path = sample_dir / "runner-phase-timing.jsonl"
+            rows = [
+                {
+                    "schema": harness.RUNNER_PHASE_SCHEMA,
+                    "version": 1,
+                    "sequence": 1,
+                    "suite": "parity",
+                    "case": None,
+                    "stage": "orchestration_residual",
+                    "duration_ns": 60,
+                    "executed": True,
+                    "complete": True,
+                    "outcome": "completed",
+                    "exit_code": None,
+                    "command_category": None,
+                },
+                {
+                    "schema": harness.RUNNER_PHASE_SCHEMA,
+                    "version": 1,
+                    "sequence": 2,
+                    "suite": "parity",
+                    "case": None,
+                    "stage": "suite_total",
+                    "duration_ns": 60,
+                    "executed": True,
+                    "complete": True,
+                    "outcome": "completed",
+                    "exit_code": None,
+                    "command_category": None,
+                },
+                {
+                    "schema": harness.RUNNER_PHASE_SCHEMA,
+                    "version": 1,
+                    "sequence": 3,
+                    "suite": None,
+                    "case": "runner",
+                    "stage": "orchestration_residual",
+                    "duration_ns": 10,
+                    "executed": True,
+                    "complete": True,
+                    "outcome": "success",
+                    "exit_code": 0,
+                    "command_category": None,
+                },
+                {
+                    "schema": harness.RUNNER_PHASE_SCHEMA,
+                    "version": 1,
+                    "sequence": 4,
+                    "suite": None,
+                    "case": "runner",
+                    "stage": "runner_total",
+                    "duration_ns": 70,
+                    "executed": True,
+                    "complete": True,
+                    "outcome": "success",
+                    "exit_code": 0,
+                    "command_category": None,
+                },
+            ]
+            trace_path.write_text(
+                "".join(harness._json_line(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            argv = [
+                str((run_dir.parent / "tools" / "python.exe").resolve()),
+                f"{harness.REPO_ROOT}/tests/run_tests.py",
+                "--suite",
+                "parity",
+                "--filter",
+                "fixture",
+                f"--phase-timing={sample_dir}/runner-phase-timing.jsonl",
+            ]
+            runner_summary = harness._runner_summary(stdout_path)
+            artifacts = []
+            phase_traces = harness._phase_trace_records([trace_path])
+        else:
+            argv = [
+                str(
+                    (
+                        run_dir.parent
+                        / harness.WARM_CACHE_OUTPUT_NAME
+                        / harness.WARM_CACHE_BUILD_FILES["ring"]
+                    ).resolve()
+                ),
+                "check",
+                f"{harness.REPO_ROOT}/fixture.ring",
+            ]
+            runner_summary = None
+            artifacts = harness._artifact_records([artifact_path])
+            phase_traces = []
         return {
             "schema": harness.RESULT_SCHEMA,
             "run_id": run_id,
@@ -230,17 +399,7 @@ class StrictCombineTests(unittest.TestCase):
             "included": True,
             "source_sha": source_sha,
             "manifest_sha": manifest_sha,
-            "argv": [
-                str(
-                    (
-                        run_dir.parent
-                        / harness.WARM_CACHE_OUTPUT_NAME
-                        / harness.WARM_CACHE_BUILD_FILES["ring"]
-                    ).resolve()
-                ),
-                "check",
-                f"{harness.REPO_ROOT}/fixture.ring",
-            ],
+            "argv": argv,
             "cwd": str(harness.REPO_ROOT.resolve()),
             "cache": {
                 "thinlto_cache": state,
@@ -299,9 +458,9 @@ class StrictCombineTests(unittest.TestCase):
             "exit": {"code": 0, "expected": True},
             "stdout": harness._file_record(stdout_path),
             "stderr": harness._file_record(stderr_path),
-            "runner_summary": None,
-            "artifacts": harness._artifact_records([artifact_path]),
-            "phase_traces": [],
+            "runner_summary": runner_summary,
+            "artifacts": artifacts,
+            "phase_traces": phase_traces,
             "invocation_error": None,
             "invalid_reason": None,
         }
@@ -313,10 +472,11 @@ class StrictCombineTests(unittest.TestCase):
         state: str,
         run_id: str,
         source_sha: str = "a" * 40,
+        runner: bool = False,
     ) -> Path:
         run_dir = root / run_id
         run_dir.mkdir()
-        manifest = self._manifest()
+        manifest = self._manifest(runner=runner)
         manifest_path = run_dir / "manifest.snapshot.json"
         harness._json_dump(manifest_path, manifest)
         harness.CANONICAL_MANIFEST_SHA256 = harness._sha256_file(manifest_path)
@@ -331,6 +491,7 @@ class StrictCombineTests(unittest.TestCase):
                 source_sha=source_sha,
                 manifest_sha=manifest_sha,
                 run_dir=run_dir,
+                runner=runner,
             )
             for index in range(3)
         ]
@@ -459,6 +620,70 @@ class StrictCombineTests(unittest.TestCase):
                 len((output / "combined-samples.jsonl").read_text().splitlines()), 6
             )
             self.assertTrue((output / "combined-summary.json").is_file())
+
+    def test_combines_and_replays_runner_phase_summaries_per_lane(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(
+                root, state="cold", run_id="runner-cold", runner=True
+            )
+            warm = self._write_run(
+                root, state="warm", run_id="runner-warm", runner=True
+            )
+            summary = combine.combine_runs(
+                [cold, warm], root / "runner-combined"
+            )
+            self.assertTrue(summary["complete"])
+            lanes = {lane["case_id"]: lane for lane in summary["lanes"]}
+            self.assertEqual(set(lanes), {"fixture_cold", "fixture_warm"})
+            for case_id, lane in lanes.items():
+                with self.subTest(case_id=case_id):
+                    timing = lane["runner_phase_timing"]
+                    self.assertEqual(timing["sample_count"], 3)
+                    self.assertEqual(timing["runner_total_ns"]["median"], 70)
+                    self.assertEqual(
+                        timing["accounting"]["runner"]["balance_ns"]["median"],
+                        0,
+                    )
+
+    def test_combine_replay_rejects_early_runner_summary_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run_dir = self._write_run(
+                root, state="cold", run_id="runner-tampered", runner=True
+            )
+            samples_path = run_dir / "samples.jsonl"
+            records = [
+                json.loads(line)
+                for line in samples_path.read_text(encoding="utf-8").splitlines()
+            ]
+            record = records[0]
+            trace_path = Path(record["phase_traces"][0]["path"])
+            rows = [
+                json.loads(line)
+                for line in trace_path.read_text(encoding="utf-8").splitlines()
+            ]
+            early_pair = [dict(rows[-2]), dict(rows[-1])]
+            for row in early_pair:
+                row["duration_ns"] = 0
+            rows[0:0] = early_pair
+            for sequence, row in enumerate(rows, 1):
+                row["sequence"] = sequence
+            trace_path.write_text(
+                "".join(harness._json_line(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            record["phase_traces"] = harness._phase_trace_records([trace_path])
+            samples_path.write_text(
+                "".join(harness._json_line(item) + "\n" for item in records),
+                encoding="utf-8",
+            )
+            summary_path = run_dir / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["samples_jsonl"] = harness._file_record(samples_path)
+            harness._json_dump(summary_path, summary)
+            with self.assertRaisesRegex(harness.HarnessError, "unique terminal"):
+                combine.combine_runs([run_dir], root / "replay-output")
 
     def test_unpaired_descriptive_control_reports_median_mad_and_p95_delta(self) -> None:
         def lane(wall: dict) -> dict:

@@ -54,9 +54,38 @@ The harness requires exact phase order, fields, types, line/path provenance,
 and compiler/source/lane/entry identities. Those structural failures are hard
 errors even for warm-ups, timeouts, or otherwise excluded attempts. Missing or
 known-unreadable traces, incomplete rows, command outcome/execution mismatch,
-and timing-accounting failures remain explicit eligibility failures. Bootstrap traces continue to
-use `ring.check-benchmark.bootstrap-phase.v1` and are validated separately;
-unknown trace schemas fail closed.
+and timing-accounting failures remain explicit eligibility failures.
+
+Manifest v4 selects trace semantics explicitly. `compiler_phase_timing`,
+`runner_phase_timing`, and `bootstrap_phase_timing` are required, mutually
+exclusive booleans. A declared trace requires exactly one true mode; an empty
+trace list requires all three false. Bootstrap traces continue to use
+`ring.check-benchmark.bootstrap-phase.v1` and are accepted only for the exact
+tracked-bootstrap argv, requirements, artifacts, output path, timeout, and
+exit recipe. The harness never infers bootstrap semantics from two disabled
+modes, and unknown trace schemas fail closed.
+
+The filtered runner lane, all six individual suite lanes, and the full gate
+append the runner's exact
+`--phase-timing={sample_dir}/runner-phase-timing.jsonl` option. These traces use
+`ring.test-runner-phase.v1` with the exact 12-field contract emitted by
+`tests/run_tests.py`: schema/version, contiguous sequence, suite/case, fixed
+stage, duration, executed/complete/outcome, exit code, and command category.
+Unknown fields (including a hypothetical thirteenth field), schemas, stage or
+field combinations, and path/sequence drift are hard errors. Missing or
+unreadable traces, incomplete rows, accounting mismatches, and a runner total
+that exceeds the enclosing Job wall time make the attempt ineligible.
+The runner orchestration residual and total must be one unique final pair;
+an earlier duplicate pair or single runner-scoped summary row is a hard error.
+
+Accounting is serial and exact: each suite's child-stage sum plus its
+orchestration residual equals `suite_total`; compiler construction and other
+runner setup stages plus all suite totals and the final runner residual equal
+`runner_total`. A child `nonzero` event is valid evidence for a negative test
+case and is not confused with failure of the outer runner. Each lane summary
+keeps its own stage/category/suite aggregates, compiler-construction total,
+runner total, wall time outside the runner, and suite/runner accounting. Runner
+timings are never pooled across lanes.
 
 Compiler-controlled build exits, including a non-zero child `clang`, finalize
 the canonical six rows and set `command_success` from the actual command
@@ -266,7 +295,14 @@ case, each current suite, the full
 gate, and a fresh tracked-bootstrap build. `bootstrap.py` mirrors the production
 O3+ThinLTO build into the sample directory and emits compile/runtime/link phase
 wall times. Compiler-internal phase traces are requested only by the direct
-`check` lanes described above.
+`check` lanes described above; runner traces are requested only by the eight
+runner lanes listed above.
+
+The checked-in runner-summary contract deliberately remains at the pre-
+ownership-integration snapshot of 1556 full-gate cases. After the ownership
+work lands, all suite counts and case-identity digests must be replayed and the
+manifest byte pin refreshed before collecting the formal B-176 baseline. The
+current runner-trace wiring does not claim that replay has happened.
 
 The harness is Windows-only because the measurement contract is specifically a
 Windows Job Object contract. The implementation uses Python's standard library

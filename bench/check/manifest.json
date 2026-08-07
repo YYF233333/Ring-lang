@@ -1,5 +1,5 @@
 {
-  "schema": "ring.check-benchmark.manifest.v3",
+  "schema": "ring.check-benchmark.manifest.v4",
   "description": "B-176 bounded check and validation feedback lanes. Every template expands into separately run cold and warm cache lanes.",
   "fingerprint_flags": {
     "compiler": ["-std=c11", "-O3", "-flto=thin"],
@@ -28,6 +28,8 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": null,
       "compiler_phase_timing": true,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
@@ -44,6 +46,8 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": null,
       "compiler_phase_timing": false,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "artifacts": [],
       "phase_trace_paths": []
     },
@@ -59,6 +63,8 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/golden/abort_handler_arm.ring"],
       "runner_summary": null,
       "compiler_phase_timing": true,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
@@ -75,6 +81,8 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/modules/diamond_dep/main.ring"],
       "runner_summary": null,
       "compiler_phase_timing": true,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
@@ -91,6 +99,8 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/error_undefined.ring"],
       "runner_summary": null,
       "compiler_phase_timing": true,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
@@ -107,6 +117,8 @@
       "requires": ["tool:ring", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": null,
       "compiler_phase_timing": true,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "expected_executed_phases": ["input_entry_load", "entry_parse", "type_effect_check_lower", "resource_plan_verify", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
@@ -123,6 +135,8 @@
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
       "runner_summary": null,
       "compiler_phase_timing": true,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
@@ -139,6 +153,8 @@
       "requires": ["tool:ring", "path:{repo}/compiler/main.ring"],
       "runner_summary": null,
       "compiler_phase_timing": true,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "expected_executed_phases": ["input_entry_load", "entry_parse", "project_module_load_parse", "type_effect_check_lower", "resource_plan_verify", "command_total"],
       "artifacts": [],
       "phase_trace_paths": ["{sample_dir}/compiler-phase-timing.jsonl"]
@@ -160,6 +176,9 @@
       "expected_exit_codes": [0],
       "requires": ["tool:ring", "tool:clang", "path:{repo}/tests/cases/hello.ring"],
       "runner_summary": null,
+      "compiler_phase_timing": false,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": false,
       "artifacts": ["{sample_dir}/hello.c", "{sample_dir}/hello.o"],
       "phase_trace_paths": []
     },
@@ -168,7 +187,7 @@
       "description": "one uniquely filtered bool_ops e2e case including isolated compiler construction",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e", "--filter", "bool_ops.ring"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e", "--filter", "bool_ops.ring", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 300,
       "expected_exit_codes": [0],
@@ -185,16 +204,19 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "isolate_runner_runtime": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "suite_e2e",
       "description": "complete e2e suite",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "e2e", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 1800,
       "expected_exit_codes": [0],
@@ -211,16 +233,19 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "isolate_runner_runtime": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "suite_golden",
       "description": "complete golden suite",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "golden"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "golden", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 1800,
       "expected_exit_codes": [0],
@@ -237,16 +262,19 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "isolate_runner_runtime": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "suite_rc",
       "description": "complete RC verification suite",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "rc"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "rc", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 2400,
       "expected_exit_codes": [0],
@@ -263,15 +291,18 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "suite_structural",
       "description": "complete generated-C structural suite",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "structural"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "structural", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 1800,
       "expected_exit_codes": [0],
@@ -288,15 +319,18 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "suite_parity",
       "description": "complete static parity evidence suite",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "parity"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "parity", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 300,
       "expected_exit_codes": [0],
@@ -313,15 +347,18 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "suite_self_compile",
       "description": "tracked C bootstrap fixed-point suite",
       "policy": "adaptive",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "self-compile"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--suite", "self-compile", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 2400,
       "expected_exit_codes": [0],
@@ -338,15 +375,18 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "full_gate",
       "description": "complete local C-native standard gate",
       "policy": "full_gate",
       "cache_states": ["cold", "warm"],
-      "argv": ["{python}", "{repo}/tests/run_tests.py"],
+      "argv": ["{python}", "{repo}/tests/run_tests.py", "--phase-timing={sample_dir}/runner-phase-timing.jsonl"],
       "cwd": "{repo}",
       "timeout_seconds": 5400,
       "expected_exit_codes": [0],
@@ -368,9 +408,12 @@
         "fail_policy": "zero",
         "reported_exit_policy": "required_match_raw"
       },
+      "compiler_phase_timing": false,
+      "runner_phase_timing": true,
+      "bootstrap_phase_timing": false,
       "isolate_runner_runtime": true,
       "artifacts": [],
-      "phase_trace_paths": []
+      "phase_trace_paths": ["{sample_dir}/runner-phase-timing.jsonl"]
     },
     {
       "case_id": "tracked_bootstrap_build",
@@ -406,6 +449,9 @@
         "path:{repo}/ring_runtime.cpp"
       ],
       "runner_summary": null,
+      "compiler_phase_timing": false,
+      "runner_phase_timing": false,
+      "bootstrap_phase_timing": true,
       "artifacts": [
         "{sample_dir}/bootstrap/ring_compiler_lto.o",
         "{sample_dir}/bootstrap/ring_runtime_lto.o",
