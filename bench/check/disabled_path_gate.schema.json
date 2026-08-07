@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ring.check-benchmark.disabled-path-gate.schema.v1",
+  "$id": "ring.check-benchmark.disabled-path-gate.schema.v2",
   "title": "Ring disabled phase-timing AB/BA evidence",
   "type": "object",
   "additionalProperties": false,
@@ -22,7 +22,7 @@
   "properties": {
     "schema": {
       "type": "string",
-      "const": "ring.check-benchmark.disabled-path-gate.v1"
+      "const": "ring.check-benchmark.disabled-path-gate.v2"
     },
     "created_utc": { "type": "string", "minLength": 1 },
     "contract": {
@@ -299,6 +299,33 @@
         "stderr": { "$ref": "#/$defs/file" }
       }
     },
+    "linker_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "probe_argv",
+        "cwd",
+        "claimed_path",
+        "selected_path",
+        "exit_code",
+        "stdout",
+        "stderr"
+      ],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "ring.check-benchmark.linker-binding.v1"
+        },
+        "probe_argv": { "$ref": "#/$defs/string_array" },
+        "cwd": { "type": "string", "minLength": 1 },
+        "claimed_path": { "type": "string", "minLength": 1 },
+        "selected_path": { "type": "string", "minLength": 1 },
+        "exit_code": { "type": "integer", "const": 0 },
+        "stdout": { "$ref": "#/$defs/file" },
+        "stderr": { "$ref": "#/$defs/file" }
+      }
+    },
     "binary": {
       "type": "object",
       "additionalProperties": false,
@@ -330,8 +357,11 @@
         "prelude_files",
         "gate",
         "schema_contract",
+        "harness",
+        "windows_job",
         "binary",
-        "build"
+        "build",
+        "linker_binding"
       ],
       "properties": {
         "subject": { "$ref": "#/$defs/subject_name" },
@@ -348,13 +378,16 @@
         },
         "gate": { "$ref": "#/$defs/optional_file" },
         "schema_contract": { "$ref": "#/$defs/optional_file" },
+        "harness": { "$ref": "#/$defs/optional_file" },
+        "windows_job": { "$ref": "#/$defs/optional_file" },
         "binary": { "$ref": "#/$defs/binary" },
         "build": {
           "type": "array",
           "minItems": 3,
           "maxItems": 3,
           "items": { "$ref": "#/$defs/command" }
-        }
+        },
+        "linker_binding": { "$ref": "#/$defs/linker_binding" }
       }
     },
     "invocation": {

@@ -220,6 +220,24 @@ class DisabledPathGateTests(unittest.TestCase):
                                 "sha256": "5" * 64,
                             }
                         ),
+                        "harness": (
+                            None
+                            if name == "base"
+                            else {
+                                "path": gate.HARNESS_PATH,
+                                "bytes": 1,
+                                "sha256": "8" * 64,
+                            }
+                        ),
+                        "windows_job": (
+                            None
+                            if name == "base"
+                            else {
+                                "path": gate.WINDOWS_JOB_PATH,
+                                "bytes": 1,
+                                "sha256": "9" * 64,
+                            }
+                        ),
                         "binary": {
                             "bytes": 1,
                             "raw_sha256": ("a" if name == "base" else "b") * 64,
@@ -232,6 +250,16 @@ class DisabledPathGateTests(unittest.TestCase):
                             command("runtime_compile"),
                             command("link"),
                         ],
+                        "linker_binding": {
+                            "schema": harness.LINKER_BINDING_SCHEMA,
+                            "probe_argv": ["clang", "-###", "link"],
+                            "cwd": stage["source"],
+                            "claimed_path": "C:/lld-link.exe",
+                            "selected_path": "C:/lld-link.exe",
+                            "exit_code": 0,
+                            "stdout": copy.deepcopy(file_record),
+                            "stderr": copy.deepcopy(file_record),
+                        },
                     }
                 )
             tools = {
@@ -358,6 +386,81 @@ class DisabledPathGateTests(unittest.TestCase):
                     gate.REPO_ROOT, "git", "a" * 40
                 )
 
+        for drift_path in (gate.HARNESS_PATH, gate.WINDOWS_JOB_PATH):
+            def drifted(
+                _repo: Path, _git: str, _commit: str, path: str,
+                *, target: str = drift_path,
+            ) -> bytes:
+                if path == target:
+                    return b"drifted helper"
+                return (gate.REPO_ROOT / path).read_bytes()
+
+            with self.subTest(path=drift_path), mock.patch.object(
+                gate, "_git_show", side_effect=drifted
+            ), self.assertRaisesRegex(gate.GateError, "current .*candidate ref"):
+                gate._require_current_contract_bytes(
+                    gate.REPO_ROOT, "git", "a" * 40
+                )
+
+    def test_link_command_and_claimed_lld_provenance_are_consistent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            stage = gate._stage_layout(root)
+            lld = (root / "tools" / "lld-link.exe").resolve()
+            tools = {
+                "clang": {"path": str((root / "tools" / "clang.exe").resolve())},
+                "clangxx": {"path": str((root / "tools" / "clang++.exe").resolve())},
+                "lld_link": {"path": str(lld)},
+            }
+            link = gate._expected_build_commands(stage, tools)[-1][1]
+            self.assertIn(f"-B{lld.parent}", link)
+            self.assertIn("-fuse-ld=lld", link)
+            selected_without_suffix = str(lld.with_suffix(""))
+            completed = mock.Mock(
+                returncode=0,
+                stdout=b"",
+                stderr=(
+                    f"{json.dumps(selected_without_suffix)} \"-out:ring.exe\"\n"
+                ).encode("utf-8"),
+            )
+            with mock.patch.object(gate.subprocess, "run", return_value=completed):
+                binding = gate._probe_linker_binding(
+                    link,
+                    Path(stage["source"]),
+                    lld,
+                    {},
+                    root=root,
+                    stem="linker-probe",
+                )
+            self.assertEqual(binding["claimed_path"], str(lld))
+            self.assertEqual(binding["selected_path"], str(lld))
+            self.assertEqual(binding["probe_argv"], [link[0], "-###", *link[1:]])
+            self.assertEqual(
+                gate._sidecar(root, binding["stdout"], "probe.stdout").read_bytes(),
+                b"",
+            )
+            self.assertEqual(
+                gate._sidecar(root, binding["stderr"], "probe.stderr").read_bytes(),
+                completed.stderr,
+            )
+
+            expected = gate._expected_linker_binding(
+                link, Path(stage["source"]), lld
+            )
+            gate._verify_linker_binding(root, binding, expected, set(), "candidate")
+            forged = copy.deepcopy(binding)
+            forged_stderr = root / "raw" / "forged-linker-probe.stderr"
+            forged_stderr.write_bytes(
+                f'{json.dumps(str(root / "other-lld-link"))} "-out:ring.exe"\n'.encode(
+                    "utf-8"
+                )
+            )
+            forged["stderr"] = gate._relative_file_record(forged_stderr, root)
+            with self.assertRaisesRegex(gate.GateError, "raw linker probe"):
+                gate._verify_linker_binding(
+                    root, forged, expected, set(), "candidate"
+                )
+
     def test_archive_member_preflight_rejects_windows_crlf_conversion(self) -> None:
         blob = b"line\n"
         inputs = {
@@ -368,6 +471,8 @@ class DisabledPathGateTests(unittest.TestCase):
                 gate.FIXTURE_PATH,
                 gate.GATE_PATH,
                 gate.SCHEMA_PATH,
+                gate.HARNESS_PATH,
+                gate.WINDOWS_JOB_PATH,
                 *gate.STD_PATHS,
             )
         }

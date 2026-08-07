@@ -56,6 +56,7 @@ def _fingerprint(
     if not isinstance(os_record, dict) or not isinstance(cpu, dict) or not isinstance(power, dict):
         raise harness.HarnessError("environment lacks stable machine identity records")
     ring = tools.get("ring") if isinstance(tools, dict) else None
+    lld_link = tools.get("lld_link") if isinstance(tools, dict) else None
     required_build_values = {
         "source_sha": environment.get("source_sha"),
         "manifest_sha": environment.get("manifest_sha"),
@@ -64,6 +65,15 @@ def _fingerprint(
         "tools.ring.path": ring.get("path") if isinstance(ring, dict) else None,
         "tools.ring.version": ring.get("version") if isinstance(ring, dict) else None,
         "tools.ring.sha256": ring.get("sha256") if isinstance(ring, dict) else None,
+        "tools.lld_link.path": (
+            lld_link.get("path") if isinstance(lld_link, dict) else None
+        ),
+        "tools.lld_link.version": (
+            lld_link.get("version") if isinstance(lld_link, dict) else None
+        ),
+        "tools.lld_link.sha256": (
+            lld_link.get("sha256") if isinstance(lld_link, dict) else None
+        ),
     }
     missing_build = [
         name
@@ -150,9 +160,25 @@ def _validate_lane_schedule(
     expected_warmups = harness.DIRECT_WARMUPS if policy == "direct_short" else 0
     if len(warmups) != expected_warmups:
         raise harness.HarnessError(f"warm-up policy mismatch in lane {case_id}")
-    if warmups and (warmups[0].get("index") != 0 or warmups[0].get("included") is not False):
+    if warmups and (
+        warmups[0].get("index") != 0
+        or warmups[0].get("included") is not False
+        or warmups[0].get("invalid_reason") != "warmup"
+    ):
         raise harness.HarnessError(f"warm-up placement mismatch in lane {case_id}")
     measured = ordered[expected_warmups:]
+    fatal = [
+        record.get("invalid_reason")
+        for record in measured
+        if record.get("included") is False
+        and not harness._is_replaceable_measurement_invalid(
+            record.get("invalid_reason")
+        )
+    ]
+    if fatal:
+        raise harness.HarnessError(
+            f"lane contains a fatal non-replaceable attempt {case_id}: {fatal}"
+        )
     if sum(record.get("included") is True for record in measured) != target:
         raise harness.HarnessError(f"valid-sample target mismatch in lane {case_id}")
     if not measured or measured[-1].get("included") is not True:
@@ -171,6 +197,7 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
     environment_path = _require_file(run_dir, "environment.json")
     samples_path = _require_file(run_dir, "samples.jsonl")
     summary_path = _require_file(run_dir, "summary.json")
+    harness.validate_formal_manifest_bytes(manifest_path)
 
     manifest = harness._load_json(manifest_path)
     schema = harness._load_json(schema_path)

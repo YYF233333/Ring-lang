@@ -14,6 +14,12 @@ def phase_errors(classified: harness.PhaseValidation) -> list[str]:
 
 
 class StrictCombineTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._canonical_manifest_sha = harness.CANONICAL_MANIFEST_SHA256
+
+    def tearDown(self) -> None:
+        harness.CANONICAL_MANIFEST_SHA256 = self._canonical_manifest_sha
+
     def _compiler_rows(self) -> list[dict]:
         durations = {
             "input_entry_load": 10,
@@ -91,12 +97,19 @@ class StrictCombineTests(unittest.TestCase):
                 "sha256": character * 64,
             }
             for name, character in (
-                ("python", "1"), ("clang", "2"), ("clangxx", "3")
+                ("python", "1"), ("clang", "2"), ("clangxx", "3"),
+                ("lld_link", "6"),
             )
         }
+        build_output = {}
+        for name, filename in harness.WARM_CACHE_BUILD_FILES.items():
+            path = root / filename
+            if not path.exists():
+                path.write_bytes(name.encode("utf-8"))
+            build_output[name] = harness._file_record(path)
         return {
             "schema": harness.WARM_CACHE_RECEIPT_SCHEMA,
-            "recipe_version": 1,
+            "recipe_version": 2,
             "source": {
                 "git_sha": source_sha,
                 "git_dirty": False,
@@ -121,6 +134,7 @@ class StrictCombineTests(unittest.TestCase):
                 "stderr": {"sha256": "5" * 64, "bytes": 0},
             },
             "cache_inventory": harness._cache_inventory(cache),
+            "build_output": build_output,
         }
 
     def _record(
@@ -153,7 +167,15 @@ class StrictCombineTests(unittest.TestCase):
             "included": True,
             "source_sha": source_sha,
             "manifest_sha": manifest_sha,
-            "argv": ["ring.exe", "check", f"{harness.REPO_ROOT}/fixture.ring"],
+            "argv": [
+                str(
+                    (
+                        run_dir.parent / harness.WARM_CACHE_BUILD_FILES["ring"]
+                    ).resolve()
+                ),
+                "check",
+                f"{harness.REPO_ROOT}/fixture.ring",
+            ],
             "cwd": str(harness.REPO_ROOT.resolve()),
             "cache": {
                 "thinlto_cache": state,
@@ -232,6 +254,7 @@ class StrictCombineTests(unittest.TestCase):
         manifest = self._manifest()
         manifest_path = run_dir / "manifest.snapshot.json"
         harness._json_dump(manifest_path, manifest)
+        harness.CANONICAL_MANIFEST_SHA256 = harness._sha256_file(manifest_path)
         manifest_sha = harness._sha256_file(manifest_path)
         case_id = f"fixture_{state}"
         records = [
@@ -275,7 +298,15 @@ class StrictCombineTests(unittest.TestCase):
             "dist_c_sha256": "b" * 64,
             "runtime_sha256": "c" * 64,
             "tools": {
-                "ring": {"path": "ring.exe", "version": "v", "sha256": "d" * 64},
+                "ring": {
+                    "path": self._seed_receipt(root, source_sha, manifest)[
+                        "build_output"
+                    ]["ring"]["path"],
+                    "version": "v",
+                    "sha256": self._seed_receipt(root, source_sha, manifest)[
+                        "build_output"
+                    ]["ring"]["sha256"],
+                },
                 **self._seed_receipt(root, source_sha, manifest)["tools"],
             },
             "flags": manifest["fingerprint_flags"],
@@ -435,7 +466,7 @@ class StrictCombineTests(unittest.TestCase):
                 (0, True, None),
                 (1, True, None),
                 (2, True, None),
-                (3, False, "late invalid"),
+                (3, False, "measurement_errors: late invalid"),
             )
         ]
         with self.assertRaisesRegex(harness.HarnessError, "continued after"):
@@ -451,6 +482,22 @@ class StrictCombineTests(unittest.TestCase):
             harness._json_dump(summary_path, summary)
             with self.assertRaisesRegex(harness.HarnessError, "incomplete"):
                 combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_structurally_valid_reduced_or_byte_drifted_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            harness.CANONICAL_MANIFEST_SHA256 = self._canonical_manifest_sha
+            with self.assertRaisesRegex(harness.HarnessError, "formal manifest bytes"):
+                combine.combine_runs([cold], root / "combined-reduced")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            manifest_path = cold / "manifest.snapshot.json"
+            manifest_path.write_bytes(manifest_path.read_bytes() + b" ")
+            with self.assertRaisesRegex(harness.HarnessError, "formal manifest bytes"):
+                combine.combine_runs([cold], root / "combined-byte-drift")
 
     def test_rejects_old_or_lax_schema_before_reading_raw_samples(self) -> None:
         mutations = {
@@ -470,7 +517,7 @@ class StrictCombineTests(unittest.TestCase):
                 mutate(schema)
                 harness._json_dump(schema_path, schema)
                 (cold / "samples.jsonl").write_text("not-json\n", encoding="utf-8")
-                expected = r"\$id" if name == "old_v1" else "canonical invocation.v2"
+                expected = r"\$id" if name == "old_v1" else "canonical invocation.v3"
                 with self.assertRaisesRegex(harness.HarnessError, expected):
                     combine.combine_runs([cold], root / "combined")
 
@@ -635,6 +682,17 @@ class StrictCombineTests(unittest.TestCase):
             forged = {
                 "status_counts": {"pass": 1, "fail": 0, "skip": 0},
                 "suite_counts": {"forged": {"pass": 1, "fail": 0, "skip": 0}},
+                "cases": [
+                    {
+                        "suite": "forged",
+                        "name": "case",
+                        "status": "pass",
+                        "skip_reason": None,
+                    }
+                ],
+                "cases_sha256": harness.runner_cases_contract(
+                    "[PASS] forged: case\n"
+                )["sha256"],
                 "reported_exit_code": 0,
             }
             self._rewrite_samples_and_summary(

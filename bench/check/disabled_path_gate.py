@@ -20,15 +20,16 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 import run as harness
+import windows_job
 from windows_job import preflight_job_support, run_in_job
 
 
 BENCH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BENCH_DIR.parents[1]
 DEFAULT_SCHEMA = BENCH_DIR / "disabled_path_gate.schema.json"
-EVIDENCE_SCHEMA = "ring.check-benchmark.disabled-path-gate.v1"
-SCHEMA_ID = "ring.check-benchmark.disabled-path-gate.schema.v1"
-SCHEMA_CANONICAL_SHA256 = "6a8105e93a78e60e9f0107e30882b5ebd19b06b80d31bbb409f270a1e2c495e0"
+EVIDENCE_SCHEMA = "ring.check-benchmark.disabled-path-gate.v2"
+SCHEMA_ID = "ring.check-benchmark.disabled-path-gate.schema.v2"
+SCHEMA_CANONICAL_SHA256 = "e869d99a4d5b61a991c650664c58efdf38ccb4df1932063e2f176b62c6d4ce54"
 
 SUBJECTS = ("base", "candidate")
 WARMUP_PAIRS = 5
@@ -43,6 +44,8 @@ RUNTIME_PATH = "ring_runtime.cpp"
 FIXTURE_PATH = "tests/cases/hello.ring"
 GATE_PATH = "bench/check/disabled_path_gate.py"
 SCHEMA_PATH = "bench/check/disabled_path_gate.schema.json"
+HARNESS_PATH = "bench/check/run.py"
+WINDOWS_JOB_PATH = "bench/check/windows_job.py"
 STD_PATHS = (
     "std/io.ring",
     "std/iterator.ring",
@@ -304,6 +307,8 @@ def _require_current_contract_bytes(
     for path, current in (
         (GATE_PATH, Path(__file__).resolve()),
         (SCHEMA_PATH, DEFAULT_SCHEMA.resolve()),
+        (HARNESS_PATH, Path(harness.__file__).resolve()),
+        (WINDOWS_JOB_PATH, Path(windows_job.__file__).resolve()),
     ):
         if current.read_bytes() != _git_show(repo, git_path, candidate_commit, path):
             raise GateError(f"current {path} bytes differ from candidate ref")
@@ -319,7 +324,7 @@ def _require_archive_member_identity(
     paths = [ANCHOR_PATH, RUNTIME_PATH, FIXTURE_PATH]
     paths.extend(STD_PATHS)
     if subject == "candidate":
-        paths.extend((GATE_PATH, SCHEMA_PATH))
+        paths.extend((GATE_PATH, SCHEMA_PATH, HARNESS_PATH, WINDOWS_JOB_PATH))
     for path in paths:
         if path not in inputs or inputs[path] != _git_show(repo, git_path, commit, path):
             raise GateError(
@@ -350,17 +355,33 @@ def _verify_subjects(
             _verify_source(repo, git_path, commit, record, path)
         prelude_records.append(prelude)
         if index == 0:
-            if subject["gate"] is not None or subject["schema_contract"] is not None:
-                raise GateError("base must not claim candidate gate/schema bytes")
+            if any(
+                subject[name] is not None
+                for name in ("gate", "schema_contract", "harness", "windows_job")
+            ):
+                raise GateError("base must not claim candidate execution-closure bytes")
         else:
             gate = _verify_source(repo, git_path, commit, subject["gate"], GATE_PATH)
             schema = _verify_source(
                 repo, git_path, commit, subject["schema_contract"], SCHEMA_PATH
             )
+            harness_bytes = _verify_source(
+                repo, git_path, commit, subject["harness"], HARNESS_PATH
+            )
+            windows_job_bytes = _verify_source(
+                repo, git_path, commit, subject["windows_job"], WINDOWS_JOB_PATH
+            )
             if Path(__file__).resolve().read_bytes() != gate:
                 raise GateError("current gate bytes differ from candidate ref")
             if DEFAULT_SCHEMA.resolve().read_bytes() != schema:
                 raise GateError("current schema bytes differ from candidate ref")
+            if Path(harness.__file__).resolve().read_bytes() != harness_bytes:
+                raise GateError("current harness bytes differ from candidate ref")
+            if (
+                Path(windows_job.__file__).resolve().read_bytes()
+                != windows_job_bytes
+            ):
+                raise GateError("current windows_job bytes differ from candidate ref")
     if fixture_bytes[0] != fixture_bytes[1]:
         raise GateError("base/candidate fixture archive bytes differ")
     if prelude_records[0] != prelude_records[1]:
@@ -418,11 +439,109 @@ def _expected_build_commands(
             "link",
             [
                 tools["clang"]["path"], str(compiler_object), str(runtime_object),
-                "-o", str(build / "ring.exe"), *LINK_FLAGS,
+                "-o", str(build / "ring.exe"), *LINK_FLAGS[:-1],
+                f"-B{Path(tools['lld_link']['path']).resolve().parent}",
+                LINK_FLAGS[-1],
                 f"-Wl,/lldltocache:{stage['thinlto_cache']}", LTO_CACHE_POLICY,
             ],
         ),
     ]
+
+
+def _selected_lld_link(stderr: str) -> Path | None:
+    for line in stderr.splitlines():
+        match = re.match(r'^\s*("(?:\\.|[^"])*")', line)
+        if match is None:
+            continue
+        try:
+            token = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        candidate = Path(token)
+        if candidate.name.lower() not in {"lld-link", "lld-link.exe"}:
+            continue
+        if candidate.suffix.lower() != ".exe":
+            candidate = Path(str(candidate) + ".exe")
+        return candidate.resolve()
+    return None
+
+
+def _expected_linker_binding(
+    argv: Sequence[str], cwd: Path, lld_link: Path
+) -> dict[str, Any]:
+    claimed = str(lld_link.resolve())
+    return {
+        "schema": harness.LINKER_BINDING_SCHEMA,
+        "probe_argv": [argv[0], "-###", *argv[1:]],
+        "cwd": str(cwd.resolve()),
+        "claimed_path": claimed,
+        "selected_path": claimed,
+        "exit_code": 0,
+    }
+
+
+def _probe_linker_binding(
+    argv: Sequence[str], cwd: Path, lld_link: Path,
+    environment: Mapping[str, str],
+    *,
+    root: Path,
+    stem: str,
+) -> dict[str, Any]:
+    expected = _expected_linker_binding(argv, cwd, lld_link)
+    try:
+        completed = subprocess.run(
+            expected["probe_argv"], cwd=cwd, env=environment,
+            capture_output=True,
+            timeout=60, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GateError(f"cannot probe clang linker binding: {exc}") from exc
+    stdout = root / "raw" / f"{stem}.stdout"
+    stderr = root / "raw" / f"{stem}.stderr"
+    stdout.parent.mkdir(parents=True, exist_ok=True)
+    stdout.write_bytes(completed.stdout)
+    stderr.write_bytes(completed.stderr)
+    selected = _selected_lld_link(
+        completed.stderr.decode("utf-8", errors="replace")
+    )
+    if completed.returncode != 0 or selected != lld_link.resolve():
+        raise GateError(
+            "clang linker binding probe did not select the claimed lld-link: "
+            f"claimed={lld_link.resolve()}, selected={selected}, "
+            f"exit={completed.returncode}"
+        )
+    return {
+        **expected,
+        "stdout": _relative_file_record(stdout, root),
+        "stderr": _relative_file_record(stderr, root),
+    }
+
+
+def _verify_linker_binding(
+    root: Path,
+    binding: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    seen: set[str],
+    label: str,
+) -> None:
+    if set(binding) != {*expected, "stdout", "stderr"} or any(
+        binding.get(name) != value for name, value in expected.items()
+    ):
+        raise GateError(f"{label} linker binding provenance drifted")
+    sidecars: dict[str, Path] = {}
+    for stream in ("stdout", "stderr"):
+        record = binding[stream]
+        if record["path"] in seen:
+            raise GateError("linker probe sidecar path is reused")
+        seen.add(record["path"])
+        sidecars[stream] = _sidecar(root, record, f"{label}.linker_probe.{stream}")
+    selected = _selected_lld_link(
+        sidecars["stderr"].read_bytes().decode("utf-8", errors="replace")
+    )
+    if selected != Path(expected["claimed_path"]).resolve():
+        raise GateError(
+            f"{label} raw linker probe did not select the claimed lld-link"
+        )
 
 
 def _verify_builds(
@@ -452,6 +571,16 @@ def _verify_builds(
                     raise GateError("build sidecar path is reused")
                 seen.add(record[stream]["path"])
                 _sidecar(root, record[stream], f"build.{subject['subject']}.{phase}.{stream}")
+        expected_binding = _expected_linker_binding(
+            expected[-1][1], Path(stage["source"]), Path(tools["lld_link"]["path"])
+        )
+        _verify_linker_binding(
+            root,
+            subject["linker_binding"],
+            expected_binding,
+            seen,
+            str(subject["subject"]),
+        )
 
 
 def _verify_rows(
@@ -662,7 +791,9 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
 
 def _archive_inputs(archive_path: Path, commit: str) -> dict[str, bytes]:
     required = {ANCHOR_PATH, RUNTIME_PATH, FIXTURE_PATH, *STD_PATHS}
-    wanted = {GATE_PATH, SCHEMA_PATH, *required}
+    wanted = {
+        GATE_PATH, SCHEMA_PATH, HARNESS_PATH, WINDOWS_JOB_PATH, *required,
+    }
     result: dict[str, bytes] = {}
     with tarfile.open(archive_path, "r:") as archive:
         if archive.pax_headers.get("comment") != commit:
@@ -716,7 +847,17 @@ def _build_subject(
         if (source / path).read_bytes() != data:
             raise GateError(f"extracted {subject} bytes differ for {path}")
     commands = []
+    linker_binding: dict[str, Any] | None = None
     for phase, argv in _expected_build_commands(stage, tools):
+        if phase == "link":
+            linker_binding = _probe_linker_binding(
+                argv,
+                source,
+                Path(tools["lld_link"]["path"]),
+                environment,
+                root=root,
+                stem=f"build-{subject}-linker-probe",
+            )
         record = _job_command(
             argv, cwd=source, environment=environment, root=root,
             stem=f"build-{subject}-{phase}", timeout=BUILD_TIMEOUT_SECONDS, phase=phase,
@@ -730,13 +871,23 @@ def _build_subject(
     shutil.copy2(built, slot)
     if harness._sha256_file(slot) != binary["raw_sha256"]:
         raise GateError("subject slot copy changed binary bytes")
-    gate = schema = None
+    gate = schema = harness_record = windows_job_record = None
     if subject == "candidate":
-        if GATE_PATH not in inputs or SCHEMA_PATH not in inputs:
-            raise GateError("candidate archive lacks gate/schema")
-        if Path(__file__).resolve().read_bytes() != inputs[GATE_PATH] or DEFAULT_SCHEMA.read_bytes() != inputs[SCHEMA_PATH]:
-            raise GateError("current gate/schema bytes differ from candidate ref")
+        required_contract = {GATE_PATH, SCHEMA_PATH, HARNESS_PATH, WINDOWS_JOB_PATH}
+        if not required_contract.issubset(inputs):
+            raise GateError("candidate archive lacks the gate execution closure")
+        if (
+            Path(__file__).resolve().read_bytes() != inputs[GATE_PATH]
+            or DEFAULT_SCHEMA.read_bytes() != inputs[SCHEMA_PATH]
+            or Path(harness.__file__).resolve().read_bytes() != inputs[HARNESS_PATH]
+            or Path(windows_job.__file__).resolve().read_bytes() != inputs[WINDOWS_JOB_PATH]
+        ):
+            raise GateError("current gate execution closure differs from candidate ref")
         gate, schema = _input_record(GATE_PATH, inputs[GATE_PATH]), _input_record(SCHEMA_PATH, inputs[SCHEMA_PATH])
+        harness_record = _input_record(HARNESS_PATH, inputs[HARNESS_PATH])
+        windows_job_record = _input_record(WINDOWS_JOB_PATH, inputs[WINDOWS_JOB_PATH])
+    if linker_binding is None:
+        raise GateError(f"{subject} build omitted the linker binding probe")
     return {
         "subject": subject,
         "commit": commit,
@@ -747,8 +898,11 @@ def _build_subject(
         "prelude_files": [_input_record(path, inputs[path]) for path in STD_PATHS],
         "gate": gate,
         "schema_contract": schema,
+        "harness": harness_record,
+        "windows_job": windows_job_record,
         "binary": binary,
         "build": commands,
+        "linker_binding": linker_binding,
     }
 
 

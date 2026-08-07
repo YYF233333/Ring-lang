@@ -56,6 +56,49 @@ class ManifestAndPolicyTests(unittest.TestCase):
         self.assertFalse(control["compiler_phase_timing"])
         self.assertEqual(control["phase_trace_paths"], [])
 
+    def test_formal_manifest_is_exact_byte_pinned(self) -> None:
+        harness.validate_formal_manifest_bytes(harness.DEFAULT_MANIFEST)
+        original = harness.DEFAULT_MANIFEST.read_bytes()
+        self.assertNotIn(b"\r\n", original)
+        attributes = subprocess.run(
+            [
+                "git", "-C", str(harness.REPO_ROOT), "check-attr", "text", "eol",
+                "--", "bench/check/manifest.json",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        ).stdout
+        self.assertIn("text: set", attributes)
+        self.assertIn("eol: lf", attributes)
+        manifest = harness._load_json(harness.DEFAULT_MANIFEST)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            drifts = {
+                "byte": original + b" ",
+                "crlf": original.replace(b"\n", b"\r\n"),
+                "reduced": json.dumps(
+                    {**manifest, "lanes": manifest["lanes"][:1]},
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+                "reordered": json.dumps(
+                    manifest, sort_keys=True, ensure_ascii=False
+                ).encode("utf-8"),
+            }
+            for name, data in drifts.items():
+                path = root / f"{name}.json"
+                path.write_bytes(data)
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    harness.HarnessError, "formal manifest bytes differ"
+                ):
+                    harness.validate_formal_manifest_bytes(path)
+
+    def test_explicit_ring_is_probe_only(self) -> None:
+        with self.assertRaisesRegex(harness.HarnessError, "restricted to --probe"):
+            harness.main(["--list", "--ring", str(Path(sys.executable).resolve())])
+
     def test_result_schema_rejects_unknown_root_field(self) -> None:
         schema = harness._load_json(harness.DEFAULT_RESULT_SCHEMA)
         with self.assertRaises(harness.HarnessError):
@@ -70,7 +113,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
                 phase_schema,
             )
 
-    def test_result_schema_v2_definition_is_pinned_before_data_load(self) -> None:
+    def test_result_schema_v3_definition_is_pinned_before_data_load(self) -> None:
         schema = harness._load_json(harness.DEFAULT_RESULT_SCHEMA)
         old = json.loads(json.dumps(schema))
         old["$id"] = "ring.check-benchmark.invocation.v1"
@@ -82,7 +125,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
         lax["properties"]["runner_summary"]["properties"]["suite_counts"] = {
             "type": "object"
         }
-        with self.assertRaisesRegex(harness.HarnessError, "canonical invocation.v2"):
+        with self.assertRaisesRegex(harness.HarnessError, "canonical invocation.v3"):
             harness.validate_schema_definition(lax)
 
     def test_strict_json_rejects_top_level_and_nested_duplicate_keys(self) -> None:
@@ -93,6 +136,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
                 harness._strict_json_loads(text, "fixture")
 
     def test_runner_summary_requires_exact_counts_and_final_exit(self) -> None:
+        expected = harness.runner_cases_contract("[PASS] e2e: hello\n")
         contract = {
             "schema": harness.RUNNER_SUMMARY_CONTRACT_SCHEMA,
             "expected_total": 1,
@@ -100,6 +144,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
             "expected_suite_counts": {
                 "e2e": {"pass": 1, "fail": 0, "skip": 0}
             },
+            "expected_cases_sha256": expected["sha256"],
             "skip_policy": "exact",
             "fail_policy": "zero",
             "reported_exit_policy": "required_match_raw",
@@ -138,6 +183,53 @@ class ManifestAndPolicyTests(unittest.TestCase):
                             summary, contract, raw_exit
                         )
 
+    def test_runner_case_identity_status_and_skip_reason_are_exact(self) -> None:
+        valid = (
+            "[PASS] e2e: alpha.ring\n"
+            "[SKIP] e2e: beta.ring -- known limitation\n"
+            "Exit code: 0 (all 1 tests passed)\n"
+        )
+        expected = harness.runner_cases_contract(valid)
+        contract = {
+            "schema": harness.RUNNER_SUMMARY_CONTRACT_SCHEMA,
+            "expected_total": 2,
+            "expected_status_counts": {"pass": 1, "fail": 0, "skip": 1},
+            "expected_suite_counts": {
+                "e2e": {"pass": 1, "fail": 0, "skip": 1}
+            },
+            "expected_cases_sha256": expected["sha256"],
+            "skip_policy": "exact",
+            "fail_policy": "zero",
+            "reported_exit_policy": "required_match_raw",
+        }
+        harness._validate_runner_summary_contract(contract, "fixture")
+        valid_summary = harness._runner_summary_from_text(valid)
+        assert valid_summary is not None
+        harness._validate_runner_summary_result(valid_summary, contract, 0)
+        self.assertEqual(valid_summary["cases"], expected["cases"])
+
+        drifts = {
+            "identity/status swap": (
+                "[SKIP] e2e: alpha.ring -- known limitation\n"
+                "[PASS] e2e: beta.ring\n"
+                "Exit code: 0 (all 1 tests passed)\n"
+            ),
+            "skip reason": (
+                "[PASS] e2e: alpha.ring\n"
+                "[SKIP] e2e: beta.ring -- different limitation\n"
+                "Exit code: 0 (all 1 tests passed)\n"
+            ),
+        }
+        for label, text in drifts.items():
+            with self.subTest(label=label):
+                summary = harness._runner_summary_from_text(text)
+                assert summary is not None
+                with self.assertRaisesRegex(
+                    harness.HarnessError,
+                    "identities/statuses/skip reasons",
+                ):
+                    harness._validate_runner_summary_result(summary, contract, 0)
+
     def test_manifest_binds_runner_contract_for_both_cache_states(self) -> None:
         manifest = harness._load_json(harness.DEFAULT_MANIFEST)
         expanded = harness.expand_lanes(manifest)
@@ -155,7 +247,24 @@ class ManifestAndPolicyTests(unittest.TestCase):
             lane["case_id"]: lane["runner_summary"] for lane in expanded
         }
         self.assertEqual(full["full_gate_cold"], full["full_gate_warm"])
-        self.assertEqual(full["full_gate_cold"]["expected_total"], 1552)
+        self.assertEqual(full["full_gate_cold"]["expected_total"], 1556)
+        expected_digests = {
+            "filtered_e2e_bool_ops_cold": "3df33c0e37cd2bec720e432441dd1d09a0750beb28b0061b19de05b47c2e8503",
+            "suite_e2e_cold": "7d8e8a19103851cc33b23c3a76e36bf80ca85448dbba6c488194b8aa3be6b65a",
+            "suite_golden_cold": "c1a306e53f5d4fa15d577105ed3e9faafcd83606e7d9154be9f4df689b308cb4",
+            "suite_rc_cold": "2f0a06a5e1bbfb3ce3533323581abfdd645d765f2468bda60a4bbadc79a13260",
+            "suite_structural_cold": "3ff7ba79cfc784ed524a8535c93673856771ab6613484634c7b9c5947a20870f",
+            "suite_parity_cold": "ae4ee4b1e28d27e79ea6143a199ead811e680bb3d097a19068904744af43c744",
+            "suite_self_compile_cold": "9f0035d2c3dec96c0c5f702722da3302dce7a4c4afbc62ded164fcab9257151e",
+            "full_gate_cold": "2a5806e6b037289e9456efa616c61dee966d6e4e51ed451dc4ab5f3ef8bc4dad",
+        }
+        self.assertEqual(
+            {
+                case_id: full[case_id]["expected_cases_sha256"]
+                for case_id in expected_digests
+            },
+            expected_digests,
+        )
 
     def test_filtered_e2e_lane_binds_unique_bool_ops_case(self) -> None:
         manifest = harness._load_json(harness.DEFAULT_MANIFEST)
@@ -178,6 +287,14 @@ class ManifestAndPolicyTests(unittest.TestCase):
         self.assertEqual(
             lane["runner_summary"]["expected_status_counts"],
             {"pass": 1, "fail": 0, "skip": 0},
+        )
+        expected_digest = "3df33c0e37cd2bec720e432441dd1d09a0750beb28b0061b19de05b47c2e8503"
+        self.assertEqual(
+            harness.runner_cases_contract("[PASS] e2e: bool_ops.ring\n")["sha256"],
+            expected_digest,
+        )
+        self.assertEqual(
+            lane["runner_summary"]["expected_cases_sha256"], expected_digest
         )
 
     def test_warm_cache_receipt_rejects_wrong_recipe_and_byte_drift(self) -> None:
@@ -214,9 +331,15 @@ class ManifestAndPolicyTests(unittest.TestCase):
                     "sha256": character * 64,
                 }
                 for name, character in (
-                    ("python", "1"), ("clang", "2"), ("clangxx", "3")
+                    ("python", "1"), ("clang", "2"), ("clangxx", "3"),
+                    ("lld_link", "6"),
                 )
             }
+            build_output = {}
+            for name, filename in harness.WARM_CACHE_BUILD_FILES.items():
+                path = root / filename
+                path.write_bytes(name.encode("utf-8"))
+                build_output[name] = harness._file_record(path)
             recipe = {
                 "argv": ["fixture-seed"],
                 "cwd": str(root),
@@ -224,7 +347,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
             }
             receipt = {
                 "schema": harness.WARM_CACHE_RECEIPT_SCHEMA,
-                "recipe_version": 1,
+                "recipe_version": 2,
                 "source": source,
                 "tools": tool_records,
                 "flags": harness._warm_cache_flags(manifest),
@@ -236,6 +359,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
                     "stderr": {"sha256": "5" * 64, "bytes": 0},
                 },
                 "cache_inventory": harness._cache_inventory(cache),
+                "build_output": build_output,
             }
             receipt_path, _output = harness._warm_cache_paths(cache)
             tools = {name: value["path"] for name, value in tool_records.items()}
@@ -243,6 +367,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
                 mock.patch.object(harness, "_warm_cache_source_identity", return_value=source),
                 mock.patch.object(harness, "_seed_tool_records", return_value=tool_records),
                 mock.patch.object(harness, "_warm_cache_seed_recipe", return_value=recipe),
+                mock.patch.object(harness, "_warm_cache_build_output", return_value=build_output),
             ):
                 wrong = json.loads(json.dumps(receipt))
                 wrong["seed_invocation"]["argv"] = ["wrong-seed"]
@@ -255,6 +380,96 @@ class ManifestAndPolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(harness.HarnessError, "cache_inventory drifted"):
                     harness.validate_warm_cache_seed(manifest, tools, cache)
 
+                selected = harness.formal_tools_from_seed(tools, receipt)
+                self.assertEqual(selected["ring"], build_output["ring"]["path"])
+                Path(build_output["ring"]["path"]).write_bytes(b"forged")
+                with self.assertRaisesRegex(
+                    harness.HarnessError, "compiler bytes drifted"
+                ):
+                    harness.formal_tools_from_seed(tools, receipt)
+
+    def test_warm_cache_build_output_replays_raw_lld_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            cache = root / "ring-lang-thinlto-cache"
+            cache.mkdir()
+            _receipt, output = harness._warm_cache_paths(cache)
+            output.mkdir()
+            manifest = harness._load_json(harness.DEFAULT_MANIFEST)
+            lld = (root / "tools" / "lld-link.exe").resolve()
+            tools = {
+                "clang": str((root / "tools" / "clang.exe").resolve()),
+                "clangxx": str((root / "tools" / "clang++.exe").resolve()),
+                "lld_link": str(lld),
+            }
+            for name in ("compiler_object", "runtime_object", "ring"):
+                (output / harness.WARM_CACHE_BUILD_FILES[name]).write_bytes(
+                    name.encode("utf-8")
+                )
+            commands = harness._expected_warm_cache_build_commands(
+                manifest, tools, cache
+            )
+            trace = output / harness.WARM_CACHE_BUILD_FILES["phase_trace"]
+            trace.write_text(
+                "".join(
+                    harness._json_line(
+                        {
+                            "schema": harness.BOOTSTRAP_PHASE_SCHEMA,
+                            "phase": phase,
+                            "argv": argv,
+                            "wall_ns": 1,
+                            "exit_code": 0,
+                        }
+                    )
+                    + "\n"
+                    for phase, argv in commands
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+            probe_stdout = output / harness.WARM_CACHE_BUILD_FILES[
+                "linker_probe_stdout"
+            ]
+            probe_stderr = output / harness.WARM_CACHE_BUILD_FILES[
+                "linker_probe_stderr"
+            ]
+            probe_stdout.write_bytes(b"")
+            probe_stderr.write_bytes(
+                f'{json.dumps(str(lld.with_suffix("")))} "-out:ring.exe"\n'.encode(
+                    "utf-8"
+                )
+            )
+            link_argv = commands[-1][1]
+            binding = {
+                "schema": harness.LINKER_BINDING_SCHEMA,
+                "probe_argv": [link_argv[0], "-###", *link_argv[1:]],
+                "cwd": str(harness.REPO_ROOT.resolve()),
+                "claimed_path": str(lld),
+                "selected_path": str(lld),
+                "exit_code": 0,
+                "stdout": harness._file_record(probe_stdout),
+                "stderr": harness._file_record(probe_stderr),
+            }
+            harness._json_dump(
+                output / harness.WARM_CACHE_BUILD_FILES["linker_binding"],
+                binding,
+            )
+            records = harness._warm_cache_build_output(manifest, tools, cache)
+            self.assertEqual(records["linker_probe_stdout"]["bytes"], 0)
+
+            probe_stderr.write_bytes(
+                f'{json.dumps(str(root / "other-lld-link"))} "-out:ring.exe"\n'.encode(
+                    "utf-8"
+                )
+            )
+            binding["stderr"] = harness._file_record(probe_stderr)
+            harness._json_dump(
+                output / harness.WARM_CACHE_BUILD_FILES["linker_binding"],
+                binding,
+            )
+            with self.assertRaisesRegex(harness.HarnessError, "raw linker probe"):
+                harness._warm_cache_build_output(manifest, tools, cache)
+
     def test_empirical_p95_only_exists_for_twenty_one_values(self) -> None:
         self.assertIn("empirical_p95", harness._metric_stats(list(range(21))))
         self.assertNotIn("empirical_p95", harness._metric_stats(list(range(5))))
@@ -262,7 +477,11 @@ class ManifestAndPolicyTests(unittest.TestCase):
     def _fake_record(self, *, included: bool, warmup: bool, wall_ns: int) -> dict:
         record = {
             "included": included,
-            "invalid_reason": "warmup" if warmup else (None if included else "invalid"),
+            "invalid_reason": (
+                "warmup" if warmup else (
+                    None if included else "measurement_errors: fixture quality"
+                )
+            ),
             "wall_ns": wall_ns,
             "cpu_user_ns": 1,
             "cpu_kernel_ns": 1,
@@ -313,7 +532,7 @@ class ManifestAndPolicyTests(unittest.TestCase):
         self.assertEqual(summary["valid_samples"], 21)
         self.assertEqual(summary["attempts"], 22)
 
-    def test_warmup_reason_is_derived_before_bad_attempt_details(self) -> None:
+    def test_warmup_semantic_failure_is_not_masked(self) -> None:
         reason = harness.derive_invalid_reason(
             policy="direct_short",
             index=0,
@@ -327,7 +546,45 @@ class ManifestAndPolicyTests(unittest.TestCase):
             phase_errors=["bad trace"],
             runtime_errors=["bad runtime"],
         )
-        self.assertEqual(reason, "warmup")
+        self.assertEqual(reason, "invocation_error: launch failed")
+
+    def test_fatal_warmup_and_measured_attempt_stop_without_replacement(self) -> None:
+        cases = (
+            ("direct_short", "invocation_error: launch failed"),
+            ("adaptive", "unexpected_exit: 1"),
+        )
+        for policy, reason in cases:
+            with self.subTest(policy=policy):
+                lane = {"case_id": f"fatal_{policy}", "policy": policy}
+
+                def fake_execute(**_kwargs: object) -> dict:
+                    record = self._fake_record(
+                        included=False, warmup=False, wall_ns=1
+                    )
+                    record["invalid_reason"] = reason
+                    return record
+
+                with (
+                    mock.patch.object(
+                        harness, "execute_invocation", side_effect=fake_execute
+                    ),
+                    mock.patch.object(harness, "validate_json"),
+                ):
+                    records, summary = harness.run_lane(
+                        lane=lane,
+                        run_id="run",
+                        run_dir=Path("."),
+                        environment={},
+                        manifest_sha="0" * 64,
+                        result_schema={},
+                        tools={},
+                        thinlto_cache=Path("."),
+                        jsonl_stream=io.StringIO(),
+                    )
+                self.assertEqual(len(records), 1)
+                self.assertEqual(summary["attempts"], 1)
+                self.assertFalse(summary["complete"])
+                self.assertEqual(harness._formal_completion([summary]), (False, 1))
 
     def test_adaptive_policy_uses_three_for_long_first_valid(self) -> None:
         summary = self._exercise_policy(
@@ -588,18 +845,21 @@ class AttemptBoundaryTests(unittest.TestCase):
         }
         rows = []
         for phase in harness.COMPILER_PHASE_ORDER:
+            executed = phase in lane["expected_executed_phases"]
             rows.append(
                 {
                     "schema": harness.COMPILER_PHASE_SCHEMA,
                     "schema_version": 1,
                     "lane": case_id,
                     "phase": phase,
-                    "duration_ns": 100 if phase == "command_total" else 10,
+                    "duration_ns": (
+                        100 if phase == "command_total" else (10 if executed else 0)
+                    ),
                     "unit": "ns",
                     "compiler_identity": "sha256:" + "a" * 64,
                     "source_identity": "git:" + "b" * 40,
                     "entry_file": entry,
-                    "executed": phase in lane["expected_executed_phases"],
+                    "executed": executed,
                     "complete": True,
                     "command_success": True,
                 }

@@ -1,1 +1,2 @@
 compiler/dist-c/main.c text eol=lf
+bench/check/manifest.json text eol=lf

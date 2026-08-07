@@ -28,17 +28,20 @@ BENCH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BENCH_DIR.parents[1]
 DEFAULT_MANIFEST = BENCH_DIR / "manifest.json"
 DEFAULT_RESULT_SCHEMA = BENCH_DIR / "result.schema.json"
-MANIFEST_SCHEMA = "ring.check-benchmark.manifest.v2"
-RESULT_SCHEMA = "ring.check-benchmark.invocation.v2"
-ENVIRONMENT_SCHEMA = "ring.check-benchmark.environment.v1"
+MANIFEST_SCHEMA = "ring.check-benchmark.manifest.v3"
+RESULT_SCHEMA = "ring.check-benchmark.invocation.v3"
+ENVIRONMENT_SCHEMA = "ring.check-benchmark.environment.v2"
 SUMMARY_SCHEMA = "ring.check-benchmark.summary.v1"
 COMPILER_PHASE_SCHEMA = "ring.compiler-phase-timing.v1"
 BOOTSTRAP_PHASE_SCHEMA = "ring.check-benchmark.bootstrap-phase.v1"
-RUNNER_SUMMARY_CONTRACT_SCHEMA = "ring.check-benchmark.runner-summary-contract.v1"
-WARM_CACHE_RECEIPT_SCHEMA = "ring.check-benchmark.warm-cache-seed.v1"
+RUNNER_SUMMARY_CONTRACT_SCHEMA = "ring.check-benchmark.runner-summary-contract.v2"
+WARM_CACHE_RECEIPT_SCHEMA = "ring.check-benchmark.warm-cache-seed.v2"
 # Updated mechanically after result.schema.json changes.  The constant pins the
 # complete nested contract, not merely its public $id.
-RESULT_SCHEMA_CANONICAL_SHA256 = "95e0bd9037a80e879bad2588d9d89edde5facaa827dd840225f639c800c36947"
+RESULT_SCHEMA_CANONICAL_SHA256 = "79fec93925e6cc703b89a55e0162a20ab4a81654b2930e9e659a8dfa7d0b055e"
+# Formal runs and the baseline combiner accept only these exact checked-in
+# manifest bytes.  The value is updated mechanically with manifest.json.
+CANONICAL_MANIFEST_SHA256 = "68e96b4758ba847f9dcf5001ed2212b762a3ed93a65d3777745f9bfea794e129"
 COMPILER_PHASE_ORDER = (
     "input_entry_load",
     "entry_parse",
@@ -57,6 +60,7 @@ ALLOWED_PLACEHOLDERS = {
     "ring",
     "clang",
     "clangxx",
+    "lld_link",
     "powershell",
     "run_dir",
     "sample_dir",
@@ -73,9 +77,20 @@ RSS_POLL_MS = 10
 WARM_CACHE_SEED_TIMEOUT_SECONDS = 600
 WARM_CACHE_RECEIPT_NAME = "ring-lang-b176-warm-seed-receipt.json"
 WARM_CACHE_OUTPUT_NAME = "ring-lang-b176-warm-seed-output"
+LINKER_BINDING_SCHEMA = "ring.check-benchmark.linker-binding.v1"
+WARM_CACHE_BUILD_FILES = {
+    "compiler_object": "ring_compiler_lto.o",
+    "runtime_object": "ring_runtime_lto.o",
+    "ring": "ring.exe",
+    "phase_trace": "phase-trace.jsonl",
+    "linker_binding": "linker-binding.json",
+    "linker_probe_stdout": "linker-probe.stdout.txt",
+    "linker_probe_stderr": "linker-probe.stderr.txt",
+}
 SAMPLE_ID_RE = re.compile(
     r"^(?P<case_id>[a-z][a-z0-9_]*)-(?P<index>[0-9]{3})-(?P<nonce>[0-9a-f]{8})$"
 )
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 class HarnessError(RuntimeError):
@@ -249,8 +264,19 @@ def validate_schema_definition(schema: Mapping[str, Any]) -> None:
     actual_sha = _sha256_bytes(canonical)
     if actual_sha != RESULT_SCHEMA_CANONICAL_SHA256:
         raise HarnessError(
-            "result schema definition does not match the canonical invocation.v2 "
+            "result schema definition does not match the canonical invocation.v3 "
             f"contract: expected {RESULT_SCHEMA_CANONICAL_SHA256}, got {actual_sha}"
+        )
+
+
+def validate_formal_manifest_bytes(path: Path) -> None:
+    """Require the exact checked-in manifest contract for formal evidence."""
+
+    actual = _sha256_file(path)
+    if actual != CANONICAL_MANIFEST_SHA256:
+        raise HarnessError(
+            "formal manifest bytes differ from the canonical checked-in contract: "
+            f"expected {CANONICAL_MANIFEST_SHA256}, got {actual}"
         )
 
 
@@ -266,6 +292,7 @@ def _validate_runner_summary_contract(
         "expected_total",
         "expected_status_counts",
         "expected_suite_counts",
+        "expected_cases_sha256",
         "skip_policy",
         "fail_policy",
         "reported_exit_policy",
@@ -303,6 +330,13 @@ def _validate_runner_summary_contract(
             accumulated[key] += counts[key]
     if accumulated != statuses:
         raise HarnessError(f"{prefix} suite/status counts disagree")
+    cases_sha = contract["expected_cases_sha256"]
+    if (
+        not isinstance(cases_sha, str)
+        or SHA256_RE.fullmatch(cases_sha) is None
+        or cases_sha == "0" * 64
+    ):
+        raise HarnessError(f"{prefix}.expected_cases_sha256 must be one SHA-256")
     if contract["skip_policy"] != "exact":
         raise HarnessError(f"{prefix}.skip_policy must be 'exact'")
     if contract["fail_policy"] != "zero" or statuses["fail"] != 0:
@@ -614,6 +648,7 @@ def build_tools(ring_override: str | None) -> dict[str, str | None]:
         "ring": _tool_path("ring.exe", ring_override or str(REPO_ROOT / "ring.exe")),
         "clang": _tool_path("clang"),
         "clangxx": _tool_path("clang++"),
+        "lld_link": _tool_path("lld-link"),
         "powershell": _tool_path("powershell"),
     }
 
@@ -673,7 +708,7 @@ def _warm_cache_paths(cache: Path) -> tuple[Path, Path]:
 
 def _seed_tool_records(tools: Mapping[str, str | None]) -> dict[str, Any]:
     records: dict[str, Any] = {}
-    for name in ("python", "clang", "clangxx"):
+    for name in ("python", "clang", "clangxx", "lld_link"):
         path = tools.get(name)
         if not isinstance(path, str) or not Path(path).is_file():
             raise HarnessError(f"warm-cache seed requires tool {name}")
@@ -703,6 +738,8 @@ def _warm_cache_seed_recipe(
         records["clang"]["path"],
         "--clangxx",
         records["clangxx"]["path"],
+        "--lld-link",
+        records["lld_link"]["path"],
         "--cache",
         str(cache.resolve()),
     ]
@@ -734,14 +771,137 @@ def _warm_cache_flags(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _selected_lld_link(stderr: str) -> Path | None:
+    for line in stderr.splitlines():
+        match = re.match(r'^\s*("(?:\\.|[^"])*")', line)
+        if match is None:
+            continue
+        try:
+            token = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        candidate = Path(token)
+        if candidate.name.lower() not in {"lld-link", "lld-link.exe"}:
+            continue
+        if candidate.suffix.lower() != ".exe":
+            candidate = Path(str(candidate) + ".exe")
+        return candidate.resolve()
+    return None
+
+
+def _expected_warm_cache_build_commands(
+    manifest: Mapping[str, Any], tools: Mapping[str, str | None], cache: Path
+) -> list[tuple[str, list[str]]]:
+    _receipt, output = _warm_cache_paths(cache)
+    anchor = REPO_ROOT / "compiler" / "dist-c" / "main.c"
+    runtime = REPO_ROOT / "ring_runtime.cpp"
+    compiler_object = output / WARM_CACHE_BUILD_FILES["compiler_object"]
+    runtime_object = output / WARM_CACHE_BUILD_FILES["runtime_object"]
+    ring = output / WARM_CACHE_BUILD_FILES["ring"]
+    required = {name: tools.get(name) for name in ("clang", "clangxx", "lld_link")}
+    if any(not isinstance(path, str) or not path for path in required.values()):
+        raise HarnessError("warm-cache build tools are incomplete")
+    link_flags: list[str] = []
+    cache_inserted = False
+    for flag in manifest["fingerprint_flags"]["link"]:
+        if flag == "-fuse-ld=lld":
+            link_flags.append(f"-B{Path(required['lld_link']).resolve().parent}")
+        if flag.startswith("-Wl,/lldltocachepolicy:") and not cache_inserted:
+            link_flags.append(f"-Wl,/lldltocache:{cache.resolve()}")
+            cache_inserted = True
+        link_flags.append(flag)
+    if "-fuse-ld=lld" not in link_flags or not cache_inserted:
+        raise HarnessError("manifest link flags lack the bounded lld/ThinLTO policy")
+    return [
+        (
+            "anchor_compile",
+            [
+                str(required["clang"]), "-c", str(anchor), "-o",
+                str(compiler_object), *manifest["fingerprint_flags"]["compiler"],
+            ],
+        ),
+        (
+            "runtime_compile",
+            [
+                str(required["clangxx"]), "-c", str(runtime), "-o",
+                str(runtime_object), *manifest["fingerprint_flags"]["runtime"],
+            ],
+        ),
+        (
+            "link",
+            [
+                str(required["clang"]), str(compiler_object), str(runtime_object),
+                "-o", str(ring), *link_flags,
+            ],
+        ),
+    ]
+
+
+def _warm_cache_build_output(
+    manifest: Mapping[str, Any], tools: Mapping[str, str | None], cache: Path
+) -> dict[str, Any]:
+    _receipt, output = _warm_cache_paths(cache)
+    records = {
+        name: _actual_file_record(output / filename, f"warm-cache seed {name}")
+        for name, filename in WARM_CACHE_BUILD_FILES.items()
+    }
+    trace_path = output / WARM_CACHE_BUILD_FILES["phase_trace"]
+    rows: list[Any] = []
+    with trace_path.open("r", encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if line.strip():
+                rows.append(
+                    _strict_json_loads(line, f"{trace_path}:{line_number}")
+                )
+    expected = _expected_warm_cache_build_commands(manifest, tools, cache)
+    if len(rows) != len(expected):
+        raise HarnessError("warm-cache bootstrap phase trace count drifted")
+    for row, (phase, argv) in zip(rows, expected, strict=True):
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"schema", "phase", "argv", "wall_ns", "exit_code"}
+            or row.get("schema") != BOOTSTRAP_PHASE_SCHEMA
+            or row.get("phase") != phase
+            or row.get("argv") != argv
+            or not _is_trace_int(row.get("wall_ns"))
+            or row["wall_ns"] < 0
+            or row.get("exit_code") != 0
+        ):
+            raise HarnessError(f"warm-cache bootstrap phase {phase} provenance drifted")
+    binding_path = output / WARM_CACHE_BUILD_FILES["linker_binding"]
+    binding = _load_json(binding_path)
+    link_argv = expected[-1][1]
+    lld_path = str(Path(str(tools["lld_link"])).resolve())
+    expected_binding = {
+        "schema": LINKER_BINDING_SCHEMA,
+        "probe_argv": [link_argv[0], "-###", *link_argv[1:]],
+        "cwd": str(REPO_ROOT.resolve()),
+        "claimed_path": lld_path,
+        "selected_path": lld_path,
+        "exit_code": 0,
+        "stdout": records["linker_probe_stdout"],
+        "stderr": records["linker_probe_stderr"],
+    }
+    if binding != expected_binding:
+        raise HarnessError("warm-cache bootstrap linker binding drifted")
+    probe_stderr = (
+        output / WARM_CACHE_BUILD_FILES["linker_probe_stderr"]
+    ).read_bytes().decode("utf-8", errors="replace")
+    if _selected_lld_link(probe_stderr) != Path(lld_path):
+        raise HarnessError(
+            "warm-cache bootstrap raw linker probe did not select the claimed lld-link"
+        )
+    return records
+
+
 def _validate_warm_cache_receipt_shape(receipt: Any) -> None:
     required = {
         "schema", "recipe_version", "source", "tools", "flags", "cache_path",
-        "seed_invocation", "outcome", "cache_inventory",
+        "seed_invocation", "outcome", "cache_inventory", "build_output",
     }
     if not isinstance(receipt, dict) or set(receipt) != required:
         raise HarnessError("warm-cache receipt fields differ from the strict contract")
-    if receipt["schema"] != WARM_CACHE_RECEIPT_SCHEMA or receipt["recipe_version"] != 1:
+    if receipt["schema"] != WARM_CACHE_RECEIPT_SCHEMA or receipt["recipe_version"] != 2:
         raise HarnessError("warm-cache receipt schema/version is unsupported")
     if not isinstance(receipt["source"], dict) or set(receipt["source"]) != {
         "git_sha", "git_dirty", "dist_c", "runtime", "bootstrap",
@@ -768,7 +928,7 @@ def _validate_warm_cache_receipt_shape(receipt: Any) -> None:
         ):
             raise HarnessError(f"warm-cache receipt source {name} is malformed")
     if not isinstance(receipt["tools"], dict) or set(receipt["tools"]) != {
-        "python", "clang", "clangxx",
+        "python", "clang", "clangxx", "lld_link",
     }:
         raise HarnessError("warm-cache receipt tool identity is malformed")
     for name, value in receipt["tools"].items():
@@ -783,6 +943,22 @@ def _validate_warm_cache_receipt_shape(receipt: Any) -> None:
             or len(value["sha256"]) != 64
         ):
             raise HarnessError(f"warm-cache receipt tool {name} is malformed")
+    build_output = receipt["build_output"]
+    if not isinstance(build_output, dict) or set(build_output) != set(WARM_CACHE_BUILD_FILES):
+        raise HarnessError("warm-cache receipt build output identity is malformed")
+    for name, value in build_output.items():
+        minimum_bytes = 0 if name == "linker_probe_stdout" else 1
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"path", "sha256", "bytes"}
+            or not isinstance(value["path"], str)
+            or not Path(value["path"]).is_absolute()
+            or not isinstance(value["sha256"], str)
+            or SHA256_RE.fullmatch(value["sha256"]) is None
+            or not _is_trace_int(value["bytes"])
+            or value["bytes"] < minimum_bytes
+        ):
+            raise HarnessError(f"warm-cache receipt build output {name} is malformed")
     if not isinstance(receipt["flags"], dict) or set(receipt["flags"]) != {
         "compiler", "runtime", "link",
     }:
@@ -877,6 +1053,7 @@ def prepare_warm_cache_seed(
     source = _warm_cache_source_identity()
     if source["git_dirty"]:
         raise HarnessError("warm-cache seed requires a clean tracked worktree")
+    seed_tools = _seed_tool_records(tools)
     recipe = _warm_cache_seed_recipe(cache, tools)
     try:
         completed = subprocess.run(
@@ -890,14 +1067,19 @@ def prepare_warm_cache_seed(
             "warm-cache seed failed with exit "
             f"{completed.returncode}; output retained at {output}"
         )
+    if _warm_cache_source_identity() != source:
+        raise HarnessError("warm-cache seed source identity changed during bootstrap")
+    if _seed_tool_records(tools) != seed_tools:
+        raise HarnessError("warm-cache seed tool identity changed during bootstrap")
     inventory = _cache_inventory(cache)
     if inventory["files"] == 0:
         raise HarnessError("warm-cache seed succeeded but produced an empty cache")
+    build_output = _warm_cache_build_output(manifest, tools, cache)
     receipt = {
         "schema": WARM_CACHE_RECEIPT_SCHEMA,
-        "recipe_version": 1,
+        "recipe_version": 2,
         "source": source,
-        "tools": _seed_tool_records(tools),
+        "tools": seed_tools,
         "flags": _warm_cache_flags(manifest),
         "cache_path": str(cache),
         "seed_invocation": recipe,
@@ -907,12 +1089,9 @@ def prepare_warm_cache_seed(
             "stderr": _bytes_record(completed.stderr),
         },
         "cache_inventory": inventory,
+        "build_output": build_output,
     }
     _validate_warm_cache_receipt_shape(receipt)
-    try:
-        shutil.rmtree(output)
-    except OSError as exc:
-        raise HarnessError(f"cannot remove bounded warm-cache seed output: {exc}") from exc
     _json_dump(receipt_path, receipt)
     return receipt_path
 
@@ -932,6 +1111,7 @@ def validate_warm_cache_seed(
         "cache_path": str(cache),
         "seed_invocation": _warm_cache_seed_recipe(cache, tools),
         "cache_inventory": _cache_inventory(cache),
+        "build_output": _warm_cache_build_output(manifest, tools, cache),
     }
     for field, value in expected.items():
         if receipt[field] != value:
@@ -939,6 +1119,21 @@ def validate_warm_cache_seed(
     if receipt["source"]["git_dirty"]:
         raise HarnessError("warm-cache seed receipt was captured from a dirty worktree")
     return receipt_path, receipt
+
+
+def formal_tools_from_seed(
+    tools: Mapping[str, str | None], receipt: Mapping[str, Any]
+) -> dict[str, str | None]:
+    """Select only the compiler executable proven by the formal seed receipt."""
+
+    _validate_warm_cache_receipt_shape(receipt)
+    ring = receipt["build_output"]["ring"]
+    actual = _actual_file_record(Path(ring["path"]), "formal seed compiler")
+    if actual != ring:
+        raise HarnessError("formal seed compiler bytes drifted from the build receipt")
+    selected = dict(tools)
+    selected["ring"] = ring["path"]
+    return selected
 
 
 def validate_retained_warm_cache_seed(
@@ -970,9 +1165,20 @@ def validate_retained_warm_cache_seed(
     tools = environment.get("tools")
     if not isinstance(tools, dict):
         raise HarnessError("formal environment tool identity is missing")
-    for name in ("python", "clang", "clangxx"):
+    for name in ("python", "clang", "clangxx", "lld_link"):
         if identity["tools"][name] != tools.get(name):
             raise HarnessError(f"warm-cache seed tool {name} identity mismatch")
+    for name, record in identity["build_output"].items():
+        if _actual_file_record(Path(record["path"]), f"seed build output {name}") != record:
+            raise HarnessError(f"warm-cache seed build output {name} drifted")
+    ring = tools.get("ring")
+    built_ring = identity["build_output"]["ring"]
+    if (
+        not isinstance(ring, dict)
+        or ring.get("path") != built_ring["path"]
+        or ring.get("sha256") != built_ring["sha256"]
+    ):
+        raise HarnessError("formal compiler is not the seed receipt build output")
     flags = environment.get("flags")
     if not isinstance(flags, dict) or identity["flags"] != {
         "compiler": flags.get("compiler"),
@@ -1790,13 +1996,57 @@ def _classify_phase_trace_records(
     return PhaseValidation(tuple(hard), tuple(eligibility))
 
 
-def _runner_summary(stdout_path: Path) -> dict[str, Any] | None:
-    text = stdout_path.read_text(encoding="utf-8", errors="replace")
-    suite_counts: dict[str, dict[str, int]] = {}
-    status_counts = {"pass": 0, "fail": 0, "skip": 0}
-    for match in re.finditer(r"^\[(PASS|FAIL|SKIP)\]\s+([^:\r\n]+):", text, re.MULTILINE):
+def runner_cases_contract(stdout_text: str) -> dict[str, Any]:
+    """Return canonical ordered runner cases and their contract SHA-256.
+
+    PASS/FAIL details are diagnostic rather than contract identity.  A SKIP
+    reason is semantic and is therefore retained exactly.
+    """
+
+    cases: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for line in stdout_text.splitlines():
+        match = re.fullmatch(r"\[(PASS|FAIL|SKIP)\]\s+([^:\r\n]+):\s*(.*)", line)
+        if match is None:
+            continue
         status = match.group(1).lower()
         suite = match.group(2).strip()
+        payload = match.group(3).strip()
+        name, separator, detail = payload.partition(" -- ")
+        name = name.strip()
+        identity = (suite, name)
+        if not suite or not name:
+            raise HarnessError("runner emitted an empty suite or case identity")
+        if identity in seen:
+            raise HarnessError(
+                f"runner emitted duplicate case identity {suite!r}: {name!r}"
+            )
+        seen.add(identity)
+        cases.append(
+            {
+                "suite": suite,
+                "name": name,
+                "status": status,
+                "skip_reason": detail if status == "skip" and separator else (
+                    "" if status == "skip" else None
+                ),
+            }
+        )
+    canonical = json.dumps(
+        cases, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return {"cases": cases, "sha256": _sha256_bytes(canonical)}
+
+
+def _runner_summary_from_text(text: str) -> dict[str, Any] | None:
+    contract = runner_cases_contract(text)
+    cases = contract["cases"]
+    suite_counts: dict[str, dict[str, int]] = {}
+    status_counts = {"pass": 0, "fail": 0, "skip": 0}
+    for case in cases:
+        status = case["status"]
+        suite = case["suite"]
         status_counts[status] += 1
         suite_record = suite_counts.setdefault(suite, {"pass": 0, "fail": 0, "skip": 0})
         suite_record[status] += 1
@@ -1812,13 +2062,21 @@ def _runner_summary(stdout_path: Path) -> dict[str, Any] | None:
         if len(exit_matches) == 1 and not text[exit_matches[0].end() :].strip()
         else None
     )
-    if not suite_counts and not exit_matches:
+    if not cases and not exit_matches:
         return None
     return {
         "status_counts": status_counts,
         "suite_counts": suite_counts,
+        "cases": cases,
+        "cases_sha256": contract["sha256"],
         "reported_exit_code": int(final_exit.group(1)) if final_exit else None,
     }
+
+
+def _runner_summary(stdout_path: Path) -> dict[str, Any] | None:
+    return _runner_summary_from_text(
+        stdout_path.read_text(encoding="utf-8", errors="replace")
+    )
 
 
 def _validate_runner_summary_result(
@@ -1848,6 +2106,20 @@ def _validate_runner_summary_result(
         )
     if sum(statuses.values()) != contract["expected_total"]:
         raise HarnessError("runner total does not match the manifest contract")
+    cases = summary.get("cases")
+    if not isinstance(cases, list):
+        raise HarnessError("runner case identities are missing")
+    canonical = json.dumps(
+        cases, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    actual_sha = _sha256_bytes(canonical)
+    if summary.get("cases_sha256") != actual_sha:
+        raise HarnessError("runner case identity digest is inconsistent")
+    if actual_sha != contract["expected_cases_sha256"]:
+        raise HarnessError(
+            "runner case identities/statuses/skip reasons do not match the manifest contract"
+        )
 
 
 def derive_invalid_reason(
@@ -1867,14 +2139,23 @@ def derive_invalid_reason(
     if policy not in ALLOWED_POLICIES:
         raise HarnessError(f"cannot derive eligibility for unknown policy {policy!r}")
     warmups = DIRECT_WARMUPS if policy == "direct_short" else 0
-    if index < warmups:
-        return "warmup"
     if invocation_error is not None:
-        return f"measurement_error: {invocation_error}"
+        return f"invocation_error: {invocation_error}"
     if measurement["timed_out"]:
         return "timeout"
     if exit_code not in expected_exit_codes:
         return f"unexpected_exit: {exit_code}"
+    if runtime_errors:
+        return f"runner_runtime_invalid: {'; '.join(runtime_errors)}"
+    if runner_expected and runner_summary is None:
+        return "runner_summary_missing"
+    missing_artifacts = [item["path"] for item in artifacts if not item["exists"]]
+    if missing_artifacts:
+        return f"artifact_missing: {','.join(missing_artifacts)}"
+    if phase_errors:
+        return f"phase_trace_invalid: {'; '.join(phase_errors)}"
+    if index < warmups:
+        return "warmup"
     exact_fields = (
         "cpu_user_ns",
         "cpu_kernel_ns",
@@ -1890,16 +2171,15 @@ def derive_invalid_reason(
         return f"measurement_errors: {'; '.join(measurement['measurement_errors'])}"
     if not measurement["rss_complete"]:
         return "rss_incomplete"
-    if runtime_errors:
-        return f"runner_runtime_invalid: {'; '.join(runtime_errors)}"
-    if runner_expected and runner_summary is None:
-        return "runner_summary_missing"
-    missing_artifacts = [item["path"] for item in artifacts if not item["exists"]]
-    if missing_artifacts:
-        return f"artifact_missing: {','.join(missing_artifacts)}"
-    if phase_errors:
-        return f"phase_trace_invalid: {'; '.join(phase_errors)}"
     return None
+
+
+def _is_replaceable_measurement_invalid(reason: Any) -> bool:
+    return (
+        reason == "rss_incomplete"
+        or isinstance(reason, str)
+        and reason.startswith(("missing_exact_metrics:", "measurement_errors:"))
+    )
 
 
 @dataclass(frozen=True)
@@ -2594,6 +2874,13 @@ def run_lane(
                         if record["wall_ns"] >= LONG_LANE_THRESHOLD_NS
                         else SHORT_VALID_SAMPLES
                     )
+        reason = record.get("invalid_reason")
+        if (
+            reason is not None
+            and reason != "warmup"
+            and not _is_replaceable_measurement_invalid(reason)
+        ):
+            break
         index += 1
 
     final_target = target if target is not None else SHORT_VALID_SAMPLES
@@ -2674,6 +2961,13 @@ def _prepare_output(path: Path) -> None:
         path.mkdir(parents=True)
 
 
+def _formal_completion(lane_summaries: Sequence[Mapping[str, Any]]) -> tuple[bool, int]:
+    complete = bool(lane_summaries) and all(
+        lane.get("complete") is True for lane in lane_summaries
+    )
+    return complete, 0 if complete else 1
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -2709,6 +3003,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     validate_schema_definition(result_schema)
     lanes = expand_lanes(manifest)
 
+    if args.ring is not None and not args.probe:
+        raise HarnessError(
+            "--ring is restricted to --probe; formal runs use the seed build receipt"
+        )
+    if not args.list and not args.probe:
+        validate_formal_manifest_bytes(manifest_path)
     tools = build_tools(args.ring)
     if args.prepare_warm_cache:
         if (
@@ -2744,9 +3044,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     selected = select_lanes(lanes, args.cases) if args.cases else lanes
     if args.probe:
         selected = [_probe_lane(tools)]
-    job_preflight = preflight_job_support()
-    preflight_root = (args.output or BENCH_DIR / "results" / "preflight").resolve()
-    preflight_lanes(selected, tools, preflight_root, args.thinlto_cache.resolve())
 
     state: str | None = None
     seed_receipt_path: Path | None = None
@@ -2764,6 +3061,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed_receipt_path, seed_receipt = validate_warm_cache_seed(
             manifest, tools, args.thinlto_cache.resolve()
         )
+        tools = formal_tools_from_seed(tools, seed_receipt)
+
+    job_preflight = preflight_job_support()
+    preflight_root = (args.output or BENCH_DIR / "results" / "preflight").resolve()
+    preflight_lanes(selected, tools, preflight_root, args.thinlto_cache.resolve())
 
     if args.preflight:
         print(
@@ -2853,7 +3155,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     jsonl_stream=jsonl_stream,
                 )
             lane_summaries.append(lane_summary)
+            if not args.probe and lane_summary.get("complete") is not True:
+                break
 
+    complete, exit_status = _formal_completion(lane_summaries)
     summary = {
         "schema": SUMMARY_SCHEMA,
         "run_id": run_id,
@@ -2861,11 +3166,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "manifest_sha": manifest_sha,
         "samples_jsonl": _file_record(samples_path),
         "lanes": lane_summaries,
-        "complete": all(lane["complete"] for lane in lane_summaries),
+        "complete": complete,
     }
     _json_dump(run_dir / "summary.json", summary)
     print(_json_line({"run_dir": str(run_dir), "complete": summary["complete"]}))
-    return 0 if summary["complete"] else 1
+    return exit_status
 
 
 if __name__ == "__main__":

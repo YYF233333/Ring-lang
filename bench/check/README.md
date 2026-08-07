@@ -148,12 +148,17 @@ generated cache is removed after counters and artifacts are collected. The
 harness itself owns the bounded warm seed recipe: from a clean worktree it
 builds the tracked anchor/runtime/link once with `bootstrap.py` into an empty
 cache and writes a strict receipt beside it. The receipt binds source files,
-tool executables, flags, exact seed argv/outcome, and a per-file canonical
-cache inventory. Formal cold and warm batches both verify the same receipt and
-current seed bytes. Warm batches copy the seed into their run directory and
-mutate only that isolated working copy, so one batch cannot warm a later batch.
-The retained receipt is part of the combine fingerprint. OS file cache is
-deliberately not flushed or claimed as controlled.
+tool executables (including the exact `lld-link`), flags, exact seed
+argv/outcome, the built compiler and intermediate outputs, and a per-file
+canonical cache inventory. The bootstrap output remains beside the cache as
+`ring-lang-b176-warm-seed-output`; formal lanes use only its receipt-proven
+`ring.exe`. Formal cold and warm batches verify the same receipt, build output,
+and current seed bytes. Warm batches copy the seed cache into their run
+directory and mutate only that isolated working copy, so one batch cannot warm
+a later batch. Keep the seed cache, receipt, and bootstrap output together until
+all dependent formal batches have been combined, then remove the three as one
+seed lifecycle. The retained receipt is part of the combine fingerprint. OS
+file cache is deliberately not flushed or claimed as controlled.
 
 The Python runner also has a separate ignored root artifact,
 `ring_runtime.o`. Lanes that can consume it (`filtered_e2e_bool_ops`, e2e,
@@ -184,12 +189,12 @@ python bench/check/run.py --preflight `
   --confirm-cache-state cold
 ```
 
-Run one direct lane from a clean worktree with an explicitly selected compiler:
+Run one direct lane from a clean worktree. The compiler is selected exclusively
+from the validated bootstrap receipt/output prepared above:
 
 ```powershell
 python bench/check/run.py `
   --case tiny_hello_check_warm `
-  --ring C:\path\to\ring.exe `
   --thinlto-cache "$env:TEMP\ring-lang-thinlto-cache" `
   --confirm-cache-state warm `
   --output C:\path\to\fresh-results

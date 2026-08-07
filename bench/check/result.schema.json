@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ring.check-benchmark.invocation.v2",
+  "$id": "ring.check-benchmark.invocation.v3",
   "title": "Ring check benchmark invocation",
   "type": "object",
   "additionalProperties": false,
@@ -49,7 +49,7 @@
   "properties": {
     "schema": {
       "type": "string",
-      "const": "ring.check-benchmark.invocation.v2"
+      "const": "ring.check-benchmark.invocation.v3"
     },
     "run_id": { "type": "string", "minLength": 1 },
     "sample_id": {
@@ -210,7 +210,7 @@
     "runner_summary": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["status_counts", "suite_counts", "reported_exit_code"],
+      "required": ["status_counts", "suite_counts", "cases", "cases_sha256", "reported_exit_code"],
       "properties": {
         "status_counts": {
           "type": "object",
@@ -235,6 +235,21 @@
             }
           }
         },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["suite", "name", "status", "skip_reason"],
+            "properties": {
+              "suite": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "type": "string", "enum": ["pass", "fail", "skip"] },
+              "skip_reason": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "cases_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "reported_exit_code": { "type": ["integer", "null"] }
       }
     },
