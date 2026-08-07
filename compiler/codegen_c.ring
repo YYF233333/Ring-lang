@@ -1865,7 +1865,7 @@ struct CDerivedFn {
     saved: CEmitState
 }
 
-// Collect dict param names for a derived impl filtered by trait.
+// Collect every bound's type parameter and trait in exact registered ABI order.
 fn collect_c_derived_dict_params(bounds: List<TraitBound>) -> List<Str> {
     let mut params: List<Str> = []
     for b in bounds {
