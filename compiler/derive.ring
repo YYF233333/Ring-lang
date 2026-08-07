@@ -2,8 +2,9 @@ use types::{Type, EffectRow, StructField, EnumVariant,
     INT, STR, BOOL, EMPTY_ROW}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     ImplEntry, ImplDictBound, MethodOrigin,
-    add_impl, has_impl, install_method_scheme}
-use ast::{span_zero}
+    add_impl, has_impl, find_impl, install_method_scheme,
+    instantiate_impl_dict_requirements}
+use ast::{Span, DeriveAttribute, span_zero}
 use diagnostics::{CollectingSink, Severity, DiagnosticContext, make_diag}
 use codes::{E0503}
 use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef,
@@ -69,7 +70,7 @@ struct UserType {
     type_kind: TypeKind,
     struct_def: StructDef?,
     enum_def: EnumDef?,
-    derive_traits: List<Str>
+    derive_attrs: List<DeriveAttribute>
 }
 
 fn collect_user_types(env: TypeEnv) -> List<UserType> {
@@ -85,7 +86,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         // type-checking, but they have no observable runtime structure to derive.
         if def.is_extern { continue }
         if builtins.contains(name) == false {
-            result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none, derive_traits: def.derive_traits })
+            result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none, derive_attrs: def.derive_attrs })
         }
     }
     let mut sorted_enums = env.types.enums.entries()
@@ -95,7 +96,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         // Skip mod aliases to avoid duplicate derives
         if name != def.name { continue }
         if builtins.contains(name) == false {
-            result.push(UserType { name: name, type_kind: TypeKind::EnumKind, struct_def: none, enum_def: some(def), derive_traits: def.derive_traits })
+            result.push(UserType { name: name, type_kind: TypeKind::EnumKind, struct_def: none, enum_def: some(def), derive_attrs: def.derive_attrs })
         }
     }
     result
@@ -138,7 +139,7 @@ fn derive_trait(
                     match result {
                         some(di) => {
                             known.insert(ut.name)
-                            register_derived_impl(env, sink, di, trait_name)
+                            register_derived_impl(env, sink, di, trait_name, span_zero())
                             derived_impls.push(di)
                             changed = true
                         },
@@ -189,7 +190,7 @@ fn derive_hash_trait(
                         match result {
                             some(di) => {
                                 known.insert(ut.name)
-                                register_derived_impl(env, sink, di, "Hash")
+                                register_derived_impl(env, sink, di, "Hash", span_zero())
                                 derived_impls.push(di)
                                 changed = true
                             },
@@ -207,10 +208,17 @@ fn has_manual_impl(env: TypeEnv, type_name: Str, trait_name: Str) -> Bool {
 }
 
 fn requests_derive(ut: UserType, trait_name: Str) -> Bool {
-    for requested in ut.derive_traits {
-        if requested == trait_name { return true }
+    for attr in ut.derive_attrs {
+        if attr.trait_name == trait_name { return true }
     }
     false
+}
+
+fn derive_attribute(ut: UserType, trait_name: Str) -> DeriveAttribute? {
+    for attr in ut.derive_attrs {
+        if attr.trait_name == trait_name { return some(attr) }
+    }
+    none
 }
 
 // Json is deliberately opt-in. Unlike the historical auto-derived traits,
@@ -219,6 +227,110 @@ fn derive_json_trait(
     mut env: TypeEnv, mut sink: CollectingSink,
     all_types: List<UserType>, mut derived_impls: List<DerivedImpl>
 ) {
+    for ut in all_types {
+        for attr in ut.derive_attrs {
+            if attr.trait_name != "Json" {
+                let requested = attr.trait_name
+                let detail = "unsupported explicit derive trait '${requested}'"
+                sink.report(make_diag(E0503, Severity::SevError,
+                    "@derive currently supports Json; '${requested}' is not an explicit derive target",
+                    attr.span, DiagnosticContext::TraitError { detail: detail }))
+            }
+        }
+    }
+
+    // Json is a two-phase derive.  First solve every explicit candidate's
+    // ordered runtime predicates as a least fixed point.  Candidate references
+    // consult the current plan, so mutually-recursive SCCs grow together rather
+    // than waiting for one member to become "known" first.  Manual impls are
+    // always read through their authoritative ImplEntry.dict_bounds.
+    let mut candidates: List<UserType> = []
+    let mut candidate_names: Set<Str> = set_new()
+    let mut plans: Map<Str, List<ImplDictBound>> = map_new()
+    for ut in all_types {
+        if requests_derive(ut, "Json") && !has_manual_impl(env, ut.name, "Json") {
+            candidates.push(ut)
+            candidate_names.insert(ut.name)
+            let empty: List<ImplDictBound> = []
+            plans.insert(ut.name, empty)
+        }
+    }
+
+    let mut invalid: Set<Str> = set_new()
+    // Every successful changed round either invalidates a candidate or appends
+    // at least one previously unseen (type-param, trait) pair. This finite cap
+    // is an internal guard against accidental non-monotonic SCC regressions.
+    let trait_count = env.trait_reg.traits.len()
+    let mut max_rounds = 2 + candidates.len()
+    for ut in candidates {
+        max_rounds = max_rounds + user_type_param_count(ut) * (trait_count + 1)
+    }
+    let mut rounds = 0
+    let mut changed = true
+    while changed {
+        rounds = rounds + 1
+        if rounds > max_rounds {
+            panic("Json derive evidence fixed point did not terminate")
+        }
+        changed = false
+        for ut in candidates {
+            if !invalid.contains(ut.name) {
+                match plan_json_bounds_for_user_type(
+                    env, ut, candidate_names, invalid, plans
+                ) {
+                    none => {
+                        invalid.insert(ut.name)
+                        changed = true
+                    },
+                    some(next) => {
+                        // Monotonic union preserves the first-discovery order.
+                        // Never replace a plan: SCC peers may expose the same
+                        // finite predicate set in a different traversal order.
+                        let mut merged: List<ImplDictBound> = []
+                        match plans.get(ut.name) {
+                            some(previous) => {
+                                for bound in previous { merged.push(bound) }
+                            },
+                            none => {}
+                        }
+                        let before = merged.len()
+                        for bound in next {
+                            push_impl_dict_bound(
+                                merged, bound.type_param_index, bound.trait_name)
+                        }
+                        if merged.len() != before {
+                            plans.insert(ut.name, merged)
+                            changed = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Register the complete valid set before producing any body actions.  A
+    // recursive member can therefore resolve every peer via find_impl exactly
+    // like ordinary inference does; no provisional/builtin dictionary exists.
+    for ut in candidates {
+        if !invalid.contains(ut.name) {
+            let plan = match plans.get(ut.name) {
+                some(bounds) => bounds,
+                none => []
+            }
+            let signature = json_derived_signature(ut, plan)
+            match signature {
+                some(di) => {
+                    let attr_span = match derive_attribute(ut, "Json") {
+                        some(attr) => attr.span,
+                        none => span_zero()
+                    }
+                    register_derived_impl(env, sink, di, "Json", attr_span)
+                },
+                none => { invalid.insert(ut.name) }
+            }
+        }
+    }
+
     let mut known: Set<Str> = set_new()
     let mut sorted_impls = env.trait_reg.trait_impls.entries()
     sorted_impls.sort_by(compare_by_first)
@@ -228,50 +340,263 @@ fn derive_json_trait(
             if imp.trait_name == "Json" { known.insert(imp.target_type_name) }
         }
     }
-    known.insert("Int")
-    known.insert("Float")
-    known.insert("Str")
-    known.insert("Bool")
 
-    for ut in all_types {
-        for requested in ut.derive_traits {
-            if requested != "Json" {
-                let detail = "unsupported explicit derive trait '${requested}'"
-                sink.report(make_diag(E0503, Severity::SevError,
-                    "@derive currently supports Json; '${requested}' is not an explicit derive target",
-                    span_zero(), DiagnosticContext::TraitError { detail: detail }))
+    for ut in candidates {
+        if !invalid.contains(ut.name) {
+            match try_derive(env, ut, "Json", known) {
+                some(di) => {
+                    let planned = match plans.get(ut.name) {
+                        some(found) => found,
+                        none => []
+                    }
+                    let actual = match derived_impl_dict_bounds(di) {
+                        some(found) => found,
+                        none => panic("Json derive produced an invalid type-parameter bound")
+                    }
+                    if !same_impl_dict_bound_set(planned, actual) {
+                        panic("Json derive evidence set changed after ImplEntry registration")
+                    }
+                    let planned_signature = match json_derived_signature(ut, planned) {
+                        some(found) => found,
+                        none => panic("Json derive lost its registered evidence plan")
+                    }
+                    // Field actions are name-addressed, while the method ABI is
+                    // positional. Normalize the emitted ABI back to the exact
+                    // first-discovery order already stored in ImplEntry.
+                    derived_impls.push(derived_impl_with_bounds(
+                        di, planned_signature.bounds))
+                },
+                none => { invalid.insert(ut.name) }
             }
         }
     }
 
-    let mut changed = true
-    while changed {
-        changed = false
-        for ut in all_types {
-            if requests_derive(ut, "Json") && !known.contains(ut.name) {
-                let result = try_derive(env, ut, "Json", known)
-                match result {
-                    some(di) => {
-                        known.insert(ut.name)
-                        register_derived_impl(env, sink, di, "Json")
-                        derived_impls.push(di)
-                        changed = true
-                    },
-                    none => {}
-                }
-            }
-        }
-    }
-
-    for ut in all_types {
-        if requests_derive(ut, "Json") && !known.contains(ut.name) {
+    for ut in candidates {
+        if invalid.contains(ut.name) {
             let display = ut.name
+            let attr_span = match derive_attribute(ut, "Json") {
+                some(attr) => attr.span,
+                none => span_zero()
+            }
             sink.report(make_diag(E0503, Severity::SevError,
                 "Cannot derive Json for '${display}': every field must provide Json evidence",
-                span_zero(), DiagnosticContext::TraitError {
+                attr_span, DiagnosticContext::TraitError {
                     detail: "Json derive field evidence is missing"
                 }))
         }
+    }
+}
+
+fn user_type_param_count(ut: UserType) -> Int {
+    match ut.type_kind {
+        TypeKind::StructKind => match ut.struct_def {
+            some(def) => def.type_params.len(),
+            none => 0
+        },
+        TypeKind::EnumKind => match ut.enum_def {
+            some(def) => def.type_params.len(),
+            none => 0
+        }
+    }
+}
+
+fn same_impl_dict_bound_set(
+    left: List<ImplDictBound>, right: List<ImplDictBound>
+) -> Bool {
+    if left.len() != right.len() { return false }
+    for expected in left {
+        let found = right.any(fn(actual) {
+            actual.type_param_index == expected.type_param_index &&
+                actual.trait_name == expected.trait_name
+        })
+        if !found { return false }
+    }
+    true
+}
+
+fn push_impl_dict_bound(
+    mut bounds: List<ImplDictBound>, type_param_index: Int, trait_name: Str
+) {
+    let duplicate = bounds.any(fn(bound) {
+        bound.type_param_index == type_param_index && bound.trait_name == trait_name
+    })
+    if !duplicate {
+        bounds.push(ImplDictBound {
+            type_param_index: type_param_index,
+            trait_name: trait_name
+        })
+    }
+}
+
+fn plan_json_bounds_for_user_type(
+    env: TypeEnv, ut: UserType,
+    candidate_names: Set<Str>, invalid: Set<Str>,
+    plans: Map<Str, List<ImplDictBound>>
+) -> List<ImplDictBound>? {
+    let mut bounds: List<ImplDictBound> = []
+    match ut.type_kind {
+        TypeKind::StructKind => match ut.struct_def {
+            some(def) => {
+                for field in def.fields {
+                    if !plan_json_evidence_for_type(
+                        env, field.ty, def.type_param_vars, "Json",
+                        candidate_names, invalid, plans, bounds
+                    ) { return none }
+                }
+            },
+            none => return none
+        },
+        TypeKind::EnumKind => match ut.enum_def {
+            some(def) => {
+                for variant in def.variants {
+                    for field_ty in variant.fields {
+                        if !plan_json_evidence_for_type(
+                            env, field_ty, def.type_param_vars, "Json",
+                            candidate_names, invalid, plans, bounds
+                        ) { return none }
+                    }
+                }
+            },
+            none => return none
+        }
+    }
+    some(bounds)
+}
+
+fn plan_json_evidence_for_type(
+    env: TypeEnv, t: Type, owner_type_param_vars: List<Int>, trait_name: Str,
+    candidate_names: Set<Str>, invalid: Set<Str>,
+    plans: Map<Str, List<ImplDictBound>>, mut bounds: List<ImplDictBound>
+) -> Bool {
+    match t {
+        Type::TypeVar { id, .. } => {
+            let param_idx = index_of_int(owner_type_param_vars, id)
+            if param_idx < 0 { return false }
+            push_impl_dict_bound(bounds, param_idx, trait_name)
+            true
+        },
+        Type::StructType { name, type_params, .. } =>
+            plan_json_nominal_evidence(
+                env, name, type_params, owner_type_param_vars, trait_name,
+                candidate_names, invalid, plans, bounds),
+        Type::EnumType { name, type_params, .. } =>
+            plan_json_nominal_evidence(
+                env, name, type_params, owner_type_param_vars, trait_name,
+                candidate_names, invalid, plans, bounds),
+        Type::IntType => has_impl(env.trait_reg, "Int", trait_name),
+        Type::FloatType => has_impl(env.trait_reg, "Float", trait_name),
+        Type::StrType => has_impl(env.trait_reg, "Str", trait_name),
+        Type::BoolType => has_impl(env.trait_reg, "Bool", trait_name),
+        Type::UnitType => has_impl(env.trait_reg, "Unit", trait_name),
+        _ => false
+    }
+}
+
+fn plan_json_nominal_evidence(
+    env: TypeEnv, name: Str, type_args: List<Type>,
+    owner_type_param_vars: List<Int>, trait_name: Str,
+    candidate_names: Set<Str>, invalid: Set<Str>,
+    plans: Map<Str, List<ImplDictBound>>, mut bounds: List<ImplDictBound>
+) -> Bool {
+    if trait_name == "Json" && candidate_names.contains(name) {
+        if invalid.contains(name) { return false }
+        let candidate_bounds = match plans.get(name) {
+            some(found) => found,
+            none => return false
+        }
+        for candidate_bound in candidate_bounds {
+            match type_args.get(candidate_bound.type_param_index) {
+                some(type_arg) => {
+                    if !plan_json_evidence_for_type(
+                        env, type_arg, owner_type_param_vars,
+                        candidate_bound.trait_name,
+                        candidate_names, invalid, plans, bounds
+                    ) { return false }
+                },
+                none => return false
+            }
+        }
+        return true
+    }
+
+    match find_impl(env.trait_reg, name, trait_name) {
+        none => false,
+        some(impl_entry) => match instantiate_impl_dict_requirements(
+            impl_entry, type_args
+        ) {
+            none => false,
+            some(requirements) => {
+                for requirement in requirements {
+                    if !plan_json_evidence_for_type(
+                        env, requirement.type_arg, owner_type_param_vars,
+                        requirement.trait_name,
+                        candidate_names, invalid, plans, bounds
+                    ) { return false }
+                }
+                true
+            }
+        }
+    }
+}
+
+fn json_derived_signature(
+    ut: UserType, impl_bounds: List<ImplDictBound>
+) -> DerivedImpl? {
+    let type_params = match ut.type_kind {
+        TypeKind::StructKind => match ut.struct_def {
+            some(def) => def.type_params,
+            none => return none
+        },
+        TypeKind::EnumKind => match ut.enum_def {
+            some(def) => def.type_params,
+            none => return none
+        }
+    }
+    let mut bounds: List<TraitBound> = []
+    for impl_bound in impl_bounds {
+        match type_params.get(impl_bound.type_param_index) {
+            some(type_param) => bounds.push(TraitBound {
+                type_param: type_param,
+                trait_name: impl_bound.trait_name
+            }),
+            none => return none
+        }
+    }
+    some(DerivedImpl {
+        type_name: ut.name,
+        trait_name: "Json",
+        type_params: type_params,
+        bounds: bounds,
+        type_kind: ut.type_kind,
+        struct_fields: none,
+        enum_variants: none
+    })
+}
+
+fn derived_impl_dict_bounds(di: DerivedImpl) -> List<ImplDictBound>? {
+    let mut result: List<ImplDictBound> = []
+    for bound in di.bounds {
+        let param_idx = index_of_str(di.type_params, bound.type_param)
+        if param_idx < 0 { return none }
+        result.push(ImplDictBound {
+            type_param_index: param_idx,
+            trait_name: bound.trait_name
+        })
+    }
+    some(result)
+}
+
+fn derived_impl_with_bounds(
+    di: DerivedImpl, bounds: List<TraitBound>
+) -> DerivedImpl {
+    DerivedImpl {
+        type_name: di.type_name,
+        trait_name: di.trait_name,
+        type_params: di.type_params,
+        bounds: bounds,
+        type_kind: di.type_kind,
+        struct_fields: di.struct_fields,
+        enum_variants: di.enum_variants
     }
 }
 
@@ -421,8 +746,7 @@ fn resolve_field_action(
     }
     if trait_name == "Json" {
         return resolve_json_field_action(
-            env, field_type, type_param_vars, type_param_names,
-            known, self_type_name, bounds)
+            env, field_type, type_param_vars, type_param_names, bounds)
     }
     match field_type {
         Type::IntType => some(FieldAction::Identity),
@@ -517,60 +841,112 @@ fn resolve_json_field_action(
     field_type: Type,
     type_param_vars: List<Int>,
     type_param_names: List<Str>,
-    known: Set<Str>,
-    self_type_name: Str,
     mut bounds: List<TraitBound>
 ) -> FieldAction? {
-    match field_type {
-        Type::IntType => some(FieldAction::Call {
-            dict_name: trait_dict_name("Int", "Json"), extra_dicts: []
+    match resolve_json_dict_ref(
+        env, field_type, type_param_vars, type_param_names, "Json", bounds
+    ) {
+        some(DictRef::Simple(dict_name)) => some(FieldAction::Call {
+            dict_name: dict_name,
+            extra_dicts: []
         }),
-        Type::FloatType => some(FieldAction::Call {
-            dict_name: trait_dict_name("Float", "Json"), extra_dicts: []
+        some(DictRef::Static(dict_name)) => some(FieldAction::Call {
+            dict_name: dict_name,
+            extra_dicts: []
         }),
-        Type::StrType => some(FieldAction::Call {
-            dict_name: trait_dict_name("Str", "Json"), extra_dicts: []
+        some(DictRef::Wrapped { dict, inner_dicts, .. }) => some(FieldAction::Call {
+            dict_name: dict,
+            extra_dicts: inner_dicts
         }),
-        Type::BoolType => some(FieldAction::Call {
-            dict_name: trait_dict_name("Bool", "Json"), extra_dicts: []
-        }),
+        none => none
+    }
+}
+
+// Derive-side counterpart of infer_ctx.resolve_dict_evidence_for_type.  The
+// only local policy is how a surrounding derived impl turns a free type var
+// into one of its own bounds; nominal requirements are instantiated by the
+// shared env helper from the exact ImplEntry.dict_bounds sequence.
+fn resolve_json_dict_ref(
+    env: TypeEnv, t: Type,
+    owner_type_param_vars: List<Int>, owner_type_param_names: List<Str>,
+    trait_name: Str, mut bounds: List<TraitBound>
+) -> DictRef? {
+    match t {
         Type::TypeVar { id, .. } => {
-            let param_idx = index_of_int(type_param_vars, id)
+            let param_idx = index_of_int(owner_type_param_vars, id)
             if param_idx < 0 { return none }
-            let param_name = str_at(type_param_names, param_idx)
-            if !has_bound(bounds, param_name, "Json") {
-                bounds.push(TraitBound { type_param: param_name, trait_name: "Json" })
+            let param_name = str_at(owner_type_param_names, param_idx)
+            if !has_bound(bounds, param_name, trait_name) {
+                bounds.push(TraitBound {
+                    type_param: param_name,
+                    trait_name: trait_name
+                })
             }
-            some(FieldAction::Call {
-                dict_name: trait_bound_param_name(param_name, "Json"), extra_dicts: []
-            })
+            some(DictRef::Simple(trait_bound_param_name(param_name, trait_name)))
         },
         Type::StructType { name, type_params, .. } => {
-            if name != self_type_name && !known.contains(name) { return none }
-            match resolve_extra_dicts(
-                type_params, type_param_vars, type_param_names,
-                "Json", known, self_type_name, bounds) {
-                some(extra_dicts) => some(FieldAction::Call {
-                    dict_name: trait_dict_name(name, "Json"),
-                    extra_dicts: extra_dicts
-                }),
-                none => none
-            }
+            resolve_json_nominal_dict_ref(
+                env, name, type_params, owner_type_param_vars,
+                owner_type_param_names, trait_name, bounds)
         },
         Type::EnumType { name, type_params, .. } => {
-            if name != self_type_name && !known.contains(name) { return none }
-            match resolve_extra_dicts(
-                type_params, type_param_vars, type_param_names,
-                "Json", known, self_type_name, bounds) {
-                some(extra_dicts) => some(FieldAction::Call {
-                    dict_name: trait_dict_name(name, "Json"),
-                    extra_dicts: extra_dicts
-                }),
-                none => none
-            }
+            resolve_json_nominal_dict_ref(
+                env, name, type_params, owner_type_param_vars,
+                owner_type_param_names, trait_name, bounds)
         },
+        Type::IntType => resolve_json_builtin_dict_ref(env, "Int", trait_name),
+        Type::FloatType => resolve_json_builtin_dict_ref(env, "Float", trait_name),
+        Type::StrType => resolve_json_builtin_dict_ref(env, "Str", trait_name),
+        Type::BoolType => resolve_json_builtin_dict_ref(env, "Bool", trait_name),
+        Type::UnitType => resolve_json_builtin_dict_ref(env, "Unit", trait_name),
         _ => none
     }
+}
+
+fn resolve_json_builtin_dict_ref(
+    env: TypeEnv, type_name: Str, trait_name: Str
+) -> DictRef? {
+    if has_impl(env.trait_reg, type_name, trait_name) {
+        some(DictRef::Static(trait_dict_name(type_name, trait_name)))
+    } else {
+        none
+    }
+}
+
+fn resolve_json_nominal_dict_ref(
+    env: TypeEnv, name: Str, type_args: List<Type>,
+    owner_type_param_vars: List<Int>, owner_type_param_names: List<Str>,
+    trait_name: Str, mut bounds: List<TraitBound>
+) -> DictRef? {
+    let impl_entry = match find_impl(env.trait_reg, name, trait_name) {
+        some(found) => found,
+        none => return none
+    }
+    let requirements = match instantiate_impl_dict_requirements(
+        impl_entry, type_args
+    ) {
+        some(found) => found,
+        none => return none
+    }
+    let dict_name = trait_dict_name(name, trait_name)
+    if requirements.len() == 0 {
+        return some(DictRef::Static(dict_name))
+    }
+    let mut inner_dicts: List<DictRef> = []
+    for requirement in requirements {
+        match resolve_json_dict_ref(
+            env, requirement.type_arg, owner_type_param_vars,
+            owner_type_param_names, requirement.trait_name, bounds
+        ) {
+            some(dict_ref) => inner_dicts.push(dict_ref),
+            none => return none
+        }
+    }
+    some(DictRef::Wrapped {
+        dict: dict_name,
+        trait_name: trait_name,
+        inner_dicts: inner_dicts
+    })
 }
 
 fn resolve_hash_field_action(
@@ -759,7 +1135,7 @@ fn resolve_type_arg_dict(
 
 fn register_derived_impl(
     mut env: TypeEnv, sink: CollectingSink,
-    di: DerivedImpl, trait_name: Str
+    di: DerivedImpl, trait_name: Str, span: Span
 ) {
     let mut methods: Map<Str, TypeScheme> = map_new()
 
@@ -787,7 +1163,6 @@ fn register_derived_impl(
     register_trait_methods(methods, trait_name, self_type, type_var_ids, scheme_bounds)
 
     let origin = "<derive>:${di.type_name}:${trait_name}"
-    let span = span_zero()
     let exact = map_clone(methods)
 
     add_impl(env.trait_reg, ImplEntry {

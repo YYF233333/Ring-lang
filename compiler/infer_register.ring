@@ -2,7 +2,7 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string, effect_to_string, nominal_display_name}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember,
-    UseDecl, UseImport}
+    UseDecl, UseImport, DeriveAttribute}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, ImplDictBound, TypeAliasDef, FnBound, SigDef,
     EffectAliasDef, AssocTypeDef, MethodOrigin, mono, apply_subst, apply_subst_effect_map,
@@ -122,12 +122,12 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
             Decl::Fn { name: "${mod_name}::${name}", type_params: type_params, params: params,
                        return_type: return_type, declared_effects: declared_effects, body: body,
                        is_pub: is_pub, is_abstract: is_abstract, span: span },
-        Decl::Struct { name, type_params, fields, derive_traits, is_pub, span } =>
+        Decl::Struct { name, type_params, fields, derive_attrs, is_pub, span } =>
             Decl::Struct { name: "${mod_name}::${name}", type_params: type_params, fields: fields,
-                          derive_traits: derive_traits, is_pub: is_pub, span: span },
-        Decl::Enum { name, type_params, variants, derive_traits, is_pub, span } =>
+                          derive_attrs: derive_attrs, is_pub: is_pub, span: span },
+        Decl::Enum { name, type_params, variants, derive_attrs, is_pub, span } =>
             Decl::Enum { name: "${mod_name}::${name}", type_params: type_params, variants: variants,
-                        derive_traits: derive_traits, is_pub: is_pub, span: span },
+                        derive_attrs: derive_attrs, is_pub: is_pub, span: span },
         Decl::ExternFn { name, type_params, params, return_type, declared_effects, is_pub, span } =>
             Decl::ExternFn { name: "${mod_name}::${name}", type_params: type_params, params: params,
                             return_type: return_type, declared_effects: declared_effects,
@@ -178,12 +178,12 @@ pub fn module_prefix_decl_name(module_prefix: Str, decl: Decl) -> Decl {
             Decl::Fn { name: module_item_identity(module_prefix, name), type_params: type_params, params: params,
                        return_type: return_type, declared_effects: declared_effects, body: body,
                        is_pub: is_pub, is_abstract: is_abstract, span: span },
-        Decl::Struct { name, type_params, fields, derive_traits, is_pub, span } =>
+        Decl::Struct { name, type_params, fields, derive_attrs, is_pub, span } =>
             Decl::Struct { name: module_item_identity(module_prefix, name), type_params: type_params, fields: fields,
-                          derive_traits: derive_traits, is_pub: is_pub, span: span },
-        Decl::Enum { name, type_params, variants, derive_traits, is_pub, span } =>
+                          derive_attrs: derive_attrs, is_pub: is_pub, span: span },
+        Decl::Enum { name, type_params, variants, derive_attrs, is_pub, span } =>
             Decl::Enum { name: module_item_identity(module_prefix, name), type_params: type_params, variants: variants,
-                        derive_traits: derive_traits, is_pub: is_pub, span: span },
+                        derive_attrs: derive_attrs, is_pub: is_pub, span: span },
         Decl::ExternFn { name, type_params, params, return_type, declared_effects, is_pub, span } =>
             // The declaration participates in the same exact module identity
             // scheme as Ring functions. HIR stores its foreign ABI leaf
@@ -652,12 +652,12 @@ fn register_mod_item(
 
 fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: List<Str>, mut deferred_enum_names: List<Str>) {
     match decl {
-        Decl::Struct { name, type_params, fields, derive_traits, span, .. } => {
-            preregister_struct(ctx, name, type_params, derive_traits)
+        Decl::Struct { name, type_params, fields, derive_attrs, span, .. } => {
+            preregister_struct(ctx, name, type_params, derive_attrs)
             deferred_struct_names.push(name)
         },
-        Decl::Enum { name, type_params, variants, derive_traits, span, .. } => {
-            preregister_enum(ctx, name, type_params, derive_traits)
+        Decl::Enum { name, type_params, variants, derive_attrs, span, .. } => {
+            preregister_enum(ctx, name, type_params, derive_attrs)
             deferred_enum_names.push(name)
         },
         Decl::ModBlock { name: mod_name, uses: mod_uses, decls: mod_decls, .. } => {
@@ -1331,7 +1331,7 @@ fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
 // Struct registration
 // ============================================================
 
-fn preregister_struct(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, derive_traits: List<Str>) {
+fn preregister_struct(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, derive_attrs: List<DeriveAttribute>) {
     let mut tp_names: List<Str> = []
     let mut tp_vars: List<Int> = []
     for tp in type_params {
@@ -1340,7 +1340,7 @@ fn preregister_struct(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
         match tv { Type::TypeVar { id, .. } => { tp_vars.push(id) }, _ => {} }
         ctx.type_param_scope.insert(tp.name, tv)
     }
-    let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], derive_traits: derive_traits, is_extern: false }
+    let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], derive_attrs: derive_attrs, is_extern: false }
     ctx.env.types.structs.insert(name, def)
 }
 
@@ -1374,7 +1374,7 @@ fn complete_struct_fields(mut ctx: InferCtx, name: Str, fields: List<StructField
 // Enum registration
 // ============================================================
 
-fn preregister_enum(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, derive_traits: List<Str>) {
+fn preregister_enum(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, derive_attrs: List<DeriveAttribute>) {
     let mut tp_names: List<Str> = []
     let mut tv_ids: List<Int> = []
     for tp in type_params {
@@ -1383,7 +1383,7 @@ fn preregister_enum(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         match tv { Type::TypeVar { id, .. } => { tv_ids.push(id) }, _ => {} }
         ctx.type_param_scope.insert(tp.name, tv)
     }
-    let def = EnumDef { name: name, type_params: tp_names, type_param_vars: tv_ids, variants: [], derive_traits: derive_traits, variant_index: map_new() }
+    let def = EnumDef { name: name, type_params: tp_names, type_param_vars: tv_ids, variants: [], derive_attrs: derive_attrs, variant_index: map_new() }
     ctx.env.types.enums.insert(name, def)
 }
 
@@ -3010,7 +3010,7 @@ fn register_extern_type_common(
     // is_extern: true marks this as an opaque FFI type so trait derivation skips
     // it (B-074). An opaque type has no fields to compare/clone/order/debug, and
     // a derived dict would reference a non-existent runtime constructor.
-    let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], derive_traits: [], is_extern: true }
+    let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], derive_attrs: [], is_extern: true }
     if install_visible_name {
         ctx.env.types.structs.insert(name, def)
     }
@@ -3141,12 +3141,12 @@ fn register_effect_alias(mut ctx: InferCtx, name: Str, type_params: List<TypePar
 
 fn register_decl(mut ctx: InferCtx, decl: Decl) {
     match decl {
-        Decl::Struct { name, type_params, fields, derive_traits, span, .. } => {
-            preregister_struct(ctx, name, type_params, derive_traits)
+        Decl::Struct { name, type_params, fields, derive_attrs, span, .. } => {
+            preregister_struct(ctx, name, type_params, derive_attrs)
             complete_struct_fields(ctx, name, fields)
         },
-        Decl::Enum { name, type_params, variants, derive_traits, span, .. } => {
-            preregister_enum(ctx, name, type_params, derive_traits)
+        Decl::Enum { name, type_params, variants, derive_attrs, span, .. } => {
+            preregister_enum(ctx, name, type_params, derive_attrs)
             complete_enum_variants(ctx, name, type_params, variants)
         },
         Decl::Effect { name, type_params, ops, .. } =>

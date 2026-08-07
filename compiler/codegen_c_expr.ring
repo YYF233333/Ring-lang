@@ -848,8 +848,14 @@ pub fn ensure_c_dict_getter(mut ctx: CCtx, name: Str) -> Str {
                 c_emit(ctx, "${gvar} = ${v};")
             },
             none => {
-                // Builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq
-                // fallback) — the name STR is allocated once, in the getter.
+                // Json is an ordinary public trait: every valid Json dictionary
+                // is registered by an impl or the derive prepass. Falling
+                // through here would hide a broken SCC/registry edge.
+                if name.ends_with("_Json") {
+                    panic("C codegen invariant: unregistered Json dictionary '${name}'")
+                }
+                // Builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq)
+                // — the name STR is allocated once, in the getter.
                 rt_use(ctx, "ring_str_from_cstr", 1)
                 rt_use(ctx, "ring_get_builtin_dict", 1)
                 let g = c_global_cstr(ctx, name)

@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT,
     effects_match_kind, nominal_display_name}
 use union_find::{UnionFind, uf_find, uf_lookup}
-use ast::{Span, EffectExpr, TypeParam}
+use ast::{Span, EffectExpr, TypeParam, DeriveAttribute}
 use diagnostics::{CollectingSink, DiagnosticSink, DiagnosticContext, Severity,
     make_diag}
 use codes::{E0504}
@@ -52,7 +52,7 @@ pub struct StructDef {
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
     pub fields: List<StructField>,
-    pub derive_traits: List<Str>,
+    pub derive_attrs: List<DeriveAttribute>,
     // True for opaque extern (FFI) types registered as zero-field structs.
     // Carries cross-module via TypeDef::StructDef_ so both the declaring and
     // consuming modules can exclude it from trait derivation (B-074).
@@ -64,7 +64,7 @@ pub struct EnumDef {
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
     pub variants: List<EnumVariant>,
-    pub derive_traits: List<Str>,
+    pub derive_attrs: List<DeriveAttribute>,
     pub variant_index: Map<Str, Int>
 }
 
@@ -126,6 +126,14 @@ pub struct TraitDef {
 // carry TypeBound type_args or assoc_constraints here.
 pub struct ImplDictBound {
     pub type_param_index: Int,
+    pub trait_name: Str
+}
+
+// One runtime dictionary predicate instantiated against a nominal use site's
+// actual type arguments.  Both ordinary inference and synthetic derive code
+// consume this mapping so bound order/index/trait cannot drift between them.
+pub struct ImplDictRequirement {
+    pub type_arg: Type,
     pub trait_name: Str
 }
 
@@ -562,6 +570,22 @@ pub fn find_impl(reg: TraitRegistry, type_name: Str, trait_name: Str) -> ImplEnt
         some(impls) => impls.find(fn(i) { i.trait_name == trait_name }),
         none => none
     }
+}
+
+pub fn instantiate_impl_dict_requirements(
+    entry: ImplEntry, type_args: List<Type>
+) -> List<ImplDictRequirement>? {
+    let mut requirements: List<ImplDictRequirement> = []
+    for bound in entry.dict_bounds {
+        match type_args.get(bound.type_param_index) {
+            some(type_arg) => requirements.push(ImplDictRequirement {
+                type_arg: type_arg,
+                trait_name: bound.trait_name
+            }),
+            none => return none
+        }
+    }
+    some(requirements)
 }
 
 pub fn find_impl_by_origin(
