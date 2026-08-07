@@ -59,7 +59,14 @@ class StrictCombineTests(unittest.TestCase):
                 "compiler": ["-O3"],
                 "runtime": ["-O3"],
                 "runner_runtime": ["-O2"],
-                "link": ["-flto=thin"],
+                "link": [
+                    "-flto=thin",
+                    "-fuse-ld=lld",
+                    (
+                        "-Wl,/lldltocachepolicy:cache_size_bytes=1073741824:"
+                        "cache_size_files=4096:prune_after=168h"
+                    ),
+                ],
             },
             "lanes": [
                 {
@@ -85,28 +92,86 @@ class StrictCombineTests(unittest.TestCase):
     def _seed_receipt(
         self, root: Path, source_sha: str, manifest: dict
     ) -> dict:
-        cache = (root / "thinlto-cache").resolve()
+        cache = (root / "ring-lang-thinlto-cache").resolve()
         cache.mkdir(exist_ok=True)
         seed_file = cache / "seed.bin"
         if not seed_file.exists():
             seed_file.write_bytes(b"seed")
-        tools = {
-            name: {
-                "path": str((root / f"{name}.exe").resolve()),
-                "version": "fixture",
-                "sha256": character * 64,
-            }
-            for name, character in (
-                ("python", "1"), ("clang", "2"), ("clangxx", "3"),
-                ("lld_link", "6"),
-            )
+        tool_names = {
+            "python": "python.exe",
+            "clang": "clang.exe",
+            "clangxx": "clang++.exe",
+            "lld_link": "lld-link.exe",
         }
-        build_output = {}
-        for name, filename in harness.WARM_CACHE_BUILD_FILES.items():
-            path = root / filename
-            if not path.exists():
-                path.write_bytes(name.encode("utf-8"))
-            build_output[name] = harness._file_record(path)
+        tools = {}
+        for name, filename in tool_names.items():
+            path = (root / "tools" / filename).resolve()
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(f"{name}-tool".encode("utf-8"))
+            tools[name] = {
+                "path": str(path),
+                "version": "fixture",
+                "sha256": harness._sha256_file(path),
+            }
+        tool_paths = {name: record["path"] for name, record in tools.items()}
+        _receipt_path, output = harness._warm_cache_paths(cache)
+        output.mkdir(exist_ok=True)
+        for name in ("compiler_object", "runtime_object", "ring"):
+            (output / harness.WARM_CACHE_BUILD_FILES[name]).write_bytes(
+                name.encode("utf-8")
+            )
+        commands = harness._expected_warm_cache_build_commands(
+            manifest, tool_paths, cache
+        )
+        trace = output / harness.WARM_CACHE_BUILD_FILES["phase_trace"]
+        trace.write_text(
+            "".join(
+                harness._json_line(
+                    {
+                        "schema": harness.BOOTSTRAP_PHASE_SCHEMA,
+                        "phase": phase,
+                        "argv": argv,
+                        "wall_ns": 1,
+                        "exit_code": 0,
+                    }
+                )
+                + "\n"
+                for phase, argv in commands
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        probe_stdout = output / harness.WARM_CACHE_BUILD_FILES[
+            "linker_probe_stdout"
+        ]
+        probe_stderr = output / harness.WARM_CACHE_BUILD_FILES[
+            "linker_probe_stderr"
+        ]
+        probe_stdout.write_bytes(b"")
+        lld = Path(tools["lld_link"]["path"])
+        probe_stderr.write_bytes(
+            f'{json.dumps(str(lld.with_suffix("")))} "-out:ring.exe"\n'.encode(
+                "utf-8"
+            )
+        )
+        link_argv = commands[-1][1]
+        binding = {
+            "schema": harness.LINKER_BINDING_SCHEMA,
+            "probe_argv": [link_argv[0], "-###", *link_argv[1:]],
+            "cwd": str(harness.REPO_ROOT.resolve()),
+            "claimed_path": str(lld.resolve()),
+            "selected_path": str(lld.resolve()),
+            "exit_code": 0,
+            "stdout": harness._file_record(probe_stdout),
+            "stderr": harness._file_record(probe_stderr),
+        }
+        harness._json_dump(
+            output / harness.WARM_CACHE_BUILD_FILES["linker_binding"], binding
+        )
+        build_output = {
+            name: harness._file_record(output / filename)
+            for name, filename in harness.WARM_CACHE_BUILD_FILES.items()
+        }
         return {
             "schema": harness.WARM_CACHE_RECEIPT_SCHEMA,
             "recipe_version": 2,
@@ -123,11 +188,9 @@ class StrictCombineTests(unittest.TestCase):
                 for name in ("compiler", "runtime", "link")
             },
             "cache_path": str(cache),
-            "seed_invocation": {
-                "argv": ["fixture-seed"],
-                "cwd": str(root.resolve()),
-                "timeout_seconds": harness.WARM_CACHE_SEED_TIMEOUT_SECONDS,
-            },
+            "seed_invocation": harness._warm_cache_seed_recipe_from_paths(
+                cache, tool_paths
+            ),
             "outcome": {
                 "exit_code": 0,
                 "stdout": {"sha256": "4" * 64, "bytes": 0},
@@ -170,7 +233,9 @@ class StrictCombineTests(unittest.TestCase):
             "argv": [
                 str(
                     (
-                        run_dir.parent / harness.WARM_CACHE_BUILD_FILES["ring"]
+                        run_dir.parent
+                        / harness.WARM_CACHE_OUTPUT_NAME
+                        / harness.WARM_CACHE_BUILD_FILES["ring"]
                     ).resolve()
                 ),
                 "check",
@@ -311,7 +376,9 @@ class StrictCombineTests(unittest.TestCase):
             },
             "flags": manifest["fingerprint_flags"],
             "cache_state": state,
-            "thinlto_cache_path": str((root / "thinlto-cache").resolve()),
+            "thinlto_cache_path": str(
+                (root / "ring-lang-thinlto-cache").resolve()
+            ),
             "thinlto_cache_inventory": self._seed_receipt(
                 root, source_sha, manifest
             )["cache_inventory"],
@@ -363,6 +430,19 @@ class StrictCombineTests(unittest.TestCase):
         ]
         summary["samples_jsonl"] = harness._file_record(samples_path)
         harness._json_dump(summary_path, summary)
+
+    def _rewrite_retained_seed(self, run_dir: Path, mutate) -> None:
+        environment_path = run_dir / "environment.json"
+        environment = json.loads(environment_path.read_text(encoding="utf-8"))
+        receipt = environment["warm_cache_seed"]["identity"]
+        mutate(receipt)
+        receipt_path = run_dir / "warm-cache-seed-receipt.json"
+        harness._json_dump(receipt_path, receipt)
+        environment["warm_cache_seed"] = {
+            "identity": receipt,
+            "receipt": harness._file_record(receipt_path),
+        }
+        harness._json_dump(environment_path, environment)
 
     def test_combines_complete_cold_and_warm_batches(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -581,6 +661,113 @@ class StrictCombineTests(unittest.TestCase):
             receipt_path = cold / "warm-cache-seed-receipt.json"
             receipt_path.write_bytes(receipt_path.read_bytes() + b" ")
             with self.assertRaisesRegex(harness.HarnessError, "receipt file provenance"):
+                combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_self_consistent_arbitrary_linker_probe_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+
+            def replace_probe(receipt: dict) -> None:
+                stderr = Path(
+                    receipt["build_output"]["linker_probe_stderr"]["path"]
+                )
+                stderr.write_bytes(b"arbitrary non-parseable linker output\n")
+                binding_path = Path(
+                    receipt["build_output"]["linker_binding"]["path"]
+                )
+                binding = json.loads(binding_path.read_text(encoding="utf-8"))
+                binding["stderr"] = harness._file_record(stderr)
+                harness._json_dump(binding_path, binding)
+                receipt["build_output"]["linker_probe_stderr"] = (
+                    harness._file_record(stderr)
+                )
+                receipt["build_output"]["linker_binding"] = harness._file_record(
+                    binding_path
+                )
+
+            self._rewrite_retained_seed(cold, replace_probe)
+            with self.assertRaisesRegex(harness.HarnessError, "raw linker probe"):
+                combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_missing_retained_linker_probe_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            environment = json.loads(
+                (cold / "environment.json").read_text(encoding="utf-8")
+            )
+            stderr = Path(
+                environment["warm_cache_seed"]["identity"]["build_output"][
+                    "linker_probe_stderr"
+                ]["path"]
+            )
+            stderr.unlink()
+            with self.assertRaisesRegex(
+                harness.HarnessError, "missing retained warm-cache seed"
+            ):
+                combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_linker_binding_sidecar_path_and_hash_drift(self) -> None:
+        for drift in ("path", "hash"):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                cold = self._write_run(root, state="cold", run_id="cold-run")
+
+                def mutate_binding(receipt: dict) -> None:
+                    binding_path = Path(
+                        receipt["build_output"]["linker_binding"]["path"]
+                    )
+                    binding = json.loads(binding_path.read_text(encoding="utf-8"))
+                    if drift == "path":
+                        original = Path(binding["stderr"]["path"])
+                        forged = original.with_name("forged-linker-probe.stderr.txt")
+                        forged.write_bytes(original.read_bytes())
+                        binding["stderr"] = harness._file_record(forged)
+                    else:
+                        binding["stderr"]["sha256"] = "0" * 64
+                    harness._json_dump(binding_path, binding)
+                    receipt["build_output"]["linker_binding"] = (
+                        harness._file_record(binding_path)
+                    )
+
+                self._rewrite_retained_seed(cold, mutate_binding)
+                with self.assertRaisesRegex(
+                    harness.HarnessError, "linker binding drifted"
+                ):
+                    combine.combine_runs([cold], root / "combined")
+
+    def test_rejects_retained_seed_tool_byte_and_invocation_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            environment = json.loads(
+                (cold / "environment.json").read_text(encoding="utf-8")
+            )
+            lld = Path(
+                environment["warm_cache_seed"]["identity"]["tools"]["lld_link"][
+                    "path"
+                ]
+            )
+            lld.write_bytes(b"drifted-lld-link-tool")
+            with self.assertRaisesRegex(
+                harness.HarnessError, "tool lld_link bytes drifted"
+            ):
+                combine.combine_runs([cold], root / "combined")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+
+            def mutate_invocation(receipt: dict) -> None:
+                receipt["seed_invocation"]["argv"][-1] = str(
+                    (root / "other-cache").resolve()
+                )
+
+            self._rewrite_retained_seed(cold, mutate_invocation)
+            with self.assertRaisesRegex(
+                harness.HarnessError, "invocation provenance drifted"
+            ):
                 combine.combine_runs([cold], root / "combined")
 
     def test_rejects_machine_identity_drift(self) -> None:

@@ -725,21 +725,35 @@ def _seed_tool_records(tools: Mapping[str, str | None]) -> dict[str, Any]:
 def _warm_cache_seed_recipe(
     cache: Path, tools: Mapping[str, str | None]
 ) -> dict[str, Any]:
-    _receipt_path, output = _warm_cache_paths(cache)
     records = _seed_tool_records(tools)
+    return _warm_cache_seed_recipe_from_paths(
+        cache, {name: record["path"] for name, record in records.items()}
+    )
+
+
+def _warm_cache_seed_recipe_from_paths(
+    cache: Path, tools: Mapping[str, str]
+) -> dict[str, Any]:
+    _receipt_path, output = _warm_cache_paths(cache)
+    required: dict[str, str] = {}
+    for name in ("python", "clang", "clangxx", "lld_link"):
+        path = tools.get(name)
+        if not isinstance(path, str) or not path:
+            raise HarnessError(f"warm-cache seed recipe requires tool {name}")
+        required[name] = str(Path(path).resolve())
     argv = [
-        records["python"]["path"],
+        required["python"],
         str((BENCH_DIR / "bootstrap.py").resolve()),
         "--repo",
         str(REPO_ROOT.resolve()),
         "--output-dir",
         str(output.resolve()),
         "--clang",
-        records["clang"]["path"],
+        required["clang"],
         "--clangxx",
-        records["clangxx"]["path"],
+        required["clangxx"],
         "--lld-link",
-        records["lld_link"]["path"],
+        required["lld_link"],
         "--cache",
         str(cache.resolve()),
     ]
@@ -903,6 +917,13 @@ def _validate_warm_cache_receipt_shape(receipt: Any) -> None:
         raise HarnessError("warm-cache receipt fields differ from the strict contract")
     if receipt["schema"] != WARM_CACHE_RECEIPT_SCHEMA or receipt["recipe_version"] != 2:
         raise HarnessError("warm-cache receipt schema/version is unsupported")
+    cache_path = receipt["cache_path"]
+    if (
+        not isinstance(cache_path, str)
+        or not Path(cache_path).is_absolute()
+        or Path(cache_path).name != "ring-lang-thinlto-cache"
+    ):
+        raise HarnessError("warm-cache receipt cache path is malformed")
     if not isinstance(receipt["source"], dict) or set(receipt["source"]) != {
         "git_sha", "git_dirty", "dist_c", "runtime", "bootstrap",
     }:
@@ -1165,12 +1186,42 @@ def validate_retained_warm_cache_seed(
     tools = environment.get("tools")
     if not isinstance(tools, dict):
         raise HarnessError("formal environment tool identity is missing")
+    retained_tool_paths: dict[str, str] = {}
     for name in ("python", "clang", "clangxx", "lld_link"):
-        if identity["tools"][name] != tools.get(name):
+        receipt_tool = identity["tools"][name]
+        if receipt_tool != tools.get(name):
             raise HarnessError(f"warm-cache seed tool {name} identity mismatch")
-    for name, record in identity["build_output"].items():
-        if _actual_file_record(Path(record["path"]), f"seed build output {name}") != record:
-            raise HarnessError(f"warm-cache seed build output {name} drifted")
+        actual_tool = _actual_file_record(
+            Path(receipt_tool["path"]), f"warm-cache seed tool {name}"
+        )
+        if (
+            actual_tool["path"] != receipt_tool["path"]
+            or actual_tool["sha256"] != receipt_tool["sha256"]
+        ):
+            raise HarnessError(
+                f"warm-cache seed tool {name} bytes drifted from its receipt"
+            )
+        retained_tool_paths[name] = receipt_tool["path"]
+    flags = environment.get("flags")
+    if not isinstance(flags, dict) or identity["flags"] != {
+        "compiler": flags.get("compiler"),
+        "runtime": flags.get("runtime"),
+        "link": flags.get("link"),
+    }:
+        raise HarnessError("warm-cache seed build flags mismatch")
+    cache = Path(identity["cache_path"])
+    expected_seed_invocation = _warm_cache_seed_recipe_from_paths(
+        cache, retained_tool_paths
+    )
+    if identity["seed_invocation"] != expected_seed_invocation:
+        raise HarnessError("warm-cache seed invocation provenance drifted")
+    replayed_build_output = _warm_cache_build_output(
+        {"fingerprint_flags": identity["flags"]},
+        retained_tool_paths,
+        cache,
+    )
+    if replayed_build_output != identity["build_output"]:
+        raise HarnessError("warm-cache seed build output provenance drifted")
     ring = tools.get("ring")
     built_ring = identity["build_output"]["ring"]
     if (
@@ -1179,13 +1230,6 @@ def validate_retained_warm_cache_seed(
         or ring.get("sha256") != built_ring["sha256"]
     ):
         raise HarnessError("formal compiler is not the seed receipt build output")
-    flags = environment.get("flags")
-    if not isinstance(flags, dict) or identity["flags"] != {
-        "compiler": flags.get("compiler"),
-        "runtime": flags.get("runtime"),
-        "link": flags.get("link"),
-    }:
-        raise HarnessError("warm-cache seed build flags mismatch")
     return identity
 
 
