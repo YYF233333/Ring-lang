@@ -109,3 +109,11 @@ Repository Steward 维护本账本；用户保留 release、公开 campaign 和�
 - 对外文案引入新的比较级、安全保证或平台支持范围。
 
 完成项的逐轮过程留 Git；本文件只保留当前 claim、范围、证据状态和下一道门。
+
+## 9. 公共名称与组织边界（2026-08-09 D-003）
+
+语言的公共名称确定为 **Vorton**，GitHub organization 使用 [`vorton-lang`](https://github.com/vorton-lang)。对外完整名称使用 **Vorton Programming Language**；短名称仍为 **Vorton**。
+
+本决定只固定名称和组织身份，不提前执行仓库迁移或公开 release。在迁移计划另行拍板并原子执行前，现有仓库名、源码扩展名、CLI、包名、内部路径和历史文档可以继续使用 Ring；这些遗留标识不构成双品牌或兼容承诺，也不得通过零散 alias 提前形成两套公共身份。
+
+用户已授权先维护 `vorton-lang` 的最小公开组织页面：可以设置组织显示名、使用 §5 已批准边界内的单句 description，并建立不含 logo、插图、badge、下载链接或未发货能力的 profile README。网站、视觉资产、仓库 transfer/rename、历史保留策略、生成物拆仓、CLI/扩展名/package namespace 和 release 仍属于后续迁移计划；本次组织页面上线不等于 release。
