@@ -494,6 +494,19 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 **验收**：迁移前 manifest 能从备份恢复全部 durable ref/notes，main 与远端 exact SHA、活动工作处置和 CI 状态可复核；迁移后 `vorton-lang/vorton` 保留完整 ancestry/tag/notes 与旧 URL/Git 重定向，仓内公共标识、最终扩展名、CLI/editor/runtime/test/文档一次切换且无遗留 alias；tracked C anchor 可从 clean clone 构建并达到 self-compile fixed point，GitHub 语言统计不计该生成文件；Issue/PR schema、ruleset、最小权限访问和定时/离线扫描均有 dry-run 与负面测试，导入计数和依赖映射可重放且不存在双重手工真值；本地完整 C/RC/structural/parity/self-compile 与迁移后远端 CI 全绿。本项不创建 release/tag，也不授权公开 preview。
 
+### B-184 Ownership checker workaround retirement / 语义人体工学收口 [refactor] [P1] [L] [judgment] [queued] [after: B-183]
+
+> **2026-08-09 用户方向**：当前 strict ownership 自举为通过 compiler fixed point 引入了大量 sink-local fresh whole binding、named Borrow firebreak、每轮 loop view 与 whole-value rebuild。它们中一部分是在现有语言边界下表达唯一 owning sink 的必要代码，一部分则暴露 callable/capture mode、loop back-edge 或 closure ordinary-capture 的分析精度不足。本项在 Vorton 仓库迁移完成后独立收口；不与 B-180 性能专项混做，也不阻塞当前 correctness checkpoint。
+
+**目标 / 范围**：
+
+1. 以 strict ownership 迁移补丁、hash-bound diagnostics 与 self-host fixed-point evidence 建立 workaround inventory；逐项分为「语义必要的唯一 ownership 分流」「checker false positive」「仅为旧 bootstrap 所需且现已冗余」三类，禁止按 fresh-local 文本形状 blanket 删除。
+2. 对 false positive 在单一 ownership 真值中修复：优先收敛 callable/capture mode fixed point、临时 CFG 的 branch/loop 状态、ordinary closure 捕获与 sink fanout；checker、Perceus、`verify_rc` 必须消费同一 plan，不新增 callee-name、arity、AST-shape fallback 或第二套 authority。
+3. 分析修复后机械删除不再需要的 firebreak/helper/fresh locals，恢复最小、可读的 compiler source；仍代表多个真实 owning sink 的分流必须保留或重构为单一 owner，不能用隐式复制、`clone`、RC 泄漏或放宽 `E0801` 消除。
+4. 当前 fail-loud 的 partial move、may-own consume-capture / `FnOnce` 契约以及 B-168 前跨 `catch` ownership transfer 不在本项暗中扩语义；前两者若进入实现须另交用户 decision dossier 并立项，后者继续由 B-168 及其消费者收口。
+
+**验收**：inventory 对当前 workaround 100% 有分类与 source/evidence lineage；每个被修 false positive 都有能在旧 checker 失败、新 checker 通过的正例，以及保持真实 double-move/use-after-move 失败的对抗负例；workaround 删除前后 HIR ownership plan、DefId authority、traversal/evaluation order与诊断类别可复核。old-anchor/current strict、C emission、Perceus/`verify_rc`、完整 C/RC/structural/parity/self-host double bootstrap 全绿，`E0801` 覆盖不得减少，禁止 clone/fallback/豁免增量。最终报告分别列出已删除、仍语义必要、转交独立能力项的代码形态，不能以“编译通过”代替 soundness 证明。
+
 ### B-181 生成程序 runtime / 内存 / 产物 release budget [infra] [P1] [M] [judgment] [queued] [after: B-180]
 
 B-176/B-180 先解决编译器开发反馈；本项再建立用户程序性能真值，避免两类优化竞争同一 P0。覆盖代表性 CLI、容器、effect、trait、RC workload 的 wall/CPU、peak RSS、allocation/dup/drop 数和 binary size；记录 compiler commit、`dist-c` 指纹、C compiler/version、完整 flags、机器与 cold/warm 状态。
