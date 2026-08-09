@@ -1,6 +1,6 @@
 # Ring 产品主张与发布传播治理
 
-> 事实截止：2026-08-07。
+> 事实截止：2026-08-09。
 >
 > 本文件控制 Ring 可以向谁、在什么证据下、用什么边界表达产品主张。它不是实现 backlog，不改变 [`docs/backlog.md`](backlog.md) 的优先级；实现状态仍以 `CLAUDE.md`、活动看板、audit 与可重放测试为准。
 
@@ -103,7 +103,7 @@ Ring 采用 `MIT OR Apache-2.0` 双许可，copyright holder 为 `Yufeng Ying`�
 Repository Steward 维护本账本；用户保留 release、公开 campaign 和保证边界决定。以下事件触发同步，而不是按日制造文档 churn：
 
 - critical escaped defect 或新 counterexample；
-- B-174/B-175/B-181/B-111/B-182 的状态改变；
+- B-183/B-174/B-175/B-181/B-111/B-182 的状态改变；
 - release candidate snapshot/anchor 改变；
 - 外部竞品事件满足 [`competitive-analysis.md`](competitive-analysis.md) §12 的提前复查门；
 - 对外文案引入新的比较级、安全保证或平台支持范围。
@@ -117,3 +117,13 @@ Repository Steward 维护本账本；用户保留 release、公开 campaign 和�
 本决定只固定名称和组织身份，不提前执行仓库迁移或公开 release。在迁移计划另行拍板并原子执行前，现有仓库名、源码扩展名、CLI、包名、内部路径和历史文档可以继续使用 Ring；这些遗留标识不构成双品牌或兼容承诺，也不得通过零散 alias 提前形成两套公共身份。
 
 用户已授权先维护 `vorton-lang` 的最小公开组织页面：可以设置组织显示名、使用 §5 已批准边界内的单句 description，并建立不含 logo、插图、badge、下载链接或未发货能力的 profile README。网站、视觉资产、仓库 transfer/rename、历史保留策略、生成物拆仓、CLI/扩展名/package namespace 和 release 仍属于后续迁移计划；本次组织页面上线不等于 release。
+
+## 10. 仓库与 GitHub 工作流迁移方向（2026-08-09 D-004）
+
+用户批准在 B-180 性能优化完成后、B-168 与 B-174 开始前执行 B-183，目标是把核心仓库迁至 `vorton-lang/vorton`，并把用户—Repository Steward 的异步协作入口迁到 GitHub Issue / PR。该顺序避免在旧 Ring 公共标识上继续建设 preview CLI、release packaging 与后续高风险 ABI 工作。
+
+迁移保留完整 Git history、tag、自定义 durable ref 与 audit notes，采用 GitHub transfer + rename，不重建或重写历史；旧 `YYF233333/Ring-lang` slug 不得复用。`compiler/dist-c/main.c` 继续留在核心仓库充当唯一 tracked bootstrap anchor，不拆仓或使用 Git LFS，并在 `.gitattributes` 标记为 `linguist-generated`。公共身份按未发布期 clean break 一次迁到 Vorton；`.v` 扩展名已因现有语言/工具链冲突排除，最终源码扩展名及 CLI/package/editor namespace 留到 B-183 planning 固定。
+
+GitHub 迁移遵守“活动协作与稳定结论分层、无双重手工真值”：Issue/PR 承载活动工作、review 与用户决策，稳定设计/治理 verdict 仍进入仓库；现有 backlog/audit 只有在导入 schema、幂等映射、dry-run、校验和 cutover 方案完成后才能批量迁移。Steward 初期使用限定到 Vorton 仓库的最小权限人类账号凭据；需要长期无人值守身份时优先采用组织拥有的 GitHub App，machine user 仅作 fallback，任何 bot/App 均不得成为 organization owner。
+
+D-004 只授权把 B-183 排入路线并固定上述不变量，不授权现在执行 transfer、创建账号/token/App、修改组织权限/ruleset、批量创建 Issue 或发布 release。B-183 进入 planning 后必须先形成精确执行规范、权限清单、回访/离线契约和原子 cutover dossier，再由用户批准其中的仓库外动作。

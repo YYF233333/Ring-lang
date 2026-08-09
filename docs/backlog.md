@@ -275,7 +275,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 - 现有 std/ + compiler/ extern fn 全部通过（迁移后）
 - 自举一致
 
-### B-168 C-native abort/unwind 实现模型探针 [design-align] [P0] [M] [judgment] [queued] [after: B-180]
+### B-168 C-native abort/unwind 实现模型探针 [design-align] [P0] [M] [judgment] [queued] [after: B-183]
 
 > 2026-07-29 Discussion 用户拍板 P0/M、保持两候选中立实测。LLVM 已退役，B-002 Phase 2 原定的 `invoke`/`landingpad` 路径失效；现行 `setjmp`/`longjmp` 又已由 B-165 证明存在跨 catch 局部写入不可见问题。B-169/B-167 随后还会决定 effect/type evidence 的共享边界并改变 effectful function value evidence ABI，因此必须先确定共同的 C-native failure/control ABI，避免各项工作重复改写控制流、closure prototype 与 RC 证据面。
 
@@ -459,7 +459,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 **验收**：形成可在 clean worktree 重放的 baseline、top-3 wall-time 构成与 B-180 的逐项收益预算；至少区分“compiler 内部算法”“每进程初始化/重复 parse-check”“runner/clang 调度”三类成本。测量入口自身开销可量化且关闭时近零；本项以一个 bounded measurement wave 收口，不扩张成通用 telemetry 框架。
 
-### B-180 `check` / runner 吞吐 2× 专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-168+B-174]
+### B-180 `check` / runner 吞吐 2× 专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-183]
 
 **进入门**：#268、#269 已关闭；执行期间新增的 critical 也必须先关闭。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
 
@@ -471,6 +471,28 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
 
 **量化验收**：以 B-176 同机同 manifest 为基线，`compiler/main.ring check` median 与完整本地标准门 wall time 都降至基线的 **≤50%**；`check --verify-rc compiler/main.ring` 同样以 ≤50% 为目标，本项不得以只有 10–20% 改善宣告完成。tiny/大单文件/module check 的 p95 不得回退 >10%；串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。报告 cold/warm wall、CPU、peak aggregate/per-worker RSS；若为了 2× 需要 >25% peak aggregate RSS 增长，必须先给出内存上限、自适应 jobs 与低内存退化证据。完整 C/RC/ASan/self-host 门通过，任何原始失败都必须 fail loud。
+
+### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-180] [before: B-168+B-174]
+
+> **2026-08-09 用户方向**：性能优化完成后、preview CLI 与 release 准备开始前迁移到 `vorton-lang`，并把用户—Steward 的异步协作切到 GitHub Issue / PR。D-004 只批准路线与顺序；进入本项时必须先展开执行规范和外部变更清单，再由用户批准 transfer、凭据/App、组织权限与批量导入等具体动作。
+
+**范围 / 文件与外部面**：GitHub organization/repository settings、`.github/` Issue/PR 模板与 ruleset、`docs/workflow.md`、`docs/backlog.md`、`docs/audit-report.md`、`.agents/` / `.claude/` provider adapter 与验证器、Git notes audit ledger、repo-wide public identity/CLI/source extension/editor package/cache path、`.gitattributes`、tracked bootstrap、README/规范/测试/CI。
+
+**已固定边界**：
+
+1. 核心仓库目标为 `vorton-lang/vorton`；使用 GitHub transfer + rename，保留完整 commit/tag/ref provenance，不新建空仓导入、不 squash 或重写历史，也不得复用旧 `YYF233333/Ring-lang` slug 破坏重定向。
+2. `compiler/dist-c/main.c` 继续作为核心仓库内唯一 tracked C bootstrap anchor，不拆仓、不转 Git LFS；以 `linguist-generated` 排除语言统计并默认折叠 diff，其他生成 C 仍不入库或只作为 release artifact。
+3. 公共身份按未发布期 clean break 原子改为 Vorton，不建立 Ring alias/双 CLI/双 ABI；`.v` 因与 V、Verilog、Rocq Prover 冲突而排除，最终源码扩展名及 CLI/package/editor namespace 在本项 planning 固定。
+4. GitHub 成为活动工作与用户决策的异步入口，稳定设计/治理结论仍落仓库；Issue 与旧 Markdown 看板不得长期并存为两份手工真值。初期使用当前人类账号下限定到 Vorton 仓库的最小权限凭据，长期无人值守身份优先组织拥有的 GitHub App，machine user 只作工具能力不足时的 fallback；bot/App 不取得 organization owner。
+
+**planning 必须先产出的执行规范**：
+
+- 固定 cutover snapshot，盘点并处置全部 worktree/local branch、未推送 main、tag、自定义 ref 与 `refs/notes/*`；生成可恢复 backup/bundle、迁移 manifest 和逐项 rollback/stop 条件。
+- 定义 B/A/D 到 Issue 的 title/body/label/state/dependency 映射、幂等 marker、两阶段建链、dry-run、断点续传、数量/内容校验，以及 cutover 后 Markdown 看板的归档或生成视图方案；完成历史不批量制造 Issue。
+- 定义 Steward 的 GitHub 读写授权矩阵、同账号署名/机器标记、用户保留决定门、Issue/PR 生命周期、merge 策略、review/CI/thread gate、回访频率、离线补扫和未来 webhook 切换；不读取或改变用户个人 notification read-state。
+- 把 repo transfer、公共标识 clean break、bootstrap 重生、workflow/ruleset/template 上线和活动账本导入排成一个有界维护窗口；任何需要组织管理、凭据、App 安装或公开状态变化的步骤在执行前逐项取得用户批准。
+
+**验收**：迁移前 manifest 能从备份恢复全部 durable ref/notes，main 与远端 exact SHA、活动工作处置和 CI 状态可复核；迁移后 `vorton-lang/vorton` 保留完整 ancestry/tag/notes 与旧 URL/Git 重定向，仓内公共标识、最终扩展名、CLI/editor/runtime/test/文档一次切换且无遗留 alias；tracked C anchor 可从 clean clone 构建并达到 self-compile fixed point，GitHub 语言统计不计该生成文件；Issue/PR schema、ruleset、最小权限访问和定时/离线扫描均有 dry-run 与负面测试，导入计数和依赖映射可重放且不存在双重手工真值；本地完整 C/RC/structural/parity/self-compile 与迁移后远端 CI 全绿。本项不创建 release/tag，也不授权公开 preview。
 
 ### B-181 生成程序 runtime / 内存 / 产物 release budget [infra] [P1] [M] [judgment] [queued] [after: B-180]
 
@@ -569,7 +591,7 @@ handle {
 
 ## 工具链
 
-### B-174 v0.1 preview CLI 与本地项目闭环 [feature] [P0] [L] [judgment] [queued] [after: B-180]
+### B-174 v0.1 preview CLI 与本地项目闭环 [feature] [P0] [L] [judgment] [queued] [after: B-183]
 
 当前 CLI 只有 `check`/`build`，`build` 只产出 C 与 object，版本写死且 runtime/std 定位依赖仓库布局。首个 preview 必须让解压后的用户在一个命令闭环内检查、构建、运行并诊断工具链。
 
