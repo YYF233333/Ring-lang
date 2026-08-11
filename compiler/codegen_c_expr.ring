@@ -1017,8 +1017,14 @@ pub fn ensure_c_dict_getter(mut ctx: CCtx, name: Str) -> Str {
                 c_emit(ctx, "${gvar} = ${v};")
             },
             none => {
-                // Builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq
-                // fallback) — the name STR is allocated once, in the getter.
+                // Json is an ordinary public trait: every valid Json dictionary
+                // is registered by an impl or the derive prepass. Falling
+                // through here would hide a broken SCC/registry edge.
+                if name.ends_with("_Json") {
+                    panic("C codegen invariant: unregistered Json dictionary '${name}'")
+                }
+                // Builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq)
+                // — the name STR is allocated once, in the getter.
                 rt_use(ctx, "ring_str_from_cstr", 1)
                 rt_use(ctx, "ring_get_builtin_dict", 1)
                 let builtin_name = name
@@ -2748,7 +2754,7 @@ fn gen_c_runtime_call(mut ctx: CCtx, name: Str, args: List<Str>) -> Str {
 
 // Send a proven extern ABI leaf through the complete legacy direct-call
 // pipeline. Many std extern spellings map implicitly to `ring_<leaf>` rather
-// than appearing in extern_fn_to_runtime_c (notably assert/json_stringify).
+// than appearing in extern_fn_to_runtime_c (notably assert).
 // Only after both known runtime paths miss is the raw foreign symbol valid.
 fn gen_c_extern_abi_call(mut ctx: CCtx, abi_name: Str, arg_vals: List<Str>) -> Str {
     match extern_fn_to_runtime_c(abi_name) {

@@ -43,17 +43,6 @@
 ## Runtime
 
 
-### #260 `json_stringify<T>` 的 native runtime 无条件按 Str 解引用 [critical] [judgment] [open]
-
-2026-07-29 B-107 HOF 正式门禁发现并由 direct-call 对照确认：`std/io.ring` 与语言规范公开声明 `json_stringify<T>(value: T) -> Str`，但 native `ring_json_stringify(void*)` 除 null 外无条件把参数转成 `RingStr*`。当前 C-native 安全源码直接执行 `json_stringify(107)` 时，会把 tagged Int `0xD7` 当字符串指针解引用并以 `0xC0000005` 崩溃；不需要一等函数或字典传递即可触发。
-
-**修复约束**：公开签名与 native 实现必须一致。若保留 `<T>`，需设计可证明覆盖所承诺类型的序列化/type-evidence 或单态 type-directed lowering，并让直接调用与一等 extern wrapper 共用同一路径；若只支持 Str，则必须收窄标准库签名和规范，不能继续让 checker 接受会越界访问的安全程序。验收至少覆盖 Int/Float/Bool/Str、直接调用/一等函数值、C-native/structural/self-host，并对不支持的结构类型给出编译期诊断而非 runtime UB。任何收窄公开签名的候选先形成用户决策包。
-
-独立 Argument 已确认 runtime 猜值、primitive-only 隐式收窄与孤立选择性具体化都不能诚实恢复现有契约；公开支持域与兼容成本由 Steward Inbox D-001 等用户拍板，期间冻结本项实现并继续其他无阻塞工作。
-
-发现者：B-107 HOF implementation + independent review
-
-
 ### #227 drop_closure_env / drop_dict / drop_evidence 三函数体完全相同 [medium] [mechanical] [open]
 
 `ring_runtime.cpp:3212-3276`：三个 drop 函数实现逐字节相同——读 count-prefixed 数组，逐 slot 调 ring_drop。每个约 8 行，总共 24 行做同一件事。

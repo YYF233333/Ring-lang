@@ -15,6 +15,7 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
+#include <chrono>
 
 #include <cctype>
 #include <sstream>
@@ -691,6 +692,22 @@ extern "C" void* ring_box_int(int64_t val) {
     // B-080: tagged pointer — no heap allocation.
     // Encoding: (val << 1) | 1.  63-bit signed range.
     return (void*)(((uintptr_t)val << 1) | 1);
+}
+
+// Compiler-internal B-176 measurement clock. This deliberately has no std
+// declaration: only compiler/phase_timing.ring can opt into it. A process-local
+// steady-clock origin keeps the boxed result inside Ring's signed 63-bit Int
+// representation; saturation preserves monotonicity in the theoretical limit.
+extern "C" void* ring_bench_monotonic_ns() {
+    using Clock = std::chrono::steady_clock;
+    static const Clock::time_point origin = Clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        Clock::now() - origin).count();
+    constexpr int64_t ring_int_max = INT64_MAX >> 1;
+    const int64_t bounded = elapsed < 0
+        ? 0
+        : (elapsed > ring_int_max ? ring_int_max : (int64_t)elapsed);
+    return ring_box_int(bounded);
 }
 
 extern "C" int64_t ring_unbox_int(void* p) {
@@ -1972,25 +1989,6 @@ extern "C" void* ring_delete_file(void* path) {
 }
 
 // ============================================================================
-// Collection clone / from
-// ============================================================================
-
-// B-152 P2: renamed to avoid duplicate symbol with the Ring list_clone function
-// (which the codegen mangles to ring_list_clone).  Kept for bootstrap compat.
-extern "C" void* ring_list_clone_rt(void* list) {
-    RingList* src = as_list(list);
-    int64_t ln = list_len(src);
-    void* data = make_ring_list(ln);
-    RingList* dst = as_list(data);
-    if (ln > 0) {
-        memmove(dst->buf, src->buf, (size_t)ln * sizeof(void*));
-        list_set_len(dst, ln);
-        for (int64_t i = 0; i < ln; i++) ring_dup(dst->buf[i]);
-    }
-    return data;
-}
-
-// ============================================================================
 // String operations (additional)
 // ============================================================================
 
@@ -2301,40 +2299,6 @@ extern "C" void* ring_assert(int64_t cond, void* msg) {
         exit(1);
     }
     return nullptr;
-}
-
-// JSON-stringify a value. The bootstrap compiler only ever calls this on Str
-// (to emit JS string literals), so the value is treated as a std::string and
-// rendered as a quoted, escaped JSON string. (General <T> serialization would
-// require runtime type tags, which the uniform-boxing runtime does not carry.)
-extern "C" void* ring_json_stringify(void* val) {
-    if (!val) {
-        return make_ring_str("null", 4);
-    }
-    RingStr* s = as_str(val);
-    std::string out = "\"";
-    for (int64_t i = 0; i < s->len; i++) {
-        unsigned char c = (unsigned char)s->buf[i];
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    out += buf;
-                } else {
-                    out += (char)c;
-                }
-        }
-    }
-    out += "\"";
-    return make_ring_str(out.c_str(), (int64_t)out.size());
 }
 
 // ============================================================================

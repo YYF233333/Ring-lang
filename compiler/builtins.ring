@@ -365,6 +365,7 @@ fn register_cell(mut env: TypeEnv, sink: CollectingSink) {
         type_params: ["T"],
         type_param_vars: [cell_t_id],
         fields: [StructField { name: "value", ty: cell_t, is_pub: true }],
+        derive_attrs: [],
         is_extern: false
     })
 
@@ -478,6 +479,7 @@ fn register_option(mut env: TypeEnv, sink: CollectingSink) {
             EnumVariant { name: "some", fields: [option_t], field_names: none },
             EnumVariant { name: "none", fields: [], field_names: none }
         ],
+        derive_attrs: [],
         variant_index: option_vi
     })
 

@@ -14,6 +14,8 @@ Option<T> = some(T) | none
 
 `print`、`assert`、`panic`、进程退出和 JSON 字符串化等基础入口声明在 [`std/io.ring`](../../std/io.ring)。其中 `panic` 是不可恢复的终止；可恢复错误使用 `fail<E>`。
 
+`json_stringify<T: Json>(value: T) -> Str` 只接受可取得 `Json` evidence 的类型。标准库为 `Int`、`Float`、`Bool`、`Str` 和 `List<T: Json>` 提供实现；用户 struct/enum 使用 `@derive(Json)` 显式请求结构化实现。Struct 输出按字段声明顺序组成对象；enum 输出以 `"_tag"` 保存 variant 名，随后按声明顺序输出 named 字段或 `_0`、`_1` 等 positional 字段。没有 `Json` evidence 的调用在编译期拒绝。
+
 ### `Cell<T>`
 
 `Cell<T>` 是预加载的共享可变容器。构造本身是纯的；读取与修改都显式产生对应状态类型的 `mut<T>` marker effect：

@@ -371,3 +371,21 @@ impl<T: Ord> List {
         self.sort_by(fn(a, b) { if a < b { -1 } else { if a > b { 1 } else { 0 } } })
     }
 }
+
+impl<T: Json> Json for List<T> {
+    fn to_json(self) -> Str {
+        let mut out = string_builder()
+        out.add("[")
+        let mut i = 0
+        while i < self.len {
+            if i > 0 {
+                out.add(",")
+            }
+            let value = ring_slot_read(self.buf, i)
+            out.add(value.to_json())
+            i = i + 1
+        }
+        out.add("]")
+        out.to_str()
+    }
+}

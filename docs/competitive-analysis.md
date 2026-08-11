@@ -1,6 +1,6 @@
 # Ring-lang 竞品与行业定位
 
-> 最后更新：2026-08-03
+> 最后更新：2026-08-08
 >
 > 事实截止：2026-08-03（版本、活跃度与 stars 均为时点数据）
 >
@@ -456,6 +456,16 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 ---
 
 ## 12. 复查节奏与触发条件
+
+### 12.1 GitHub 竞品雷达
+
+公开的 [`Ring-lang` Star List](https://github.com/stars/YYF233333/lists/ring-lang) 是本报告的持续观察入口，由 Repository Steward 依 `docs/workflow.md` 的 standing authorization 维护。每轮竞品复查先读取该清单，再按本报告的一手来源纪律核验事实；复查可在同一工作中自主 Star 官方仓库、更新描述及增删清单成员，无需逐项请求用户确认。
+
+纳入清单至少满足一项：① 可直接替代 Ring 的产品或工具链；② 与当前类型/effect/ownership/resource/verification 设计有实质机制重叠；③ 对 agent 开发闭环、诊断、语义 inspection、发布工具链或执行速度构成可复核基准；④ 正在为活动 backlog 提供一手实现或实验参考。优先收录官方、canonical、仍可核验的仓库；同一项目默认只收一个主仓，只有独立的 agent/eval/runtime 子仓确实承载不同证据面时才例外。泛编译器资料、仅因 stars 高而相关性弱的项目、重复镜像和不可确认来源不进入核心雷达。
+
+清单可以是本文全景矩阵的超集：被纳入只表示“值得观察”，不表示直接竞品、成熟、正确或已采用。移出清单通常只表示重复、长期失活或已不再影响当前决策；默认保留用户原有 Star。GitHub stars、更新时间与提交频率只能用于发现复查对象，任何进入本文的能力、版本、威胁或行动结论仍须回到官网、官方仓库、release notes、论文或会议页面核验。
+
+### 12.2 复查节奏
 
 常规保鲜期：**6 周**。下次定期复查建议不晚于 2026-09-14。
 

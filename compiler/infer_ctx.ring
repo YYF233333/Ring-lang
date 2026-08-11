@@ -21,7 +21,8 @@ use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry,
     new_type_env, mono,
     apply_subst, apply_subst_row, apply_subst_map, find_impl, lookup_variant,
     exact_scheme_value_origin, build_scheme_var_map,
-    new_local_callable_identity_scheme}
+    new_local_callable_identity_scheme,
+    instantiate_impl_dict_requirements}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 use resolver::{ResolvedNamespacePlan, ModuleFramePlan, ResolvedNamespaceBinding,
     NamespaceKind}
@@ -1543,33 +1544,34 @@ fn resolve_named_impl_dict_evidence(
                 }
             }
 
+            let requirements = match instantiate_impl_dict_requirements(
+                impl_entry, type_params
+            ) {
+                some(resolved) => resolved,
+                none => return DictEvidenceResolution::Missing {
+                    suppress_diagnostic: false
+                }
+            }
+
             let mut inner_dicts: List<DictRef> = []
             let mut has_pending = false
             let mut has_missing = false
             let mut suppress_missing = true
-            for impl_bound in impl_entry.dict_bounds {
-                match type_params.get(impl_bound.type_param_index) {
-                    none => {
-                        has_missing = true
-                        suppress_missing = false
+            for requirement in requirements {
+                match resolve_dict_evidence_for_type(
+                    env, current_fn_bounds, requirement.type_arg, s,
+                    requirement.trait_name
+                ) {
+                    DictEvidenceResolution::Resolved { dict_ref } => {
+                        let inner_dict_ref = dict_ref
+                        inner_dicts.push(inner_dict_ref)
                     },
-                    some(type_arg) => {
-                        match resolve_dict_evidence_for_type(
-                            env, current_fn_bounds, type_arg, s,
-                            impl_bound.trait_name
-                        ) {
-                            DictEvidenceResolution::Resolved { dict_ref } => {
-                                let inner_dict_ref = dict_ref
-                                inner_dicts.push(inner_dict_ref)
-                            },
-                            DictEvidenceResolution::Pending => {
-                                has_pending = true
-                            },
-                            DictEvidenceResolution::Missing { suppress_diagnostic } => {
-                                has_missing = true
-                                if !suppress_diagnostic { suppress_missing = false }
-                            }
-                        }
+                    DictEvidenceResolution::Pending => {
+                        has_pending = true
+                    },
+                    DictEvidenceResolution::Missing { suppress_diagnostic } => {
+                        has_missing = true
+                        if !suppress_diagnostic { suppress_missing = false }
                     }
                 }
             }

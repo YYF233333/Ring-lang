@@ -282,6 +282,8 @@ impl Employee {
 
 派生按依赖 fixpoint 扩展到嵌套与递归用户类型。`Hash` 的内建基础 evidence 当前包括 `Int`、`Str`、`Bool`，不包括 `Float` 或 `Unit`；缺少所需 evidence 时保持 fail closed，并在实际 trait bound 被要求时报告 E0503。
 
+`Json` 不属于无提示的全局 auto-derive 集合。用户必须在 struct/enum 声明前显式写 `@derive(Json)`；编译器只在全部字段都能取得 `Json` evidence 时生成实现，并为泛型字段保留相应 trait bound。缺失字段 evidence 会报告 E0503。当前 `@derive(...)` 的显式表面只接受 `Json`，不提供空 `impl`、alias 或第二套兼容入口。
+
 ## 限制
 
 - 不支持 `dyn Trait` 动态分发

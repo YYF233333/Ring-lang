@@ -74,6 +74,12 @@ trait Collection {
 }
 ```
 
+### 1.1a JSON 编码支持域（2026-08-06 D-001）
+
+`json_stringify` 的公开支持域由公开 `Json` trait 裁决，签名为 `json_stringify<T: Json>(value: T) -> Str`，不再承诺无约束的任意 `T`。Int、Float、Bool、Str 与 `List<T: Json>` 提供标准实现；用户 struct/enum 只有在显式请求 `Json` derive 时才获得结构化实现，不做无提示的全局 auto-derive。
+
+结构化编码保持历史字段、enum `_tag` 形状与 Float 编码规则；这些输出属于可回归的公开行为。调用点缺少 `Json` evidence 时必须在编译期拒绝。实现复用普通 trait dictionary 作为类型证据，native runtime 不按值表示猜测类型，也不为 unknown 类型提供 fallback。显式 derive 的具体表面语法与实现分层在 #260 planning/review 中对齐现有 trait/derive 机制，但不得改变上述支持域和 fail-closed 边界。
+
 ### 1.1b Union Type（匿名 enum 语法糖，2026-05-25 决策）
 
 `A | B | C` 是匿名 enum 的语法糖。纯编译期展开，不引入子类型，HM 推断不受影响。
@@ -1248,7 +1254,7 @@ extern fn read_all(path: Str) -> Str / io             // path is readonly
 - Drop 传播由 symbolic ownership shape 表达：nominal identity、直接 Drop、字段/类型参数依赖位与显式阻断边界。递归 nominal SCC 求最小不动点；tuple/record/Option/Result 结构传播，List/Map/Set 等隐藏 raw-slot owner 使用集中 override，Ptr 与未来 `Rc<T>` 等共享边界显式阻断。未解析 TypeVar 以 may-Drop 进入 checker，不允许因此复制潜在线性值。
 - 所有会合成调用的 lowering 完成后、Perceus 之前运行独立 ownership pass。该 pass 以稳定 binding `DefId` 建临时 CFG，区分 normal/return/break/continue/exceptional edge，以 `Available / Moved / MaybeMoved` 做 branch join 与 loop fixed point；重新赋值可恢复 Available，shadow/synthetic binding 不按裸名称合并。
 - 真正移交的完整 binding 在 HIR 中物化为 `Take`。C11 lowering 先把原值保存到临时量，再把源槽清为 null，最后交给目标；所有 cleanup-visible 槽在注册 cleanup 前初始化为 null，scope drop 始终按逆声明序无条件执行，null drop 为 no-op。Perceus 不再维护 block 级 moved-name 抑制表，verifier 独立核对 Take、调用契约、drop 与 moved-read，不盲信 annotation。
-- 当前不支持 partial move：field/index/pattern/destructure/spread 中移出 may-Drop 值必须给出单轮可修诊断；完整 binding 与 fresh temporary 可移交。普通 closure 只允许 borrow/mut capture；在 FnOnce/consume-closure 语义落地前，closure body 移交捕获值一律拒绝。
+- 当前不支持 partial move：field/index/pattern/destructure/spread 中移出 may-Drop 值必须给出单轮可修诊断；完整 binding 与 fresh temporary 可移交。普通 closure 只允许捕获已证明 non-may-own 的外部 binding，并采用 borrow/mut capture；may-own、未解析 TypeVar 与含 may-own 字段的复合值在 closure 构造点 fail loud。Tail-resumptive handler arm 同样按 exact outer binding 执行这条边界，因为 handler evidence 可经 effectful function value 逃出 `handle`；`fail.raise` abort arm 是当前 C 控制流中的 inline 边界，不构造该 evidence closure，但仍禁止 handled body 移交其外层 binding。原因是普通 `FnType` 不携带 capture ownership shape，若直接 rc+1 会破坏 Drop 值 rc 恒 1，若隐式移交又需要 FnOnce/consume-call 契约。在该契约落地前，closure/handler body 移交捕获值同样一律拒绝。
 - B-168 固定 C-native failure/control ABI 前，任何可能跨 `catch`/raise 边界修改外层 cleanup-visible 槽的 `Take` 一律 fail loud；不得把自动局部置空或 drop flag 带过现行 `setjmp` 边界。B-168 完成后由同一 ownership plan 接入选定的稳定存储/显式 failure edge。
 
 ### 7.4 别名追踪与 mutation 安全
@@ -1332,6 +1338,7 @@ impl Drop for FileHandle {
 - `impl Drop` 的类型在赋值时 auto-move（编译器推断，lv2 显示 `move`）
 - Drop 类型 rc 恒为 1（auto-move 保证唯一 owner）→ scope-end drop = rc 归零 = **与 Rust 析构时机完全一致**
 - Drop 类型不可 Clone（`impl Drop` 禁止 `impl Clone`——资源不可复制）
+- 当前无处在对象分配中保存析构所需的 runtime trait evidence，因此 `impl<T: Trait> Drop for Box<T>` 这类带 type-parameter bound 的实现必须在注册前 fail loud；不需要 runtime evidence 的无 bound `impl<T> Drop for Box<T>` 仍可使用。未来若支持前者，evidence 必须成为对象布局与 drop glue 的显式、可验证契约，不能在析构调用处填占位值。
 - Drop 顺序对齐 Rust：同 scope 逆序 / struct 字段声明序 / 容器元素序
 - `drop(x)` 提前释放
 - abort 路径（fail/catch）的 drop-aware unwind 保证全路径 RAII；当前 C 后端尚未兑现，B-168 先确定可审计、可移植的控制流模型，再由 B-002 Phase 2 实现
@@ -1380,9 +1387,13 @@ let inc = fn() [mut counter: Int, name: Str] { ... }
 ```
 
 **捕获规则**：
-- 只读使用 → borrow 捕获（rc+1 on captured value）
+- 只读使用且捕获类型已证明 non-may-own → borrow 捕获（rc+1 on captured value）
 - mutation 使用 → mut 捕获（共享可变绑定，box 化）
 - spawn 闭包 → move 捕获（强制，防止 data race）
+
+当前普通 closure 没有 FnOnce/consume-call 形态，也没有在 `FnType` 中携带 capture ownership shape。因此 ordinary borrow/mut capture 不得接收 may-own 外部 binding；未解析 TypeVar 按 may-own fail closed。需要把资源交给 closure 的代码必须等待显式 consume-capture 模型，不能通过隐式 rc+1 延后 Drop，也不能把所有普通函数值统一线性化。该限制不影响 closure 内部新建并在自身作用域内消费的资源；nested closure 仍按各自 exact free-binding identity 独立检查。
+
+Tail-resumptive handler arm 会被物化进 effect evidence；该 evidence 又可能由 handler 内创建的 effectful function value 持有并逃出 `handle`。因此 handler 构造时必须按 exact `DefId` 检查 outer capture：Resource、transitive may-own wrapper、`Any` 与未解析 TypeVar 一律 fail loud，不能把借用藏进可逃逸 evidence。已证明 non-may-own 的捕获仍按现行词法 evidence ABI 保留；其中只有 physical-RC-eligible 值取得 `ring_dup` 并在 env mask 中标为 owned，`Ptr`、direct extern 与 contains-extern 值保持 RC-excluded。`fail.raise` abort arm 由 C 后端在 `setjmp`/`longjmp` catch path 内联执行，不创建 handler closure；它保留现有 outer-move 禁令，并在当前函数作用域读取外层值。
 
 **可变捕获豁免别名规则**：闭包的 mut 捕获创建共享可变绑定（原变量和闭包双方均可修改），不适用 §7.4 的别名失效规则——这是共享可变的 explicit opt-in。lv2 捕获列表 `[mut counter]` 标明。
 

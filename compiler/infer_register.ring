@@ -17,7 +17,7 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant, OwnershipShape,
     fresh_callable_ownership_inference_term}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember,
-    UseDecl, UseImport}
+    UseDecl, UseImport, DeriveAttribute}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, ImplDictBound, TypeAliasDef, FnBound, SigDef,
     EffectAliasDef, AssocTypeDef, MethodOrigin, mono, apply_subst, apply_subst_effect_map,
@@ -125,13 +125,17 @@ pub fn exact_prelude_extern_result_role(name: Str) -> Int {
 // ordinary registration path retain the reserved-name rejection below.
 pub fn register_prelude_decl_public(mut ctx: InferCtx, decl: Decl) {
     match decl {
-        Decl::Struct { name, type_params, fields, span, .. } => {
+        Decl::Struct { name, type_params, fields, derive_attrs, span, .. } => {
             if name == BUILTIN_LIST || name == BUILTIN_MAP ||
                name == BUILTIN_SET {
                 let definition_name = name
-                preregister_struct_definition(ctx, definition_name, type_params)
+                let definition_derive_attrs = derive_attrs
+                preregister_struct_definition(
+                    ctx, definition_name, type_params, definition_derive_attrs)
             } else {
-                preregister_struct(ctx, name, type_params, span)
+                let registered_name = name
+                preregister_struct(
+                    ctx, registered_name, type_params, derive_attrs, span)
             }
             complete_struct_fields(ctx, name, fields)
         },
@@ -278,23 +282,27 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
                 is_pub: is_pub, is_abstract: is_abstract, span: result_span
             }
         },
-        Decl::Struct { name, type_params, fields, is_pub, span } => {
+        Decl::Struct { name, type_params, fields, derive_attrs, is_pub, span } => {
             let result_type_params = type_params
             let result_fields = fields
+            let result_derive_attrs = derive_attrs
             let result_span = span
             Decl::Struct {
                 name: "${mod_name}::${name}",
                 type_params: result_type_params, fields: result_fields,
+                derive_attrs: result_derive_attrs,
                 is_pub: is_pub, span: result_span
             }
         },
-        Decl::Enum { name, type_params, variants, is_pub, span } => {
+        Decl::Enum { name, type_params, variants, derive_attrs, is_pub, span } => {
             let result_type_params = type_params
             let result_variants = variants
+            let result_derive_attrs = derive_attrs
             let result_span = span
             Decl::Enum {
                 name: "${mod_name}::${name}",
                 type_params: result_type_params, variants: result_variants,
+                derive_attrs: result_derive_attrs,
                 is_pub: is_pub, span: result_span
             }
         },
@@ -434,23 +442,27 @@ pub fn module_prefix_decl_name(module_prefix: Str, decl: Decl) -> Decl {
                 is_pub: is_pub, is_abstract: is_abstract, span: result_span
             }
         },
-        Decl::Struct { name, type_params, fields, is_pub, span } => {
+        Decl::Struct { name, type_params, fields, derive_attrs, is_pub, span } => {
             let result_type_params = type_params
             let result_fields = fields
+            let result_derive_attrs = derive_attrs
             let result_span = span
             Decl::Struct {
                 name: module_item_identity(module_prefix, name),
                 type_params: result_type_params, fields: result_fields,
+                derive_attrs: result_derive_attrs,
                 is_pub: is_pub, span: result_span
             }
         },
-        Decl::Enum { name, type_params, variants, is_pub, span } => {
+        Decl::Enum { name, type_params, variants, derive_attrs, is_pub, span } => {
             let result_type_params = type_params
             let result_variants = variants
+            let result_derive_attrs = derive_attrs
             let result_span = span
             Decl::Enum {
                 name: module_item_identity(module_prefix, name),
                 type_params: result_type_params, variants: result_variants,
+                derive_attrs: result_derive_attrs,
                 is_pub: is_pub, span: result_span
             }
         },
@@ -1034,14 +1046,19 @@ fn register_mod_item(
 
 fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: List<Str>, mut deferred_enum_names: List<Str>) {
     match decl {
-        Decl::Struct { name, type_params, fields, span, .. } => {
-            preregister_struct(ctx, name, type_params, span)
+        Decl::Struct { name, type_params, fields, derive_attrs, span, .. } => {
+            let preregistered_struct_name = name
+            preregister_struct(
+                ctx, preregistered_struct_name, type_params,
+                derive_attrs, span)
             let deferred_struct_name = name
             deferred_struct_names.push(deferred_struct_name)
         },
-        Decl::Enum { name, type_params, variants, span, .. } => {
+        Decl::Enum { name, type_params, variants, derive_attrs, span, .. } => {
             let preregistered_enum_name = name
-            preregister_enum(ctx, preregistered_enum_name, type_params, span)
+            preregister_enum(
+                ctx, preregistered_enum_name, type_params,
+                derive_attrs, span)
             let deferred_enum_name = name
             deferred_enum_names.push(deferred_enum_name)
         },
@@ -1915,19 +1932,24 @@ fn reject_reserved_ownership_nominal(
 }
 
 fn preregister_struct(
-    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, span: Span
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    derive_attrs: List<DeriveAttribute>, span: Span
 ) {
     if reject_reserved_ownership_nominal(ctx, name, span) { return }
-    preregister_struct_definition_firebreak(ctx, name, type_params)
+    preregister_struct_definition_firebreak(
+        ctx, name, type_params, derive_attrs)
 }
 
 fn preregister_struct_definition_firebreak(
-    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    derive_attrs: List<DeriveAttribute>
 ) {
     let definition_name = name
     let definition_type_params = type_params
+    let definition_derive_attrs = derive_attrs
     preregister_struct_definition(
-        ctx, definition_name, definition_type_params)
+        ctx, definition_name, definition_type_params,
+        definition_derive_attrs)
 }
 
 fn append_struct_type_var_id_firebreak(
@@ -1947,7 +1969,8 @@ fn bind_struct_type_param_firebreak(
 }
 
 fn preregister_struct_definition(
-    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    derive_attrs: List<DeriveAttribute>
 ) {
     let mut tp_names: List<Str> = []
     let mut tp_vars: List<Int> = []
@@ -1963,7 +1986,15 @@ fn preregister_struct_definition(
         ctx.type_param_scope.insert(tp.name, tv)
     }
     let definition_name = name
-    let def = StructDef { name: definition_name, type_params: tp_names, type_param_vars: tp_vars, fields: [], is_extern: false }
+    let definition_derive_attrs = derive_attrs
+    let def = StructDef {
+        name: definition_name,
+        type_params: tp_names,
+        type_param_vars: tp_vars,
+        fields: [],
+        derive_attrs: definition_derive_attrs,
+        is_extern: false
+    }
     ctx.env.types.structs.insert(name, def)
 }
 
@@ -2097,7 +2128,8 @@ fn record_canonical_variant_origin_firebreak(
 }
 
 fn preregister_enum(
-    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, span: Span
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    derive_attrs: List<DeriveAttribute>, span: Span
 ) {
     if reject_reserved_ownership_nominal(ctx, name, span) { return }
     let mut tp_names: List<Str> = []
@@ -2114,7 +2146,15 @@ fn preregister_enum(
         ctx.type_param_scope.insert(tp.name, tv)
     }
     let definition_name = name
-    let def = EnumDef { name: definition_name, type_params: tp_names, type_param_vars: tv_ids, variants: [], variant_index: map_new() }
+    let definition_derive_attrs = derive_attrs
+    let def = EnumDef {
+        name: definition_name,
+        type_params: tp_names,
+        type_param_vars: tv_ids,
+        variants: [],
+        derive_attrs: definition_derive_attrs,
+        variant_index: map_new()
+    }
     ctx.env.types.enums.insert(name, def)
 }
 
@@ -4596,7 +4636,7 @@ fn register_extern_type_common(
     let def = StructDef {
         name: extern_definition_name,
         type_params: tp_names, type_param_vars: tp_vars,
-        fields: [], is_extern: true
+        fields: [], derive_attrs: [], is_extern: true
     }
     if install_visible_name {
         let visible_type_name = name
@@ -4791,14 +4831,17 @@ fn register_effect_alias(mut ctx: InferCtx, name: Str, type_params: List<TypePar
 
 fn register_decl(mut ctx: InferCtx, decl: Decl) {
     match decl {
-        Decl::Struct { name, type_params, fields, span, .. } => {
-            preregister_struct(ctx, name, type_params, span)
+        Decl::Struct { name, type_params, fields, derive_attrs, span, .. } => {
+            let preregistered_struct_name = name
+            preregister_struct(
+                ctx, preregistered_struct_name, type_params,
+                derive_attrs, span)
             complete_struct_fields(ctx, name, fields)
         },
-        Decl::Enum { name, type_params, variants, span, .. } => {
+        Decl::Enum { name, type_params, variants, derive_attrs, span, .. } => {
             let preregistered_enum_name = name
             preregister_enum(ctx, preregistered_enum_name,
-                type_params, span)
+                type_params, derive_attrs, span)
             let completed_enum_name = name
             complete_enum_variants(
                 ctx, completed_enum_name, type_params, variants)

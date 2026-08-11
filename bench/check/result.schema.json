@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ring.check-benchmark.invocation.v1",
+  "$id": "ring.check-benchmark.invocation.v3",
   "title": "Ring check benchmark invocation",
   "type": "object",
   "additionalProperties": false,
@@ -8,6 +8,7 @@
     "schema",
     "run_id",
     "sample_id",
+    "sample_dir",
     "case_id",
     "index",
     "included",
@@ -42,15 +43,20 @@
     "runner_summary",
     "artifacts",
     "phase_traces",
+    "invocation_error",
     "invalid_reason"
   ],
   "properties": {
     "schema": {
       "type": "string",
-      "const": "ring.check-benchmark.invocation.v1"
+      "const": "ring.check-benchmark.invocation.v3"
     },
     "run_id": { "type": "string", "minLength": 1 },
-    "sample_id": { "type": "string", "minLength": 1 },
+    "sample_id": {
+      "type": "string",
+      "pattern": "[a-z][a-z0-9_]*-[0-9]{3}-[0-9a-f]{8}"
+    },
+    "sample_dir": { "type": "string", "minLength": 1 },
     "case_id": { "type": "string", "minLength": 1 },
     "index": { "type": "integer", "minimum": 0 },
     "included": { "type": "boolean" },
@@ -204,7 +210,7 @@
     "runner_summary": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["status_counts", "suite_counts", "reported_exit_code"],
+      "required": ["status_counts", "suite_counts", "cases", "cases_sha256", "reported_exit_code"],
       "properties": {
         "status_counts": {
           "type": "object",
@@ -217,8 +223,33 @@
           }
         },
         "suite_counts": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pass", "fail", "skip"],
+            "properties": {
+              "pass": { "type": "integer", "minimum": 0 },
+              "fail": { "type": "integer", "minimum": 0 },
+              "skip": { "type": "integer", "minimum": 0 }
+            }
+          }
         },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["suite", "name", "status", "skip_reason"],
+            "properties": {
+              "suite": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "type": "string", "enum": ["pass", "fail", "skip"] },
+              "skip_reason": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "cases_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "reported_exit_code": { "type": ["integer", "null"] }
       }
     },
@@ -241,14 +272,16 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "line", "value"],
+        "required": ["path", "line", "value", "read_error"],
         "properties": {
           "path": { "type": "string", "minLength": 1 },
           "line": { "type": "integer", "minimum": 1 },
-          "value": { "type": "object" }
+          "value": { "type": ["object", "null"] },
+          "read_error": { "type": ["string", "null"] }
         }
       }
     },
+    "invocation_error": { "type": ["string", "null"] },
     "invalid_reason": { "type": ["string", "null"] }
   }
 }

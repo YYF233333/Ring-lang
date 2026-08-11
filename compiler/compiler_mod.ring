@@ -16,6 +16,9 @@ use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{RcFinding, verify_rc_program, rc_fatal_count, format_rc_findings}
 use codes::{E0708}
 use infer_helpers::{is_value_type}
+use phase_timing::{
+    PhaseTiming, PHASE_PROJECT_MODULE_LOAD_PARSE,
+    PHASE_TYPE_EFFECT_CHECK_LOWER, PHASE_RESOURCE_PLAN_VERIFY}
 
 pub struct CompileProjectResult {
     pub success: Bool
@@ -260,10 +263,17 @@ fn build_project_extern_forward_bridges(
     if has_ambiguity { none } else { some(bridges) }
 }
 
-fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
+fn compile_phases(entry_file: Str, error_format: Str, mut timing: PhaseTiming) -> CompilePhaseResult? {
+    let graph_start = timing.start_phase()
     match build_module_graph(entry_file, error_format) {
-        none => none,
+        none => {
+            timing.finish_phase(PHASE_PROJECT_MODULE_LOAD_PARSE, graph_start)
+            timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+            none
+        },
         some(graph) => {
+            timing.finish_phase(PHASE_PROJECT_MODULE_LOAD_PARSE, graph_start)
+            let check_start = timing.start_phase()
             let mut module_asts: Map<Str, Program> = map_new()
             let mut module_hirs: Map<Str, HProgram> = map_new()
             let mut module_exports_map: Map<Str, ModuleExports> = map_new()
@@ -359,7 +369,10 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                     }
                 }
             }
-            if check_ok == false { return none }
+            if check_ok == false {
+                timing.finish_phase(PHASE_TYPE_EFFECT_CHECK_LOWER, check_start)
+                return none
+            }
 
             // B-144 + B-145: compute per-module extern type names.
             // Step 1: collect the global union of all modules' extern type names
@@ -424,7 +437,9 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                 }
             }
 
-            match build_project_extern_forward_bridges(graph, module_hirs, error_format) {
+            let bridges = build_project_extern_forward_bridges(graph, module_hirs, error_format)
+            timing.finish_phase(PHASE_TYPE_EFFECT_CHECK_LOWER, check_start)
+            match bridges {
                 none => none,
                 some(extern_forward_bridges) => some(CompilePhaseResult {
                     graph: compile_phase_graph_result_firebreak(graph),
@@ -466,10 +481,16 @@ fn compile_phase_extern_bridges_result_firebreak(
 // Bundle mode
 // ============================================================
 
-pub fn compile_project(entry_file: Str, error_format: Str) -> CompileProjectResult {
-    match compile_phases(entry_file, error_format) {
-        none => CompileProjectResult { success: false },
-        some(_) => CompileProjectResult { success: true },
+pub fn compile_project(entry_file: Str, error_format: Str, mut timing: PhaseTiming) -> CompileProjectResult {
+    match compile_phases(entry_file, error_format, timing) {
+        none => {
+            timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
+            CompileProjectResult { success: false }
+        },
+        some(_) => {
+            timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
+            CompileProjectResult { success: true }
+        },
     }
 }
 
@@ -483,10 +504,17 @@ pub struct CProjectCompileResult {
     pub success: Bool
 }
 
-pub fn compile_project_c(entry_file: Str, c_path: Str, o_path: Str, emit_lines: Bool, error_format: Str) -> CProjectCompileResult {
-    match compile_phases(entry_file, error_format) {
-        none => CProjectCompileResult { success: false },
+pub fn compile_project_c(
+    entry_file: Str, c_path: Str, o_path: Str, emit_lines: Bool,
+    error_format: Str, mut timing: PhaseTiming
+) -> CProjectCompileResult {
+    match compile_phases(entry_file, error_format, timing) {
+        none => {
+            timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
+            CProjectCompileResult { success: false }
+        },
         some(phases) => {
+            let resource_start = timing.start_phase()
             let entry_key = module_key(phases.graph.entry.path_segments)
 
             // Build list of (module_prefix, HProgram, uses) in topo order
@@ -519,8 +547,11 @@ pub fn compile_project_c(entry_file: Str, c_path: Str, o_path: Str, emit_lines: 
                 }
             }
 
-            generate_c_project(modules, entry_prefix, c_path, o_path, emit_lines, phases.extern_forward_bridges)
-            CProjectCompileResult { success: true }
+            timing.finish_phase(PHASE_RESOURCE_PLAN_VERIFY, resource_start)
+            let build_ok = generate_c_project(
+                modules, entry_prefix, c_path, o_path, emit_lines,
+                phases.extern_forward_bridges)
+            CProjectCompileResult { success: build_ok }
         },
     }
 }
@@ -545,10 +576,17 @@ fn append_project_rc_finding_firebreak(
     findings.push(exact_finding)
 }
 
-pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool, error_format: Str) -> RcProjectVerifyResult {
-    match compile_phases(entry_file, error_format) {
-        none => RcProjectVerifyResult { success: false, fatal: 0, exempt: 0, report: "" },
+pub fn verify_project_rc(
+    entry_file: Str, mutate: Str, strict: Bool, error_format: Str,
+    mut timing: PhaseTiming
+) -> RcProjectVerifyResult {
+    match compile_phases(entry_file, error_format, timing) {
+        none => {
+            timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
+            RcProjectVerifyResult { success: false, fatal: 0, exempt: 0, report: "" }
+        },
         some(phases) => {
+            let resource_start = timing.start_phase()
             let mut all: List<RcFinding> = []
             for key in phases.graph.topo_order {
                 match phases.module_hirs.get(key) {
@@ -564,6 +602,7 @@ pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool, error_forma
                 }
             }
             let fatal = rc_fatal_count(all)
+            timing.finish_phase(PHASE_RESOURCE_PLAN_VERIFY, resource_start)
             RcProjectVerifyResult {
                 success: true,
                 fatal: fatal,

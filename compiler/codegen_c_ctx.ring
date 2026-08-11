@@ -119,6 +119,10 @@ pub struct CCtx {
     // (LLVM auto-uniques; the later body lands in a dead block) — in C a
     // second definition is a hard clang error, so later bodies are skipped.
     pub emitted_fns: Set<Str>,
+    // Synthetic derive methods registered before any member of their SCC is
+    // emitted. Kept separate from ordinary declarations so a predeclared
+    // derive body is not mistaken for a user/manual collision.
+    pub predeclared_derived_fns: Set<Str>,
     pub extern_types: Set<Str>,
     // Exact resolved/mangled callable identities, kept separate from
     // `functions`: that map also contains const getters and backend helpers,
@@ -255,6 +259,7 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         rt_protos: map_new(),
         cstr_cache: map_new(),
         emitted_fns: set_new(),
+        predeclared_derived_fns: set_new(),
         extern_types: set_new(),
         ring_callable_names: set_new(),
         extern_callable_names: extern_callable_names,
@@ -986,7 +991,6 @@ fn rt_sig(name: Str) -> Str? {
     if name == "ring_parse_float" { return some("p>p") }
     // Misc
     if name == "ring_assert" { return some("ip>p") }
-    if name == "ring_json_stringify" { return some("p>p") }
     if name == "ring_match_fail" { return some("piip>p") }
     // Trait dicts (step 5)
     if name == "ring_get_builtin_dict" { return some("p>p") }
