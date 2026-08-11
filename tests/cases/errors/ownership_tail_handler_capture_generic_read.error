@@ -1,0 +1,4 @@
+E0801
+tail-resumptive handler cannot capture owner-bearing value 'source'
+handler evidence may escape; only non-may-own outer captures are supported until explicit lifetime/consume semantics exist
+!internal compiler error

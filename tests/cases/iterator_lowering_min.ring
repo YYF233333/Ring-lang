@@ -16,7 +16,9 @@ impl Iterator for TinyCounter {
 impl Iterable for TinyCounter {
     type Item = Int
     type Iter = TinyCounter
-    fn iter(self) -> TinyCounter { self }
+    // Iterable.iter is a Borrow interface. Return an independent iterator
+    // value instead of silently strengthening the implementation to Move.
+    fn iter(self) -> TinyCounter { self.clone() }
 }
 
 fn main() {

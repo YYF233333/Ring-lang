@@ -5,7 +5,9 @@ struct Pair<A, B> {
   second: B,
 }
 
-fn swap_first<A, B>(p: Pair<A, B>, new_first: A) -> Pair<A, B> {
+// Spread remains a borrow/copy operation. Exercise it on a concrete
+// non-may-own instantiation; the generic may-own case is a compile-negative.
+fn swap_first(p: Pair<Int, Str>, new_first: Int) -> Pair<Int, Str> {
   Pair { ..p, first: new_first }
 }
 
@@ -14,9 +16,10 @@ enum Tree<T> {
   Node { left: Tree<T>, right: Tree<T>, value: T },
 }
 
-fn update_value<T>(t: Tree<T>, v: T) -> Tree<T> {
+fn update_value(t: Tree<Int>, v: Int) -> Tree<Int> {
   match t {
     Node { left, right, value } => Node { ..t, value: v },
+    // Every Leaf field is overridden, so the spread retains no projection.
     Leaf { value } => Leaf { ..t, value: v },
   }
 }

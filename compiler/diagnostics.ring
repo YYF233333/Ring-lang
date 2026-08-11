@@ -121,7 +121,11 @@ impl DiagnosticSink for CollectingSink {
         let key = diag_key(d)
         if !self.seen.contains_key(key) {
             self.seen.insert(key, true)
-            self.items.push(d)
+            // The trait declaration is old-anchor-compatible lv0 and therefore
+            // exposes a Borrow parameter.  Store a fresh whole-value copy; do
+            // not turn a borrowed projection into an implicit partial move.
+            let stored = Diagnostic { ..d }
+            self.items.push(stored)
         }
     }
 
@@ -151,6 +155,7 @@ pub fn make_diagnostic(
     context: DiagnosticContext,
     notes: List<DiagnosticNote>
 ) -> Diagnostic {
+    let category = some(error_category(code))
     Diagnostic {
         severity: severity,
         code: code,
@@ -159,7 +164,7 @@ pub fn make_diagnostic(
         notes: notes,
         context: context,
         suggestions: [],
-        category: some(error_category(code))
+        category: category
     }
 }
 
@@ -170,5 +175,11 @@ pub fn make_diag(
     span: Span,
     context: DiagnosticContext
 ) -> Diagnostic {
-    make_diagnostic(code, severity, message, span, context, [])
+    let owned_code = code
+    let owned_severity = severity
+    let owned_message = message
+    let owned_span = span
+    let owned_context = context
+    make_diagnostic(owned_code, owned_severity, owned_message,
+        owned_span, owned_context, [])
 }

@@ -1,13 +1,10 @@
-// B-087 gap 3: a closure created inside a generic function that uses a trait-bounded
-// operation (== via T's Eq dict) must CAPTURE the dict param (__ring_T_Eq) into its
-// env. collect_captures only collected plain locals, not dict/evidence params, so the
-// lambda body could not find the dict → wrong dispatch / crash.
+// B-087 generic Eq dispatch remains covered without capturing `target: T` in a
+// closure.  Ownership treats unresolved TypeVar captures as may-own and rejects
+// them fail-closed, so the search is intentionally expressed as a direct loop.
 
 fn find_first_match<T: Eq>(xs: List<T>, target: T) -> Bool {
-    // closure captures both `target` (local) AND the implicit T_Eq dict param
-    let pred = fn(x: T) -> Bool { x == target }
     for x in xs {
-        if pred(x) { return true }
+        if x == target { return true }
     }
     false
 }

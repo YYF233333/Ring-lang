@@ -9,7 +9,8 @@
 // declaration order (audit #237) — the emitted .c is byte-identical across
 // runs.
 
-use types::{Type, Effect, EffectRow, effect_kind_name}
+use types::{Type, Effect, EffectRow, OwnershipMetadata, effect_kind_name,
+    merge_ownership_shape, types_equal_with_ownership}
 use ast::{Span, UseDecl, UseImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, HEffectOp, TraitBound, evidence_param_name, trait_bound_param_name,
@@ -17,11 +18,12 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     variant_ctor_name, compare_by_first, hexpr_type, trait_dict_name,
     default_method_self_name, scan_trait_method_order, collect_all_supertraits,
     type_contains_extern_handle,
-    hparam_is_mutable,
+    hparam_is_external_drop_owner,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef, TypeKind,
     DERIVED_HASH_SEED}
-use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
-    CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_local, c_mangle_fn,
+use codegen_c_ctx::{CCtx, CFnInfo, CDirectDropInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
+    CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_param_def,
+    c_local, c_mangle_fn,
     c_mangle_fn_with_prefix, c_mangle_method, c_sanitize, c_symbol_for_fn_key, c_symbol_fragment,
     c_line_directive,
     rt_use, rt_use_raw,
@@ -41,19 +43,26 @@ use resolver::{module_prefix}
 
 pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool) {
     let mut ctx = new_c_ctx(emit_lines)
+    ctx.ownership_metadata = program.ownership_metadata
+    register_c_direct_drop_shapes(ctx, program.ownership_metadata)
 
     // B-091: auto-boxed mut-cell def_ids (closure write-through capture).
-    for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
+    for did in program.boxed_vars {
+        let boxed_var_id = did
+        ctx.boxed_vars.insert(boxed_var_id)
+    }
     // B-144: extern type names (RC exclusion decisions — field_rc_skip flags
     // consumed by emit_c_drop_functions).
-    for en in program.extern_type_names { ctx.extern_types.insert(en) }
-    // B-002p1: types with user `impl Drop` (emit_c_drop_functions calls the
-    // user drop body before the recursive field drops).
-    for dt in program.drop_types { ctx.drop_types.insert(dt) }
-
+    for en in program.extern_type_names {
+        let extern_type_name = en
+        ctx.extern_types.insert(extern_type_name)
+    }
     // B-104 D4: static dict singleton definitions (dict_lower) — the memoised
     // getters build wrapped instances from these.
-    for sd in program.static_dicts { ctx.static_dict_defs.insert(sd.name, sd) }
+    for sd in program.static_dicts {
+        let static_dict = sd
+        ctx.static_dict_defs.insert(static_dict.name, static_dict)
+    }
 
     // Trait method slot order + supertrait edges — SHARED hir.ring scan
     // (plan §2.5 #2: single source; no codegen-local trait registry).
@@ -65,7 +74,6 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     // Effect scan + transitive closure (B-089 G-b) — determines evidence
     // param counts, which are part of every C prototype.
     scan_fn_effects_c(program.decls, ctx.local_fn_effects)
-    scan_fn_mut_params_c(program.decls, ctx.fn_mut_params)
     compute_transitive_effect_closure_c(program.decls, ctx.local_fn_effects)
 
     // Step 6: effect op declarations (slot-order contract) + B-097 default
@@ -113,7 +121,9 @@ pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool)
     emit_c_main_wrapper(ctx)
 
     // Assemble + write + compile.
-    c_write_and_compile(ctx, c_path, o_path)
+    let output_c_path = c_path
+    let output_o_path = o_path
+    c_write_and_compile(ctx, output_c_path, output_o_path)
 }
 
 // ============================================================
@@ -144,16 +154,22 @@ pub fn generate_c_project(
         let (prefix, program, _uses) = m
         // B-144: program-level extern type names (per-module filtered set
         // from compile_phases — union across modules is safe, B-145).
-        for en in program.extern_type_names { ctx.extern_types.insert(en) }
-        // B-002p1: types with user impl Drop (union across modules).
-        for dt in program.drop_types { ctx.drop_types.insert(dt) }
+        for en in program.extern_type_names {
+            let extern_type_name = en
+            ctx.extern_types.insert(extern_type_name)
+        }
+        register_c_direct_drop_shapes(ctx, program.ownership_metadata)
         // B-104 D4: static dict singletons — instance names deterministically
         // encode their structure, same-name entries are identical (dedupe).
-        for sd in program.static_dicts { ctx.static_dict_defs.insert(sd.name, sd) }
+        for sd in program.static_dicts {
+            let static_dict = sd
+            ctx.static_dict_defs.insert(static_dict.name, static_dict)
+        }
         // Trait method slot order + supertraits (hir.ring single source).
         scan_trait_method_order(program.decls, ctx.trait_method_order, ctx.trait_supertraits)
-        scan_fn_effects_with_prefix_c(program.decls, some(prefix), ctx.local_fn_effects)
-        scan_fn_mut_params_with_prefix_c(program.decls, some(prefix), ctx.fn_mut_params)
+        let effect_scan_prefix = prefix
+        scan_fn_effects_with_prefix_c(
+            program.decls, some(effect_scan_prefix), ctx.local_fn_effects)
         // B-090: effect-op declaration order (slot contract, all modules).
         register_effect_ops_c(program.decls, ctx.effect_ops)
     }
@@ -172,7 +188,9 @@ pub fn generate_c_project(
     // methods / traits / enums stay globally bare, also LLVM parity).
     for m in modules {
         let (prefix, program, _uses) = m
-        c_forward_declare_with_prefix(ctx, program.decls, some(prefix))
+        let declaration_prefix = prefix
+        c_forward_declare_with_prefix(
+            ctx, program.decls, some(declaration_prefix))
     }
 
     // Struct ctors after the WHOLE forward pass (fns win ring_<Name>).
@@ -185,6 +203,7 @@ pub fn generate_c_project(
     emit_c_builtin_derived_impls(ctx)
     for m in modules {
         let (_prefix, program, _uses) = m
+        ctx.ownership_metadata = program.ownership_metadata
         emit_c_derived_impls(ctx, program.derived_impls)
     }
 
@@ -192,7 +211,9 @@ pub fn generate_c_project(
     // local_names / imports_map are PER-MODULE state (#134).
     for m in modules {
         let (prefix, program, uses) = m
-        ctx.module_prefix = some(prefix)
+        let body_prefix = prefix
+        ctx.module_prefix = some(body_prefix)
+        ctx.ownership_metadata = program.ownership_metadata
         ctx.boxed_vars = program.boxed_vars
         ctx.local_names = collect_c_module_names(program.decls)
         ctx.imports_map = build_c_imports_map(uses)
@@ -210,7 +231,30 @@ pub fn generate_c_project(
     emit_c_default_evidence_init(ctx)
     emit_c_main_wrapper_common(ctx, c_mangle_fn_with_prefix(entry_prefix, "main"), true)
 
-    c_write_and_compile(ctx, c_path, o_path)
+    let output_c_path = c_path
+    let output_o_path = o_path
+    c_write_and_compile(ctx, output_c_path, output_o_path)
+}
+
+// Backend projection of the frozen ownership truth.  Project generation may
+// overwrite ctx.ownership_metadata while emitting each module, so the global
+// drop pass consumes this stable union rather than whichever bundle happened
+// to be visited last.
+fn register_c_direct_drop_shapes(
+    mut ctx: CCtx, metadata: OwnershipMetadata
+) {
+    for entry in metadata.ownership_shapes.entries() {
+        let (identity, shape) = entry
+        let has_direct_drop = shape.direct_drop
+        let merged_identity = identity
+        let direct_drop_identity = identity
+        let merged_shape = shape
+        merge_ownership_shape(
+            ctx.merged_ownership_metadata, merged_identity, merged_shape)
+        if has_direct_drop {
+            ctx.direct_drop_types.insert(direct_drop_identity)
+        }
+    }
 }
 
 // Shared tail of both entry points: assemble the translation unit, write it
@@ -219,12 +263,14 @@ fn c_write_and_compile(ctx: CCtx, c_path: Str, o_path: Str) {
     let text = assemble_c_file(ctx)
     write_file(c_path, text)
 
+    let failed_c_path = c_path
+    let compiled_o_path = o_path
     let rc = exec_sync("clang", ["-std=c11", "-O2", "-c", c_path, "-o", o_path])
     if rc != 0 {
-        eprintln("ring-c: clang failed (exit code ${rc}) compiling ${c_path} — is clang on PATH?")
+        eprintln("ring-c: clang failed (exit code ${rc}) compiling ${failed_c_path} — is clang on PATH?")
         exit_process(1)
     } else {
-        print("Compiled: ${o_path}")
+        print("Compiled: ${compiled_o_path}")
     }
 }
 
@@ -271,14 +317,38 @@ fn collect_c_module_names(decls: List<HDecl>) -> Set<Str> {
 fn collect_c_module_names_rec(decls: List<HDecl>, mut names: Set<Str>) {
     for decl in decls {
         match decl {
-            HDecl::Fn { name, .. } => { names.insert(name) },
-            HDecl::Struct { name, .. } => { names.insert(name) },
-            HDecl::Enum { name, .. } => { names.insert(name) },
-            HDecl::Const { name, .. } => { names.insert(name) },
-            HDecl::Trait { name, .. } => { names.insert(name) },
-            HDecl::ExternFn { name, .. } => { names.insert(name) },
-            HDecl::ExternType { name, .. } => { names.insert(name) },
-            HDecl::TypeAlias { name, .. } => { names.insert(name) },
+            HDecl::Fn { name, .. } => {
+                let fn_name = name
+                names.insert(fn_name)
+            },
+            HDecl::Struct { name, .. } => {
+                let struct_name = name
+                names.insert(struct_name)
+            },
+            HDecl::Enum { name, .. } => {
+                let enum_name = name
+                names.insert(enum_name)
+            },
+            HDecl::Const { name, .. } => {
+                let const_name = name
+                names.insert(const_name)
+            },
+            HDecl::Trait { name, .. } => {
+                let trait_name = name
+                names.insert(trait_name)
+            },
+            HDecl::ExternFn { name, .. } => {
+                let extern_fn_name = name
+                names.insert(extern_fn_name)
+            },
+            HDecl::ExternType { name, .. } => {
+                let extern_type_name = name
+                names.insert(extern_type_name)
+            },
+            HDecl::TypeAlias { name, .. } => {
+                let alias_name = name
+                names.insert(alias_name)
+            },
             HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
                     match m {
@@ -290,7 +360,10 @@ fn collect_c_module_names_rec(decls: List<HDecl>, mut names: Set<Str>) {
                     }
                 }
             },
-            HDecl::Effect { name, .. } => { names.insert(name) },
+            HDecl::Effect { name, .. } => {
+                let effect_name = name
+                names.insert(effect_name)
+            },
             HDecl::ModBlock { decls: md, .. } => { collect_c_module_names_rec(md, names) },
             HDecl::Test { .. } => {},
             HDecl::Sig { .. } => {},
@@ -334,14 +407,20 @@ fn c_preamble() -> List<Str> {
 
 fn assemble_c_file(ctx: CCtx) -> Str {
     let mut out: List<Str> = []
-    for l in c_preamble() { out.push(l) }
+    for l in c_preamble() {
+        let preamble_line = l
+        out.push(preamble_line)
+    }
 
     out.push("/* ---- runtime prototypes (ring_runtime.cpp C ABI) ---- */")
     let mut rt_names = ctx.rt_protos.keys()
     rt_names.sort()
     for n in rt_names {
         match ctx.rt_protos.get(n) {
-            some(p) => out.push(p),
+            some(p) => {
+                let runtime_prototype = p
+                out.push(runtime_prototype)
+            },
             none => {},
         }
     }
@@ -349,18 +428,25 @@ fn assemble_c_file(ctx: CCtx) -> Str {
 
     if ctx.globals.len() > 0 {
         out.push("/* ---- string constants (explicit-length byte arrays) & const cells ---- */")
-        for g in ctx.globals { out.push(g) }
+        for g in ctx.globals {
+            let global_definition = g
+            out.push(global_definition)
+        }
         out.push("")
     }
 
     if ctx.fn_protos.len() > 0 {
         out.push("/* ---- ring function prototypes ---- */")
-        for p in ctx.fn_protos { out.push(p) }
+        for p in ctx.fn_protos {
+            let function_prototype = p
+            out.push(function_prototype)
+        }
         out.push("")
     }
 
     for d in ctx.fn_defs {
-        out.push(d)
+        let function_definition = d
+        out.push(function_definition)
         out.push("")
     }
 
@@ -402,7 +488,8 @@ fn c_register_builtin_enums(mut ctx: CCtx) {
     ctx.functions.insert("ring_Result_Ok", CFnInfo { c_name: "ring_Result_Ok", total_params: 1 })
     ctx.functions.insert("ring_Result_Err", CFnInfo { c_name: "ring_Result_Err", total_params: 1 })
     for key in ["ring_Option_some", "ring_Result_Ok", "ring_Result_Err"] {
-        ctx.ring_callable_names.insert(key)
+        let callable_name = key
+        ctx.ring_callable_names.insert(callable_name)
     }
     let mut ev1: List<Str> = []
     ctx.fn_evidence_params.insert("ring_Option_some", ev1)
@@ -466,21 +553,40 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     some(p) => c_mangle_fn_with_prefix(p, name),
                     none => c_mangle_fn(name),
                 }
+                let declared_fn_name = mangled
+                let prefixed_effect_key = mangled
                 ctx.ring_callable_names.insert(mangled)
                 let effect_key = match prefix {
-                    some(_) => mangled,
+                    some(_) => prefixed_effect_key,
                     none => name,
                 }
-                c_declare_fn(ctx, mangled, effect_key, params, effects, trait_bounds)
+                let declared_trait_bounds = trait_bounds
+                c_declare_fn(
+                    ctx, declared_fn_name, effect_key, params, effects,
+                    declared_trait_bounds)
             },
             HDecl::Impl { target_type, trait_name, methods, .. } => {
                 for m in methods {
                     match m {
-                        HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, .. } => {
+                        HDecl::Fn { name: mn, params: mp, return_type: mr,
+                                    effects: me, trait_bounds: mtb, .. } => {
                             // #177: qualified effect key matching scan_fn_effects_c.
                             let method_key = c_mangle_method(target_type, mn)
+                            let declared_method_key = method_key
+                            let drop_method_key = method_key
                             ctx.ring_callable_names.insert(method_key)
-                            c_declare_fn(ctx, method_key, "${target_type}_${mn}", mp, me, mtb)
+                            let declared_method_trait_bounds = mtb
+                            let drop_method_trait_bounds = mtb
+                            c_declare_fn(
+                                ctx, declared_method_key, "${target_type}_${mn}",
+                                mp, me, declared_method_trait_bounds)
+                            let drop_target_type = target_type
+                            let drop_return_type = mr
+                            let drop_effects = me
+                            register_c_direct_drop_method(
+                                ctx, drop_target_type, drop_method_key, mp,
+                                drop_return_type, drop_effects,
+                                drop_method_trait_bounds)
                         },
                         _ => {},
                     }
@@ -498,8 +604,9 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                             none => methods.len() > 0,
                         }
                         if has_methods && ctx.dict_build_fns.contains(dict_name) == false {
+                            let dict_prototype_name = dict_name
                             ctx.dict_build_fns.insert(dict_name)
-                            ctx.fn_protos.push("void* ring_dict_build_${c_symbol_fragment(dict_name)}(void);")
+                            ctx.fn_protos.push("void* ring_dict_build_${c_symbol_fragment(dict_prototype_name)}(void);")
                         }
                     },
                     none => {},
@@ -522,11 +629,13 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                                     }
                                     let total = 1 + all_supers.len() + tm.params.len() + ev_params.len()
                                     let c_name = c_symbol_fragment(default_fn_name)
+                                    let evidence_fn_name = default_fn_name
+                                    let prototype_c_name = c_name
                                     ctx.functions.insert(default_fn_name, CFnInfo { c_name: c_name, total_params: total })
-                                    ctx.fn_evidence_params.insert(default_fn_name, ev_params)
+                                    ctx.fn_evidence_params.insert(evidence_fn_name, ev_params)
                                     let mut ps: List<Str> = []
                                     for _i in 0..total { ps.push("void*") }
-                                    ctx.fn_protos.push("void* ${c_name}(${ps.join(", ")});")
+                                    ctx.fn_protos.push("void* ${prototype_c_name}(${ps.join(", ")});")
                                 }
                             },
                             none => {},
@@ -544,13 +653,18 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     fnames.push(f.name)
                     frs.push(type_contains_extern_handle(f.ty, ctx.extern_types))
                 }
-                ctx.struct_types.insert(name, CStructInfo { field_names: fnames, field_rc_skip: frs })
+                let registered_struct_name = name
+                ctx.struct_types.insert(
+                    registered_struct_name,
+                    CStructInfo { field_names: fnames, field_rc_skip: frs })
                 // The ring_<Name> constructor fn is declared AFTER the whole
                 // forward pass (c_declare_struct_ctors) — fns win collisions.
             },
             HDecl::Enum { name, variants, .. } => {
-                register_c_enum_info(ctx, name, variants)
-                c_emit_enum_ctors(ctx, name, variants)
+                let registered_enum_name = name
+                let emitted_enum_name = name
+                register_c_enum_info(ctx, registered_enum_name, variants)
+                c_emit_enum_ctors(ctx, emitted_enum_name, variants)
             },
             HDecl::Const { name, .. } => {
                 // Const = zero-arg lazy getter (same scheme as the LLVM backend).
@@ -561,21 +675,31 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     none => c_mangle_fn(name),
                 }
                 if ctx.functions.contains_key(mangled) == false {
+                    let const_function_key = mangled
+                    let const_evidence_key = mangled
                     let c_name = if is_runtime_symbol(mangled) { "${mangled}__ring" } else { c_symbol_for_fn_key(mangled) }
-                    ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: 0 })
+                    let const_prototype_name = c_name
+                    ctx.functions.insert(
+                        const_function_key,
+                        CFnInfo { c_name: c_name, total_params: 0 })
                     let mut no_ev: List<Str> = []
-                    ctx.fn_evidence_params.insert(mangled, no_ev)
-                    ctx.fn_protos.push("void* ${c_name}(void);")
+                    ctx.fn_evidence_params.insert(const_evidence_key, no_ev)
+                    ctx.fn_protos.push("void* ${const_prototype_name}(void);")
                 }
             },
             HDecl::Test { .. } => {
                 // #215: test block as a zero-arg function.
                 let test_name = "ring_test_${ctx.test_fns.len()}"
-                ctx.functions.insert(test_name, CFnInfo { c_name: test_name, total_params: 0 })
+                let test_c_name = test_name
+                let test_evidence_name = test_name
+                let test_prototype_name = test_name
+                let registered_test_name = test_name
+                ctx.functions.insert(
+                    test_name, CFnInfo { c_name: test_c_name, total_params: 0 })
                 let mut no_ev: List<Str> = []
-                ctx.fn_evidence_params.insert(test_name, no_ev)
-                ctx.fn_protos.push("void* ${test_name}(void);")
-                ctx.test_fns.push(test_name)
+                ctx.fn_evidence_params.insert(test_evidence_name, no_ev)
+                ctx.fn_protos.push("void* ${test_prototype_name}(void);")
+                ctx.test_fns.push(registered_test_name)
             },
             HDecl::ModBlock { decls: md, .. } => {
                 // Inline-mod decl names are already module-prefixed by the
@@ -591,14 +715,164 @@ fn c_forward_declare_with_prefix(mut ctx: CCtx, decls: List<HDecl>, prefix: Str?
                     some(p) => c_mangle_fn_with_prefix(p, name),
                     none => c_mangle_fn(name),
                 }
+                let extern_abi_key = extern_key
+                let extern_abi_name = abi_name
                 ctx.extern_callable_names.insert(extern_key)
-                ctx.extern_abi_names.insert(extern_key, abi_name)
+                ctx.extern_abi_names.insert(extern_abi_key, extern_abi_name)
             },
             HDecl::ExternType { .. } => {},
             HDecl::TypeAlias { .. } => {},
             HDecl::Sig { .. } => {},
         }
     }
+}
+
+// Record destructor identity only from the stable HIR parameter role.  The
+// method spelling is intentionally irrelevant after the normal forward pass
+// has resolved its registry key and C symbol.
+fn register_c_direct_drop_method(
+    mut ctx: CCtx, target_type: Str, fn_key: Str, params: List<HParam>,
+    return_type: Type, effects: EffectRow, trait_bounds: List<TraitBound>
+) {
+    let mut param_types: List<Type> = []
+    let mut param_flags: List<Int> = []
+    let mut drop_owner_param = -1
+    let mut param_index = 0
+    for param in params {
+        param_types.push(param.ty)
+        param_flags.push(param.flags)
+        if hparam_is_external_drop_owner(param) {
+            if drop_owner_param >= 0 {
+                panic("unreachable: destructor HIR declaration has multiple owner roles")
+            }
+            drop_owner_param = param_index
+        }
+        param_index = param_index + 1
+    }
+    if drop_owner_param < 0 { return }
+    if drop_owner_param != 0 {
+        panic("unreachable: destructor HIR owner role is not the self parameter")
+    }
+    if !ctx.direct_drop_types.contains(target_type) {
+        panic("unreachable: destructor HIR role has no direct Drop ownership shape")
+    }
+    match ctx.functions.get(fn_key) {
+        some(info) => {
+            let evidence_params = match ctx.fn_evidence_params.get(fn_key) {
+                some(names) => names,
+                none => panic(
+                    "unreachable: destructor HIR role has no declared evidence ABI")
+            }
+            let declared_arity = param_types.len() +
+                trait_bounds.len() + evidence_params.len()
+            if info.total_params != declared_arity {
+                panic("unreachable: destructor C declaration disagrees with checked ABI arity")
+            }
+            let candidate = CDirectDropInfo {
+                fn_key: fn_key,
+                c_name: info.c_name,
+                total_params: declared_arity,
+                param_types: param_types,
+                param_flags: param_flags,
+                return_type: return_type,
+                declared_effects: effects,
+                trait_bounds: trait_bounds,
+                evidence_params: evidence_params,
+                drop_owner_param: drop_owner_param
+            }
+            match ctx.direct_drop_methods.get(target_type) {
+                some(existing) => {
+                    // Project HPrograms each carry the same checked prelude,
+                    // while the backend intentionally emits a shared impl
+                    // method only once by its exact registry identity. Accept
+                    // that repeated HIR role only when its registry identity,
+                    // complete checked signature, ABI suffix and destructor
+                    // parameter role all agree.
+                    if !c_direct_drop_infos_equal(
+                        ctx.merged_ownership_metadata, existing, candidate
+                    ) {
+                        panic("unreachable: direct Drop target has multiple destructor HIR roles")
+                    }
+                },
+                none => ctx.direct_drop_methods.insert(
+                    target_type, candidate)
+            }
+        },
+        none => panic(
+            "unreachable: destructor HIR role has no declared C function")
+    }
+}
+
+fn c_direct_drop_str_lists_equal(a: List<Str>, b: List<Str>) -> Bool {
+    if a.len() != b.len() { return false }
+    let mut index = 0
+    while index < a.len() {
+        if a.get(index) != b.get(index) { return false }
+        index = index + 1
+    }
+    true
+}
+
+fn c_direct_drop_int_lists_equal(a: List<Int>, b: List<Int>) -> Bool {
+    if a.len() != b.len() { return false }
+    let mut index = 0
+    while index < a.len() {
+        if a.get(index) != b.get(index) { return false }
+        index = index + 1
+    }
+    true
+}
+
+fn c_direct_drop_trait_bounds_equal(
+    a: List<TraitBound>, b: List<TraitBound>
+) -> Bool {
+    if a.len() != b.len() { return false }
+    let mut index = 0
+    while index < a.len() {
+        match (a.get(index), b.get(index)) {
+            (some(left), some(right)) => {
+                if left.type_param != right.type_param ||
+                   left.trait_name != right.trait_name {
+                    return false
+                }
+            },
+            _ => return false
+        }
+        index = index + 1
+    }
+    true
+}
+
+// This predicate is deliberately stricter than the uniform C prototype:
+// exact duplicate checked preludes are idempotent, but sharing a C symbol is
+// never sufficient evidence that two destructor declarations are identical.
+fn c_direct_drop_infos_equal(
+    metadata: OwnershipMetadata,
+    a: CDirectDropInfo, b: CDirectDropInfo
+) -> Bool {
+    a.fn_key == b.fn_key &&
+        a.c_name == b.c_name &&
+        a.total_params == b.total_params &&
+        a.drop_owner_param == b.drop_owner_param &&
+        c_direct_drop_int_lists_equal(a.param_flags, b.param_flags) &&
+        c_direct_drop_trait_bounds_equal(a.trait_bounds, b.trait_bounds) &&
+        c_direct_drop_str_lists_equal(a.evidence_params, b.evidence_params) &&
+        types_equal_with_ownership(
+            metadata,
+            Type::TupleType { elements: a.param_types },
+            Type::TupleType { elements: b.param_types }) &&
+        types_equal_with_ownership(
+            metadata, a.return_type, b.return_type) &&
+        types_equal_with_ownership(
+            metadata,
+            Type::EffectRowType {
+                effects: a.declared_effects.effects,
+                tail: a.declared_effects.tail
+            },
+            Type::EffectRowType {
+                effects: b.declared_effects.effects,
+                tail: b.declared_effects.tail
+            })
 }
 
 // ============================================================
@@ -645,10 +919,12 @@ fn c_emit_enum_ctors(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) {
         none => panic("C codegen: enum '${name}' not registered"),
     }
     rt_use(ctx, "ring_alloc", 2)
-    let tid = get_or_assign_c_typeid(ctx, name)
+    let typeid_enum_name = name
+    let tid = get_or_assign_c_typeid(ctx, typeid_enum_name)
     let mut tag = 0
     for v in variants {
-        let key = c_mangle_fn(variant_ctor_name(name, v.name))
+        let ctor_enum_name = name
+        let key = c_mangle_fn(variant_ctor_name(ctor_enum_name, v.name))
         let vtag = tag
         tag = tag + 1
         // First-come-wins within the forward pass (forward_declare_enum_ctors
@@ -656,24 +932,29 @@ fn c_emit_enum_ctors(mut ctx: CCtx, name: Str, variants: List<HEnumVariant>) {
         if ctx.functions.contains_key(key) {
             continue
         }
+        let function_key = key
+        let callable_key = key
+        let evidence_key = key
         let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { c_symbol_for_fn_key(key) }
-        ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: v.fields.len() })
+        let prototype_c_name = c_name
+        let definition_c_name = c_name
+        ctx.functions.insert(function_key, CFnInfo { c_name: c_name, total_params: v.fields.len() })
         // Only positional payload variants are first-class function values.
         // Named-field variants lower structurally; fieldless variants are
         // singleton values rather than fn() constructors.
         if v.field_names.is_none() && v.fields.len() > 0 {
-            ctx.ring_callable_names.insert(key)
+            ctx.ring_callable_names.insert(callable_key)
         }
         let mut no_ev: List<Str> = []
-        ctx.fn_evidence_params.insert(key, no_ev)
+        ctx.fn_evidence_params.insert(evidence_key, no_ev)
 
         let mut ps: List<Str> = []
         for i in 0..v.fields.len() { ps.push("void* a${i}") }
         let params_str = if ps.len() == 0 { "void" } else { ps.join(", ") }
-        ctx.fn_protos.push("void* ${c_name}(${params_str});")
+        ctx.fn_protos.push("void* ${prototype_c_name}(${params_str});")
 
         let mut def: List<Str> = []
-        def.push("void* ${c_name}(${params_str}) {")
+        def.push("void* ${definition_c_name}(${params_str}) {")
         def.push("    void* p = ring_alloc((int64_t)(sizeof(int64_t) + ${max_fields} * sizeof(void*)), ${tid});")
         def.push("    *(int64_t*)p = ${vtag};")
         for i in 0..v.fields.len() {
@@ -692,7 +973,8 @@ fn c_declare_struct_ctors(mut ctx: CCtx, decls: List<HDecl>) {
     for decl in decls {
         match decl {
             HDecl::Struct { name, fields, .. } => {
-                c_emit_struct_ctor(ctx, name, fields)
+                let struct_ctor_name = name
+                c_emit_struct_ctor(ctx, struct_ctor_name, fields)
             },
             HDecl::ModBlock { decls: md, .. } => {
                 c_declare_struct_ctors(ctx, md)
@@ -708,20 +990,24 @@ fn c_emit_struct_ctor(mut ctx: CCtx, name: Str, fields: List<HStructField>) {
         // A fn (or enum ctor) already owns this symbol — skip (LLVM parity).
         return
     }
+    let function_key = key
+    let evidence_key = key
     let c_name = if is_runtime_symbol(key) { "${key}__ring" } else { c_symbol_for_fn_key(key) }
-    ctx.functions.insert(key, CFnInfo { c_name: c_name, total_params: fields.len() })
+    let prototype_c_name = c_name
+    let definition_c_name = c_name
+    ctx.functions.insert(function_key, CFnInfo { c_name: c_name, total_params: fields.len() })
     let mut no_ev: List<Str> = []
-    ctx.fn_evidence_params.insert(key, no_ev)
+    ctx.fn_evidence_params.insert(evidence_key, no_ev)
 
     rt_use(ctx, "ring_alloc", 2)
     let tid = get_or_assign_c_typeid(ctx, name)
     let mut ps: List<Str> = []
     for i in 0..fields.len() { ps.push("void* a${i}") }
     let params_str = if ps.len() == 0 { "void" } else { ps.join(", ") }
-    ctx.fn_protos.push("void* ${c_name}(${params_str});")
+    ctx.fn_protos.push("void* ${prototype_c_name}(${params_str});")
 
     let mut def: List<Str> = []
-    def.push("void* ${c_name}(${params_str}) {")
+    def.push("void* ${definition_c_name}(${params_str}) {")
     def.push("    void* p = ring_alloc((int64_t)(${fields.len()} * sizeof(void*)), ${tid});")
     for i in 0..fields.len() {
         def.push("    ((void**)p)[${i}] = a${i};")
@@ -740,10 +1026,18 @@ fn c_declare_fn(mut ctx: CCtx, mangled: Str, effect_key: Str, params: List<HPara
     let ev_names = extract_effect_names(effective)
     let mut ev_params: List<Str> = []
     for en in ev_names { ev_params.push(evidence_param_name(en)) }
+    let dedupe_key = mangled
+    let runtime_probe_key = mangled
+    let runtime_name_key = mangled
+    let symbol_key = mangled
+    let function_key = mangled
+    let trait_key = mangled
+    let counted_ev_params = ev_params
+    let iter_ev_params = ev_params
     ctx.fn_evidence_params.insert(mangled, ev_params)
 
     // Dedupe (multi-decl re-declaration parity with forward_declare_fn_with_name).
-    if ctx.functions.contains_key(mangled) { return }
+    if ctx.functions.contains_key(dedupe_key) { return }
 
     // Symbol-collision rename: a Ring fn whose mangled name IS a runtime
     // symbol gets a __ring suffix.
@@ -752,25 +1046,27 @@ fn c_declare_fn(mut ctx: CCtx, mangled: Str, effect_key: Str, params: List<HPara
     // (runtime shim), matching the LLVM backend's behaviour.
     // Step 8: module-qualified keys carry $$ (LLVM key parity) — the C
     // symbol is the sanitized key (identity for prefix-less names).
-    let c_name = if is_runtime_symbol(mangled) {
-        "${mangled}__ring"
+    let c_name = if is_runtime_symbol(runtime_probe_key) {
+        "${runtime_name_key}__ring"
     } else {
-        c_symbol_for_fn_key(mangled)
+        c_symbol_for_fn_key(symbol_key)
     }
 
-    let total = params.len() + trait_bounds.len() + ev_params.len()
-    ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: total })
+    let total = params.len() + trait_bounds.len() + counted_ev_params.len()
+    let iter_trait_bounds = trait_bounds
+    let prototype_c_name = c_name
+    ctx.functions.insert(function_key, CFnInfo { c_name: c_name, total_params: total })
 
     // Function-value ABI invariant: wrappers must receive one checker-resolved
     // DictRef per declared bound.
-    ctx.fn_trait_bounds.insert(mangled, trait_bounds)
+    ctx.fn_trait_bounds.insert(trait_key, trait_bounds)
 
     let mut ps: List<Str> = []
     for _p in params { ps.push("void*") }
-    for _b in trait_bounds { ps.push("void*") }
-    for _e in ev_params { ps.push("void*") }
+    for _b in iter_trait_bounds { ps.push("void*") }
+    for _e in iter_ev_params { ps.push("void*") }
     let params_str = if ps.len() == 0 { "void" } else { ps.join(", ") }
-    ctx.fn_protos.push("void* ${c_name}(${params_str});")
+    ctx.fn_protos.push("void* ${prototype_c_name}(${params_str});")
 }
 
 // ============================================================
@@ -786,7 +1082,8 @@ fn emit_c_decl(mut ctx: CCtx, decl: HDecl) {
             for m in methods {
                 match m {
                     HDecl::Fn { name: mn, params: mp, effects: me, body: mb, trait_bounds: mtb, span: msp, .. } => {
-                        emit_c_fn_body(ctx, mn, mp, me, mb, mtb, some(target_type), msp)
+                        let method_impl_type = target_type
+                        emit_c_fn_body(ctx, mn, mp, me, mb, mtb, some(method_impl_type), msp)
                     },
                     _ => {},
                 }
@@ -835,6 +1132,7 @@ fn begin_c_fn(mut ctx: CCtx, mangled: Str) -> Map<Str, Str> {
     ctx.used_locals = set_new()
     let saved = ctx.named_values
     ctx.named_values = map_new()
+    ctx.value_slots_by_def_id = map_new()
     ctx.in_function = true
     ctx.current_fn_name = mangled
     ctx.indent = 1
@@ -846,11 +1144,18 @@ fn begin_c_fn(mut ctx: CCtx, mangled: Str) -> Map<Str, Str> {
 fn end_c_fn(mut ctx: CCtx, mangled: Str, params_str: Str, saved: Map<Str, Str>) {
     let mut def: List<Str> = []
     def.push("void* ${mangled}(${params_str}) {")
-    for d in ctx.cur_decls { def.push(d) }
-    for l in ctx.cur_body { def.push(l) }
+    for d in ctx.cur_decls {
+        let emitted_decl = d
+        def.push(emitted_decl)
+    }
+    for l in ctx.cur_body {
+        let emitted_line = l
+        def.push(emitted_line)
+    }
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
     ctx.named_values = saved
+    ctx.value_slots_by_def_id = map_new()
     ctx.in_function = false
     ctx.current_fn_name = ""
 }
@@ -877,14 +1182,16 @@ fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: Effec
     // a C redefinition error; call sites all resolve to the first symbol,
     // matching the LLVM backend's effective behaviour.
     if ctx.emitted_fns.contains(c_name) { return }
+    let definition_c_name = c_name
     ctx.emitted_fns.insert(c_name)
 
+    let effect_mangled = mangled
     let saved = begin_c_fn(ctx, mangled)
 
     // Parameters → C signature (uniform void* boxing, LLVM parity).
     let mut sig_parts: List<Str> = []
     for p in params {
-        let cn = c_param(ctx, p.name)
+        let cn = c_param_def(ctx, p.name, p.def_id)
         sig_parts.push("void* ${cn}")
     }
     for b in trait_bounds {
@@ -894,7 +1201,7 @@ fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: Effec
     }
     let effect_key = match impl_type {
         some(t) => "${t}_${name}",
-        none => mangled,
+        none => effect_mangled,
     }
     // Single-file scans retain their historical bare keys.
     let lookup_effect_key = match ctx.module_prefix {
@@ -916,11 +1223,12 @@ fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: Effec
     let val = gen_c_expr(ctx, body)
     c_emit(ctx, "return ${val};")
 
-    end_c_fn(ctx, c_name, params_str, saved)
+    end_c_fn(ctx, definition_c_name, params_str, saved)
 }
 
 fn emit_c_zero_arg_fn(mut ctx: CCtx, mangled: Str, body: HExpr, span: Span) {
-    let saved = begin_c_fn(ctx, mangled)
+    let begin_mangled = mangled
+    let saved = begin_c_fn(ctx, begin_mangled)
     c_line_directive(ctx, span)
     let val = gen_c_expr(ctx, body)
     c_emit(ctx, "return ${val};")
@@ -966,14 +1274,16 @@ fn emit_c_const_body(mut ctx: CCtx, name: Str, init: HExpr, span: Span) {
 fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: Str, span: Span) {
     let g = "__ring_constg_${mangled}"
     ctx.globals.push("static void* ${g} = 0;")
+    let call_intern_fn = intern_fn
     rt_use(ctx, intern_fn, 1)
 
-    let saved = begin_c_fn(ctx, mangled)
+    let begin_mangled = mangled
+    let saved = begin_c_fn(ctx, begin_mangled)
     c_line_directive(ctx, span)
     c_emit(ctx, "if (${g} == 0) {")
     ctx.indent = ctx.indent + 1
     let built = gen_c_expr(ctx, init)
-    c_emit(ctx, "${g} = ${intern_fn}(${built});")
+    c_emit(ctx, "${g} = ${call_intern_fn}(${built});")
     ctx.indent = ctx.indent - 1
     c_emit(ctx, "}")
     c_emit(ctx, "return ${g};")
@@ -1002,6 +1312,20 @@ fn emit_c_memoised_const(mut ctx: CCtx, mangled: Str, init: HExpr, intern_fn: St
 fn emit_c_drop_functions(mut ctx: CCtx) {
     rt_use(ctx, "ring_drop", 1)
 
+    // Ownership metadata and role-tagged HIR are independent frozen inputs.
+    // Require a total one-to-one projection before emitting any glue.
+    let mut direct_names = ctx.direct_drop_types.to_list()
+    direct_names.sort()
+    for direct_name in direct_names {
+        if !ctx.direct_drop_methods.contains_key(direct_name) {
+            panic("unreachable: direct Drop type has no destructor HIR role")
+        }
+        if !ctx.struct_types.contains_key(direct_name) &&
+                !ctx.enum_types.contains_key(direct_name) {
+            panic("unreachable: direct Drop type has no generated C glue")
+        }
+    }
+
     // ---- user structs (sorted; audit #237 determinism) ----
     let mut struct_names = ctx.struct_types.keys()
     struct_names.sort()
@@ -1017,15 +1341,13 @@ fn emit_c_drop_functions(mut ctx: CCtx) {
 
                 // B-002p1: user `impl Drop` body runs BEFORE the recursive
                 // field drops (user cleanup can still read the fields).
-                if ctx.drop_types.contains(sname) {
-                    let user_drop_name = c_mangle_method(sname, "drop")
-                    match ctx.functions.get(user_drop_name) {
-                        some(fi) => {
-                            def.push("    ${fi.c_name}(${c_user_drop_args(ctx, user_drop_name, fi.total_params)});")
+                if ctx.direct_drop_types.contains(sname) {
+                    match ctx.direct_drop_methods.get(sname) {
+                        some(info) => {
+                            def.push("    ${info.c_name}(${c_user_drop_args(ctx, info.fn_key, info.total_params)});")
                         },
-                        none => {
-                            eprintln("[drop-warn] user drop method '${user_drop_name}' not found for Drop type '${sname}'")
-                        },
+                        none => panic(
+                            "unreachable: direct Drop struct has no destructor HIR role"),
                     }
                 }
 
@@ -1041,7 +1363,8 @@ fn emit_c_drop_functions(mut ctx: CCtx) {
                 ctx.fn_protos.push("void ${drop_name}(void* p);")
                 ctx.fn_defs.push(def.join("\n"))
 
-                let tid = get_or_assign_c_typeid(ctx, sname)
+                let typeid_struct_name = sname
+                let tid = get_or_assign_c_typeid(ctx, typeid_struct_name)
                 ctx.drop_registrations.push("ring_register_drop(${tid}, (void*)${drop_name});")
             },
             none => {},
@@ -1063,15 +1386,13 @@ fn emit_c_drop_functions(mut ctx: CCtx) {
 
                 // The user destructor runs while the complete enum payload is
                 // still live, matching the struct drop order above.
-                if ctx.drop_types.contains(ename) {
-                    let user_drop_name = c_mangle_method(ename, "drop")
-                    match ctx.functions.get(user_drop_name) {
-                        some(fi) => {
-                            def.push("    ${fi.c_name}(${c_user_drop_args(ctx, user_drop_name, fi.total_params)});")
+                if ctx.direct_drop_types.contains(ename) {
+                    match ctx.direct_drop_methods.get(ename) {
+                        some(info) => {
+                            def.push("    ${info.c_name}(${c_user_drop_args(ctx, info.fn_key, info.total_params)});")
                         },
-                        none => {
-                            eprintln("[drop-warn] user drop method '${user_drop_name}' not found for Drop type '${ename}'")
-                        },
+                        none => panic(
+                            "unreachable: direct Drop enum has no destructor HIR role"),
                     }
                 }
 
@@ -1105,7 +1426,8 @@ fn emit_c_drop_functions(mut ctx: CCtx) {
                 ctx.fn_protos.push("void ${drop_name}(void* p);")
                 ctx.fn_defs.push(def.join("\n"))
 
-                let tid = get_or_assign_c_typeid(ctx, ename)
+                let typeid_enum_name = ename
+                let tid = get_or_assign_c_typeid(ctx, typeid_enum_name)
                 ctx.drop_registrations.push("ring_register_drop(${tid}, (void*)${drop_name});")
             },
             none => {},
@@ -1135,7 +1457,10 @@ fn c_user_drop_args(ctx: CCtx, user_drop_name: Str, total_params: Int) -> Str {
     for ep in ev {
         let effect_name = effect_name_from_evidence_param(ep)
         match ctx.default_evidence.get(effect_name) {
-            some(g) => args.push(g),
+            some(g) => {
+                let drop_arg = g
+                args.push(drop_arg)
+            },
             none => args.push("RING_UNIT"),
         }
     }
@@ -1181,7 +1506,10 @@ fn emit_c_main_wrapper_common(mut ctx: CCtx, ring_main_key: Str, warn_no_main: B
                     for ep in evs {
                         let effect_name = effect_name_from_evidence_param(ep)
                         match ctx.default_evidence.get(effect_name) {
-                            some(g) => args.push(g),
+                            some(g) => {
+                                let main_arg = g
+                                args.push(main_arg)
+                            },
                             none => args.push("RING_UNIT"),
                         }
                     }
@@ -1214,7 +1542,9 @@ fn register_effect_ops_c(decls: List<HDecl>, mut effect_ops: Map<Str, List<HEffe
     for decl in decls {
         match decl {
             HDecl::Effect { name, ops, .. } => {
-                effect_ops.insert(name, ops)
+                let registered_effect_name = name
+                let registered_effect_ops = ops
+                effect_ops.insert(registered_effect_name, registered_effect_ops)
             },
             HDecl::ModBlock { decls: md, .. } => {
                 register_effect_ops_c(md, effect_ops)
@@ -1237,14 +1567,16 @@ fn register_c_default_evidence(mut ctx: CCtx) {
             if !op.has_default { all_have_defaults = false }
         }
         if all_have_defaults && ops.len() > 0 {
-            effect_names.push(ename)
+            let defaultable_effect_name = ename
+            effect_names.push(defaultable_effect_name)
         }
     }
     effect_names.sort()
     for ename in effect_names {
+        let stored_evidence_effect_name = ename
         let g = c_symbol_fragment(default_evidence_name(ename))
         ctx.globals.push("static void* ${g} = 0;")
-        ctx.default_evidence.insert(ename, g)
+        ctx.default_evidence.insert(stored_evidence_effect_name, g)
     }
 }
 
@@ -1269,7 +1601,8 @@ fn scan_fn_effects_with_prefix_c(decls: List<HDecl>, prefix: Str?, mut local_fn_
                         some(p) => c_mangle_fn_with_prefix(p, name),
                         none => name,
                     }
-                    local_fn_effects.insert(key, effects)
+                    let stored_effects = effects
+                    local_fn_effects.insert(key, stored_effects)
                 }
             },
             HDecl::Impl { target_type, methods, .. } => {
@@ -1278,7 +1611,8 @@ fn scan_fn_effects_with_prefix_c(decls: List<HDecl>, prefix: Str?, mut local_fn_
                         HDecl::Fn { name: mn, effects: me, .. } => {
                             if me.effects.len() > 0 {
                                 let key = "${target_type}_${mn}"
-                                local_fn_effects.insert(key, me)
+                                let stored_method_effects = me
+                                local_fn_effects.insert(key, stored_method_effects)
                             }
                         },
                         _ => {},
@@ -1293,67 +1627,13 @@ fn scan_fn_effects_with_prefix_c(decls: List<HDecl>, prefix: Str?, mut local_fn_
     }
 }
 
-// A value type (Int/Float/Bool/Str) is the only kind a `mut` param boxes
-// into a CELL (#B-087 gap 5).
-fn c_is_value_type(t: Type) -> Bool {
-    match t {
-        Type::IntType => true,
-        Type::FloatType => true,
-        Type::BoolType => true,
-        Type::StrType => true,
-        _ => false,
-    }
-}
-
-fn mut_param_flags_c(params: List<HParam>) -> List<Bool> {
-    let mut flags: List<Bool> = []
-    for p in params {
-        if p.name == "self" || !hparam_is_mutable(p) {
-            flags.push(false)
-        } else {
-            flags.push(c_is_value_type(p.ty))
-        }
-    }
-    flags
-}
-
-fn scan_fn_mut_params_c(decls: List<HDecl>, mut fn_mut_params: Map<Str, List<Bool>>) {
-    scan_fn_mut_params_with_prefix_c(decls, none, fn_mut_params)
-}
-
-fn scan_fn_mut_params_with_prefix_c(decls: List<HDecl>, prefix: Str?, mut fn_mut_params: Map<Str, List<Bool>>) {
-    for decl in decls {
-        match decl {
-            HDecl::Fn { name, params, .. } => {
-                let key = match prefix {
-                    some(p) => c_mangle_fn_with_prefix(p, name),
-                    none => name,
-                }
-                fn_mut_params.insert(key, mut_param_flags_c(params))
-            },
-            HDecl::Impl { target_type, methods, .. } => {
-                for m in methods {
-                    match m {
-                        HDecl::Fn { name: mn, params: mp, .. } => {
-                            let ufcs_name = "${target_type}_${mn}"
-                            fn_mut_params.insert(ufcs_name, mut_param_flags_c(mp))
-                        },
-                        _ => {},
-                    }
-                }
-            },
-            HDecl::ModBlock { decls: md, .. } => {
-                scan_fn_mut_params_with_prefix_c(md, prefix, fn_mut_params)
-            },
-            _ => {},
-        }
-    }
-}
-
 fn collect_local_names_rec_c(decls: List<HDecl>, mut names: Set<Str>) {
     for decl in decls {
         match decl {
-            HDecl::Fn { name, .. } => { names.insert(name) },
+            HDecl::Fn { name, .. } => {
+                let local_name = name
+                names.insert(local_name)
+            },
             HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
                     match m {
@@ -1383,7 +1663,10 @@ fn compute_transitive_effect_closure_c(decls: List<HDecl>, mut local_fn_effects:
 fn collect_project_callable_kinds_c(decls: List<HDecl>, mut top_level: Set<Str>, mut impl_methods: Set<Str>) {
     for decl in decls {
         match decl {
-            HDecl::Fn { name, .. } => { top_level.insert(name) },
+            HDecl::Fn { name, .. } => {
+                let top_level_name = name
+                top_level.insert(top_level_name)
+            },
             HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
                     match m {
@@ -1400,7 +1683,10 @@ fn collect_project_callable_kinds_c(decls: List<HDecl>, mut top_level: Set<Str>,
 
 fn project_effect_key_c(prefix: Str, name: Str, top_level: Set<Str>, impl_methods: Set<Str>, imports: Map<Str, Str>) -> Str {
     match imports.get(name) {
-        some(key) => key,
+        some(key) => {
+            let imported_key = key
+            imported_key
+        },
         none => {
             if impl_methods.contains(name) {
                 name
@@ -1436,12 +1722,16 @@ fn compute_project_effect_closure_c(modules: List<(Str, HProgram, List<UseDecl>)
         sorted_callers.sort_by(compare_by_first)
         for entry in sorted_callers {
             let (caller, callees) = entry
-            let caller_key = project_effect_key_c(prefix, caller, top_level, impl_methods, imports)
+            let caller_for_key = caller
+            let caller_key = project_effect_key_c(
+                prefix, caller_for_key, top_level, impl_methods, imports)
             let mut mapped: Set<Str> = set_new()
             let mut sorted_callees = callees.to_list()
             sorted_callees.sort()
             for callee in sorted_callees {
-                mapped.insert(project_effect_key_c(prefix, callee, top_level, impl_methods, imports))
+                let callee_for_key = callee
+                mapped.insert(project_effect_key_c(
+                    prefix, callee_for_key, top_level, impl_methods, imports))
             }
             qualified_callees.insert(caller_key, mapped)
         }
@@ -1465,8 +1755,13 @@ fn propagate_transitive_effects_c(fn_callees: Map<Str, Set<Str>>, mut local_fn_e
                         match local_fn_effects.get(name) {
                             none => {
                                 let mut effs: List<Effect> = []
-                                for e in callee_effects.effects { effs.push(e) }
-                                local_fn_effects.insert(name, EffectRow { effects: effs, tail: none })
+                                for e in callee_effects.effects {
+                                    let propagated_effect = e
+                                    effs.push(propagated_effect)
+                                }
+                                let effect_owner_name = name
+                                local_fn_effects.insert(effect_owner_name,
+                                    EffectRow { effects: effs, tail: none })
                                 changed = true
                             },
                             some(current) => {
@@ -1477,7 +1772,8 @@ fn propagate_transitive_effects_c(fn_callees: Map<Str, Set<Str>>, mut local_fn_e
                                         if effect_kind_name(ce) == ename { found = true }
                                     }
                                     if found == false {
-                                        current.effects.push(e)
+                                        let appended_effect = e
+                                        current.effects.push(appended_effect)
                                         changed = true
                                     }
                                 }
@@ -1518,7 +1814,9 @@ fn emit_c_trait_default_methods(mut ctx: CCtx, trait_name: Str, methods: List<HT
 
 fn emit_c_one_default_method(mut ctx: CCtx, c_name: Str, default_fn_name: Str, trait_name: Str, method: HTraitMethod, body: HExpr) {
     if ctx.emitted_fns.contains(c_name) { return }
-    ctx.emitted_fns.insert(c_name)
+    let c_name_for_insert = c_name
+    let c_name_for_pop = c_name
+    ctx.emitted_fns.insert(c_name_for_insert)
 
     let saved = c_push_fn(ctx, default_fn_name)
     let mut sig_parts: List<Str> = []
@@ -1537,7 +1835,7 @@ fn emit_c_one_default_method(mut ctx: CCtx, c_name: Str, default_fn_name: Str, t
 
     // Regular params (including self).
     for p in method.params {
-        let pv = c_param(ctx, p.name)
+        let pv = c_param_def(ctx, p.name, p.def_id)
         sig_parts.push("void* ${pv}")
     }
 
@@ -1549,7 +1847,7 @@ fn emit_c_one_default_method(mut ctx: CCtx, c_name: Str, default_fn_name: Str, t
 
     let val = gen_c_expr(ctx, body)
     c_emit(ctx, "return ${val};")
-    c_pop_fn(ctx, c_name, sig_parts.join(", "), saved)
+    c_pop_fn(ctx, c_name_for_pop, sig_parts.join(", "), saved)
 }
 
 // ============================================================
@@ -1565,7 +1863,10 @@ fn emit_c_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str, methods: 
     let mut impl_methods: List<Str> = []
     for m in methods {
         match m {
-            HDecl::Fn { name, .. } => impl_methods.push(name),
+            HDecl::Fn { name, .. } => {
+                let impl_method_name = name
+                impl_methods.push(impl_method_name)
+            },
             _ => {},
         }
     }
@@ -1578,15 +1879,21 @@ fn emit_c_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str, methods: 
 
     let build_fn_name = "ring_dict_build_${c_symbol_fragment(dict_name)}"
     if ctx.emitted_fns.contains(build_fn_name) { return }
-    ctx.emitted_fns.insert(build_fn_name)
+    let build_fn_name_for_insert = build_fn_name
+    let build_fn_name_for_proto = build_fn_name
+    let build_fn_name_for_push = build_fn_name
+    let build_fn_name_for_pop = build_fn_name
+    ctx.emitted_fns.insert(build_fn_name_for_insert)
     // Defensive: a dict whose forward pass was skipped (trait_method_order
     // miss) still needs registration + prototype.
+    let dict_name_for_insert = dict_name
+    let dict_name_for_getter = dict_name
     if ctx.dict_build_fns.contains(dict_name) == false {
-        ctx.dict_build_fns.insert(dict_name)
-        ctx.fn_protos.push("void* ${build_fn_name}(void);")
+        ctx.dict_build_fns.insert(dict_name_for_insert)
+        ctx.fn_protos.push("void* ${build_fn_name_for_proto}(void);")
     }
 
-    let saved = c_push_fn(ctx, build_fn_name)
+    let saved = c_push_fn(ctx, build_fn_name_for_push)
     rt_use(ctx, "ring_alloc", 2)
     let dict = fresh_tmp(ctx)
     c_emit(ctx, "${dict} = ring_alloc((int64_t)(sizeof(int64_t) + ${method_count} * sizeof(void*)), 16);")
@@ -1600,10 +1907,10 @@ fn emit_c_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str, methods: 
         }
     }
     c_emit(ctx, "return ${dict};")
-    c_pop_fn(ctx, build_fn_name, "void", saved)
+    c_pop_fn(ctx, build_fn_name_for_pop, "void", saved)
 
     // Memoised getter (routes through the build fn — dict_build_fns entry).
-    let _g = ensure_c_dict_getter(ctx, dict_name)
+    let _g = ensure_c_dict_getter(ctx, dict_name_for_getter)
 }
 
 fn emit_c_dict_method_slot(mut ctx: CCtx, target_type: Str, trait_name: Str, method_name: Str, dict_var: Str, slot_idx: Int) {
@@ -1645,20 +1952,25 @@ fn emit_c_dict_method_slot(mut ctx: CCtx, target_type: Str, trait_name: Str, met
 fn ensure_c_dict_method_thunk(mut ctx: CCtx, method_c_name: Str, method_arity: Int) -> Str {
     let thunk_name = "${method_c_name}__dictthunk"
     if ctx.emitted_fns.contains(thunk_name) { return thunk_name }
-    ctx.emitted_fns.insert(thunk_name)
+    let thunk_name_for_insert = thunk_name
+    let thunk_name_for_proto = thunk_name
+    let thunk_name_for_def = thunk_name
+    let emitted_thunk_name = thunk_name
+    ctx.emitted_fns.insert(thunk_name_for_insert)
     let mut sig_parts: List<Str> = ["void* env"]
     let mut fwd: List<Str> = []
     for i in 0..method_arity {
         sig_parts.push("void* p${i}")
         fwd.push("p${i}")
     }
-    ctx.fn_protos.push("void* ${thunk_name}(${sig_parts.join(", ")});")
+    ctx.fn_protos.push(
+        "void* ${thunk_name_for_proto}(${sig_parts.join(", ")});")
     let mut def: List<Str> = []
-    def.push("void* ${thunk_name}(${sig_parts.join(", ")}) {")
+    def.push("void* ${thunk_name_for_def}(${sig_parts.join(", ")}) {")
     def.push("    return ${method_c_name}(${fwd.join(", ")});")
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
-    thunk_name
+    emitted_thunk_name
 }
 
 // B-141: default-method thunk — FORWARDS env (= dict ptr) as self_dict,
@@ -1666,7 +1978,11 @@ fn ensure_c_dict_method_thunk(mut ctx: CCtx, method_c_name: Str, method_arity: I
 fn ensure_c_default_method_thunk(mut ctx: CCtx, default_fn_name: Str, dfi: CFnInfo, target_type: Str, trait_name: Str) -> Str {
     let thunk_name = "${dfi.c_name}__defaultthunk_${c_symbol_fragment(target_type)}"
     if ctx.emitted_fns.contains(thunk_name) { return thunk_name }
-    ctx.emitted_fns.insert(thunk_name)
+    let thunk_name_for_insert = thunk_name
+    let thunk_name_for_proto = thunk_name
+    let thunk_name_for_def = thunk_name
+    let emitted_thunk_name = thunk_name
+    ctx.emitted_fns.insert(thunk_name_for_insert)
 
     let all_supers = collect_all_supertraits(ctx.trait_supertraits, trait_name)
     let thunk_arity = dfi.total_params - all_supers.len()
@@ -1683,15 +1999,19 @@ fn ensure_c_default_method_thunk(mut ctx: CCtx, default_fn_name: Str, dfi: CFnIn
         sig_parts.push("void* p${i}")
     }
     let mut fwd: List<Str> = ["p0"]
-    for sc in super_calls { fwd.push(sc) }
+    for sc in super_calls {
+        let forwarded_super_call = sc
+        fwd.push(forwarded_super_call)
+    }
     for i in 1..thunk_arity { fwd.push("p${i}") }
-    ctx.fn_protos.push("void* ${thunk_name}(${sig_parts.join(", ")});")
+    ctx.fn_protos.push(
+        "void* ${thunk_name_for_proto}(${sig_parts.join(", ")});")
     let mut def: List<Str> = []
-    def.push("void* ${thunk_name}(${sig_parts.join(", ")}) {")
+    def.push("void* ${thunk_name_for_def}(${sig_parts.join(", ")}) {")
     def.push("    return ${dfi.c_name}(${fwd.join(", ")});")
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
-    thunk_name
+    emitted_thunk_name
 }
 
 // B-141: forwarding stubs ring_<Type>_<method> for default methods the impl
@@ -1700,7 +2020,10 @@ fn emit_c_default_method_stubs(mut ctx: CCtx, target_type: Str, trait_name: Str,
     let mut impl_method_names: Set<Str> = set_new()
     for m in impl_methods {
         match m {
-            HDecl::Fn { name, .. } => { impl_method_names.insert(name) },
+            HDecl::Fn { name, .. } => {
+                let impl_method_name = name
+                impl_method_names.insert(impl_method_name)
+            },
             _ => {},
         }
     }
@@ -1719,9 +2042,20 @@ fn emit_c_default_method_stubs(mut ctx: CCtx, target_type: Str, trait_name: Str,
                 if ctx.functions.contains_key(mangled) { continue }
                 let stub_arity = dfi.total_params - 1 - super_count
                 let c_name = if is_runtime_symbol(mangled) { "${mangled}__ring" } else { mangled }
-                ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: stub_arity })
+                let mangled_for_function = mangled
+                let mangled_for_evidence = mangled
+                let c_name_for_function = c_name
+                let c_name_for_proto = c_name
+                let c_name_for_def = c_name
+                ctx.functions.insert(mangled_for_function,
+                    CFnInfo { c_name: c_name_for_function,
+                              total_params: stub_arity })
                 match ctx.fn_evidence_params.get(default_fn_name) {
-                    some(ev) => { ctx.fn_evidence_params.insert(mangled, ev) },
+                    some(ev) => {
+                        let evidence_params = ev
+                        ctx.fn_evidence_params.insert(
+                            mangled_for_evidence, evidence_params)
+                    },
                     none => {},
                 }
 
@@ -1738,9 +2072,9 @@ fn emit_c_default_method_stubs(mut ctx: CCtx, target_type: Str, trait_name: Str,
                     fwd.push("p${i}")
                 }
                 let params_str = if sig_parts.len() == 0 { "void" } else { sig_parts.join(", ") }
-                ctx.fn_protos.push("void* ${c_name}(${params_str});")
+                ctx.fn_protos.push("void* ${c_name_for_proto}(${params_str});")
                 let mut def: List<Str> = []
-                def.push("void* ${c_name}(${params_str}) {")
+                def.push("void* ${c_name_for_def}(${params_str}) {")
                 def.push("    return ${dfi.c_name}(${fwd.join(", ")});")
                 def.push("}")
                 ctx.fn_defs.push(def.join("\n"))
@@ -1876,11 +2210,18 @@ fn begin_c_derived_fn(mut ctx: CCtx, type_name: Str, method_name: Str, trait_nam
     let base = if is_binary { 2 } else { 1 }
     let total = base + dict_params.len()
     let c_name = if is_runtime_symbol(mangled) { "${mangled}__ring" } else { mangled }
-    ctx.functions.insert(mangled, CFnInfo { c_name: c_name, total_params: total })
+    let mangled_for_function = mangled
+    let mangled_for_evidence = mangled
+    let c_name_for_function = c_name
+    let c_name_for_push = c_name
+    let c_name_for_proto = c_name
+    let c_name_for_result = c_name
+    ctx.functions.insert(mangled_for_function,
+        CFnInfo { c_name: c_name_for_function, total_params: total })
     let mut no_ev: List<Str> = []
-    ctx.fn_evidence_params.insert(mangled, no_ev)
+    ctx.fn_evidence_params.insert(mangled_for_evidence, no_ev)
 
-    let saved = c_push_fn(ctx, c_name)
+    let saved = c_push_fn(ctx, c_name_for_push)
     let mut sig_parts: List<Str> = []
     let self_var = c_param(ctx, "self")
     sig_parts.push("void* ${self_var}")
@@ -1896,8 +2237,10 @@ fn begin_c_derived_fn(mut ctx: CCtx, type_name: Str, method_name: Str, trait_nam
         sig_parts.push("void* ${dv}")
     }
     let params_str = sig_parts.join(", ")
-    ctx.fn_protos.push("void* ${c_name}(${params_str});")
-    some(CDerivedFn { c_name: c_name, params_str: params_str, self_var: self_var, other_var: other_var, saved: saved })
+    ctx.fn_protos.push("void* ${c_name_for_proto}(${params_str});")
+    some(CDerivedFn { c_name: c_name_for_result,
+        params_str: params_str, self_var: self_var,
+        other_var: other_var, saved: saved })
 }
 
 fn end_c_derived_fn(mut ctx: CCtx, d: CDerivedFn) {
@@ -1913,25 +2256,42 @@ fn resolve_c_dict_for_derived(mut ctx: CCtx, name: Str) -> Str {
 // Call a dict's slot-0 closure on the given args (+ resolved extra dicts) —
 // shared shape of the derived eq/cmp/debug dict calls.
 fn emit_c_derived_dict_call(mut ctx: CCtx, dict_name: Str, extra_dicts: List<DictRef>, args: List<Str>) -> Str {
-    let resolved_dict = resolve_c_dict_for_derived(ctx, dict_name)
+    let dict_name_for_resolve = dict_name
+    let resolved_dict = resolve_c_dict_for_derived(
+        ctx, dict_name_for_resolve)
     let cls = fresh_tmp(ctx)
     c_emit(ctx, "${cls} = ((void**)${resolved_dict})[1];")
     let mut call_args: List<Str> = []
     let mut owned_extra_dicts: List<Str> = []
-    for a in args { call_args.push(a) }
+    for a in args {
+        let call_arg = a
+        call_args.push(call_arg)
+    }
     for ed in extra_dicts {
         match ed {
             DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+                let wrapped_dict = dict
+                let wrapped_trait_name = trait_name
+                let wrapped_inner_dicts = inner_dicts
                 let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
-                    dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
+                    dict: wrapped_dict, trait_name: wrapped_trait_name,
+                    inner_dicts: wrapped_inner_dicts
                 })
-                call_args.push(value)
-                owned_extra_dicts.push(value)
+                let value_for_call = value
+                let value_for_cleanup = value
+                call_args.push(value_for_call)
+                owned_extra_dicts.push(value_for_cleanup)
             },
-            DictRef::Simple(name) =>
-                call_args.push(c_resolve_dict_ref(ctx, DictRef::Simple(name))),
-            DictRef::Static(name) =>
-                call_args.push(c_resolve_dict_ref(ctx, DictRef::Static(name))),
+            DictRef::Simple(name) => {
+                let simple_name = name
+                call_args.push(c_resolve_dict_ref(
+                    ctx, DictRef::Simple(simple_name)))
+            },
+            DictRef::Static(name) => {
+                let static_name = name
+                call_args.push(c_resolve_dict_ref(
+                    ctx, DictRef::Static(static_name)))
+            },
         }
     }
     let result = gen_c_closure_call(ctx, cls, call_args)
@@ -2135,18 +2495,21 @@ fn emit_c_ne_fn(mut ctx: CCtx, type_name: Str) {
     let eq_fi = eq_fi_opt.unwrap()
     let arity = eq_fi.total_params
     let c_name = if is_runtime_symbol(mangled_ne) { "${mangled_ne}__ring" } else { mangled_ne }
+    let mangled_ne_for_evidence = mangled_ne
+    let c_name_for_proto = c_name
+    let c_name_for_definition = c_name
     ctx.functions.insert(mangled_ne, CFnInfo { c_name: c_name, total_params: arity })
     let mut no_ev: List<Str> = []
-    ctx.fn_evidence_params.insert(mangled_ne, no_ev)
+    ctx.fn_evidence_params.insert(mangled_ne_for_evidence, no_ev)
     let mut sig_parts: List<Str> = []
     let mut fwd: List<Str> = []
     for i in 0..arity {
         sig_parts.push("void* p${i}")
         fwd.push("p${i}")
     }
-    ctx.fn_protos.push("void* ${c_name}(${sig_parts.join(", ")});")
+    ctx.fn_protos.push("void* ${c_name_for_proto}(${sig_parts.join(", ")});")
     let mut def: List<Str> = []
-    def.push("void* ${c_name}(${sig_parts.join(", ")}) {")
+    def.push("void* ${c_name_for_definition}(${sig_parts.join(", ")}) {")
     def.push("    return RING_BOOL(1 - RING_UNTAG(${eq_fi.c_name}(${fwd.join(", ")})));")
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
@@ -2750,11 +3113,15 @@ fn emit_c_derived_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str) {
     if method_count == 0 { return }
 
     let build_fn_name = "ring_dict_build_${c_symbol_fragment(dict_name)}"
+    let dict_name_for_getter = dict_name
+    let build_fn_name_for_proto = build_fn_name
+    let build_fn_name_for_push = build_fn_name
+    let build_fn_name_for_pop = build_fn_name
     ctx.dict_build_fns.insert(dict_name)
     ctx.emitted_fns.insert(build_fn_name)
-    ctx.fn_protos.push("void* ${build_fn_name}(void);")
+    ctx.fn_protos.push("void* ${build_fn_name_for_proto}(void);")
 
-    let saved = c_push_fn(ctx, build_fn_name)
+    let saved = c_push_fn(ctx, build_fn_name_for_push)
     rt_use(ctx, "ring_alloc", 2)
     let dict = fresh_tmp(ctx)
     c_emit(ctx, "${dict} = ring_alloc((int64_t)(sizeof(int64_t) + ${method_count} * sizeof(void*)), 16);")
@@ -2768,7 +3135,7 @@ fn emit_c_derived_trait_dict(mut ctx: CCtx, target_type: Str, trait_name: Str) {
         }
     }
     c_emit(ctx, "return ${dict};")
-    c_pop_fn(ctx, build_fn_name, "void", saved)
+    c_pop_fn(ctx, build_fn_name_for_pop, "void", saved)
 
-    let _g = ensure_c_dict_getter(ctx, dict_name)
+    let _g = ensure_c_dict_getter(ctx, dict_name_for_getter)
 }

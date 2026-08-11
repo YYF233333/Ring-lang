@@ -99,10 +99,14 @@ static inline const char* ring_memmem(const char* hay, size_t hlen,
 #define RING_TYPEID_TUPLE    10
 #define RING_TYPEID_SB       13   // StringBuilder (same underlying type as Str)
 #define RING_TYPEID_CELL     14   // boxed mut-cell: { void* value } — write-through closure capture (B-091)
-#define RING_TYPEID_CLOSURE_ENV 15 // closure env struct: { int64 count, void* cap0, ... } — owned-capture drop (B-084)
+#define RING_TYPEID_CLOSURE_ENV 15 // legacy bootstrap: { int64 count; void* caps[count] }
+#define RING_TYPEID_CLOSURE_ENV_MASKED 22 // { int64 count; void* caps[count]; intptr_t rc_mask[count] }
+// TRANSITION-ONLY bootstrap bridge: dist-c still emits the legacy typeid 15
+// layout while the new compiler emits masked typeid 22. Remove typeid 15 and
+// its drop registration after the gen2/fixed-point bootstrap is verified.
 // B-104 D4 (#151): trait dicts are first-class.  Layout for BOTH dict typeids:
-//   { int64 method_count, void* method_closure0, ... }  (count-prefixed, like
-//   CLOSURE_ENV) — dispatch GEPs slot i at offset 8 + i*8.
+//   { int64 method_count, void* method_closure0, ... }  (count-prefixed;
+//   unlike the masked CLOSURE_ENV) — dispatch GEPs slot i at offset 8 + i*8.
 //   DICT_STATIC — module-level singletons (impl dicts / builtin primitive dicts
 //                 / fully-static wrapped instances).  Registered NEVER-DROP:
 //                 they live for the program lifetime, so a stray ring_dup/
@@ -227,7 +231,9 @@ static const char* ring_tid_name(uint32_t tid) {
         case 0:  return "INT";    case 2:  return "BOOL";   case 3:  return "STR";
         case 7:  return "CLOSURE"; case 8: return "OPTION"; case 10: return "TUPLE";
         case 13: return "SB";     // B-104 D8: StringBuilder
+        case 15: return "CLOSURE_ENV_V1"; // transition-only bootstrap layout
         case 21: return "EVIDENCE"; // B-096: evidence struct
+        case 22: return "CLOSURE_ENV_MASKED";
         default: return (tid >= RING_TYPEID_USER_BASE) ? "USER" : "?"; // D8: user types (Type≈tid103)
     }
 }
@@ -601,6 +607,7 @@ static void drop_list(void* data);
 static void drop_map(void* data);
 static void drop_closure(void* data);
 static void drop_closure_env(void* data);
+static void drop_closure_env_masked(void* data);
 static void drop_option(void* data);
 static void drop_tuple(void* data);
 static void drop_sb(void* data);
@@ -660,6 +667,7 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     drop_table[RING_TYPEID_SB]      = drop_sb;
     drop_table[RING_TYPEID_CELL]    = drop_cell;
     drop_table[RING_TYPEID_CLOSURE_ENV] = drop_closure_env;
+    drop_table[RING_TYPEID_CLOSURE_ENV_MASKED] = drop_closure_env_masked;
     // B-096: evidence struct { count, closure0, closure1, ... }.
     drop_table[RING_TYPEID_EVIDENCE] = drop_evidence;
     // B-104 D4 (#151): first-class trait dicts.  Static singletons never drop
@@ -1285,14 +1293,24 @@ extern "C" void* ring_Option_and_then(void* opt, void* closure) {
 // for type-correctness; ring_raise never returns.
 extern "C" void* ring_Option_to_fail(void* opt, void* err) {
     int64_t tag = *(int64_t*)opt;
-    if (tag == 0) return *((void**)((int64_t*)opt + 1));
+    if (tag == 0) {
+        // The callable contract takes `err` on every edge. On Some the error
+        // is unused, so release that transferred ownership before returning
+        // the borrowed payload; on None ring_raise transfers it to the catch.
+        ring_drop(err);
+        return *((void**)((int64_t*)opt + 1));
+    }
     ring_raise(err);
     return nullptr;
 }
 
 extern "C" void* ring_Option_unwrap_or_else(void* opt, void* closure) {
     int64_t tag = *(int64_t*)opt;
-    if (tag == 0) return *((void**)((int64_t*)opt + 1));
+    if (tag == 0) {
+        void* value = *((void**)((int64_t*)opt + 1));
+        ring_dup(value);
+        return value;
+    }
     RingClosure* cl = (RingClosure*)closure;
     typedef void* (*ring_fn_0)(void* env);
     ring_fn_0 fn = (ring_fn_0)cl->fn_ptr;
@@ -2402,6 +2420,23 @@ static void* ring_make_ord_dict(void* cmpfn) {
     return data;
 }
 
+// Clone for primitive RC values is the runtime ownership operation itself:
+// tagged Int/Bool values are unchanged, while heap-backed Float/Str values gain
+// one balanced reference.  Generic Ring code receives this closure through the
+// ordinary one-method Clone dictionary at slot 0.
+static void* ring_cl_clone_rc(void* /*env*/, void* val) {
+    if (val) ring_dup(val);
+    return val;
+}
+static void* ring_make_clone_dict() {
+    void* data = ring_alloc(sizeof(int64_t) + 4 * sizeof(void*), RING_TYPEID_DICT_STATIC);
+    *(int64_t*)data = 4;
+    void** d = (void**)((char*)data + 8);
+    d[0] = ring_make_closure((void*)ring_cl_clone_rc);
+    d[1] = nullptr; d[2] = nullptr; d[3] = nullptr;
+    return data;
+}
+
 // #179: Debug trait closure functions — Debug has a single method `debug(val) -> Str`.
 // Each closure takes (env, val) where val is a boxed Ring value, returns a boxed Str.
 static void* ring_Int_debug(void* /*env*/, void* val) {
@@ -2523,9 +2558,9 @@ static void drop_closure(void* data) {
     // RingClosure = { fn_ptr: void*, env_ptr: void* }
     // fn_ptr is a function pointer, don't drop.
     // env_ptr if non-null is a ring_alloc'd env struct, needs ring_drop.
-    // The env carries its own typeid (RING_TYPEID_CLOSURE_ENV for gen_lambda
-    // closures → drop_closure_env; RING_TYPEID_CLOSURE for catch/handle envs,
-    // which ring_try leaks and never drops), so ring_drop dispatches correctly.
+    // The env carries its own typeid (masked closure envs use
+    // RING_TYPEID_CLOSURE_ENV_MASKED; transition-only bootstrap output may
+    // still use legacy RING_TYPEID_CLOSURE_ENV), so ring_drop dispatches it.
     void** cls = (void**)data;
     if (cls[1]) {  // env_ptr
         ring_drop(cls[1]);
@@ -2533,19 +2568,29 @@ static void drop_closure(void* data) {
 }
 
 static void drop_closure_env(void* data) {
-    // Closure env struct (B-084): { int64 count, void* cap0, void* cap1, ... }.
-    // gen_lambda gives every general-purpose closure env this dedicated typeid
-    // (NOT RING_TYPEID_CLOSURE, which drop_closure mis-reads as a {fn,env} pair).
-    // Each captured slot holds an OWNED RC reference — Perceus emits a ring_dup at
-    // capture (non-last-use) or moves the sole owned ref in (last-use), so the
-    // enclosing scope does not also drop it.  Releasing the env therefore drops
-    // every slot exactly once: ring_drop dispatches on each slot's own typeid, so
-    // mut-cells (RING_TYPEID_CELL, B-091) and plain owned heap values are handled
-    // uniformly and stay RC-balanced (no double-free, no leak).
+    // TRANSITION-ONLY legacy bootstrap closure env:
+    //   { int64 count; void* captures[count] }.
+    // Delete this function with typeid 15 after the gen2 fixed point.
     int64_t count = *(int64_t*)data;
-    void** slots = (void**)((char*)data + 8);
+    void** slots = (void**)((char*)data + sizeof(int64_t));
     for (int64_t i = 0; i < count; i++) {
         if (slots[i]) ring_drop(slots[i]);
+    }
+}
+
+static void drop_closure_env_masked(void* data) {
+    // Masked closure env struct (B-084):
+    //   { int64 count; void* captures[count]; intptr_t rc_mask[count] }.
+    // New gen_lambda gives every general-purpose closure env this typeid
+    // (NOT RING_TYPEID_CLOSURE, which drop_closure mis-reads as a {fn,env} pair).
+    // mask!=0 means construction acquired an owned physical-RC reference via
+    // ring_dup. mask==0 is a logical borrow or an RC-ineligible Ptr/extern/
+    // contains-extern capture and must never reach ring_drop.
+    int64_t count = *(int64_t*)data;
+    void** slots = (void**)((char*)data + sizeof(int64_t));
+    intptr_t* rc_mask = (intptr_t*)((char*)slots + count * sizeof(void*));
+    for (int64_t i = 0; i < count; i++) {
+        if (rc_mask[i] != 0 && slots[i]) ring_drop(slots[i]);
     }
 }
 
@@ -2573,11 +2618,9 @@ static void drop_sb(void* data) {
 
 static void drop_dict(void* data) {
     // B-104 D4: dynamic wrapped dict { int64 count, void* method_closure0, ... }.
-    // Each non-null slot is a RingClosure whose env (CLOSURE_ENV, count =
-    // inner_count) holds dup'd inner-dict references — dropping the closure
-    // drops the env, which releases the inners (no-op for DICT_STATIC inners,
-    // real release for dict-param-backed dynamic inners).  Same walk as
-    // drop_closure_env.
+    // Each non-null slot is a RingClosure whose masked CLOSURE_ENV owns dup'd
+    // inner-dict/evidence references. Dropping the closure releases those
+    // mask=1 capabilities (no-op for immortal DICT_STATIC/default values).
     int64_t count = *(int64_t*)data;
     void** slots = (void**)((char*)data + 8);
     for (int64_t i = 0; i < count; i++) {
@@ -2589,8 +2632,8 @@ static void drop_evidence(void* data) {
     // B-096: evidence struct { int64 count, ptr slot0, ptr slot1, ... }.
     // Each non-null slot is a ring_alloc'd RingClosure {fn_ptr, env_ptr} with
     // typeid RING_TYPEID_CLOSURE.  ring_drop on the closure drops its env
-    // (CLOSURE_ENV), releasing captured variables.  Same walk as drop_dict /
-    // drop_closure_env — count-prefixed, drop each non-null slot.
+    // (masked CLOSURE_ENV), releasing its owned captures. Evidence itself is a
+    // plain count-prefixed layout, so drop each non-null closure slot here.
     int64_t count = *(int64_t*)data;
     void** slots = (void**)((char*)data + 8);
     for (int64_t i = 0; i < count; i++) {
@@ -2639,6 +2682,17 @@ extern "C" void* ring_get_builtin_dict(void* name_ptr) {
         if (has_type_segment("Bool"))  return ring_make_eq_dict((void*)ring_cl_eq_bool,  (void*)ring_cl_ne_bool);
         // Any other Eq dict (user enums) → tag comparison.
         return ring_make_eq_dict((void*)ring_cl_eq_tag, (void*)ring_cl_ne_tag);
+    }
+    // Clone dicts (single `clone` method). Primitive Clone is shallow under
+    // Perceus RC: the returned value owns one additional reference.
+    if (has_trait_suffix("Clone")) {
+        if (has_type_segment("Int") || has_type_segment("Float") ||
+            has_type_segment("Str") || has_type_segment("Bool")) {
+            return ring_make_clone_dict();
+        }
+        fprintf(stderr, "ring: no builtin Clone dict for '%s'\n", n.c_str());
+        fflush(stderr);
+        return nullptr;
     }
     // #179: Debug dicts (single `debug` method).
     if (has_trait_suffix("Debug")) {

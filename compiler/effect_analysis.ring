@@ -38,7 +38,8 @@ pub fn collect_fn_callees(decls: List<HDecl>, local_names: Set<Str>, mut fn_call
             HDecl::Fn { name, body, .. } => {
                 let mut callees = set_new()
                 collect_local_calls(body, local_names, callees)
-                fn_callees.insert(name, callees)
+                let function_name = name
+                fn_callees.insert(function_name, callees)
             },
             HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
@@ -67,7 +68,10 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
         HExpr::Call { callee, args, .. } => {
             match callee {
                 HExpr::Ident { name, .. } => {
-                    if local_names.contains(name) { out.insert(name) }
+                    if local_names.contains(name) {
+                        let called_name = name
+                        out.insert(called_name)
+                    }
                 },
                 HExpr::FieldAccess { receiver: recv, field, .. } => {
                     // Try qualified name first for impl methods (LLVM backend
@@ -115,7 +119,10 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
                         _ => {},
                     }
                     if !found_qualified {
-                        if local_names.contains(field) { out.insert(field) }
+                        if local_names.contains(field) {
+                            let called_name = field
+                            out.insert(called_name)
+                        }
                     }
                 },
                 _ => {},
@@ -223,6 +230,7 @@ pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>
         HExpr::Clone { inner, .. } => {
             collect_local_calls(inner, local_names, out)
         },
+        HExpr::Take { .. } => {},
         // B-125: unsafe block — recurse into body
         HExpr::UnsafeBlock { body, .. } => {
             collect_local_calls(body, local_names, out)

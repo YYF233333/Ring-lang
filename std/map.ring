@@ -45,16 +45,16 @@ pub fn map_new<K, V>() -> Map<K, V> {
     }
 }
 
-pub fn map_from<K: Hash + Eq, V>(entries: List<(K, V)>) -> Map<K, V> {
+pub fn map_from<K: Hash + Eq + Clone, V: Clone>(
+    entries: List<(K, V)>
+) -> Map<K, V> {
     let mut m: Map<K, V> = map_new()
     let mut i = 0
     while i < entries.len() {
-        match entries.get(i) {
-            some(pair) => {
-                m.insert(pair.0, pair.1)
-            },
-            none => {},
-        }
+        let pair = ring_slot_read(entries.buf, i)
+        // Tuple projections remain borrowed until partial move is supported.
+        // Clone each field into the fresh Map slots explicitly.
+        m.insert(pair.0.clone(), pair.1.clone())
         i = i + 1
     }
     m

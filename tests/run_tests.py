@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import atexit
 import hashlib
 import json
@@ -27,11 +28,12 @@ import os
 import re
 import shutil
 import subprocess
+import symtable
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -62,6 +64,13 @@ RECOVERY_CASES = (
     "error_recovery_if.ring",
 )
 
+# Frontend-positive ownership contracts that deliberately have no execution
+# companion.  They are checked with the exact compiler supplied to the runner;
+# no C build or source-text oracle may stand in for acceptance.
+POSITIVE_CHECK_ONLY_CASES = (
+    "tests/cases/ownership_callable_or_pattern_projection_paths.ring",
+)
+
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RC_FINDING_RE = re.compile(
     r"^(.+):(\d+):(\d+)\s+rc-verify\[([^\]]+)\]\s+(.+)$",
@@ -73,6 +82,9 @@ RC_SUMMARY_RE = re.compile(
 )
 RC_EXEMPT_RE = re.compile(r"^rc-verify exempt classes:\s*(.*)$", re.MULTILINE)
 RC_BOUNDARY_MARKER = "HIR-level proof. Codegen-level drops are outside this check"
+RING_TAGGED_INT_MIN = -(1 << 62)
+RING_TAGGED_INT_MAX = (1 << 62) - 1
+CALLABLE_INFERENCE_TERM_LIMIT = 4_000_000_000_000_000_000
 
 
 @dataclass(frozen=True)
@@ -101,9 +113,11 @@ class RcInvocationContract:
     strict: bool = False
     fatal_exact: Optional[int] = None
     fatal_min: int = 0
+    local_finding_exact: Optional[int] = None
     exempt_min: int = 0
     exempt_counts: Tuple[Tuple[str, int], ...] = ()
     finding_counts: Tuple[Tuple[str, int], ...] = ()
+    global_finding_counts: Tuple[Tuple[str, int], ...] = ()
     finding_lines: Tuple[Tuple[str, Tuple[int, ...]], ...] = ()
     finding_function_bindings: Tuple[Tuple[str, str, str], ...] = ()
 
@@ -126,6 +140,12 @@ C_LINE_BUILD_CASES = (
     ),
 )
 EXTERN_RC_FIXTURE = "tests/cases/structural/extern_handle_rc.ring"
+CLOSURE_ENV_RC_FIXTURE = (
+    "tests/cases/structural/closure_env_rc_mask.ring"
+)
+SPREAD_SOURCE_SEQUENCE_FIXTURE = (
+    "tests/cases/structural/spread_source_sequence.ring"
+)
 STRUCTURAL_ORACLE_FIXTURES = {
     "backend.c_line_directives": tuple(
         fixture
@@ -133,6 +153,10 @@ STRUCTURAL_ORACLE_FIXTURES = {
         for fixture in fixtures
     ),
     "backend.extern_handle_rc_structural": (EXTERN_RC_FIXTURE,),
+    "backend.closure_env_rc_mask_structural": (CLOSURE_ENV_RC_FIXTURE,),
+    "backend.spread_source_sequence_structural": (
+        SPREAD_SOURCE_SEQUENCE_FIXTURE,
+    ),
 }
 
 # Subdirectories within tests/cases/ that also contain negative test cases.
@@ -358,6 +382,32 @@ def matches_filter(name: str, name_filter: Optional[str]) -> bool:
     return name_filter.replace("\\", "/").lower() in name.replace("\\", "/").lower()
 
 
+def positive_check_only_exact_filter(name_filter: Optional[str]) -> bool:
+    """Return whether the filter names exactly one registered positive check."""
+    if not name_filter:
+        return False
+    normalized_filter = name_filter.replace("\\", "/").casefold()
+    for fixture in POSITIVE_CHECK_ONLY_CASES:
+        ring_file = REPO / fixture
+        rel = ring_file.relative_to(CASES_DIR).as_posix()
+        exact_names = {
+            fixture.casefold(),
+            rel.casefold(),
+            ring_file.name.casefold(),
+        }
+        if normalized_filter in exact_names:
+            return True
+    return False
+
+
+def pure_positive_check_only_e2e_selection(
+    suites: List[str],
+    name_filter: Optional[str],
+) -> bool:
+    """Recognize an e2e invocation that can only execute frontend checks."""
+    return set(suites) == {"e2e"} and positive_check_only_exact_filter(name_filter)
+
+
 def normalized_repo_path(path) -> str:
     """Normalize an absolute or repo-relative path to forward-slash form."""
     text = str(path).replace("\\", "/")
@@ -546,6 +596,50 @@ def discover_negative_cases(directory: Path) -> List[Path]:
         if f.suffix == ".ring" and f.with_suffix(".error").is_file():
             cases.append(f)
     return cases
+
+
+def run_positive_check_only_cases(
+    ring_exe: str,
+    collector: ResultCollector,
+    *,
+    name_filter: Optional[str] = None,
+    check_runner: Callable[..., subprocess.CompletedProcess] = ring_check,
+) -> None:
+    """Require explicitly registered frontend-positive cases to check cleanly."""
+    suite = "e2e"
+    for fixture in POSITIVE_CHECK_ONLY_CASES:
+        ring_file = REPO / fixture
+        rel = ring_file.relative_to(CASES_DIR)
+        label = f"check-pos:{rel}"
+
+        if not (
+            matches_filter(fixture, name_filter)
+            or matches_filter(str(rel), name_filter)
+        ):
+            continue
+        if not ring_file.is_file():
+            collector.add(TestResult(
+                TestResult.FAIL, suite, label,
+                f"positive check-only fixture not found: {fixture}",
+            ))
+            continue
+
+        try:
+            result = check_runner(ring_exe, str(ring_file))
+        except subprocess.TimeoutExpired:
+            collector.add(TestResult(
+                TestResult.FAIL, suite, label, "check timed out"))
+            continue
+
+        if result.returncode == 0:
+            collector.add(TestResult(TestResult.PASS, suite, label))
+            continue
+
+        combined = (result.stdout or "") + (result.stderr or "")
+        collector.add(TestResult(
+            TestResult.FAIL, suite, label,
+            f"expected check exit 0, got {result.returncode}: {combined[:300]}",
+        ))
 
 
 def error_contract_failure(contract_text: str, output: str) -> Optional[str]:
@@ -1022,15 +1116,17 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
             name_filter: Optional[str] = None) -> None:
     """Run the E2E test suite."""
     suite = "e2e"
+    check_only_exact = positive_check_only_exact_filter(name_filter)
 
     # --- Positive single-file cases ---
-    positive = discover_positive_cases(CASES_DIR)
+    positive = [] if check_only_exact else discover_positive_cases(CASES_DIR)
     # Also include cases from subdirectories (negative/, errors/) that have .expected
-    for subdir_name in EXTRA_NEG_DIRS:
-        subdir = CASES_DIR / subdir_name
-        positive.extend(discover_positive_cases(subdir))
-    # Hand-written native semantic oracles, including EXPECT_PANIC cases.
-    positive.extend(discover_positive_cases(NATIVE_ONLY_DIR))
+    if not check_only_exact:
+        for subdir_name in EXTRA_NEG_DIRS:
+            subdir = CASES_DIR / subdir_name
+            positive.extend(discover_positive_cases(subdir))
+        # Hand-written native semantic oracles, including EXPECT_PANIC cases.
+        positive.extend(discover_positive_cases(NATIVE_ONLY_DIR))
 
     with tempfile.TemporaryDirectory(prefix="ring_e2e_") as tmpdir:
         for ring_file in positive:
@@ -1073,6 +1169,12 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 collector.add(TestResult(
                     TestResult.FAIL, suite, str(rel),
                     f"expected {exp_repr}, got {act_repr}"))
+
+    # --- Positive check-only cases ---
+    run_positive_check_only_cases(
+        ring_exe, collector, name_filter=name_filter)
+    if check_only_exact:
+        return
 
     # --- Negative single-file cases ---
     negative = discover_negative_cases(CASES_DIR)
@@ -1289,17 +1391,60 @@ def extract_ring_function_body(
 ) -> Tuple[Optional[str], Optional[str]]:
     """Extract one named Ring fixture function body, ignoring decoy text."""
     masked = mask_ring_strings_and_comments(source)
-    pattern = re.compile(
-        rf"\bfn\s+{re.escape(function_name)}\s*"
-        rf"\([^{{}}]*\)[^{{}}\n]*\{{")
-    matches = list(pattern.finditer(masked))
-    if len(matches) != 1:
-        return None, f"Ring function {function_name} found {len(matches)} times"
-    open_index = masked.rfind("{", matches[0].start(), matches[0].end())
-    try:
-        close_index = matching_delimiter(masked, open_index, "{", "}")
-    except ValueError as exc:
-        return None, f"Ring function {function_name}: {exc}"
+    headers = list(re.finditer(
+        rf"\bfn\s+{re.escape(function_name)}\b", masked))
+    bodies: List[Tuple[int, int]] = []
+    errors: List[str] = []
+    for header in headers:
+        cursor = header.end()
+        while cursor < len(masked) and masked[cursor].isspace():
+            cursor += 1
+        if cursor < len(masked) and masked[cursor] == "<":
+            try:
+                cursor = matching_delimiter(masked, cursor, "<", ">") + 1
+            except ValueError as exc:
+                errors.append(str(exc))
+                continue
+            while cursor < len(masked) and masked[cursor].isspace():
+                cursor += 1
+        if cursor >= len(masked) or masked[cursor] != "(":
+            continue
+        try:
+            params_close = matching_delimiter(masked, cursor, "(", ")")
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        cursor = params_close + 1
+        open_index = -1
+        while cursor < len(masked):
+            candidate = masked.find("{", cursor)
+            if candidate < 0:
+                break
+            if re.search(r"\bwith\s*$", masked[cursor:candidate]):
+                try:
+                    cursor = matching_delimiter(
+                        masked, candidate, "{", "}") + 1
+                except ValueError as exc:
+                    errors.append(str(exc))
+                    break
+                continue
+            open_index = candidate
+            break
+        if open_index < 0:
+            continue
+        try:
+            close_index = matching_delimiter(masked, open_index, "{", "}")
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        bodies.append((open_index, close_index))
+    if len(bodies) != 1:
+        detail = f"; {errors[0]}" if errors else ""
+        return None, (
+            f"Ring function {function_name} found {len(bodies)} bodies"
+            f"{detail}"
+        )
+    open_index, close_index = bodies[0]
     return source[open_index + 1:close_index], None
 
 
@@ -1400,9 +1545,832 @@ def extern_fixture_source_errors(extern_source: str) -> List[str]:
     return errors
 
 
+CLOSURE_ENV_FIXTURE_CONTRACTS = (
+    (
+        "foreign handle declaration",
+        r"\bextern\s+type\s+StructuralCaptureHandle\b",
+    ),
+    (
+        "owner-bearing dead-capture type",
+        r"\bstruct\s+StructuralDeadResource\s*\{\s*id\s*:\s*Int\s*\}"
+        r"\s*impl\s+Drop\s+for\s+StructuralDeadResource\b",
+    ),
+    (
+        "ordinary Ptr capture signature",
+        r"\bfn\s+structural_ordinary_ptr_capture\s*\(\s*"
+        r"value\s*:\s*Ptr\s*<\s*Int\s*>\s*\)\s*->\s*"
+        r"fn\s*\(\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "ordinary foreign-handle capture signature",
+        r"\bfn\s+structural_ordinary_handle_capture\s*\(\s*"
+        r"value\s*:\s*StructuralCaptureHandle\s*\)\s*->\s*"
+        r"fn\s*\(\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "ordinary List<foreign> capture signature",
+        r"\bfn\s+structural_ordinary_list_handle_capture\s*\(\s*"
+        r"values\s*:\s*List\s*<\s*StructuralCaptureHandle\s*>\s*\)"
+        r"\s*->\s*fn\s*\(\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "ordinary Str control signature",
+        r"\bfn\s+structural_ordinary_str_capture\s*\(\s*"
+        r"value\s*:\s*Str\s*\)\s*->\s*fn\s*\(\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "handler Ptr capture signature",
+        r"\bfn\s+structural_handler_ptr_capture\s*\(\s*"
+        r"value\s*:\s*Ptr\s*<\s*Int\s*>\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "handler foreign-handle capture signature",
+        r"\bfn\s+structural_handler_handle_capture\s*\(\s*"
+        r"value\s*:\s*StructuralCaptureHandle\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "handler List<foreign> capture signature",
+        r"\bfn\s+structural_handler_list_handle_capture\s*\(\s*"
+        r"values\s*:\s*List\s*<\s*StructuralCaptureHandle\s*>\s*\)"
+        r"\s*->\s*Int\b",
+    ),
+    (
+        "handler Str control signature",
+        r"\bfn\s+structural_handler_str_capture\s*\(\s*"
+        r"value\s*:\s*Str\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "handler Int control signature",
+        r"\bfn\s+structural_handler_int_capture\s*\(\s*"
+        r"value\s*:\s*Int\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "effectful named function declaration",
+        r"\bfn\s+structural_bound_read\s*\(\s*\)\s*->\s*Int\s*"
+        r"with\s*\{\s*StructuralBoundRead\s*\}",
+    ),
+    (
+        "local named-value wrapper signature",
+        r"\bfn\s+structural_named_value_local\s*\(\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "early local named-value wrapper signature",
+        r"\bfn\s+structural_named_value_early_local\s*\(\s*\)"
+        r"\s*->\s*Int\b",
+    ),
+    (
+        "dead lambda return signature",
+        r"\bfn\s+structural_dead_lambda_return\s*\(\s*source\s*:\s*"
+        r"StructuralDeadResource\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "dead lambda Never signature",
+        r"\bfn\s+structural_dead_lambda_never\s*\(\s*source\s*:\s*"
+        r"StructuralDeadResource\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "dead handler return signature",
+        r"\bfn\s+structural_dead_handler_return\s*\(\s*source\s*:\s*"
+        r"StructuralDeadResource\s*\)\s*->\s*Int\b",
+    ),
+    (
+        "dead handler Never signature",
+        r"\bfn\s+structural_dead_handler_never\s*\(\s*source\s*:\s*"
+        r"StructuralDeadResource\s*\)\s*->\s*Int\b",
+    ),
+)
+
+CLOSURE_ENV_FUNCTION_BODY_CONTRACTS = {
+    "structural_ordinary_ptr_capture": (
+        r"\A\s*fn\s*\(\s*\)\s*->\s*Int\s*\{\s*"
+        r"observe_capture_ptr\s*\(\s*value\s*\)\s*\}\s*\Z"),
+    "structural_ordinary_handle_capture": (
+        r"\A\s*fn\s*\(\s*\)\s*->\s*Int\s*\{\s*"
+        r"observe_capture_handle\s*\(\s*value\s*\)\s*\}\s*\Z"),
+    "structural_ordinary_list_handle_capture": (
+        r"\A\s*fn\s*\(\s*\)\s*->\s*Int\s*\{\s*"
+        r"values\s*\.\s*len\s*\(\s*\)\s*\}\s*\Z"),
+    "structural_ordinary_str_capture": (
+        r"\A\s*fn\s*\(\s*\)\s*->\s*Int\s*\{\s*"
+        r"value\s*\.\s*len\s*\(\s*\)\s*\}\s*\Z"),
+    "structural_handler_ptr_capture": (
+        r"\A\s*handle\s*\{\s*StructuralCaptureRead\.read\(\)\s*\}"
+        r"\s*with\s*\{\s*StructuralCaptureRead\.read\(\)\s*=>\s*"
+        r"observe_capture_ptr\(value\)\s*,\s*\}\s*\Z"),
+    "structural_handler_handle_capture": (
+        r"\A\s*handle\s*\{\s*StructuralCaptureRead\.read\(\)\s*\}"
+        r"\s*with\s*\{\s*StructuralCaptureRead\.read\(\)\s*=>\s*"
+        r"observe_capture_handle\(value\)\s*,\s*\}\s*\Z"),
+    "structural_handler_list_handle_capture": (
+        r"\A\s*handle\s*\{\s*StructuralCaptureRead\.read\(\)\s*\}"
+        r"\s*with\s*\{\s*StructuralCaptureRead\.read\(\)\s*=>\s*"
+        r"values\.len\(\)\s*,\s*\}\s*\Z"),
+    "structural_handler_str_capture": (
+        r"\A\s*handle\s*\{\s*StructuralCaptureRead\.read\(\)\s*\}"
+        r"\s*with\s*\{\s*StructuralCaptureRead\.read\(\)\s*=>\s*"
+        r"value\.len\(\)\s*,\s*\}\s*\Z"),
+    "structural_handler_int_capture": (
+        r"\A\s*handle\s*\{\s*StructuralCaptureRead\.read\(\)\s*\}"
+        r"\s*with\s*\{\s*StructuralCaptureRead\.read\(\)\s*=>\s*"
+        r"value\s*,\s*\}\s*\Z"),
+    "structural_named_value_local": (
+        r"\A\s*handle\s*\{\s*let\s+reader\s*=\s*"
+        r"structural_bound_read\s+reader\(\)\s*\}\s*with\s*\{"
+        r"\s*StructuralBoundRead\.read\(\)\s*=>\s*31\s*,\s*\}\s*\Z"),
+    # The zero is an unreachable type witness required by the current
+    # expression typer after an explicit return. It does not construct a
+    # second function-value wrapper.
+    "structural_named_value_early_local": (
+        r"\A\s*handle\s*\{\s*let\s+reader\s*=\s*"
+        r"structural_bound_read\s+return\s+reader\(\)\s+0\s*\}"
+        r"\s*with\s*\{\s*StructuralBoundRead\.read\(\)\s*=>\s*32"
+        r"\s*,\s*\}\s*\Z"),
+    "structural_dead_lambda_return": (
+        r"\A\s*let\s+reader\s*=\s*fn\s*\(\s*\)\s*->\s*Int\s*\{"
+        r"\s*return\s+71\s+source\.id\s*\}\s+reader\(\)\s*\Z"),
+    "structural_dead_lambda_never": (
+        r"\A\s*let\s+reader\s*=\s*fn\s*\(\s*\)\s*->\s*Int\s*\{"
+        r"\s*panic\s*\(\s*\)\s+source\.id\s*\}\s+72\s*\Z"),
+    "structural_dead_handler_return": (
+        r"\A\s*handle\s*\{\s*StructuralCaptureRead\.read\(\)\s*\}"
+        r"\s*with\s*\{\s*StructuralCaptureRead\.read\(\)\s*=>\s*\{"
+        r"\s*return\s+73\s+source\.id\s*\}\s*,\s*\}\s*\Z"),
+    "structural_dead_handler_never": (
+        r"\A\s*handle\s*\{\s*74\s*\}\s*with\s*\{\s*"
+        r"StructuralCaptureRead\.read\(\)\s*=>\s*\{\s*panic\s*\(\s*\)"
+        r"\s+source\.id\s*\}\s*,\s*\}\s*\Z"),
+}
+
+
+def closure_env_fixture_source_errors(source: str) -> List[str]:
+    """Keep every physical-mask fixture entry semantically non-empty."""
+    errors: List[str] = []
+    masked = mask_ring_strings_and_comments(source)
+    for description, pattern in CLOSURE_ENV_FIXTURE_CONTRACTS:
+        count = len(re.findall(pattern, masked))
+        if count != 1:
+            errors.append(
+                f"{CLOSURE_ENV_RC_FIXTURE}: {description} contract matched "
+                f"{count} times (expected 1)")
+    for function_name, body_pattern in CLOSURE_ENV_FUNCTION_BODY_CONTRACTS.items():
+        body, extract_error = extract_ring_function_body(source, function_name)
+        if extract_error:
+            errors.append(f"{CLOSURE_ENV_RC_FIXTURE}: {extract_error}")
+            continue
+        masked_body = mask_ring_strings_and_comments(body)
+        if re.fullmatch(body_pattern, masked_body) is None:
+            errors.append(
+                f"{CLOSURE_ENV_RC_FIXTURE}: {function_name} body no longer "
+                "matches its exact capture probe")
+    return errors
+
+
+def brace_depth_before(masked: str, offset: int) -> int:
+    """Return brace nesting before an offset in already-masked source."""
+    depth = 0
+    for char in masked[:offset]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    return depth
+
+
+def top_level_pattern_matches(masked: str, pattern: str) -> List[re.Match[str]]:
+    """Find regex matches outside every nested brace-delimited control body."""
+    return [
+        match for match in re.finditer(pattern, masked)
+        if brace_depth_before(masked, match.start()) == 0
+    ]
+
+
+def spread_source_sequence_fixture_contract_errors(source: str) -> List[str]:
+    """Pin the top-level loop statements that magnify all four paths."""
+    errors: List[str] = []
+    body, extract_error = extract_ring_function_body(source, "main")
+    if extract_error:
+        return [f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: {extract_error}"]
+    masked = mask_ring_strings_and_comments(body)
+    loops = list(re.finditer(
+        r"\bfor\s+i\s+in\s+0\s*\.\.\s*256\s*\{", masked))
+    if len(loops) != 1:
+        return [
+            f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: expected exactly one "
+            f"0..256 main loop, found {len(loops)}"
+        ]
+    loop_open = loops[0].end() - 1
+    try:
+        loop_close = matching_delimiter(masked, loop_open, "{", "}")
+    except ValueError as exc:
+        return [f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: {exc}"]
+    if masked[:loops[0].start()].strip() or masked[loop_close + 1:].strip():
+        errors.append(
+            f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: the 0..256 loop must be "
+            "the complete main body")
+    loop_body = masked[loop_open + 1:loop_close]
+    path_contracts = (
+        (
+            "Never struct",
+            r"\blet\s+from_never\s*=\s*"
+            r"spread_never_struct\s*\(\s*i\s*\)",
+            r"\bassert\s*\(\s*from_never\s*\.\s*scalar\s*==\s*i\b",
+        ),
+        (
+            "Never variant",
+            r"\blet\s+variant_never\s*=\s*"
+            r"spread_never_variant\s*\(\s*i\s*\)",
+            r"\bmatch\s+variant_never\s*\{",
+        ),
+        (
+            "borrowed struct",
+            r"\blet\s+borrowed\s*=\s*"
+            r"spread_borrowed_struct\s*\(\s*holder\s*\)",
+            r"\bassert\s*\(\s*borrowed\s*\.\s*scalar\s*==\s*i\b",
+        ),
+        (
+            "borrowed variant",
+            r"\blet\s+variant_borrowed\s*=\s*"
+            r"spread_borrowed_variant\s*\(\s*variant_holder\s*\)",
+            r"\bmatch\s+variant_borrowed\s*\{",
+        ),
+    )
+    for label, initializer_pattern, use_pattern in path_contracts:
+        initializers = top_level_pattern_matches(
+            loop_body, initializer_pattern)
+        uses = top_level_pattern_matches(loop_body, use_pattern)
+        if len(initializers) != 1:
+            errors.append(
+                f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: {label} top-level "
+                f"binding initializer matched {len(initializers)} times "
+                "inside the loop (expected 1)")
+        if len(uses) != 1:
+            errors.append(
+                f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: {label} top-level "
+                f"binding use matched {len(uses)} times inside the loop "
+                "(expected 1)")
+        if (len(initializers) == 1 and len(uses) == 1 and
+                uses[0].start() <= initializers[0].end()):
+            errors.append(
+                f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: {label} binding must be "
+                "used after its exact initializer")
+    return errors
+
+
+def spread_source_sequence_fixture_source_errors(source: str) -> List[str]:
+    """Run the source contract plus four independent dead-decoy mutations."""
+    errors = spread_source_sequence_fixture_contract_errors(source)
+    mutations = (
+        (
+            "Never struct",
+            "let from_never = spread_never_struct(i)",
+            "spread_never_struct(i)",
+            "let from_never = make_packet(i)",
+        ),
+        (
+            "Never variant",
+            "let variant_never = spread_never_variant(i)",
+            "spread_never_variant(i)",
+            "let variant_never = make_envelope(i)",
+        ),
+        (
+            "borrowed struct",
+            "let borrowed = spread_borrowed_struct(holder)",
+            "spread_borrowed_struct(holder)",
+            "let borrowed = make_packet(i)",
+        ),
+        (
+            "borrowed variant",
+            "let variant_borrowed = spread_borrowed_variant(variant_holder)",
+            "spread_borrowed_variant(variant_holder)",
+            "let variant_borrowed = make_envelope(i)",
+        ),
+    )
+    for label, original, decoy_call, replacement in mutations:
+        pattern = rf"(?m)^(?P<indent>[ \t]*){re.escape(original)}[ \t]*$"
+
+        def dead_decoy(match: re.Match[str]) -> str:
+            indent = match.group("indent")
+            return (
+                f"{indent}if false {{\n"
+                f"{indent}    let decoy = {decoy_call}\n"
+                f"{indent}}}\n{indent}{replacement}"
+            )
+
+        mutated, count = re.subn(pattern, dead_decoy, source, count=1)
+        if count != 1:
+            errors.append(
+                f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: could not construct "
+                f"{label} dead-decoy mutation")
+            continue
+        mutation_errors = spread_source_sequence_fixture_contract_errors(
+            mutated)
+        if not any(
+            f"{label} top-level binding initializer" in error
+            for error in mutation_errors
+        ):
+            errors.append(
+                f"{SPREAD_SOURCE_SEQUENCE_FIXTURE}: {label} dead-decoy "
+                "mutation escaped source integrity")
+    return errors
+
+
+def positive_check_only_fixture_integrity_errors() -> List[str]:
+    """Keep explicit check-positive fixtures normalized and companion-free."""
+    errors: List[str] = []
+    configured = list(POSITIVE_CHECK_ONLY_CASES)
+    duplicates = sorted({
+        fixture for fixture in configured if configured.count(fixture) > 1
+    })
+    if duplicates:
+        errors.append(
+            "positive check-only fixtures registered more than once: "
+            + ", ".join(duplicates))
+
+    for fixture in configured:
+        if "\\" in fixture or Path(fixture).is_absolute():
+            errors.append(
+                f"positive check-only fixture is not repo-relative: {fixture}")
+            continue
+        try:
+            normalized = normalized_repo_path(fixture)
+        except ValueError:
+            errors.append(
+                f"positive check-only fixture escapes repository: {fixture}")
+            continue
+        if normalized != fixture:
+            errors.append(
+                f"positive check-only fixture is not normalized: {fixture}")
+
+        ring_file = REPO / fixture
+        if ring_file.suffix != ".ring":
+            errors.append(
+                f"positive check-only fixture is not a .ring file: {fixture}")
+        if not ring_file.is_file():
+            errors.append(
+                f"positive check-only fixture is missing: {fixture}")
+            continue
+        companions = [
+            companion
+            for companion in (
+                ring_file.with_suffix(".expected"),
+                ring_file.with_suffix(".error"),
+            )
+            if companion.is_file()
+        ]
+        if companions:
+            errors.append(
+                f"positive check-only fixture has an execution/error companion: "
+                f"{fixture}")
+    return errors
+
+
+def positive_check_only_lane_self_test_errors() -> List[str]:
+    """Prove that blanket rejection cannot satisfy the positive check lane."""
+    errors: List[str] = []
+    if not POSITIVE_CHECK_ONLY_CASES:
+        return ["positive check-only lane has no registered fixtures"]
+
+    class RecordingCollector:
+        def __init__(self) -> None:
+            self.results: List[TestResult] = []
+
+        def add(self, result: TestResult) -> None:
+            self.results.append(result)
+
+    fixture = POSITIVE_CHECK_ONLY_CASES[0]
+    ring_file = REPO / fixture
+    compiler_sentinel = "fresh-compiler-check-probe"
+    probes = (
+        ("accepted", 0, TestResult.PASS, ""),
+        ("blanket-overreject", 1, TestResult.FAIL, "E0801 blanket rejection"),
+    )
+    for probe_name, returncode, expected_status, stderr in probes:
+        calls: List[Tuple[str, str]] = []
+
+        def fake_check(ring_exe: str, path: str) -> subprocess.CompletedProcess:
+            calls.append((ring_exe, path))
+            return subprocess.CompletedProcess(
+                [ring_exe, "check", path], returncode,
+                stdout="", stderr=stderr,
+            )
+
+        collector = RecordingCollector()
+        run_positive_check_only_cases(
+            compiler_sentinel,
+            collector,
+            name_filter=ring_file.name,
+            check_runner=fake_check,
+        )
+        expected_call = [(compiler_sentinel, str(ring_file))]
+        if calls != expected_call:
+            errors.append(
+                f"positive check-only {probe_name} self-test invoked {calls!r}, "
+                f"expected {expected_call!r}")
+        if len(collector.results) != 1:
+            errors.append(
+                f"positive check-only {probe_name} self-test produced "
+                f"{len(collector.results)} results, expected 1")
+            continue
+        result = collector.results[0]
+        if result.status != expected_status:
+            errors.append(
+                f"positive check-only {probe_name} self-test returned "
+                f"{result.status}, expected {expected_status}")
+        if (
+            returncode != 0
+            and "expected check exit 0" not in result.detail
+        ):
+            errors.append(
+                "positive check-only blanket-overreject self-test did not "
+                "preserve the exit-zero contract")
+    return errors
+
+
+def positive_check_only_lane_wiring_errors(
+    source: Optional[str] = None,
+) -> List[str]:
+    """Require run_e2e to invoke the positive check-only production lane."""
+    if source is None:
+        try:
+            source = Path(__file__).read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            return [f"cannot read runner source for positive check wiring: {exc}"]
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return [f"cannot parse runner source for positive check wiring: {exc}"]
+    try:
+        lexical_tree = symtable.symtable(source, str(Path(__file__)), "exec")
+    except SyntaxError as exc:
+        return [f"cannot analyze runner bindings for positive check wiring: {exc}"]
+
+    run_e2e_defs = [
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "run_e2e"
+    ]
+    if len(run_e2e_defs) != 1:
+        return [
+            "positive check-only wiring requires exactly one run_e2e definition, "
+            f"found {len(run_e2e_defs)}"
+        ]
+
+    run_e2e = run_e2e_defs[0]
+    if not isinstance(run_e2e, ast.FunctionDef):
+        return [
+            "positive check-only wiring requires run_e2e to be an "
+            "undecorated synchronous FunctionDef"
+        ]
+
+    helper_name = "run_positive_check_only_cases"
+    errors: List[str] = []
+    if run_e2e.decorator_list:
+        errors.append(
+            "positive check-only wiring requires run_e2e to be undecorated")
+
+    calls = [
+        node for node in ast.walk(run_e2e)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == helper_name
+    ]
+    if len(calls) != 1:
+        return errors + [
+            "run_e2e must invoke run_positive_check_only_cases exactly once, "
+            f"found {len(calls)} calls"
+        ]
+
+    call = calls[0]
+
+    class CurrentScopeControlVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.exit_lines: List[int] = []
+            self.yield_lines: List[int] = []
+            self.helper_global_lines: List[int] = []
+            self.helper_write_lines: List[int] = []
+
+        def visit_Return(self, node: ast.Return) -> None:
+            self.exit_lines.append(node.lineno)
+            self.generic_visit(node)
+
+        def visit_Raise(self, node: ast.Raise) -> None:
+            self.exit_lines.append(node.lineno)
+            self.generic_visit(node)
+
+        def visit_Yield(self, node: ast.Yield) -> None:
+            self.yield_lines.append(node.lineno)
+            self.generic_visit(node)
+
+        def visit_YieldFrom(self, node: ast.YieldFrom) -> None:
+            self.yield_lines.append(node.lineno)
+            self.generic_visit(node)
+
+        def visit_Global(self, node: ast.Global) -> None:
+            if helper_name in node.names:
+                self.helper_global_lines.append(node.lineno)
+
+        def visit_Name(self, node: ast.Name) -> None:
+            if (
+                node.id == helper_name
+                and isinstance(node.ctx, (ast.Store, ast.Del))
+            ):
+                self.helper_write_lines.append(node.lineno)
+
+        def _visit_function_header(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ) -> None:
+            for expression in node.decorator_list:
+                self.visit(expression)
+            for expression in node.args.defaults:
+                self.visit(expression)
+            for expression in node.args.kw_defaults:
+                if expression is not None:
+                    self.visit(expression)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self._visit_function_header(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self._visit_function_header(node)
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            for expression in node.args.defaults:
+                self.visit(expression)
+            for expression in node.args.kw_defaults:
+                if expression is not None:
+                    self.visit(expression)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            for expression in node.decorator_list:
+                self.visit(expression)
+            for expression in node.bases:
+                self.visit(expression)
+            for keyword in node.keywords:
+                self.visit(keyword.value)
+            for statement in node.body:
+                self.visit(statement)
+
+    controls = CurrentScopeControlVisitor()
+    for statement in run_e2e.body:
+        controls.visit(statement)
+    if controls.yield_lines:
+        errors.append(
+            "run_e2e must not contain Yield or YieldFrom in its current "
+            "scope; found at line(s) "
+            + ", ".join(str(line) for line in controls.yield_lines))
+    if controls.helper_global_lines:
+        write_lines = (
+            ", ".join(str(line) for line in controls.helper_write_lines)
+            if controls.helper_write_lines
+            else "none"
+        )
+        errors.append(
+            f"run_e2e synchronous scope must not declare global {helper_name} "
+            "at line(s) "
+            + ", ".join(str(line) for line in controls.helper_global_lines)
+            + f"; Store/Del line(s) {write_lines}")
+
+    direct_call_statements = [
+        statement
+        for statement in run_e2e.body
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+        and statement.value.func.id == helper_name
+    ]
+    if (
+        len(direct_call_statements) != 1
+        or direct_call_statements[0].value is not call
+    ):
+        errors.append(
+            "run_e2e positive check-only call must be a top-level statement, "
+            "not a conditional or nested decoy")
+    else:
+        call_statement = direct_call_statements[0]
+        call_index = run_e2e.body.index(call_statement)
+
+        exits = CurrentScopeControlVisitor()
+        for statement in run_e2e.body[:call_index]:
+            exits.visit(statement)
+        if exits.exit_lines:
+            errors.append(
+                "run_e2e may exit before the positive check-only call at "
+                "line(s) "
+                + ", ".join(str(line) for line in exits.exit_lines))
+
+        following = (
+            run_e2e.body[call_index + 1]
+            if call_index + 1 < len(run_e2e.body)
+            else None
+        )
+        if not (
+            isinstance(following, ast.If)
+            and isinstance(following.test, ast.Name)
+            and following.test.id == "check_only_exact"
+            and len(following.body) == 1
+            and isinstance(following.body[0], ast.Return)
+            and following.body[0].value is None
+            and not following.orelse
+        ):
+            errors.append(
+                "run_e2e positive check-only call must be immediately followed "
+                "by the check_only_exact return guard")
+
+    lexical_run_e2e = [
+        table for table in lexical_tree.get_children()
+        if table.get_name() == "run_e2e"
+        and table.get_lineno() == run_e2e.lineno
+    ]
+    if len(lexical_run_e2e) != 1:
+        errors.append(
+            "positive check-only wiring requires exactly one run_e2e "
+            f"lexical scope, found {len(lexical_run_e2e)}")
+    else:
+        try:
+            helper_symbol = lexical_run_e2e[0].lookup(helper_name)
+        except KeyError:
+            helper_symbol = None
+        if helper_symbol is not None and (
+            helper_symbol.is_local()
+            or helper_symbol.is_parameter()
+            or helper_symbol.is_imported()
+            or helper_symbol.is_assigned()
+        ):
+            binding_kinds = [
+                label
+                for label, active in (
+                    ("local", helper_symbol.is_local()),
+                    ("parameter", helper_symbol.is_parameter()),
+                    ("import", helper_symbol.is_imported()),
+                    ("assignment/definition", helper_symbol.is_assigned()),
+                )
+                if active
+            ]
+            errors.append(
+                f"run_e2e locally shadows {helper_name}: "
+                + ", ".join(binding_kinds))
+
+    positional_names = [
+        arg.id if isinstance(arg, ast.Name) else None for arg in call.args
+    ]
+    if positional_names != ["ring_exe", "collector"]:
+        errors.append(
+            "run_e2e positive check-only call must pass ring_exe and collector")
+    keyword_names = [keyword.arg for keyword in call.keywords]
+    if keyword_names != ["name_filter"]:
+        errors.append(
+            "run_e2e positive check-only call must pass only name_filter")
+    elif not (
+        isinstance(call.keywords[0].value, ast.Name)
+        and call.keywords[0].value.id == "name_filter"
+    ):
+        errors.append(
+            "run_e2e positive check-only call must forward the active name_filter")
+    return errors
+
+
+def positive_check_only_lane_wiring_self_test_errors() -> List[str]:
+    """Prove that control-flow and definition mutations fail closed."""
+    try:
+        source = Path(__file__).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read runner source for wiring self-test: {exc}"]
+
+    call_source = (
+        "    run_positive_check_only_cases(\n"
+        "        ring_exe, collector, name_filter=name_filter)\n"
+    )
+    if source.count(call_source) != 1:
+        return [
+            "positive check-only wiring self-test could not isolate the "
+            "production call"
+        ]
+    definition_source = "def " + "run_e2e("
+    if source.count(definition_source) != 1:
+        return [
+            "positive check-only wiring self-test could not isolate the "
+            "run_e2e definition"
+        ]
+
+    mutations = (
+        (
+            "pre-call guard",
+            source.replace(
+                call_source,
+                "    if not check_only_exact:\n"
+                "        return\n"
+                + call_source,
+                1,
+            ),
+            "may exit before",
+        ),
+        (
+            "local helper rebind",
+            source.replace(
+                call_source,
+                "    run_positive_check_only_cases = "
+                "lambda *args, **kwargs: None\n"
+                + call_source,
+                1,
+            ),
+            "locally shadows",
+        ),
+        (
+            "async definition",
+            source.replace(
+                definition_source, "async " + definition_source, 1),
+            "undecorated synchronous FunctionDef",
+        ),
+        (
+            "yield",
+            source.replace(call_source, "    yield None\n" + call_source, 1),
+            "must not contain Yield or YieldFrom",
+        ),
+        (
+            "decorator",
+            source.replace(
+                definition_source,
+                "@staticmethod\n" + definition_source,
+                1,
+            ),
+            "requires run_e2e to be undecorated",
+        ),
+        (
+            "class body exit",
+            source.replace(
+                call_source,
+                "    class CheckOnlyExit:\n"
+                "        if check_only_exact:\n"
+                "            raise SystemExit(0)\n"
+                + call_source,
+                1,
+            ),
+            "may exit before",
+        ),
+        (
+            "class body global rebind",
+            source.replace(
+                call_source,
+                "    class CheckOnlyRebind:\n"
+                "        global run_positive_check_only_cases\n"
+                "        run_positive_check_only_cases = "
+                "lambda *args, **kwargs: None\n"
+                + call_source,
+                1,
+            ),
+            "Store/Del line(s)",
+        ),
+    )
+    errors: List[str] = []
+    for label, mutated, required_error in mutations:
+        mutation_errors = positive_check_only_lane_wiring_errors(mutated)
+        if not any(required_error in error for error in mutation_errors):
+            errors.append(
+                f"positive check-only {label} mutation escaped wiring gate: "
+                f"{mutation_errors!r}")
+
+    method_body_source = source.replace(
+        call_source,
+        "    class DeferredExit:\n"
+        "        def exit_later(self):\n"
+        "            raise SystemExit(0)\n"
+        + call_source,
+        1,
+    )
+    method_body_errors = positive_check_only_lane_wiring_errors(
+        method_body_source)
+    if method_body_errors:
+        errors.append(
+            "positive check-only class method body mutation must remain "
+            f"outside the current scope: {method_body_errors!r}")
+
+    method_global_source = source.replace(
+        call_source,
+        "    class DeferredRebind:\n"
+        "        def rebind_later(self):\n"
+        "            global run_positive_check_only_cases\n"
+        "            run_positive_check_only_cases = "
+        "lambda *args, **kwargs: None\n"
+        + call_source,
+        1,
+    )
+    method_global_errors = positive_check_only_lane_wiring_errors(
+        method_global_source)
+    if method_global_errors:
+        errors.append(
+            "positive check-only class method global mutation must remain "
+            f"outside the current scope: {method_global_errors!r}")
+    return errors
+
+
 def structural_fixture_integrity_errors() -> List[str]:
     """Enforce fixture-to-oracle closure before either runner consumes it."""
     errors: List[str] = []
+    errors.extend(positive_check_only_fixture_integrity_errors())
+    errors.extend(positive_check_only_lane_self_test_errors())
+    errors.extend(positive_check_only_lane_wiring_errors())
+    errors.extend(positive_check_only_lane_wiring_self_test_errors())
     actual = structural_fixture_paths()
     configured = [
         fixture
@@ -1457,6 +2425,24 @@ def structural_fixture_integrity_errors() -> List[str]:
         errors.append(f"cannot read {EXTERN_RC_FIXTURE}: {exc}")
     else:
         errors.extend(extern_fixture_source_errors(extern_source))
+
+    closure_env_path = REPO / CLOSURE_ENV_RC_FIXTURE
+    try:
+        closure_env_source = closure_env_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        errors.append(f"cannot read {CLOSURE_ENV_RC_FIXTURE}: {exc}")
+    else:
+        errors.extend(closure_env_fixture_source_errors(closure_env_source))
+
+    spread_path = REPO / SPREAD_SOURCE_SEQUENCE_FIXTURE
+    try:
+        spread_source = spread_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        errors.append(
+            f"cannot read {SPREAD_SOURCE_SEQUENCE_FIXTURE}: {exc}")
+    else:
+        errors.extend(
+            spread_source_sequence_fixture_source_errors(spread_source))
 
     return errors
 
@@ -1939,6 +2925,135 @@ def c_rc_counts(c_body: str) -> Tuple[int, int]:
         len(re.findall(r"\bring_dup\s*\(", masked)),
         len(re.findall(r"\bring_drop\s*\(", masked)),
     )
+
+
+C_IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
+CLOSURE_ENV_ALLOC_RE = re.compile(
+    rf"(?m)^[ \t]*(?P<env>{C_IDENTIFIER})[ \t]*=[ \t]*ring_alloc\s*\("
+    r"\s*\(int64_t\)\s*\(\s*sizeof\s*\(\s*int64_t\s*\)\s*\+\s*"
+    r"(?P<capture_count>[0-9]+)\s*\*\s*sizeof\s*\(\s*void\s*\*\s*\)"
+    r"\s*\+\s*(?P<mask_count>[0-9]+)\s*\*\s*"
+    r"sizeof\s*\(\s*intptr_t\s*\)\s*\)\s*,\s*"
+    r"(?P<type_id>[0-9]+)\s*\)\s*;"
+)
+
+
+@dataclass(frozen=True)
+class CClosureEnvRecord:
+    """One literal-count masked closure environment in a generated C body."""
+
+    env: str
+    capture_count: int
+    type_id: int
+    captures: Tuple[str, ...]
+    masks: Tuple[int, ...]
+    start: int
+    end: int
+
+
+def parse_c_closure_env_records(
+    c_body: str,
+) -> Tuple[List[CClosureEnvRecord], List[str]]:
+    """Parse exact capture/mask slots without depending on a numeric typeid."""
+    masked = mask_c_strings_and_comments(c_body)
+    matches = list(CLOSURE_ENV_ALLOC_RE.finditer(masked))
+    records: List[CClosureEnvRecord] = []
+    errors: List[str] = []
+    for match_index, match in enumerate(matches):
+        env = match.group("env")
+        capture_count = int(match.group("capture_count"))
+        mask_count = int(match.group("mask_count"))
+        type_id = int(match.group("type_id"))
+        region_start = match.start()
+        region_end = (
+            matches[match_index + 1].start()
+            if match_index + 1 < len(matches)
+            else len(masked)
+        )
+        region = masked[region_start:region_end]
+        if capture_count != mask_count:
+            errors.append(
+                f"{env}: capture/mask allocation counts differ "
+                f"({capture_count}/{mask_count})")
+
+        header_re = re.compile(
+            rf"\*\s*\(\s*int64_t\s*\*\s*\)\s*{re.escape(env)}\s*"
+            rf"=\s*{capture_count}\s*;")
+        headers = list(header_re.finditer(region))
+        if len(headers) != 1:
+            errors.append(
+                f"{env}: expected one count header {capture_count}, "
+                f"found {len(headers)}")
+
+        capture_re = re.compile(
+            rf"\(\(\s*void\s*\*\s*\*\s*\)\s*{re.escape(env)}\s*\)"
+            rf"\s*\[\s*([0-9]+)\s*\]\s*=\s*({C_IDENTIFIER})\s*;")
+        capture_entries = [
+            (int(store.group(1)), store.group(2))
+            for store in capture_re.finditer(region)
+        ]
+        expected_capture_indexes = list(range(1, capture_count + 1))
+        actual_capture_indexes = sorted(index for index, _ in capture_entries)
+        if actual_capture_indexes != expected_capture_indexes:
+            errors.append(
+                f"{env}: capture slots {actual_capture_indexes} != "
+                f"{expected_capture_indexes}")
+        captures_by_index = {index: value for index, value in capture_entries}
+        captures = tuple(
+            captures_by_index.get(index, "<missing>")
+            for index in expected_capture_indexes
+        )
+
+        mask_re = re.compile(
+            rf"\(\(\s*intptr_t\s*\*\s*\)\s*\(\s*"
+            rf"\(\s*char\s*\*\s*\)\s*{re.escape(env)}\s*\+\s*"
+            rf"sizeof\s*\(\s*int64_t\s*\)\s*\+\s*{capture_count}\s*"
+            rf"\*\s*sizeof\s*\(\s*void\s*\*\s*\)\s*\)\s*\)"
+            rf"\s*\[\s*([0-9]+)\s*\]\s*=\s*([01])\s*;")
+        mask_entries = [
+            (int(store.group(1)), int(store.group(2)))
+            for store in mask_re.finditer(region)
+        ]
+        expected_mask_indexes = list(range(capture_count))
+        actual_mask_indexes = sorted(index for index, _ in mask_entries)
+        if actual_mask_indexes != expected_mask_indexes:
+            errors.append(
+                f"{env}: mask slots {actual_mask_indexes} != "
+                f"{expected_mask_indexes}")
+        masks_by_index = {index: value for index, value in mask_entries}
+        masks = tuple(
+            masks_by_index.get(index, -1)
+            for index in expected_mask_indexes
+        )
+
+        env_links = list(re.finditer(
+            rf"\(\(\s*void\s*\*\s*\*\s*\)\s*{C_IDENTIFIER}\s*\)"
+            rf"\s*\[\s*1\s*\]\s*=\s*{re.escape(env)}\s*;",
+            region,
+        ))
+        if len(env_links) != 1:
+            errors.append(
+                f"{env}: expected one closure env link, found {len(env_links)}")
+
+        records.append(CClosureEnvRecord(
+            env=env,
+            capture_count=capture_count,
+            type_id=type_id,
+            captures=captures,
+            masks=masks,
+            start=region_start,
+            end=region_end,
+        ))
+    return records, errors
+
+
+def exact_c_unary_call_count(c_body: str, callee: str, argument: str) -> int:
+    """Count one-argument C calls with an exact identifier argument."""
+    masked = mask_c_strings_and_comments(c_body)
+    return len(re.findall(
+        rf"\b{re.escape(callee)}\s*\(\s*{re.escape(argument)}\s*\)",
+        masked,
+    ))
 
 
 @dataclass(frozen=True)
@@ -2772,6 +3887,325 @@ def exact_rc_error(symbol: str, body: str,
     return None
 
 
+CLOSURE_ENV_HOST_EXPECTATIONS = {
+    "ring_structural_ordinary_ptr_capture": (
+        (1, ("r_value",), (0,)),
+    ),
+    "ring_structural_ordinary_handle_capture": (
+        (1, ("r_value",), (0,)),
+    ),
+    "ring_structural_ordinary_list_handle_capture": (
+        (1, ("r_values",), (0,)),
+    ),
+    "ring_structural_ordinary_str_capture": (
+        (1, ("r_value",), (1,)),
+    ),
+    "ring_structural_handler_ptr_capture": (
+        (1, ("r_value",), (0,)),
+    ),
+    "ring_structural_handler_handle_capture": (
+        (1, ("r_value",), (0,)),
+    ),
+    "ring_structural_handler_list_handle_capture": (
+        (1, ("r_values",), (0,)),
+    ),
+    "ring_structural_handler_str_capture": (
+        (1, ("r_value",), (1,)),
+    ),
+    "ring_structural_handler_int_capture": (
+        (1, ("r_value",), (1,)),
+    ),
+    # Handler arm env (zero captures), then the named function-value wrapper
+    # whose sole thunk-visible slot is the current evidence.
+    "ring_structural_named_value_local": (
+        (0, (), ()),
+        (1, ("r___ring_ev_StructuralBoundRead",), (1,)),
+    ),
+    "ring_structural_named_value_early_local": (
+        (0, (), ()),
+        (1, ("r___ring_ev_StructuralBoundRead",), (1,)),
+    ),
+    # Reads after Return/Never are unreachable and must not become capture
+    # slots in either the ordinary-lambda or handler-arm collector.
+    "ring_structural_dead_lambda_return": (
+        (0, (), ()),
+    ),
+    "ring_structural_dead_lambda_never": (
+        (0, (), ()),
+    ),
+    "ring_structural_dead_handler_return": (
+        (0, (), ()),
+    ),
+    "ring_structural_dead_handler_never": (
+        (0, (), ()),
+    ),
+}
+
+
+def validate_closure_env_host(
+    c_source: str,
+    symbol: str,
+    expected: Tuple[Tuple[int, Tuple[str, ...], Tuple[int, ...]], ...],
+) -> Tuple[List[str], List[CClosureEnvRecord], Optional[str]]:
+    """Validate all masked envs and exact dup roots in one host function."""
+    body, extract_error = extract_c_function_body(c_source, symbol)
+    if extract_error:
+        return [extract_error], [], None
+    records, parse_errors = parse_c_closure_env_records(body)
+    errors = [f"{symbol}: {error}" for error in parse_errors]
+    if len(records) != len(expected):
+        errors.append(
+            f"{symbol}: expected {len(expected)} masked closure envs, "
+            f"found {len(records)}")
+
+    expected_dups: dict[str, int] = {}
+    expected_capture_names: set[str] = set()
+    for index, spec in enumerate(expected):
+        count, captures, masks = spec
+        for capture, mask in zip(captures, masks):
+            expected_capture_names.add(capture)
+            expected_dups[capture] = expected_dups.get(capture, 0) + mask
+        if index >= len(records):
+            continue
+        record = records[index]
+        actual = (record.capture_count, record.captures, record.masks)
+        if actual != spec:
+            errors.append(
+                f"{symbol}: env {index} shape {actual!r} != {spec!r}")
+
+    for capture in sorted(expected_capture_names):
+        actual_dups = exact_c_unary_call_count(body, "ring_dup", capture)
+        expected_count = expected_dups[capture]
+        if actual_dups != expected_count:
+            errors.append(
+                f"{symbol}: expected ring_dup({capture}) {expected_count} "
+                f"times, found {actual_dups}")
+        # These fixture parameters are borrowed at the host boundary. Their
+        # only physical release, when eligible, belongs to the env mask.
+        if not capture.startswith("r___ring_ev_"):
+            direct_drops = exact_c_unary_call_count(
+                body, "ring_drop", capture)
+            if direct_drops != 0:
+                errors.append(
+                    f"{symbol}: capture root {capture} has {direct_drops} "
+                    "direct ring_drop calls")
+    return errors, records, body
+
+
+def special_env_cleanup_order_errors(
+    symbol: str,
+    body: str,
+    record: CClosureEnvRecord,
+    evidence: str,
+) -> List[str]:
+    """Require owned evidence before its lexical handler ref is released."""
+    masked = mask_c_strings_and_comments(body)
+    region = masked[record.start:record.end]
+
+    def sole(pattern: str, description: str) -> Optional[int]:
+        matches = list(re.finditer(pattern, region))
+        if len(matches) != 1:
+            errors.append(
+                f"{symbol}: {record.env} expected one {description}, "
+                f"found {len(matches)}")
+            return None
+        return matches[0].start()
+
+    errors: List[str] = []
+    dup_at = sole(
+        rf"\bring_dup\s*\(\s*{re.escape(evidence)}\s*\)",
+        "evidence dup",
+    )
+    capture_at = sole(
+        rf"\(\(\s*void\s*\*\s*\*\s*\)\s*{re.escape(record.env)}\s*\)"
+        rf"\s*\[\s*1\s*\]\s*=\s*{re.escape(evidence)}\s*;",
+        "evidence capture store",
+    )
+    mask_at = sole(
+        rf"\(\(\s*intptr_t\s*\*\s*\).*?\)\s*\[\s*0\s*\]"
+        rf"\s*=\s*1\s*;",
+        "owned mask store",
+    )
+    link_at = sole(
+        rf"\(\(\s*void\s*\*\s*\*\s*\)\s*{C_IDENTIFIER}\s*\)"
+        rf"\s*\[\s*1\s*\]\s*=\s*{re.escape(record.env)}\s*;",
+        "wrapper env link",
+    )
+    drop_matches = list(re.finditer(
+        rf"\bring_drop\s*\(\s*{re.escape(evidence)}\s*\)", region))
+    return_matches = list(re.finditer(r"\breturn\b", region))
+    if not drop_matches:
+        errors.append(f"{symbol}: no lexical evidence drop after wrapper build")
+    if not return_matches:
+        errors.append(f"{symbol}: no return after wrapper build")
+    if (
+        None not in (dup_at, capture_at, mask_at, link_at)
+        and drop_matches and return_matches
+    ):
+        order = (
+            dup_at, capture_at, mask_at, link_at,
+            drop_matches[0].start(), return_matches[0].start(),
+        )
+        if list(order) != sorted(order):
+            errors.append(
+                f"{symbol}: evidence dup/store/mask/link/drop/return "
+                f"order is invalid: {order}")
+    return errors
+
+
+def masked_closure_runtime_errors(
+    generated_type_ids: set[int],
+) -> Tuple[List[str], Optional[int]]:
+    """Tie generated env typeids to the runtime's mask-aware destructor."""
+    errors: List[str] = []
+    try:
+        runtime_source = RUNTIME_CPP.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read ring_runtime.cpp: {exc}"], None
+    masked = mask_c_strings_and_comments(runtime_source)
+    macro_matches = re.findall(
+        r"(?m)^\s*#\s*define\s+RING_TYPEID_CLOSURE_ENV_MASKED\s+"
+        r"([0-9]+)\s*$",
+        masked,
+    )
+    if len(macro_matches) != 1:
+        errors.append(
+            "runtime must define RING_TYPEID_CLOSURE_ENV_MASKED exactly once")
+        return errors, None
+    masked_type_id = int(macro_matches[0])
+    if generated_type_ids != {masked_type_id}:
+        errors.append(
+            f"generated masked env typeids {sorted(generated_type_ids)} != "
+            f"runtime masked typeid {masked_type_id}")
+
+    registration = re.findall(
+        r"drop_table\s*\[\s*RING_TYPEID_CLOSURE_ENV_MASKED\s*\]\s*="
+        r"\s*drop_closure_env_masked\s*;",
+        masked,
+    )
+    if len(registration) != 1:
+        errors.append(
+            "runtime must register drop_closure_env_masked exactly once")
+
+    drop_body, extract_error = extract_c_function_body(
+        runtime_source, "drop_closure_env_masked")
+    if extract_error:
+        errors.append(extract_error)
+        return errors, masked_type_id
+    masked_body = mask_c_strings_and_comments(drop_body)
+    slots_match = re.search(
+        rf"void\s*\*\s*\*\s*(?P<slots>{C_IDENTIFIER})\s*=\s*"
+        r"\(\s*void\s*\*\s*\*\s*\)\s*\(\s*\(\s*char\s*\*\s*\)"
+        r"\s*data\s*\+\s*(?:sizeof\s*\(\s*int64_t\s*\)|8)\s*\)"
+        r"\s*;",
+        masked_body,
+    )
+    mask_match = None
+    if slots_match is not None:
+        slots_name = slots_match.group("slots")
+        mask_match = re.search(
+            rf"intptr_t\s*\*\s*(?P<mask>{C_IDENTIFIER})\s*=\s*"
+            r"\(\s*intptr_t\s*\*\s*\)\s*\(\s*\(\s*char\s*\*\s*\)"
+            rf"\s*{re.escape(slots_name)}\s*\+\s*count\s*\*\s*"
+            r"sizeof\s*\(\s*void\s*\*\s*\)\s*\)\s*;",
+            masked_body,
+        )
+    if slots_match is None:
+        errors.append("drop_closure_env_masked has no exact capture array")
+    if mask_match is None:
+        errors.append("drop_closure_env_masked has no parallel intptr_t mask")
+    if slots_match is not None and mask_match is not None:
+        slots = slots_match.group("slots")
+        rc_mask = mask_match.group("mask")
+        guarded_drop = re.search(
+            rf"if\s*\(\s*{re.escape(rc_mask)}\s*\[\s*"
+            rf"(?P<index>{C_IDENTIFIER})\s*\]\s*!=\s*0\s*&&\s*"
+            rf"{re.escape(slots)}\s*\[\s*(?P=index)\s*\]\s*\)\s*"
+            rf"(?:\{{\s*)?ring_drop\s*\(\s*{re.escape(slots)}\s*"
+            rf"\[\s*(?P=index)\s*\]\s*\)\s*;",
+            masked_body,
+        )
+        if guarded_drop is None:
+            errors.append(
+                "drop_closure_env_masked does not guard slot drop by mask")
+    return errors, masked_type_id
+
+
+def run_closure_env_rc_oracle(
+    ring_exe: str, temp_root: Path,
+) -> List[str]:
+    """Inspect closure env capture masks without fabricating raw values."""
+    c_path, _, error = build_c_artifacts_fresh(
+        ring_exe, CLOSURE_ENV_RC_FIXTURE, temp_root, no_c_lines=True)
+    if error:
+        return [error]
+    try:
+        c_source = c_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read generated closure-env C: {exc}"]
+    errors: List[str] = []
+    if re.search(r"(?m)^[ \t]*#[ \t]*line\b", c_source):
+        errors.append("closure-env --no-c-lines artifact contains #line")
+
+    host_records: List[CClosureEnvRecord] = []
+    host_bodies: dict[str, str] = {}
+    for symbol, expected in CLOSURE_ENV_HOST_EXPECTATIONS.items():
+        host_errors, records, body = validate_closure_env_host(
+            c_source, symbol, expected)
+        errors.extend(host_errors)
+        host_records.extend(records)
+        if body is not None:
+            host_bodies[symbol] = body
+
+    evidence = "r___ring_ev_StructuralBoundRead"
+    for symbol in (
+        "ring_structural_named_value_local",
+        "ring_structural_named_value_early_local",
+    ):
+        body = host_bodies.get(symbol)
+        _, records, _ = validate_closure_env_host(
+            c_source, symbol, CLOSURE_ENV_HOST_EXPECTATIONS[symbol])
+        if body is not None and len(records) >= 2:
+            errors.extend(special_env_cleanup_order_errors(
+                symbol, body, records[1], evidence))
+
+    # Every recognized masked env must use the runtime-registered destructor.
+    generated_type_ids = {record.type_id for record in host_records}
+    runtime_errors, masked_type_id = masked_closure_runtime_errors(
+        generated_type_ids)
+    errors.extend(runtime_errors)
+
+    masked_source = mask_c_strings_and_comments(c_source)
+    legacy_allocs = re.findall(
+        r"(?m)^[^\n]*\bring_alloc\s*\([^\n]*,\s*15\s*\)\s*;",
+        masked_source,
+    )
+    if legacy_allocs:
+        errors.append(
+            "generated C still contains legacy typeid-15 closure env "
+            f"allocations ({len(legacy_allocs)})")
+    if masked_type_id is not None:
+        masked_alloc_lines = re.findall(
+            rf"(?m)^[^\n]*\bring_alloc\s*\([^\n]*,\s*"
+            rf"{masked_type_id}\s*\)\s*;",
+            masked_source,
+        )
+        all_records, all_parse_errors = parse_c_closure_env_records(c_source)
+        errors.extend(
+            f"generated C: {parse_error}"
+            for parse_error in all_parse_errors
+        )
+        masked_records = [
+            record for record in all_records
+            if record.type_id == masked_type_id
+        ]
+        if len(masked_alloc_lines) != len(masked_records):
+            errors.append(
+                f"masked typeid {masked_type_id} allocations/parsed envs differ "
+                f"({len(masked_alloc_lines)}/{len(masked_records)})")
+    return errors
+
+
 def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
     """Inspect local generated-C bodies without executing any raw handle."""
     errors = c_probe_mutation_matrix_errors()
@@ -2855,11 +4289,347 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path) -> List[str]:
     return errors
 
 
+def spread_never_body_sequence_errors(
+    body: str, symbol: str, source_callee: str,
+) -> List[str]:
+    """Require a reachable top-level source statement before return and alloc."""
+    errors: List[str] = []
+    masked = mask_c_strings_and_comments(body)
+    statements = top_level_c_statements(masked)
+    source_statements = [
+        statement for statement in statements
+        if re.search(rf"\b{source_callee}\s*\(", statement[2])
+    ]
+    return_statements = [
+        statement for statement in statements
+        if re.match(r"\s*return\b", statement[2])
+    ]
+    alloc_statements = [
+        statement for statement in statements
+        if re.search(r"\bring_alloc\s*\(", statement[2])
+    ]
+    source_lhs: Optional[str] = None
+    if len(source_statements) != 1:
+        errors.append(
+            f"{symbol}: expected one reachable top-level {source_callee} "
+            f"evaluation statement, found {len(source_statements)}")
+    else:
+        source_assignment = re.fullmatch(
+            rf"\s*(?:void\s*\*\s*)?"
+            rf"(?P<lhs>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+            rf"{source_callee}\s*\([^;]*\)\s*;\s*",
+            source_statements[0][2],
+        )
+        if source_assignment is None:
+            errors.append(
+                f"{symbol}: source call is not a standalone reachable "
+                "top-level evaluation statement")
+        else:
+            source_lhs = source_assignment.group("lhs")
+    if not alloc_statements:
+        errors.append(
+            f"{symbol}: missing reachable top-level destination allocation")
+    else:
+        first_alloc = alloc_statements[0]
+        early_returns = [
+            statement for statement in return_statements
+            if statement[0] < first_alloc[0]
+        ]
+        if len(early_returns) != 1:
+            errors.append(
+                f"{symbol}: expected exactly one early return before the "
+                f"destination allocation, found {len(early_returns)}")
+        elif source_lhs is not None and re.fullmatch(
+            rf"\s*return\s+{re.escape(source_lhs)}\s*;\s*",
+            early_returns[0][2],
+        ) is None:
+            errors.append(
+                f"{symbol}: early return must return the exact source "
+                f"assignment '{source_lhs}'")
+        if (len(source_statements) == 1 and return_statements and not (
+                source_statements[0][0] < return_statements[0][0] <
+                first_alloc[0])):
+            errors.append(
+                f"{symbol}: destination allocation must follow the "
+                "Never/Return spread source")
+    if "RING_INEG" in masked:
+        errors.append(
+            f"{symbol}: unreachable explicit fields/tail survived "
+            "physical spread pruning")
+    return errors
+
+
+def top_level_c_statements(masked_body: str) -> List[Tuple[int, int, str]]:
+    """Split semicolon statements executed at function-body brace depth zero."""
+    statements: List[Tuple[int, int, str]] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(masked_body):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                # A completed compound control statement is not an evaluation
+                # statement merely because it contains a nested semicolon.
+                start = index + 1
+        elif char == ";" and depth == 0:
+            text = masked_body[start:index + 1]
+            if text.strip():
+                statements.append((start, index + 1, text))
+            start = index + 1
+    return statements
+
+
+def spread_sequence_statement_oracle_self_test_errors() -> List[str]:
+    """Challenge the C oracle with independent valid/reordered/dead programs."""
+    errors: List[str] = []
+    cases = (
+        ("ring_spread_never_struct", "ring_make_packet"),
+        ("ring_spread_never_variant", "ring_make_envelope"),
+    )
+    for symbol, source_callee in cases:
+        valid = (
+            f"tmp_source = {source_callee}(RING_INT(0));\n"
+            "return tmp_source;\n"
+            "tmp_destination = ring_alloc(16, 1);\n"
+            "tmp_field = RING_INT(1);\n"
+            "return tmp_destination;\n"
+        )
+        valid_errors = spread_never_body_sequence_errors(
+            valid, symbol, source_callee)
+        if valid_errors:
+            errors.append(
+                f"{symbol}: independent valid sequence rejected by oracle: "
+                + "; ".join(valid_errors))
+
+        reordered = (
+            "tmp_destination = ring_alloc(16, 1);\n"
+            f"tmp_source = {source_callee}(RING_INT(0));\n"
+            "return tmp_source;\n"
+            "tmp_field = RING_INT(1);\n"
+            "return tmp_destination;\n"
+        )
+        reordered_errors = spread_never_body_sequence_errors(
+            reordered, symbol, source_callee)
+        if not any(
+            "destination allocation must follow" in error
+            for error in reordered_errors
+        ):
+            errors.append(
+                f"{symbol}: independent reordered statements escaped the "
+                "generated-C sequence oracle")
+
+        dead_decoy = (
+            f"if (0) {{ tmp_decoy = {source_callee}(RING_INT(0)); }}\n"
+            "return existing_value;\n"
+            "tmp_destination = ring_alloc(16, 1);\n"
+            "tmp_field = RING_INT(1);\n"
+            "return tmp_destination;\n"
+        )
+        decoy_errors = spread_never_body_sequence_errors(
+            dead_decoy, symbol, source_callee)
+        if not any(
+            "reachable top-level" in error for error in decoy_errors
+        ):
+            errors.append(
+                f"{symbol}: dead-if source decoy escaped the generated-C "
+                "sequence oracle")
+
+        wrong_lhs = (
+            f"wrong_source = {source_callee}(RING_INT(0));\n"
+            "return unrelated_source;\n"
+            "wrong_destination = ring_alloc(16, 1);\n"
+            "wrong_field = RING_INT(1);\n"
+            "return wrong_destination;\n"
+        )
+        wrong_lhs_errors = spread_never_body_sequence_errors(
+            wrong_lhs, symbol, source_callee)
+        if not any(
+            "early return must return the exact source assignment "
+            "'wrong_source'" in error
+            for error in wrong_lhs_errors
+        ):
+            errors.append(
+                f"{symbol}: independent wrong-lhs body escaped exact source "
+                "return validation")
+
+        multiple_early = (
+            f"first_source = {source_callee}(RING_INT(0));\n"
+            "return first_source;\n"
+            "return first_source;\n"
+            "first_destination = ring_alloc(16, 1);\n"
+            "first_field = RING_INT(1);\n"
+            "return first_destination;\n"
+        )
+        multiple_early_errors = spread_never_body_sequence_errors(
+            multiple_early, symbol, source_callee)
+        if not any(
+            "expected exactly one early return before the destination "
+            "allocation, found 2" in error
+            for error in multiple_early_errors
+        ):
+            errors.append(
+                f"{symbol}: independent multiple-early body escaped exact "
+                "early-return cardinality validation")
+
+        missing_early = (
+            f"late_source = {source_callee}(RING_INT(0));\n"
+            "late_destination = ring_alloc(16, 1);\n"
+            "late_field = RING_INT(1);\n"
+            "return late_destination;\n"
+        )
+        missing_early_errors = spread_never_body_sequence_errors(
+            missing_early, symbol, source_callee)
+        if not any(
+            "expected exactly one early return before the destination "
+            "allocation, found 0" in error
+            for error in missing_early_errors
+        ):
+            errors.append(
+                f"{symbol}: independent missing-early body escaped exact "
+                "early-return cardinality validation")
+    return errors
+
+
+def spread_source_sequence_generated_c_errors(c_source: str) -> List[str]:
+    """Pin source-before-allocation and borrowed-result RC in local C bodies."""
+    errors = spread_sequence_statement_oracle_self_test_errors()
+    never_functions = (
+        ("ring_spread_never_struct", "ring_make_packet"),
+        ("ring_spread_never_variant", "ring_make_envelope"),
+    )
+    for symbol, source_callee in never_functions:
+        body, extract_error = extract_c_function_body(c_source, symbol)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        errors.extend(spread_never_body_sequence_errors(
+            body, symbol, source_callee))
+
+    for symbol in (
+        "ring_spread_borrowed_struct",
+        "ring_spread_borrowed_variant",
+    ):
+        body, extract_error = extract_c_function_body(c_source, symbol)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        masked = mask_c_strings_and_comments(body)
+        unwraps = list(re.finditer(r"\bring_Option_unwrap\s*\(", masked))
+        destination_alloc = re.search(r"\bring_alloc\s*\(", masked)
+        if len(unwraps) != 1 or destination_alloc is None:
+            errors.append(
+                f"{symbol}: expected one Option.unwrap before one or more "
+                "destination/field allocations")
+        elif unwraps[0].start() >= destination_alloc.start():
+            errors.append(
+                f"{symbol}: borrowed spread call must be evaluated before "
+                "destination allocation")
+        drops = re.findall(r"\bring_drop\s*\(", masked)
+        if drops:
+            errors.append(
+                f"{symbol}: borrowed spread result acquired {len(drops)} "
+                "cleanup Drop call(s)")
+    return errors
+
+
+def run_spread_source_sequence_oracle(
+    ring_exe: str, temp_root: Path,
+) -> List[str]:
+    """Inspect generated C, then require alloc/free balance with stats runtime."""
+    c_path, object_path, error = build_c_artifacts_fresh(
+        ring_exe, SPREAD_SOURCE_SEQUENCE_FIXTURE, temp_root,
+        no_c_lines=True)
+    if error:
+        return [error]
+    try:
+        c_source = c_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read generated spread-sequence C: {exc}"]
+
+    errors = spread_source_sequence_generated_c_errors(c_source)
+    clang = find_clang()
+    cpp_compiler = shutil.which("clang++")
+    if clang is None or cpp_compiler is None:
+        return errors + ["clang/clang++ unavailable for spread alloc-stats gate"]
+
+    runtime_object = temp_root / "spread-runtime-stats.o"
+    executable = temp_root / (
+        "spread-source-sequence.exe" if sys.platform == "win32"
+        else "spread-source-sequence")
+    runtime_cmd = [
+        cpp_compiler, "-std=c++17", "-O2",
+        "-D_CRT_SECURE_NO_WARNINGS", "-DRING_ALLOC_STATS",
+        "-c", str(RUNTIME_CPP), "-o", str(runtime_object),
+    ]
+    try:
+        compiled_runtime = subprocess.run(
+            runtime_cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=TIMEOUT_COMPILE, cwd=str(REPO))
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return errors + ["spread alloc-stats runtime compilation failed"]
+    if compiled_runtime.returncode != 0:
+        return errors + [
+            "spread alloc-stats runtime compile failed: "
+            + process_output(compiled_runtime)[:500]
+        ]
+
+    try:
+        linked = subprocess.run(
+            [clang, str(object_path), str(runtime_object), "-o",
+             str(executable), *CLANG_LINK_FLAGS],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=TIMEOUT_LINK, cwd=str(REPO))
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return errors + ["spread alloc-stats link failed"]
+    if linked.returncode != 0:
+        return errors + [
+            "spread alloc-stats link failed: " + process_output(linked)[:500]
+        ]
+
+    try:
+        executed = run_exe(str(executable))
+    except subprocess.TimeoutExpired:
+        return errors + ["spread alloc-stats execution timed out"]
+    if executed.returncode != 0:
+        return errors + [
+            f"spread alloc-stats runtime exit {executed.returncode}: "
+            + process_output(executed)[:500]
+        ]
+    if norm(executed.stdout or "") != "":
+        errors.append("spread alloc-stats fixture emitted unexpected stdout")
+
+    reports = re.findall(
+        r"\[alloc-stats\]\s+allocs=(\d+)\s+frees=(\d+)\s+live=(\d+)",
+        norm(executed.stderr or ""),
+    )
+    if len(reports) != 1:
+        errors.append(
+            f"spread alloc-stats expected one final report, found "
+            f"{len(reports)}")
+    else:
+        allocs, frees, live = (int(value) for value in reports[0])
+        if allocs < 4096:
+            errors.append(
+                f"spread alloc-stats loop did not magnify the path: "
+                f"allocs={allocs}")
+        if live != 0 or frees != allocs:
+            errors.append(
+                "spread alloc-stats must balance exactly: "
+                f"allocs={allocs} frees={frees} live={live}")
+    return errors
+
+
 def run_structural(ring_exe: str, collector: ResultCollector, *,
                    name_filter: Optional[str] = None) -> None:
-    """Run generated-C source-map and extern-handle ownership oracles."""
+    """Run generated-C source-map and physical ownership oracles."""
     suite = "structural"
     integrity_errors = structural_fixture_integrity_errors()
+    integrity_errors.extend(callable_inference_limit_source_errors())
+    integrity_errors.extend(callable_nominal_walk_source_errors())
+    integrity_errors.extend(callable_contract_merge_source_errors())
+    integrity_errors.extend(ownership_bootstrap_transition_source_errors())
     if integrity_errors:
         for index, error in enumerate(integrity_errors, 1):
             collector.add(TestResult(
@@ -2895,12 +4665,39 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
         or matches_filter(EXTERN_RC_FIXTURE, name_filter)
     ):
         jobs.append((feature_id, "extern", EXTERN_RC_FIXTURE, (EXTERN_RC_FIXTURE,)))
+    feature_id = "backend.closure_env_rc_mask_structural"
+    if (
+        matches_filter(feature_id, name_filter)
+        or matches_filter(CLOSURE_ENV_RC_FIXTURE, name_filter)
+    ):
+        jobs.append((
+            feature_id,
+            "closure-env",
+            CLOSURE_ENV_RC_FIXTURE,
+            (CLOSURE_ENV_RC_FIXTURE,),
+        ))
+    feature_id = "backend.spread_source_sequence_structural"
+    if (
+        matches_filter(feature_id, name_filter)
+        or matches_filter(SPREAD_SOURCE_SEQUENCE_FIXTURE, name_filter)
+    ):
+        jobs.append((
+            feature_id,
+            "spread-sequence",
+            SPREAD_SOURCE_SEQUENCE_FIXTURE,
+            (SPREAD_SOURCE_SEQUENCE_FIXTURE,),
+        ))
     with tempfile.TemporaryDirectory(prefix="ring_structural_") as tmpdir:
         temp_root = Path(tmpdir)
         for label, kind, entry, fixtures in jobs:
             if kind == "line":
                 errors = run_c_line_oracle(
                     ring_exe, temp_root, entry, fixtures)
+            elif kind == "closure-env":
+                errors = run_closure_env_rc_oracle(ring_exe, temp_root)
+            elif kind == "spread-sequence":
+                errors = run_spread_source_sequence_oracle(
+                    ring_exe, temp_root)
             else:
                 errors = run_extern_rc_oracle(ring_exe, temp_root)
                 # The existing extern structural job already owns compiler/HIR
@@ -2944,6 +4741,7 @@ def parity_lane_members() -> dict[str, set[str]]:
     """Collect the exact evidence paths owned by each executable runner lane."""
     e2e_paths = discover_positive_cases(CASES_DIR)
     check_paths = discover_negative_cases(CASES_DIR)
+    check_paths.extend(REPO / fixture for fixture in POSITIVE_CHECK_ONLY_CASES)
     for subdir_name in EXTRA_NEG_DIRS:
         e2e_paths.extend(discover_positive_cases(CASES_DIR / subdir_name))
         check_paths.extend(discover_negative_cases(CASES_DIR / subdir_name))
@@ -3285,6 +5083,18 @@ def rc_contract_failure(
     by_category: Dict[str, List[RcFindingLine]] = {}
     for finding in report.findings:
         by_category.setdefault(finding.category, []).append(finding)
+    local_findings = [
+        finding for finding in report.findings
+        if finding.file.replace("\\", "/").lower().endswith(fixture_suffix)
+    ]
+    if (
+        contract.local_finding_exact is not None
+        and len(local_findings) != contract.local_finding_exact
+    ):
+        return (
+            f"expected exactly {contract.local_finding_exact} findings in "
+            f"{contract.fixture}, got {len(local_findings)}"
+        )
     for category, minimum in contract.finding_counts:
         matching = by_category.get(category, [])
         local = [
@@ -3295,6 +5105,13 @@ def rc_contract_failure(
             return (
                 f"expected {category}>={minimum} findings in {contract.fixture}, "
                 f"got {len(local)} local / {len(matching)} total"
+            )
+    for category, expected in contract.global_finding_counts:
+        actual = len(by_category.get(category, []))
+        if actual != expected:
+            return (
+                f"expected exactly {expected} global {category} findings, "
+                f"got {actual}"
             )
     for category, required_lines in contract.finding_lines:
         actual_lines = {
@@ -3359,6 +5176,31 @@ def expected_covered_lanes(
         if evidence in members[membership_lane]:
             return bundle
     return None
+
+
+def positive_check_only_matrix_integrity_errors(rows: List[dict]) -> List[str]:
+    """Require every registered positive check lane member in one matrix row."""
+    errors: List[str] = []
+    for fixture in POSITIVE_CHECK_ONLY_CASES:
+        owners = [
+            row for row in rows
+            if isinstance(row.get("evidence"), list)
+            and fixture in row["evidence"]
+        ]
+        if len(owners) != 1:
+            errors.append(
+                f"positive check-only fixture {fixture} must have exactly one "
+                f"parity matrix row, found {len(owners)}")
+            continue
+        row = owners[0]
+        if row.get("lane") != ["check"]:
+            errors.append(
+                f"{row.get('feature_id')}: positive check-only fixture must use "
+                "the exact check lane")
+        if row.get("status") != "covered":
+            errors.append(
+                f"{row.get('feature_id')}: positive check-only fixture must be covered")
+    return errors
 
 
 def validate_parity_matrix(
@@ -3569,7 +5411,11 @@ def validate_parity_matrix(
                     )
                     continue
                 if lane == "check":
-                    companion = evidence_path.with_suffix(".error")
+                    companion = (
+                        None
+                        if evidence_text in POSITIVE_CHECK_ONLY_CASES
+                        else evidence_path.with_suffix(".error")
+                    )
                 elif lane in {"self-compile-c", "c-structural"}:
                     companion = None
                 else:
@@ -3626,6 +5472,8 @@ def validate_parity_matrix(
             errors.append(f"{label}: gap_scope is only valid for known-gap")
 
         valid_rows.append(row)
+
+    errors.extend(positive_check_only_matrix_integrity_errors(valid_rows))
 
     # Structural fixtures and matrix rows form a closed two-way contract. A
     # newly added fixture, a deleted dependency, or an unrelated row claiming
@@ -3862,10 +5710,32 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             ),
         ),
         RcInvocationContract(
-            "shadow overwrite", "tests/cases/verify_rc/shadow_overwrite.ring",
-            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
-            exempt_counts=(("x-shadow-overwrite", 1),),
-            finding_counts=(("x-shadow-overwrite", 1),),
+            "Move logical Take live", "tests/cases/verify_rc/move_str_take.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "Move logical missing-Take mutation", "tests/cases/verify_rc/move_str_take.ring",
+            ("--verify-rc", "--rc-mutate=missing-take"), False,
+            fatal_min=1, local_finding_exact=1,
+            finding_counts=(("uaf-call-missing-take", 1),),
+            finding_lines=(("uaf-call-missing-take", (26,)),),
+        ),
+        RcInvocationContract(
+            "synthetic scope Move Take live",
+            "tests/cases/verify_rc/synthetic_scope_move_take.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "synthetic scope missing-Take mutation",
+            "tests/cases/verify_rc/synthetic_scope_move_take.ring",
+            ("--verify-rc", "--rc-mutate=missing-take"), False,
+            fatal_min=2, local_finding_exact=2,
+            finding_counts=(("uaf-call-missing-take", 2),),
+            finding_lines=(("uaf-call-missing-take", (10, 18)),),
+        ),
+        RcInvocationContract(
+            "exact-DefId shadowing live", "tests/cases/verify_rc/shadow_overwrite.ring",
+            ("--verify-rc",), True, fatal_exact=0, local_finding_exact=0,
         ),
         RcInvocationContract(
             "control-flow value", "tests/cases/verify_rc/cf_value_leak.ring",
@@ -3886,15 +5756,36 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             finding_counts=(("x-overwrite-param", 1),),
         ),
         RcInvocationContract(
-            "variable overwrite", "tests/cases/verify_rc/overwrite_var.ring",
-            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
-            exempt_counts=(("x-overwrite-var", 1),),
-            finding_counts=(("x-overwrite-var", 1),),
+            "owned variable reassignment live", "tests/cases/verify_rc/overwrite_var.ring",
+            ("--verify-rc",), True, fatal_exact=0, local_finding_exact=0,
         ),
         RcInvocationContract(
-            "spread source", "tests/cases/verify_rc/spread_leak.ring",
-            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
-            exempt_counts=(("x-spread", 1),), finding_counts=(("x-spread", 1),),
+            "spread source live", "tests/cases/verify_rc/spread_leak.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "spread source skip-materialization mutation",
+            "tests/cases/verify_rc/spread_leak.ring",
+            ("--verify-rc", "--rc-mutate=skip-spread-materialization"),
+            False, fatal_exact=4, local_finding_exact=4,
+            finding_counts=(("leak-spread-source", 2), ("leak-temp", 2)),
+            finding_lines=(
+                ("leak-spread-source", (15, 16)),
+                ("leak-temp", (15, 17)),
+            ),
+        ),
+        RcInvocationContract(
+            "mixed spread branch live",
+            "tests/cases/verify_rc/spread_mixed_branch.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "mixed spread branch post-plan mutation",
+            "tests/cases/verify_rc/spread_mixed_branch.ring",
+            ("--verify-rc", "--rc-mutate=mixed-spread-source"),
+            False, fatal_exact=2,
+            finding_counts=(("invalid-spread-source", 2),),
+            finding_lines=(("invalid-spread-source", (28, 39)),),
         ),
         RcInvocationContract(
             "discard owned", "tests/cases/verify_rc/discard_owned.ring",
@@ -3912,22 +5803,101 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             ("--verify-rc",), True, fatal_exact=0,
         ),
         RcInvocationContract(
+            "callee call synthetic metadata strip",
+            "tests/cases/verify_rc/callee_call.ring",
+            ("--verify-rc", "--rc-mutate=strip-anf-callable-metadata"),
+            False, fatal_exact=2,
+            finding_counts=(("uaf-call-contract", 1),),
+            global_finding_counts=(("uaf-call-contract", 2),),
+        ),
+        RcInvocationContract(
+            "callee call synthetic role strip",
+            "tests/cases/verify_rc/callee_call.ring",
+            ("--verify-rc", "--rc-mutate=strip-anf-callable-result-roles"),
+            False, fatal_exact=4,
+            global_finding_counts=(("uaf-call-result-role", 4),),
+        ),
+        RcInvocationContract(
+            "callable metadata live",
+            "tests/cases/verify_rc/callable_metadata_strip.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "callable metadata strip mutation",
+            "tests/cases/verify_rc/callable_metadata_strip.ring",
+            ("--verify-rc", "--rc-mutate=strip-callable-metadata"), False,
+            fatal_min=3,
+            finding_counts=(("uaf-call-contract", 3),),
+        ),
+        RcInvocationContract(
+            "slot result role live",
+            "tests/cases/verify_rc/slot_result_role.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "slot result missing-drop mutation",
+            "tests/cases/verify_rc/slot_result_role.ring",
+            ("--verify-rc", "--rc-mutate=missing-slot-result-drop"),
+            False, fatal_min=1,
+        ),
+        RcInvocationContract(
+            "slot result role-strip mutation",
+            "tests/cases/verify_rc/slot_result_role.ring",
+            ("--verify-rc", "--rc-mutate=strip-callable-result-roles"),
+            False, fatal_min=2,
+        ),
+        RcInvocationContract(
+            "Range loop edges live",
+            "tests/cases/verify_rc/range_loop_edges.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "Range Break cleanup strip mutation",
+            "tests/cases/verify_rc/range_loop_edges.ring",
+            ("--verify-rc", "--rc-mutate=strip-range-break-cleanup"),
+            False, fatal_exact=1,
+            finding_counts=(("leak-loop-exit", 1),),
+        ),
+        RcInvocationContract(
+            "Range Continue cleanup injection mutation",
+            "tests/cases/verify_rc/range_loop_edges.ring",
+            ("--verify-rc", "--rc-mutate=inject-range-continue-cleanup"),
+            False, fatal_exact=1,
+            finding_counts=(("uaf-loop-auto-drop", 1),),
+        ),
+        RcInvocationContract(
+            "owned LIVE/MOVED common Drop",
+            "tests/cases/verify_rc/maybe_moved_common_drop.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "short-circuit condition Take post-unbox Drop",
+            "tests/cases/golden/andor_lower_hotloop.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
             "shadow mismatch lax", "tests/cases/verify_rc/shadow_mismatch.ring",
-            ("--verify-rc",), False, fatal_min=1, exempt_min=1,
-            exempt_counts=(("x-shadow-overwrite", 1),),
-            finding_counts=(("uaf-shadow-mismatch", 1),),
+            ("--verify-rc",), True, fatal_exact=0, local_finding_exact=0,
+            exempt_min=1, exempt_counts=(("x-effect-value", 1),),
         ),
         RcInvocationContract(
             "shadow mismatch strict", "tests/cases/verify_rc/shadow_mismatch.ring",
-            ("--verify-rc-strict",), False, strict=True, fatal_min=1, exempt_min=1,
-            exempt_counts=(("x-shadow-overwrite", 1),),
-            finding_counts=(("uaf-shadow-mismatch", 1), ("x-shadow-overwrite", 1)),
+            ("--verify-rc-strict",), False, strict=True, fatal_exact=0,
+            local_finding_exact=1, exempt_min=1,
+            exempt_counts=(("x-effect-value", 1),),
+            finding_counts=(("x-effect-value", 1),),
+            finding_lines=(("x-effect-value", (13,)),),
         ),
     )
 
     fixture_files = {
         normalized_repo_path(path) for path in RC_NEG_DIR.glob("*.ring")
     } if RC_NEG_DIR.is_dir() else set()
+    # The condition-box ownership contract deliberately reuses the executable
+    # golden fixture whose generated C is checked by the structural lane. Keep
+    # this cross-lane admission exact; arbitrary contracts outside verify_rc/
+    # must still fail the wiring inventory.
+    fixture_files.add("tests/cases/golden/andor_lower_hotloop.ring")
     contracted_files = {contract.fixture for contract in rc_contracts}
     if fixture_files != contracted_files:
         missing = sorted(fixture_files - contracted_files)
@@ -3964,10 +5934,4320 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
 
 
 # ---------------------------------------------------------------------------
+# Callable inference namespace bootstrap regression
+# ---------------------------------------------------------------------------
+
+def callable_inference_limit_source_errors() -> List[str]:
+    """Lock the inference bound inside Ring's exact tagged-Int range."""
+    errors: List[str] = []
+    types_path = REPO / "compiler" / "types.ring"
+    try:
+        source = types_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read compiler/types.ring: {exc}"]
+
+    masked = mask_ring_strings_and_comments(source)
+    limit_matches = re.findall(
+        r"(?m)^[ \t]*pub[ \t]+const[ \t]+"
+        r"CALLABLE_INFERENCE_TERM_LIMIT[ \t]*:[ \t]*Int[ \t]*=[ \t]*"
+        r"(-?[0-9]+)[ \t]*$",
+        masked,
+    )
+    expected = str(CALLABLE_INFERENCE_TERM_LIMIT)
+    if limit_matches != [expected]:
+        errors.append(
+            "compiler/types.ring must define exactly one callable inference "
+            f"limit equal to {expected}; found {limit_matches}"
+        )
+
+    body, extract_error = extract_ring_function_body(
+        source, "fresh_callable_ownership_inference_term")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked_body = mask_ring_strings_and_comments(body)
+        boundary_contracts = (
+            (
+                "exclusive upper-bound guard",
+                r"\bterm[ \t\r\n]*>=[ \t\r\n]*"
+                r"CALLABLE_INFERENCE_TERM_LIMIT\b",
+            ),
+            (
+                "final in-range increment",
+                r"next_callable_inference_term[ \t\r\n]*=[ \t\r\n]*"
+                r"term[ \t\r\n]*\+[ \t\r\n]*1\b",
+            ),
+            (
+                "duplicate-term guard",
+                r"callable_inference_parents[ \t\r\n]*\.[ \t\r\n]*"
+                r"contains_key[ \t\r\n]*\([ \t\r\n]*term[ \t\r\n]*\)",
+            ),
+            ("fail-loud exhaustion", r"\bpanic[ \t\r\n]*\("),
+        )
+        for description, pattern in boundary_contracts:
+            count = len(re.findall(pattern, masked_body))
+            if count != 1:
+                errors.append(
+                    "fresh_callable_ownership_inference_term: "
+                    f"{description} matched {count} times (expected 1)"
+                )
+
+    large_decimal = re.compile(
+        r"(?<![A-Za-z0-9_.])(?P<sign>-?)(?P<digits>[0-9]{16,})"
+        r"(?![A-Za-z0-9_.])"
+    )
+    for path in sorted((REPO / "compiler").glob("*.ring")):
+        try:
+            compiler_source = mask_ring_strings_and_comments(
+                path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"cannot scan {display_path(path)}: {exc}")
+            continue
+        for match in large_decimal.finditer(compiler_source):
+            value = int(match.group("sign") + match.group("digits"))
+            if value < RING_TAGGED_INT_MIN or value > RING_TAGGED_INT_MAX:
+                line = compiler_source.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"{display_path(path)}:{line}: decimal Int literal {value} "
+                    "is outside the exact tagged range "
+                    f"[{RING_TAGGED_INT_MIN}, {RING_TAGGED_INT_MAX}]"
+                )
+    return errors
+
+
+def callable_nominal_walk_body_errors(body: str) -> List[str]:
+    """Validate the reachable nominal walk inside its extracted function body."""
+    errors: List[str] = []
+    masked = mask_ring_strings_and_comments(body)
+
+    def lambda_body_open_after(params_close: int) -> Optional[int]:
+        cursor = params_close + 1
+        while cursor < len(masked) and masked[cursor].isspace():
+            cursor += 1
+        if cursor < len(masked) and masked[cursor] == "{":
+            return cursor
+        if not masked.startswith("->", cursor):
+            return None
+
+        # An annotated lambda has a complete type expression before its body.
+        # Stop on expression/declaration delimiters so a function type cannot
+        # borrow an unrelated later brace.  Record return types and `with {}`
+        # effect rows consume their own balanced braces before the body brace.
+        cursor += 2
+        type_start = cursor
+        round_depth = 0
+        square_depth = 0
+        angle_depth = 0
+        type_started = False
+        while cursor < len(masked):
+            char = masked[cursor]
+            if char == "(":
+                round_depth += 1
+            elif char == ")":
+                if round_depth == 0 and square_depth == 0 and angle_depth == 0:
+                    return None
+                round_depth -= 1
+            elif char == "[":
+                square_depth += 1
+            elif char == "]":
+                if round_depth == 0 and square_depth == 0 and angle_depth == 0:
+                    return None
+                square_depth -= 1
+            elif char == "<":
+                angle_depth += 1
+            elif char == ">" and (cursor == 0 or masked[cursor - 1] != "-"):
+                if angle_depth > 0:
+                    angle_depth -= 1
+            elif (
+                char == "{" and round_depth == 0
+                and square_depth == 0 and angle_depth == 0
+            ):
+                prefix = masked[type_start:cursor].rstrip()
+                if not type_started or re.search(r"\bwith\s*$", prefix):
+                    try:
+                        cursor = matching_delimiter(masked, cursor, "{", "}")
+                    except ValueError:
+                        return None
+                    type_started = True
+                else:
+                    return cursor
+            elif (
+                char in ",=;}" and round_depth == 0
+                and square_depth == 0 and angle_depth == 0
+            ):
+                return None
+            if not char.isspace():
+                type_started = True
+            cursor += 1
+        return None
+
+    # A function type and a lambda both start with `fn(`.  Resolve only an
+    # immediate body (after the optional return type); the old "next brace"
+    # scan could attach a function type to an unrelated later match arm.
+    for match in re.finditer(r"\bfn[ \t\r\n]*\(", masked):
+        params_open = masked.find("(", match.start(), match.end())
+        try:
+            params_close = matching_delimiter(masked, params_open, "(", ")")
+        except ValueError as exc:
+            errors.append(
+                "type_reaches_callable_through_nominals closure: " + str(exc))
+            continue
+        closure_open = lambda_body_open_after(params_close)
+        if closure_open is None:
+            continue
+        try:
+            closure_close = matching_delimiter(
+                masked, closure_open, "{", "}")
+        except ValueError as exc:
+            errors.append(
+                "type_reaches_callable_through_nominals closure: " + str(exc))
+            continue
+        closure_body = masked[closure_open + 1:closure_close]
+        if re.search(r"\bnominal_visited\b", closure_body):
+            line = body.count("\n", 0, match.start()) + 1
+            errors.append(
+                "type_reaches_callable_through_nominals captures mutable "
+                f"nominal_visited in a closure at body line {line}"
+            )
+
+        params = masked[params_open + 1:params_close]
+        if re.search(r"\bnominal_visited\b", params):
+            line = body.count("\n", 0, match.start()) + 1
+            errors.append(
+                "type_reaches_callable_through_nominals shadows mutable "
+                f"nominal_visited in a lambda parameter at body line {line}"
+            )
+
+    outer_matches = top_level_pattern_matches(
+        masked, r"\bmatch[ \t\r\n]+ty[ \t\r\n]*\{")
+    if len(outer_matches) != 1:
+        errors.append(
+            "type_reaches_callable_through_nominals must have exactly one "
+            f"top-level match ty; found {len(outer_matches)}"
+        )
+        return errors
+    outer_prefix = masked[:outer_matches[0].start()]
+    outer_guard = (
+        r"\s*if\s+type_reaches_callable\s*\(\s*ty\s*,\s*subst\s*\)"
+        r"\s*\{\s*return\s+true\s*\}\s*"
+    )
+    if re.fullmatch(outer_guard, outer_prefix, re.DOTALL) is None:
+        errors.append(
+            "type_reaches_callable_through_nominals must begin with the "
+            "exact reachable direct-callable guard before its sole match ty"
+        )
+    outer_open = outer_matches[0].end() - 1
+    try:
+        outer_close = matching_delimiter(masked, outer_open, "{", "}")
+    except ValueError as exc:
+        errors.append(
+            "type_reaches_callable_through_nominals match ty: " + str(exc))
+        return errors
+    if masked[outer_close + 1:].strip():
+        errors.append(
+            "type_reaches_callable_through_nominals match ty must be the "
+            "final top-level expression"
+        )
+    match_body = masked[outer_open + 1:outer_close]
+
+    tail_arms = (
+        (
+            "record",
+            r"Type::RecordType\s*\{\s*fields\s*,\s*tail\s*,\s*\.\.\s*\}"
+            r"\s*=>\s*\{",
+            r"\s*for\s+field\s+in\s+fields\s*\{\s*"
+            r"if\s+type_reaches_callable_through_nominals\s*\(\s*"
+            r"field\.ty\s*,\s*subst\s*,\s*env\s*,\s*"
+            r"nominal_visited\s*\)\s*\{\s*return\s+true\s*\}\s*\}\s*",
+        ),
+        (
+            "effect-row",
+            r"Type::EffectRowType\s*\{\s*effects\s*,\s*tail\s*\}"
+            r"\s*=>\s*\{",
+            r"\s*for\s+eff\s+in\s+effects\s*\{\s*"
+            r"if\s+effect_reaches_callable_through_nominals\s*\(\s*"
+            r"eff\s*,\s*subst\s*,\s*env\s*,\s*"
+            r"nominal_visited\s*\)\s*\{\s*return\s+true\s*\}\s*\}\s*",
+        ),
+    )
+    tail_walk_body = re.compile(
+        r"\s*some\s*\(\s*id\s*\)\s*=>\s*"
+        r"type_reaches_callable_through_nominals\s*\(\s*"
+        r"Type::TypeVar\s*\{\s*id\s*:\s*id\s*,\s*"
+        r"name\s*:\s*none\s*\}\s*,\s*subst\s*,\s*env\s*,\s*"
+        r"nominal_visited\s*\)\s*,\s*"
+        r"none\s*=>\s*false\s*,?\s*",
+        re.DOTALL,
+    )
+    for label, header_pattern, prefix_pattern in tail_arms:
+        headers = top_level_pattern_matches(match_body, header_pattern)
+        if len(headers) != 1:
+            errors.append(
+                "type_reaches_callable_through_nominals must have exactly "
+                f"one {label} arm binding tail; found {len(headers)}"
+            )
+            continue
+        # The header contains the pattern's own `{ ... }`; the regex ends at
+        # the match-arm body opener, so use that final delimiter exactly.
+        arm_open = headers[0].end() - 1
+        try:
+            arm_close = matching_delimiter(match_body, arm_open, "{", "}")
+        except ValueError as exc:
+            errors.append(
+                f"type_reaches_callable_through_nominals {label} arm: {exc}")
+            continue
+        arm_body = match_body[arm_open + 1:arm_close]
+        if re.search(
+            r"\b(?:let|var)\s+(?:mut\s+)?nominal_visited\b", arm_body,
+        ):
+            errors.append(
+                "type_reaches_callable_through_nominals must not shadow "
+                f"nominal_visited in the {label} arm"
+            )
+
+        tail_matches = top_level_pattern_matches(
+            arm_body, r"\bmatch[ \t\r\n]+tail[ \t\r\n]*\{")
+        if len(tail_matches) != 1:
+            errors.append(
+                "type_reaches_callable_through_nominals must have exactly one "
+                f"top-level final match tail in the {label} arm; found "
+                f"{len(tail_matches)}"
+            )
+            continue
+        tail_open = tail_matches[0].end() - 1
+        try:
+            tail_close = matching_delimiter(arm_body, tail_open, "{", "}")
+        except ValueError as exc:
+            errors.append(
+                f"type_reaches_callable_through_nominals {label} tail: {exc}")
+            continue
+        prefix = arm_body[:tail_matches[0].start()]
+        if re.fullmatch(prefix_pattern, prefix, re.DOTALL) is None:
+            errors.append(
+                "type_reaches_callable_through_nominals must keep the exact "
+                f"reachable {label} child walk before its tail"
+            )
+        terminators = top_level_pattern_matches(
+            prefix, r"\b(?:return|break|continue|panic)\b")
+        if terminators:
+            errors.append(
+                "type_reaches_callable_through_nominals has a top-level "
+                f"terminator before the {label} tail walk"
+            )
+        if arm_body[tail_close + 1:].strip():
+            errors.append(
+                "type_reaches_callable_through_nominals must keep the "
+                f"{label} tail walk as the final arm expression"
+            )
+        tail_body = arm_body[tail_open + 1:tail_close]
+        if tail_walk_body.fullmatch(tail_body) is None:
+            errors.append(
+                "type_reaches_callable_through_nominals must recursively walk "
+                f"the bound {label} tail through the same nominal_visited set "
+                "on the reachable some arm"
+            )
+    return errors
+
+
+def callable_nominal_walk_authority_errors(source: str) -> List[str]:
+    """Require the unifier's conservative selector to reach the nominal walk."""
+    errors: List[str] = []
+    masked_source = mask_ring_strings_and_comments(source)
+    walk_header = (
+        r"\bfn\s+type_reaches_callable_through_nominals\s*\(\s*"
+        r"ty\s*:\s*Type\s*,\s*subst\s*:\s*UnionFind\s*,\s*"
+        r"env\s*:\s*TypeEnv\s*,\s*mut\s+nominal_visited\s*:\s*"
+        r"Set\s*<\s*Str\s*>\s*\)\s*->\s*Bool\s*\{"
+    )
+    header_count = len(re.findall(walk_header, masked_source))
+    if header_count != 1:
+        errors.append(
+            "type_reaches_callable_through_nominals must retain one exact "
+            "mutable-visited function header; found "
+            f"{header_count}"
+        )
+    wrapper_body, extract_error = extract_ring_function_body(
+        source, "type_may_hide_callable")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        wrapper_masked = mask_ring_strings_and_comments(wrapper_body)
+        wrapper_contract = (
+            r"\s*if\s*!\s*type_contains_nominal\s*\(\s*ty\s*,\s*subst\s*\)"
+            r"\s*\{\s*return\s+false\s*\}\s*"
+            r"let\s+nominal_visited\s*:\s*Set\s*<\s*Str\s*>\s*=\s*"
+            r"set_new\s*\(\s*\)\s*"
+            r"type_reaches_callable_through_nominals\s*\(\s*"
+            r"ty\s*,\s*subst\s*,\s*env\s*,\s*nominal_visited\s*\)\s*"
+        )
+        if re.fullmatch(wrapper_contract, wrapper_masked, re.DOTALL) is None:
+            errors.append(
+                "type_may_hide_callable must guard on nominal reachability and "
+                "terminally invoke the exact nominal walk with one fresh Set"
+            )
+
+    pair_body, extract_error = extract_ring_function_body(
+        source, "unification_pair_reaches_callable")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        pair_masked = mask_ring_strings_and_comments(pair_body)
+        pair_match_body: Optional[str] = None
+        pair_matches = top_level_pattern_matches(
+            pair_masked,
+            r"\bmatch\s*\(\s*matched_left\s*,\s*matched_right\s*\)\s*\{",
+        )
+        if len(pair_matches) != 1:
+            errors.append(
+                "unification_pair_reaches_callable must have one top-level "
+                "matched-input dispatch; found "
+                f"{len(pair_matches)}"
+            )
+        else:
+            pair_prefix = pair_masked[:pair_matches[0].start()]
+            pair_prefix_contract = (
+                r"\s*let\s+direct_left\s*=\s*left\s*"
+                r"let\s+direct_right\s*=\s*right\s*"
+                r"let\s+hidden_left\s*=\s*left\s*"
+                r"let\s+hidden_right\s*=\s*right\s*"
+                r"let\s+matched_left\s*=\s*left\s*"
+                r"let\s+matched_right\s*=\s*right\s*"
+                r"let\s+forward_struct\s*=\s*left\s*"
+                r"let\s+forward_record\s*=\s*right\s*"
+                r"let\s+reverse_record\s*=\s*left\s*"
+                r"let\s+reverse_struct\s*=\s*right\s*"
+                r"if\s+type_reaches_callable\s*\(\s*direct_left\s*,\s*"
+                r"subst\s*\)\s*\|\|\s*type_reaches_callable\s*\(\s*"
+                r"direct_right\s*,\s*subst\s*\)\s*\{\s*"
+                r"return\s+true\s*\}\s*"
+                r"if\s+type_may_hide_callable\s*\(\s*hidden_left\s*,\s*"
+                r"subst\s*,\s*env\s*\)\s*\|\|\s*"
+                r"type_may_hide_callable\s*\(\s*hidden_right\s*,\s*"
+                r"subst\s*,\s*env\s*\)\s*\{\s*"
+                r"return\s+true\s*\}\s*"
+            )
+            if re.fullmatch(
+                    pair_prefix_contract, pair_prefix, re.DOTALL) is None:
+                errors.append(
+                    "unification_pair_reaches_callable must retain the exact "
+                    "left/right aliases and reachable direct/hidden OR guards "
+                    "before its matched-input dispatch"
+                )
+            pair_open = pair_matches[0].end() - 1
+            try:
+                pair_close = matching_delimiter(
+                    pair_masked, pair_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "unification_pair_reaches_callable matched-input dispatch: "
+                    + str(exc))
+            else:
+                pair_match_body = pair_body[pair_open + 1:pair_close]
+                if ring_contract_tokens(pair_body[pair_close + 1:]):
+                    errors.append(
+                        "unification_pair_reaches_callable matched-input "
+                        "dispatch must be its final expression"
+                    )
+        hidden_guard_pattern = (
+            r"\bif\s+type_may_hide_callable\s*\(\s*hidden_left\s*,\s*"
+            r"subst\s*,\s*env\s*\)\s*\|\|\s*"
+            r"type_may_hide_callable\s*\(\s*hidden_right\s*,\s*"
+            r"subst\s*,\s*env\s*\)\s*\{"
+        )
+        hidden_guards = top_level_pattern_matches(
+            pair_masked, hidden_guard_pattern)
+        if len(hidden_guards) != 1:
+            errors.append(
+                "unification_pair_reaches_callable must keep one reachable "
+                "top-level hidden-left OR hidden-right guard; found "
+                f"{len(hidden_guards)}"
+            )
+        else:
+            guard_open = hidden_guards[0].end() - 1
+            try:
+                guard_close = matching_delimiter(
+                    pair_masked, guard_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "unification_pair_reaches_callable hidden guard: "
+                    + str(exc))
+            else:
+                guard_body = pair_masked[guard_open + 1:guard_close]
+                if re.fullmatch(
+                        r"\s*return\s+true\s*", guard_body) is None:
+                    errors.append(
+                        "unification_pair_reaches_callable hidden graph OR "
+                        "guard must immediately return true"
+                    )
+        hidden_calls = re.findall(
+            r"type_may_hide_callable\s*\(\s*hidden_(left|right)\s*,\s*"
+            r"subst\s*,\s*env\s*\)",
+            pair_masked,
+        )
+        if hidden_calls != ["left", "right"]:
+            errors.append(
+                "unification_pair_reaches_callable must test the complete "
+                "hidden nominal graph of left then right exactly once; found "
+                f"{hidden_calls}"
+            )
+        if pair_match_body is not None:
+            errors.extend(terminal_top_level_ring_expression_wildcard_errors(
+                pair_match_body,
+                "false",
+                "unification_pair_reaches_callable matched-input dispatch",
+            ))
+            pair_headers = (
+                ("left TypeVar", r"\(\s*Type::TypeVar\s*\{\s*id\s*,\s*"
+                 r"\.\.\s*\}\s*,\s*other\s*\)\s*=>"),
+                ("right TypeVar", r"\(\s*other\s*,\s*Type::TypeVar\s*"
+                 r"\{\s*id\s*,\s*\.\.\s*\}\s*\)\s*=>"),
+                ("Struct/Record", r"\(\s*Type::StructType\s*\{\s*\.\.\s*"
+                 r"\}\s*,\s*Type::RecordType\s*\{\s*\.\.\s*\}\s*\)"
+                 r"\s*=>"),
+                ("Record/Struct", r"\(\s*Type::RecordType\s*\{\s*\.\.\s*"
+                 r"\}\s*,\s*Type::StructType\s*\{\s*\.\.\s*\}\s*\)"
+                 r"\s*=>"),
+                ("Struct/Struct", r"\(\s*Type::StructType\s*\{\s*"
+                 r"name\s*:\s*an\s*,\s*type_params\s*:\s*aa\s*\}\s*,\s*"
+                 r"Type::StructType\s*\{\s*name\s*:\s*bn\s*,\s*"
+                 r"type_params\s*:\s*ba\s*\}\s*\)\s*=>"),
+                ("Enum/Enum", r"\(\s*Type::EnumType\s*\{\s*"
+                 r"name\s*:\s*an\s*,\s*type_params\s*:\s*aa\s*\}\s*,\s*"
+                 r"Type::EnumType\s*\{\s*name\s*:\s*bn\s*,\s*"
+                 r"type_params\s*:\s*ba\s*\}\s*\)\s*=>"),
+                ("Generic/Generic", r"\(\s*Type::GenericType\s*\{\s*"
+                 r"base\s*:\s*ab\s*,\s*args\s*:\s*aa\s*\}\s*,\s*"
+                 r"Type::GenericType\s*\{\s*base\s*:\s*bb\s*,\s*"
+                 r"args\s*:\s*ba\s*\}\s*\)\s*=>"),
+                ("Record/Record", r"\(\s*Type::RecordType\s*\{\s*"
+                 r"fields\s*:\s*af\s*,\s*\.\.\s*\}\s*,\s*"
+                 r"Type::RecordType\s*\{\s*fields\s*:\s*bf\s*,\s*"
+                 r"\.\.\s*\}\s*\)\s*=>"),
+                ("EffectRow/EffectRow", r"\(\s*Type::EffectRowType\s*\{\s*"
+                 r"effects\s*:\s*ae\s*,\s*tail\s*:\s*at\s*\}\s*,\s*"
+                 r"Type::EffectRowType\s*\{\s*effects\s*:\s*be\s*,\s*"
+                 r"tail\s*:\s*bt\s*\}\s*\)\s*=>"),
+                ("Tuple/Tuple", r"\(\s*Type::TupleType\s*\{\s*"
+                 r"elements\s*:\s*aa\s*\}\s*,\s*Type::TupleType\s*\{\s*"
+                 r"elements\s*:\s*ba\s*\}\s*\)\s*=>"),
+                ("Ptr/Ptr", r"\(\s*Type::PtrType\s*\{\s*pointee\s*:\s*a"
+                 r"\s*\}\s*,\s*Type::PtrType\s*\{\s*pointee\s*:\s*b\s*"
+                 r"\}\s*\)\s*=>"),
+                ("terminal wildcard", r"(?<![A-Za-z0-9_])_\s*=>"),
+            )
+            errors.extend(exact_top_level_ring_match_arm_headers_errors(
+                pair_match_body,
+                pair_headers,
+                "unification_pair_reaches_callable matched-input dispatch",
+            ))
+    return errors
+
+
+def callable_nominal_walk_source_errors() -> List[str]:
+    """Lock the allocation-safe nominal walk and adversarial source gate."""
+    path = REPO / "compiler" / "unify.ring"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read compiler/unify.ring: {exc}"]
+    body, extract_error = extract_ring_function_body(
+        source, "type_reaches_callable_through_nominals")
+    if extract_error:
+        return [extract_error]
+
+    errors = callable_nominal_walk_body_errors(body)
+    errors.extend(callable_nominal_walk_authority_errors(source))
+    if errors:
+        return errors
+
+    masked = mask_ring_strings_and_comments(body)
+    tail_call_pattern = re.compile(
+        r"type_reaches_callable_through_nominals\s*\(\s*"
+        r"Type::TypeVar\s*\{\s*id\s*:\s*id\s*,\s*"
+        r"name\s*:\s*none\s*\}\s*,\s*subst\s*,\s*env\s*,\s*"
+        r"nominal_visited\s*\)",
+        re.DOTALL,
+    )
+    tail_calls = list(tail_call_pattern.finditer(masked))
+    tail_matches = list(re.finditer(r"\bmatch\s+tail\s*\{", masked))
+    if len(tail_calls) != 2 or len(tail_matches) != 2:
+        return [
+            "type_reaches_callable_through_nominals mutation authority must "
+            f"find two tail calls/matches; found {len(tail_calls)}/"
+            f"{len(tail_matches)}"
+        ]
+
+    def replace_span(start: int, end: int, replacement: str) -> str:
+        return body[:start] + replacement + body[end:]
+
+    outer_matches = top_level_pattern_matches(
+        masked, r"\bmatch[ \t\r\n]+ty[ \t\r\n]*\{")
+    outer_match = outer_matches[0]
+    mutations = [
+        (
+            "record tail removal",
+            replace_span(tail_calls[0].start(), tail_calls[0].end(), "false"),
+        ),
+        (
+            "effect tail removal",
+            replace_span(tail_calls[1].start(), tail_calls[1].end(), "false"),
+        ),
+        (
+            "dead prefix",
+            replace_span(
+                tail_matches[0].start(), tail_matches[0].start(),
+                "return false\n            ",
+            ),
+        ),
+        (
+            "nested always-terminating prefix",
+            replace_span(
+                tail_matches[0].start(), tail_matches[0].start(),
+                "if true { return false }\n            ",
+            ),
+        ),
+        (
+            "fresh nominal_visited shadow",
+            replace_span(
+                tail_matches[1].start(), tail_matches[1].start(),
+                "let nominal_visited = nominal_visited\n            ",
+            ),
+        ),
+        (
+            "visited-set reset",
+            replace_span(
+                tail_matches[1].start(), tail_matches[1].start(),
+                "nominal_visited.clear()\n            ",
+            ),
+        ),
+        (
+            "nested dead tail decoy",
+            replace_span(
+                tail_calls[0].start(), tail_calls[0].end(),
+                "if false { " + tail_calls[0].group(0) + " } else { false }",
+            ),
+        ),
+        (
+            "lambda capture",
+            replace_span(
+                outer_match.start(), outer_match.start(),
+                "let capture_probe = fn() { "
+                "nominal_visited.contains(\"probe\") }\n    ",
+            ),
+        ),
+        (
+            "annotated lambda capture",
+            replace_span(
+                outer_match.start(), outer_match.start(),
+                "let capture_probe = fn() -> Bool { "
+                "nominal_visited.contains(\"probe\") }\n    ",
+            ),
+        ),
+        (
+            "lambda parameter shadow",
+            replace_span(
+                outer_match.start(), outer_match.start(),
+                "let shadow_probe = fn(nominal_visited: Int) { false }\n    ",
+            ),
+        ),
+        (
+            "outer early return",
+            replace_span(
+                outer_match.start(), outer_match.start(),
+                "return false\n    ",
+            ),
+        ),
+        (
+            "outer visited-set reset",
+            replace_span(
+                outer_match.start(), outer_match.start(),
+                "nominal_visited.clear()\n    ",
+            ),
+        ),
+        (
+            "outer match negation",
+            replace_span(
+                outer_match.start(), outer_match.start(), "!"),
+        ),
+    ]
+    initial_guards = top_level_pattern_matches(
+        masked,
+        r"\bif\s+type_reaches_callable\s*\(\s*ty\s*,\s*subst\s*\)"
+        r"\s*\{\s*return\s+true\s*\}",
+    )
+    if len(initial_guards) != 1:
+        errors.append(
+            "type_reaches_callable_through_nominals mutation authority must "
+            f"find one initial direct guard; found {len(initial_guards)}"
+        )
+    else:
+        mutations.append((
+            "disabled initial direct guard",
+            replace_span(
+                initial_guards[0].start(), initial_guards[0].end(),
+                "if false { return true }",
+            ),
+        ))
+    for label, mutated_body in mutations:
+        mutation_errors = callable_nominal_walk_body_errors(mutated_body)
+        if not mutation_errors:
+            errors.append(
+                "type_reaches_callable_through_nominals "
+                f"{label} mutation escaped source gate"
+            )
+
+    tuple_arms = list(re.finditer(
+        r"Type::TupleType\s*\{\s*elements\s*\}\s*=>\s*\{", masked))
+    if len(tuple_arms) != 1:
+        errors.append(
+            "type_reaches_callable_through_nominals mutation authority must "
+            f"find one tuple arm; found {len(tuple_arms)}"
+        )
+    else:
+        function_type_body = replace_span(
+            tuple_arms[0].end(), tuple_arms[0].end(),
+            "\n            let callable_shape: fn(Int) -> Int = "
+            "callable_shape_source",
+        )
+        function_type_errors = callable_nominal_walk_body_errors(
+            function_type_body)
+        if function_type_errors:
+            errors.append(
+                "type_reaches_callable_through_nominals function-type "
+                "lookalike was misclassified as a lambda: "
+                + "; ".join(function_type_errors)
+            )
+
+    authority_call_pattern = re.compile(
+        r"type_reaches_callable_through_nominals\s*\(\s*"
+        r"ty\s*,\s*subst\s*,\s*env\s*,\s*nominal_visited\s*\)")
+    disconnected_wrapper, wrapper_count = authority_call_pattern.subn(
+        "false", source, count=1)
+    hidden_left_pattern = re.compile(
+        r"type_may_hide_callable\s*\(\s*hidden_left\s*,\s*"
+        r"subst\s*,\s*env\s*\)")
+    disconnected_pair, pair_count = hidden_left_pattern.subn(
+        "false", source, count=1)
+    pair_or_pattern = re.compile(
+        r"(type_may_hide_callable\s*\(\s*hidden_left\s*,\s*"
+        r"subst\s*,\s*env\s*\))\s*\|\|\s*"
+        r"(type_may_hide_callable\s*\(\s*hidden_right\s*,\s*"
+        r"subst\s*,\s*env\s*\))")
+    conjunctive_pair, pair_or_count = pair_or_pattern.subn(
+        r"\1 && \2", source, count=1)
+    hidden_right_alias_pattern = re.compile(
+        r"\blet\s+hidden_right\s*=\s*right\b")
+    swapped_hidden_right, hidden_right_count = hidden_right_alias_pattern.subn(
+        "let hidden_right = left", source, count=1)
+    pair_header_pattern = re.compile(
+        r"(fn\s+unification_pair_reaches_callable\s*\(\s*"
+        r"left\s*:\s*Type\s*,\s*right\s*:\s*Type\s*,\s*"
+        r"subst\s*:\s*UnionFind\s*,\s*env\s*:\s*TypeEnv\s*\)"
+        r"\s*->\s*Bool\s*\{)")
+    dead_pair_prefix, pair_header_count = pair_header_pattern.subn(
+        r"\1\n    if true { return false }", source, count=1)
+    walk_header_mode_pattern = re.compile(
+        r"(fn\s+type_reaches_callable_through_nominals\s*\([^)]*?)"
+        r"\bmut\s+nominal_visited\b", re.DOTALL)
+    immutable_header, header_mode_count = walk_header_mode_pattern.subn(
+        r"\1nominal_visited", source, count=1)
+    pair_wildcard_first = source
+    pair_binder_first = source
+    pair_or_prefixed = source
+    pair_wildcard_count = 0
+    pair_binder_count = 0
+    pair_or_prefix_count = 0
+    pair_function_body, pair_extract_error = extract_ring_function_body(
+        source, "unification_pair_reaches_callable")
+    if pair_extract_error:
+        errors.append(pair_extract_error)
+    else:
+        pair_function_masked = mask_ring_strings_and_comments(
+            pair_function_body)
+        pair_dispatches = top_level_pattern_matches(
+            pair_function_masked,
+            r"\bmatch\s*\(\s*matched_left\s*,\s*matched_right\s*\)\s*\{",
+        )
+        if len(pair_dispatches) != 1:
+            errors.append(
+                "unification_pair_reaches_callable wildcard-first mutation "
+                f"found {len(pair_dispatches)} dispatches (expected 1)"
+            )
+        else:
+            pair_open = pair_dispatches[0].end() - 1
+            try:
+                pair_close = matching_delimiter(
+                    pair_function_masked, pair_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "unification_pair_reaches_callable wildcard-first "
+                    f"mutation: {exc}")
+            else:
+                pair_match_body = pair_function_body[
+                    pair_open + 1:pair_close]
+                mutated_match_body, mutation_error = (
+                    move_top_level_ring_expression_wildcard_first(
+                        pair_match_body, "false")
+                )
+                if mutation_error:
+                    errors.append(
+                        "unification_pair_reaches_callable " + mutation_error)
+                elif mutated_match_body is not None:
+                    mutated_pair_body = (
+                        pair_function_body[:pair_open + 1]
+                        + mutated_match_body
+                        + pair_function_body[pair_close:]
+                    )
+                    pair_wildcard_count = source.count(pair_function_body)
+                    if pair_wildcard_count == 1:
+                        pair_wildcard_first = source.replace(
+                            pair_function_body, mutated_pair_body, 1)
+                binder_match_body = (
+                    "\n        (shadow_left, shadow_right) => false,\n"
+                    + pair_match_body
+                )
+                binder_pair_body = (
+                    pair_function_body[:pair_open + 1]
+                    + binder_match_body
+                    + pair_function_body[pair_close:]
+                )
+                pair_binder_count = source.count(pair_function_body)
+                if pair_binder_count == 1:
+                    pair_binder_first = source.replace(
+                        pair_function_body, binder_pair_body, 1)
+                or_prefix_pattern = re.compile(
+                    r"\(\s*Type::StructType\s*\{\s*\.\.\s*\}\s*,\s*"
+                    r"Type::RecordType\s*\{\s*\.\.\s*\}\s*\)\s*=>")
+                or_prefixed_match_body, pair_or_prefix_count = (
+                    or_prefix_pattern.subn(
+                        lambda match: "_ | " + match.group(0),
+                        pair_match_body,
+                        count=1,
+                    )
+                )
+                if pair_or_prefix_count == 1:
+                    or_prefixed_pair_body = (
+                        pair_function_body[:pair_open + 1]
+                        + or_prefixed_match_body
+                        + pair_function_body[pair_close:]
+                    )
+                    if source.count(pair_function_body) == 1:
+                        pair_or_prefixed = source.replace(
+                            pair_function_body, or_prefixed_pair_body, 1)
+    authority_mutations = (
+        ("wrapper disconnect", disconnected_wrapper, wrapper_count, None),
+        ("pair disconnect", disconnected_pair, pair_count, None),
+        ("pair OR weakened to AND", conjunctive_pair, pair_or_count, None),
+        ("hidden-right source swapped", swapped_hidden_right,
+         hidden_right_count, None),
+        ("pair hidden guards made unreachable", dead_pair_prefix,
+         pair_header_count, None),
+        ("mutable visited header removed", immutable_header,
+         header_mode_count, None),
+        ("pair wildcard moved before concrete arms", pair_wildcard_first,
+         pair_wildcard_count,
+         "matched-input dispatch wildcard arm must remain terminal"),
+        ("pair irrefutable binder inserted before concrete arms",
+         pair_binder_first, pair_binder_count,
+         "exact direct arm-header inventory and order"),
+        ("pair Struct/Record arm widened by irrefutable OR-prefix",
+         pair_or_prefixed, pair_or_prefix_count,
+         "direct Struct/Record arm pattern must remain exact"),
+    )
+    for label, mutated_source, count, expected_error in authority_mutations:
+        if count != 1:
+            errors.append(
+                "type_reaches_callable_through_nominals "
+                f"{label} mutation matched {count} times (expected 1)"
+            )
+            continue
+        mutation_errors = callable_nominal_walk_authority_errors(
+            mutated_source)
+        if not mutation_errors:
+            errors.append(
+                "type_reaches_callable_through_nominals "
+                f"{label} mutation escaped authority gate"
+            )
+        elif (expected_error is not None
+              and not any(expected_error in error
+                          for error in mutation_errors)):
+            errors.append(
+                "type_reaches_callable_through_nominals "
+                f"{label} mutation missed targeted gate {expected_error!r}: "
+                f"{mutation_errors}"
+            )
+    return errors
+
+
+def callable_contract_merge_source_errors() -> List[str]:
+    """Keep NoBase absorption explicit for the legacy bootstrap anchor."""
+    path = REPO / "compiler" / "ownership.ring"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read compiler/ownership.ring: {exc}"]
+    body, extract_error = extract_ring_function_body(
+        source, "merge_callable_contract_resolution")
+    if extract_error:
+        return [extract_error]
+
+    masked = mask_ring_strings_and_comments(body)
+    left_count = len(re.findall(
+        r"\(\s*CallableContractResolution::NoBase\s*,\s*_\s*\)\s*=>",
+        masked,
+    ))
+    right_count = len(re.findall(
+        r"\(\s*_\s*,\s*CallableContractResolution::NoBase\s*\)\s*=>",
+        masked,
+    ))
+    errors: List[str] = []
+    if left_count != 1 or right_count != 1:
+        errors.append(
+            "merge_callable_contract_resolution must spell the two NoBase "
+            "absorbing cases as independent match arms; found "
+            f"left={left_count}, right={right_count}"
+        )
+    return errors
+
+
+def direct_drop_duplicate_source_oracles() -> Tuple[List[str], List[str]]:
+    """Lock exact prelude idempotency and fail-loud Drop conflicts."""
+    try:
+        source = (REPO / "compiler" / "codegen_c.ring").read_text(
+            encoding="utf-8")
+        ctx_source = (REPO / "compiler" / "codegen_c_ctx.ring").read_text(
+            encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        detail = f"cannot read direct Drop codegen sources: {exc}"
+        return [detail], [detail]
+
+    register_body, register_error = extract_ring_function_body(
+        source, "register_c_direct_drop_method")
+    equality_body, equality_error = extract_ring_function_body(
+        source, "c_direct_drop_infos_equal")
+    if register_error or equality_error:
+        errors = [error for error in (register_error, equality_error) if error]
+        return errors.copy(), errors.copy()
+
+    positive_errors: List[str] = []
+    negative_errors: List[str] = []
+    register_masked = mask_ring_strings_and_comments(register_body)
+    equality_masked = mask_ring_strings_and_comments(equality_body)
+
+    # Positive oracle: the already-registered arm has only a negated exact
+    # equality guard.  Equality therefore falls through idempotently, while
+    # insertion remains exclusive to the absent-entry arm.
+    duplicate_guard = re.findall(
+        r"some\s*\(\s*existing\s*\)\s*=>\s*\{.*?"
+        r"if\s*!\s*c_direct_drop_infos_equal\s*\(\s*"
+        r"ctx\.merged_ownership_metadata\s*,\s*existing\s*,\s*candidate\s*"
+        r"\)\s*\{\s*panic\s*\(\s*"
+        r"\"unreachable: direct Drop target has multiple destructor HIR roles\""
+        r"\s*\)\s*\}\s*\}",
+        register_body,
+        re.DOTALL,
+    )
+    absent_insert = re.findall(
+        r"none\s*=>\s*ctx\.direct_drop_methods\.insert\s*\(\s*"
+        r"target_type\s*,\s*candidate\s*\)",
+        register_masked,
+    )
+    if len(duplicate_guard) != 1 or len(absent_insert) != 1:
+        positive_errors.append(
+            "exact duplicate must fall through one negated equality guard and "
+            "only an absent declaration may insert; found "
+            f"guard={len(duplicate_guard)}, insert={len(absent_insert)}"
+        )
+
+    # Negative oracle: sharing a C name is insufficient.  Exact registry
+    # identity, arity, checked signature, evidence ABI and destructor role
+    # must all be independent conjunctions before the fail-loud guard above.
+    equality_contracts = (
+        ("exact fn_key", r"\ba\.fn_key\s*==\s*b\.fn_key\b"),
+        ("resolved c_name", r"\ba\.c_name\s*==\s*b\.c_name\b"),
+        ("C ABI arity", r"\ba\.total_params\s*==\s*b\.total_params\b"),
+        (
+            "destructor owner role",
+            r"\ba\.drop_owner_param\s*==\s*b\.drop_owner_param\b",
+        ),
+        (
+            "parameter ownership/role flags",
+            r"\bc_direct_drop_int_lists_equal\s*\(\s*"
+            r"a\.param_flags\s*,\s*b\.param_flags\s*\)",
+        ),
+        (
+            "trait-bound ABI",
+            r"\bc_direct_drop_trait_bounds_equal\s*\(\s*"
+            r"a\.trait_bounds\s*,\s*b\.trait_bounds\s*\)",
+        ),
+        (
+            "effect-evidence ABI",
+            r"\bc_direct_drop_str_lists_equal\s*\(\s*"
+            r"a\.evidence_params\s*,\s*b\.evidence_params\s*\)",
+        ),
+        (
+            "Ring parameter types",
+            r"Type::TupleType\s*\{\s*elements\s*:\s*a\.param_types\s*\}"
+            r"\s*,\s*Type::TupleType\s*\{\s*elements\s*:\s*"
+            r"b\.param_types\s*\}",
+        ),
+        (
+            "Ring return type",
+            r"types_equal_with_ownership\s*\(\s*metadata\s*,\s*"
+            r"a\.return_type\s*,\s*b\.return_type\s*\)",
+        ),
+        (
+            "declared effect signature",
+            r"Type::EffectRowType\s*\{\s*effects\s*:\s*"
+            r"a\.declared_effects\.effects\s*,\s*tail\s*:\s*"
+            r"a\.declared_effects\.tail\s*\}.*?"
+            r"Type::EffectRowType\s*\{\s*effects\s*:\s*"
+            r"b\.declared_effects\.effects\s*,\s*tail\s*:\s*"
+            r"b\.declared_effects\.tail\s*\}",
+        ),
+    )
+    for description, pattern in equality_contracts:
+        count = len(re.findall(pattern, equality_masked, re.DOTALL))
+        if count != 1:
+            negative_errors.append(
+                f"direct Drop conflict oracle {description} matched {count} "
+                "times (expected 1)"
+            )
+
+    info_match = re.search(
+        r"pub\s+struct\s+CDirectDropInfo\s*\{(?P<body>.*?)\}",
+        mask_ring_strings_and_comments(ctx_source),
+        re.DOTALL,
+    )
+    required_fields = {
+        "fn_key", "c_name", "total_params", "param_types", "param_flags",
+        "return_type", "declared_effects", "trait_bounds",
+        "evidence_params", "drop_owner_param",
+    }
+    if info_match is None:
+        negative_errors.append("CDirectDropInfo declaration not found")
+    else:
+        fields = set(re.findall(
+            r"\bpub\s+([A-Za-z_][A-Za-z0-9_]*)\s*:",
+            info_match.group("body"),
+        ))
+        if fields != required_fields:
+            negative_errors.append(
+                "CDirectDropInfo exact field inventory changed: "
+                f"expected {sorted(required_fields)}, found {sorted(fields)}"
+            )
+
+    role_contracts = (
+        r"if\s+drop_owner_param\s*>=\s*0\s*\{\s*panic\s*\(",
+        r"if\s+drop_owner_param\s*!=\s*0\s*\{\s*panic\s*\(",
+    )
+    for pattern in role_contracts:
+        if len(re.findall(pattern, register_masked)) != 1:
+            negative_errors.append(
+                "destructor declaration must reject duplicate or displaced "
+                f"owner roles: missing {pattern}"
+            )
+    return positive_errors, negative_errors
+
+
+def ring_contract_tokens(source: str) -> Tuple[str, ...]:
+    """Return exact Ring syntax tokens after comments/strings are masked."""
+    masked = mask_ring_strings_and_comments(source)
+    return tuple(re.findall(
+        r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|::|->|=>|\.\.|==|!=|"
+        r"<=|>=|\|\||&&|[^\s]",
+        masked,
+    ))
+
+
+def exact_ring_function_contract_errors(
+    source: str,
+    function_name: str,
+    header_pattern: str,
+    expected_body: str,
+    description: str,
+) -> List[str]:
+    """Lock one Ring function's exact header and comment-insensitive body."""
+    errors: List[str] = []
+    masked_source = mask_ring_strings_and_comments(source)
+    header_count = len(re.findall(header_pattern, masked_source, re.DOTALL))
+    if header_count != 1:
+        errors.append(
+            f"{description}: exact function header matched {header_count} "
+            "times (expected 1)"
+        )
+    body, extract_error = extract_ring_function_body(source, function_name)
+    if extract_error:
+        errors.append(extract_error)
+        return errors
+    actual_tokens = ring_contract_tokens(body)
+    expected_tokens = ring_contract_tokens(expected_body)
+    if actual_tokens != expected_tokens:
+        mismatch = next((
+            index for index, (actual, expected) in enumerate(
+                zip(actual_tokens, expected_tokens))
+            if actual != expected
+        ), min(len(actual_tokens), len(expected_tokens)))
+        actual = actual_tokens[mismatch] if mismatch < len(actual_tokens) else "<end>"
+        expected = (
+            expected_tokens[mismatch]
+            if mismatch < len(expected_tokens) else "<end>"
+        )
+        errors.append(
+            f"{description}: exact body token {mismatch} changed "
+            f"(expected {expected!r}, found {actual!r}; "
+            f"lengths {len(expected_tokens)}/{len(actual_tokens)})"
+        )
+    return errors
+
+
+def extract_unique_top_level_ring_brace_body(
+    source: str,
+    header_pattern: str,
+    description: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Extract one direct brace body from an already scoped Ring fragment."""
+    masked = mask_ring_strings_and_comments(source)
+    headers = top_level_pattern_matches(masked, header_pattern)
+    if len(headers) != 1:
+        return None, (
+            f"{description} found {len(headers)} direct bodies (expected 1)"
+        )
+    open_index = headers[0].end() - 1
+    try:
+        close_index = matching_delimiter(masked, open_index, "{", "}")
+    except ValueError as exc:
+        return None, f"{description}: {exc}"
+    return source[open_index + 1:close_index], None
+
+
+def terminal_top_level_ring_expression_wildcard_errors(
+    match_body: str,
+    expression: str,
+    description: str,
+) -> List[str]:
+    """Require one exact expression wildcard as the final direct match arm."""
+    masked = mask_ring_strings_and_comments(match_body)
+    pattern = (
+        r"(?<![A-Za-z0-9_])_\s*=>\s*"
+        + re.escape(expression)
+        + r"\b\s*,?"
+    )
+    matches = top_level_pattern_matches(masked, pattern)
+    if len(matches) != 1:
+        return [
+            f"{description} must retain one direct _ => {expression} arm; "
+            f"found {len(matches)}"
+        ]
+    if ring_contract_tokens(match_body[matches[0].end():]):
+        return [f"{description} wildcard arm must remain terminal"]
+    return []
+
+
+def terminal_top_level_ring_empty_wildcard_errors(
+    match_body: str,
+    description: str,
+) -> List[str]:
+    """Require one exact empty-brace wildcard as the final direct match arm."""
+    masked = mask_ring_strings_and_comments(match_body)
+    headers = top_level_pattern_matches(
+        masked, r"(?<![A-Za-z0-9_])_\s*=>\s*\{")
+    if len(headers) != 1:
+        return [
+            f"{description} must retain one direct _ => {{}} arm; "
+            f"found {len(headers)}"
+        ]
+    arm_open = headers[0].end() - 1
+    try:
+        arm_close = matching_delimiter(masked, arm_open, "{", "}")
+    except ValueError as exc:
+        return [f"{description} wildcard arm: {exc}"]
+    if ring_contract_tokens(match_body[arm_open + 1:arm_close]):
+        return [f"{description} wildcard arm body must remain empty"]
+    suffix_tokens = ring_contract_tokens(match_body[arm_close + 1:])
+    if suffix_tokens not in ((), (",",)):
+        return [f"{description} wildcard arm must remain terminal"]
+    return []
+
+
+def exact_top_level_ring_match_arm_headers_errors(
+    match_body: str,
+    expected_headers: Tuple[Tuple[str, str], ...],
+    description: str,
+) -> List[str]:
+    """Require the exact direct arm-header inventory and order for one match."""
+    masked = mask_ring_strings_and_comments(match_body)
+    expected_arrow_offsets: List[int] = []
+    errors: List[str] = []
+
+    def direct_token_offsets(token: str) -> List[int]:
+        offsets: List[int] = []
+        stack: List[str] = []
+        closing = {"(": ")", "[": "]", "{": "}"}
+        for offset, char in enumerate(masked):
+            if char in closing:
+                stack.append(char)
+            elif char in ")]}":
+                if not stack or closing[stack[-1]] != char:
+                    raise ValueError(
+                        f"unbalanced delimiter {char!r} at offset {offset}")
+                stack.pop()
+            elif not stack and masked.startswith(token, offset):
+                offsets.append(offset)
+        if stack:
+            raise ValueError(
+                f"unclosed delimiter {stack[-1]!r} in direct match body")
+        return offsets
+
+    try:
+        direct_arrows = direct_token_offsets("=>")
+        direct_commas = direct_token_offsets(",")
+    except ValueError as exc:
+        return [f"{description}: {exc}"]
+    arm_starts: Dict[int, int] = {}
+    comma_index = 0
+    previous_separator = -1
+    for arrow_offset in direct_arrows:
+        while (comma_index < len(direct_commas)
+               and direct_commas[comma_index] < arrow_offset):
+            previous_separator = direct_commas[comma_index]
+            comma_index += 1
+        arm_starts[arrow_offset] = previous_separator + 1
+    for label, pattern in expected_headers:
+        matches = top_level_pattern_matches(masked, pattern)
+        if len(matches) != 1:
+            errors.append(
+                f"{description} direct {label} arm matched {len(matches)} "
+                "times (expected 1)"
+            )
+            continue
+        arrow_offset = masked.find("=>", matches[0].start(), matches[0].end())
+        if arrow_offset < 0:
+            errors.append(
+                f"{description} direct {label} arm header lost its arrow")
+            continue
+        expected_arrow_offsets.append(arrow_offset)
+        arm_start = arm_starts.get(arrow_offset)
+        if arm_start is None:
+            errors.append(
+                f"{description} direct {label} arm arrow is not top-level")
+            continue
+        expected_pattern_tokens = ring_contract_tokens(
+            match_body[matches[0].start():arrow_offset])
+        actual_pattern_tokens = ring_contract_tokens(
+            match_body[arm_start:arrow_offset])
+        if actual_pattern_tokens != expected_pattern_tokens:
+            errors.append(
+                f"{description} direct {label} arm pattern must remain exact; "
+                f"expected {expected_pattern_tokens!r}, found "
+                f"{actual_pattern_tokens!r}"
+            )
+    if (len(expected_arrow_offsets) != len(expected_headers)
+            or expected_arrow_offsets != direct_arrows):
+        errors.append(
+            f"{description} must retain the exact direct arm-header inventory "
+            f"and order; expected {len(expected_headers)} arrows, found "
+            f"{len(direct_arrows)}"
+        )
+    return errors
+
+
+def move_top_level_ring_expression_wildcard_first(
+    match_body: str,
+    expression: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Build a compile-plausible mutation that moves one wildcard arm first."""
+    masked = mask_ring_strings_and_comments(match_body)
+    pattern = (
+        r"(?<![A-Za-z0-9_])_\s*=>\s*"
+        + re.escape(expression)
+        + r"\b\s*,?"
+    )
+    matches = top_level_pattern_matches(masked, pattern)
+    if len(matches) != 1:
+        return None, (
+            f"wildcard-first mutation found {len(matches)} direct "
+            f"_ => {expression} arms (expected 1)"
+        )
+    match = matches[0]
+    mutated = (
+        f"\n        _ => {expression},\n"
+        + match_body[:match.start()]
+        + match_body[match.end():]
+    )
+    return mutated, None
+
+
+def move_top_level_ring_empty_wildcard_first(
+    match_body: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Build a compile-plausible mutation that moves one empty wildcard first."""
+    masked = mask_ring_strings_and_comments(match_body)
+    headers = top_level_pattern_matches(
+        masked, r"(?<![A-Za-z0-9_])_\s*=>\s*\{")
+    if len(headers) != 1:
+        return None, (
+            f"wildcard-first mutation found {len(headers)} direct "
+            "_ => {} arms (expected 1)"
+        )
+    arm_open = headers[0].end() - 1
+    try:
+        arm_close = matching_delimiter(masked, arm_open, "{", "}")
+    except ValueError as exc:
+        return None, f"wildcard-first mutation: {exc}"
+    arm_end = arm_close + 1
+    while arm_end < len(masked) and masked[arm_end].isspace():
+        arm_end += 1
+    if arm_end < len(masked) and masked[arm_end] == ",":
+        arm_end += 1
+    mutated = (
+        "\n        _ => {},\n"
+        + match_body[:headers[0].start()]
+        + match_body[arm_end:]
+    )
+    return mutated, None
+
+
+def prelude_ownership_firebreak_source_errors(
+    registration_source: str,
+    checker_source: str,
+) -> List[str]:
+    """Lock trusted prelude registration and exact HIR emission firebreaks."""
+    errors: List[str] = []
+    errors.extend(exact_ring_function_contract_errors(
+        registration_source,
+        "register_prelude_decl_public",
+        r"\bpub\s+fn\s+register_prelude_decl_public\s*\(\s*"
+        r"mut\s+ctx\s*:\s*InferCtx\s*,\s*decl\s*:\s*Decl\s*\)\s*\{",
+        """
+        match decl {
+            Decl::Struct { name, type_params, fields, span, .. } => {
+                if name == BUILTIN_LIST || name == BUILTIN_MAP ||
+                   name == BUILTIN_SET {
+                    let definition_name = name
+                    preregister_struct_definition(
+                        ctx, definition_name, type_params)
+                } else {
+                    preregister_struct(ctx, name, type_params, span)
+                }
+                complete_struct_fields(ctx, name, fields)
+            },
+            _ => register_decl(ctx, decl)
+        }
+        """,
+        "register_prelude_decl_public trusted branch",
+    ))
+    errors.extend(exact_ring_function_contract_errors(
+        registration_source,
+        "preregister_struct",
+        r"\bfn\s+preregister_struct\s*\(\s*mut\s+ctx\s*:\s*InferCtx\s*,"
+        r"\s*name\s*:\s*Str\s*,\s*type_params\s*:\s*"
+        r"List\s*<\s*TypeParam\s*>\s*,\s*span\s*:\s*Span\s*\)\s*\{",
+        """
+        if reject_reserved_ownership_nominal(ctx, name, span) { return }
+        preregister_struct_definition_firebreak(ctx, name, type_params)
+        """,
+        "preregister_struct reserved-name gate",
+    ))
+    errors.extend(exact_ring_function_contract_errors(
+        registration_source,
+        "preregister_struct_definition_firebreak",
+        r"\bfn\s+preregister_struct_definition_firebreak\s*\(\s*"
+        r"mut\s+ctx\s*:\s*InferCtx\s*,\s*name\s*:\s*Str\s*,\s*"
+        r"type_params\s*:\s*List\s*<\s*TypeParam\s*>\s*\)\s*\{",
+        """
+        let definition_name = name
+        let definition_type_params = type_params
+        preregister_struct_definition(
+            ctx, definition_name, definition_type_params)
+        """,
+        "preregister_struct_definition_firebreak whole-value transfer",
+    ))
+    errors.extend(exact_ring_function_contract_errors(
+        checker_source,
+        "record_emitted_prelude_extern_firebreak",
+        r"\bfn\s+record_emitted_prelude_extern_firebreak\s*\(\s*"
+        r"mut\s+emitted\s*:\s*Set\s*<\s*Int\s*>\s*,\s*"
+        r"def_id\s*:\s*Int\s*\)\s*\{",
+        """
+        let emitted_def_id = def_id
+        emitted.insert(emitted_def_id)
+        """,
+        "record_emitted_prelude_extern_firebreak exact DefId",
+    ))
+    errors.extend(exact_ring_function_contract_errors(
+        checker_source,
+        "append_prelude_extern_hdecl_firebreak",
+        r"\bfn\s+append_prelude_extern_hdecl_firebreak\s*\(\s*"
+        r"mut\s+prelude_hdecls\s*:\s*List\s*<\s*HDecl\s*>\s*,\s*"
+        r"name\s*:\s*Str\s*,\s*abi_name\s*:\s*Str\s*,\s*"
+        r"def_id\s*:\s*Int\?\s*,\s*type_params\s*:\s*"
+        r"List\s*<\s*TypeParam\s*>\s*,\s*params\s*:\s*"
+        r"List\s*<\s*HParam\s*>\s*,\s*return_type\s*:\s*Type\s*,\s*"
+        r"effects\s*:\s*EffectRow\s*,\s*is_pub\s*:\s*Bool\s*,\s*"
+        r"span\s*:\s*Span\s*\)\s*\{",
+        """
+        let emitted_name = name
+        let emitted_abi_name = abi_name
+        let emitted_def_id = def_id
+        let emitted_type_params = type_params
+        let emitted_params = params
+        let emitted_return_type = return_type
+        let emitted_effects = effects
+        let emitted_span = span
+        prelude_hdecls.push(HDecl::ExternFn {
+            name: emitted_name,
+            abi_name: emitted_abi_name,
+            def_id: emitted_def_id,
+            type_params: emitted_type_params,
+            params: emitted_params,
+            return_type: emitted_return_type,
+            effects: emitted_effects,
+            is_pub: is_pub,
+            span: emitted_span
+        })
+        """,
+        "append_prelude_extern_hdecl_firebreak exact HIR payload",
+    ))
+
+    load_body, extract_error = extract_ring_function_body(
+        checker_source, "load_prelude")
+    if extract_error:
+        errors.append(extract_error)
+        return errors
+    masked = mask_ring_strings_and_comments(load_body)
+    outer_std_matches = top_level_pattern_matches(
+        masked, r"\bmatch\s+find_std_dir\s*\(\s*\)\s*\{")
+    if len(outer_std_matches) == 1:
+        outer_open = outer_std_matches[0].end() - 1
+        try:
+            outer_close = matching_delimiter(masked, outer_open, "{", "}")
+        except ValueError as exc:
+            errors.append("load_prelude top-level find_std_dir match: " + str(exc))
+        else:
+            if re.fullmatch(
+                    r"\s*let\s+mut\s+prelude_hdecls\s*:\s*"
+                    r"List\s*<\s*HDecl\s*>\s*=\s*\[\s*\]\s*",
+                    masked[:outer_std_matches[0].start()],
+                    re.DOTALL,
+            ) is None:
+                errors.append(
+                    "load_prelude must begin with its exact result list "
+                    "before the reachable find_std_dir match"
+                )
+            if re.fullmatch(
+                    r"\s*prelude_hdecls\s*",
+                    masked[outer_close + 1:],
+                    re.DOTALL,
+            ) is None:
+                errors.append(
+                    "load_prelude find_std_dir match must be followed only "
+                    "by the final prelude_hdecls result"
+                )
+    if re.search(r"\b(?:return|break|continue)\b", masked):
+        errors.append(
+            "load_prelude must not terminate before its ordered registration "
+            "and HIR-emission phases"
+        )
+    std_match_body, scope_error = extract_unique_top_level_ring_brace_body(
+        load_body,
+        r"\bmatch\s+find_std_dir\s*\(\s*\)\s*\{",
+        "load_prelude top-level find_std_dir match",
+    )
+    if scope_error:
+        errors.append(scope_error)
+        std_match_body = None
+    std_some_body: Optional[str] = None
+    if std_match_body is not None:
+        std_some_body, scope_error = extract_unique_top_level_ring_brace_body(
+            std_match_body,
+            r"\bsome\s*\(\s*std_dir\s*\)\s*=>\s*\{",
+            "load_prelude direct std_dir arm",
+        )
+        if scope_error:
+            errors.append(scope_error)
+    if std_some_body is not None:
+        file_loop_body, scope_error = extract_unique_top_level_ring_brace_body(
+            std_some_body,
+            r"\bfor\s+file\s+in\s*\(\s*STD_FILES\s*\)\s*\{",
+            "load_prelude direct std-file loop",
+        )
+        if scope_error:
+            errors.append(scope_error)
+        else:
+            expected_file_loop = """
+                let file_path = path_join(std_dir, file)
+                if file_exists(file_path) {
+                    let source = read_file(file_path)
+                    let prelude_sink = new_collecting_sink()
+                    let ast = parse(source, file_path, prelude_sink)
+                    for decl in ast.decls {
+                        let canonical_decl =
+                            canonicalize_loaded_prelude_decl_firebreak(decl)
+                        let registration_decl = canonical_decl
+                        register_prelude_decl_public(ctx, registration_decl)
+                        all_prelude_decls.push(canonical_decl)
+                    }
+                }
+            """
+            if (ring_contract_tokens(file_loop_body)
+                    != ring_contract_tokens(expected_file_loop)):
+                errors.append(
+                    "load_prelude direct std-file loop must retain the exact "
+                    "std_dir/file path, read, parse, registration, and append "
+                    "dataflow"
+                )
+            file_body, scope_error = extract_unique_top_level_ring_brace_body(
+                file_loop_body,
+                r"\bif\s+file_exists\s*\(\s*file_path\s*\)\s*\{",
+                "load_prelude direct existing-file branch",
+            )
+            if scope_error:
+                errors.append(scope_error)
+            else:
+                registration_body, scope_error = (
+                    extract_unique_top_level_ring_brace_body(
+                        file_body,
+                        r"\bfor\s+decl\s+in\s+ast\.decls\s*\{",
+                        "load_prelude direct parsed-declaration loop",
+                    )
+                )
+                if scope_error:
+                    errors.append(scope_error)
+                else:
+                    expected_registration = """
+                        let canonical_decl =
+                            canonicalize_loaded_prelude_decl_firebreak(decl)
+                        let registration_decl = canonical_decl
+                        register_prelude_decl_public(ctx, registration_decl)
+                        all_prelude_decls.push(canonical_decl)
+                    """
+                    if (ring_contract_tokens(registration_body)
+                            != ring_contract_tokens(expected_registration)):
+                        errors.append(
+                            "load_prelude parsed-declaration loop must retain "
+                            "the exact canonicalize, register, then append "
+                            "sequence on the same declaration"
+                        )
+    phase_two_body: Optional[str] = None
+    if std_some_body is not None:
+        std_some_masked = mask_ring_strings_and_comments(std_some_body)
+        declared_lists = top_level_pattern_matches(
+            std_some_masked,
+            r"\blet\s+mut\s+all_prelude_decls\s*:\s*"
+            r"List\s*<\s*Decl\s*>\s*=\s*\[\s*\]",
+        )
+        all_decl_bindings = re.findall(
+            r"\b(?:let|var)\s+(?:mut\s+)?all_prelude_decls\b",
+            std_some_masked,
+        )
+        file_loops = top_level_pattern_matches(
+            std_some_masked,
+            r"\bfor\s+file\s+in\s*\(\s*STD_FILES\s*\)\s*\{",
+        )
+        decl_loops = top_level_pattern_matches(
+            std_some_masked,
+            r"\bfor\s+decl\s+in\s+all_prelude_decls\s*\{",
+        )
+        emitted_sets = top_level_pattern_matches(
+            std_some_masked,
+            r"\blet\s+mut\s+emitted_prelude_externs\s*:\s*"
+            r"Set\s*<\s*Int\s*>\s*=\s*set_new\s*\(\s*\)",
+        )
+        if len(all_decl_bindings) != 1:
+            errors.append(
+                "load_prelude must retain exactly one authoritative "
+                "all_prelude_decls binding; found "
+                f"{len(all_decl_bindings)}"
+            )
+        if (len(declared_lists) != 1 or len(file_loops) != 1
+                or len(decl_loops) != 2 or len(emitted_sets) != 1
+                or not (
+                    declared_lists[0].start() < file_loops[0].start()
+                    < decl_loops[0].start() < emitted_sets[0].start()
+                    < decl_loops[1].start()
+                )):
+            errors.append(
+                "load_prelude must retain declared-list -> file collection "
+                "-> phase-one -> emitted-set -> phase-two order; found "
+                f"declared={len(declared_lists)}, files={len(file_loops)}, "
+                f"loops={len(decl_loops)}, sets={len(emitted_sets)}"
+            )
+        else:
+            file_loop_open = file_loops[0].end() - 1
+            phase_one_open = decl_loops[0].end() - 1
+            phase_two_open = decl_loops[1].end() - 1
+            try:
+                file_loop_close = matching_delimiter(
+                    std_some_masked, file_loop_open, "{", "}")
+                phase_one_close = matching_delimiter(
+                    std_some_masked, phase_one_open, "{", "}")
+                phase_two_close = matching_delimiter(
+                    std_some_masked, phase_two_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "load_prelude direct file/phase-one skeleton: "
+                    + str(exc))
+            else:
+                expected_between_file_and_phase_one = """
+                    let map_get_name = map_index_helper_source_name()
+                    let map_get_identity = map_index_helper_identity()
+                    match ctx.env.lookup(map_get_identity) {
+                        some(scheme) => {
+                            let bound_map_get_name = map_get_name
+                            ctx.env.bind(bound_map_get_name, scheme)
+                            record_value_origin(
+                                ctx, map_get_name, map_get_identity)
+                        },
+                        none => {}
+                    }
+                """
+                skeleton_gaps = (
+                    std_some_body[:declared_lists[0].start()],
+                    std_some_body[
+                        declared_lists[0].end():file_loops[0].start()],
+                    std_some_body[
+                        phase_one_close + 1:emitted_sets[0].start()],
+                    std_some_body[
+                        emitted_sets[0].end():decl_loops[1].start()],
+                    std_some_body[phase_two_close + 1:],
+                )
+                if any(ring_contract_tokens(gap) for gap in skeleton_gaps):
+                    errors.append(
+                        "load_prelude phase skeleton must not contain extra "
+                        "statements before collection or between phase-one, "
+                        "emitted-set, and phase-two"
+                    )
+                between_file_and_phase_one = std_some_body[
+                    file_loop_close + 1:decl_loops[0].start()]
+                if (ring_contract_tokens(between_file_and_phase_one)
+                        != ring_contract_tokens(
+                            expected_between_file_and_phase_one)):
+                    errors.append(
+                        "load_prelude phase skeleton must retain the exact "
+                        "Map-index alias publication between file collection "
+                        "and phase-one"
+                    )
+                phase_one_body = std_some_body[
+                    phase_one_open + 1:phase_one_close]
+                expected_phase_one = """
+                    match decl {
+                        Decl::ExternFn { name, params, .. } => {
+                            let exact_origin = prelude_extern_identity(name)
+                            let source = exact_prelude_extern_source(name)
+                            if source == CALLABLE_SOURCE_BUILTIN {
+                                match ctx.env.lookup(name) {
+                                    some(scheme) => {
+                                        let updated =
+                                            update_local_callable_scheme(
+                                                ctx.env, scheme,
+                                                exact_prelude_extern_ownership(
+                                                    ctx.env, name, params),
+                                                source)
+                                        let exact_def_id = match updated.def_id {
+                                            some(id) => id,
+                                            none => panic("")
+                                        }
+                                        set_callable_result_role(
+                                            ctx.env.types.ownership_metadata,
+                                            exact_def_id,
+                                            exact_prelude_extern_result_role(
+                                                name))
+                                        rebind_prelude_extern_firebreak(
+                                            ctx, name, updated)
+                                    },
+                                    none => panic("")
+                                }
+                            }
+                            record_value_origin(ctx, name, exact_origin)
+                        },
+                        _ => {}
+                    }
+                """
+                if (ring_contract_tokens(phase_one_body)
+                        != ring_contract_tokens(expected_phase_one)):
+                    errors.append(
+                        "load_prelude phase-one loop must retain the exact "
+                        "extern identity, ownership rebind, result-role, and "
+                        "origin publication body"
+                    )
+            loop_open = decl_loops[1].end() - 1
+            try:
+                loop_close = matching_delimiter(
+                    std_some_masked, loop_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "load_prelude direct phase-two declaration loop: "
+                    + str(exc))
+            else:
+                phase_two_body = std_some_body[loop_open + 1:loop_close]
+    decl_match_body: Optional[str] = None
+    if phase_two_body is not None:
+        phase_two_masked = mask_ring_strings_and_comments(phase_two_body)
+        phase_two_matches = top_level_pattern_matches(
+            phase_two_masked, r"\bmatch\s+decl\s*\{")
+        if len(phase_two_matches) == 1:
+            phase_two_match_open = phase_two_matches[0].end() - 1
+            try:
+                phase_two_match_close = matching_delimiter(
+                    phase_two_masked, phase_two_match_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "load_prelude direct phase-two declaration match: "
+                    + str(exc))
+            else:
+                if (ring_contract_tokens(
+                        phase_two_body[:phase_two_matches[0].start()])
+                        or ring_contract_tokens(
+                            phase_two_body[phase_two_match_close + 1:])):
+                    errors.append(
+                        "load_prelude phase-two loop must contain only its "
+                        "direct authoritative match decl expression"
+                    )
+        decl_match_body, scope_error = extract_unique_top_level_ring_brace_body(
+            phase_two_body,
+            r"\bmatch\s+decl\s*\{",
+            "load_prelude direct phase-two declaration match",
+        )
+        if scope_error:
+            errors.append(scope_error)
+        elif decl_match_body is not None:
+            errors.extend(terminal_top_level_ring_empty_wildcard_errors(
+                decl_match_body,
+                "load_prelude phase-two declaration match",
+            ))
+            phase_two_headers = (
+                ("Struct", r"Decl::Struct\s*\{\s*\.\.\s*\}\s*=>"),
+                ("Enum", r"Decl::Enum\s*\{\s*\.\.\s*\}\s*=>"),
+                ("Trait", r"Decl::Trait\s*\{\s*\.\.\s*\}\s*=>"),
+                ("Impl", r"Decl::Impl\s*\{\s*target_type\s*,\s*"
+                 r"type_params\s*,\s*trait_name\s*,\s*methods\s*,\s*"
+                 r"span\s*\}\s*=>"),
+                ("Fn", r"Decl::Fn\s*\{\s*\.\.\s*\}\s*=>"),
+                ("ExternFn", r"Decl::ExternFn\s*\{\s*\.\.\s*\}\s*=>"),
+                ("terminal wildcard", r"(?<![A-Za-z0-9_])_\s*=>"),
+            )
+            errors.extend(exact_top_level_ring_match_arm_headers_errors(
+                decl_match_body,
+                phase_two_headers,
+                "load_prelude phase-two declaration match",
+            ))
+    extern_arm_body: Optional[str] = None
+    if decl_match_body is not None:
+        extern_arm_body, scope_error = extract_unique_top_level_ring_brace_body(
+            decl_match_body,
+            r"Decl::ExternFn\s*\{\s*\.\.\s*\}\s*=>\s*\{",
+            "load_prelude direct ExternFn declaration arm",
+        )
+        if scope_error:
+            errors.append(scope_error)
+    if extern_arm_body is not None:
+        expected_arm = """
+            let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
+            match result {
+                some(HDecl::ExternFn {
+                    name, abi_name, def_id, type_params, params,
+                    return_type, effects, is_pub, span
+                }) => {
+                    let emit = match def_id {
+                        some(id) => {
+                            if emitted_prelude_externs.contains(id) {
+                                false
+                            } else {
+                                record_emitted_prelude_extern_firebreak(
+                                    emitted_prelude_externs, id)
+                                true
+                            }
+                        },
+                        none => true
+                    }
+                    let exact_name = match def_id {
+                        some(id) => match ctx.use_aliases.get(id) {
+                            some(origin) => origin,
+                            none => name
+                        },
+                        none => name
+                    }
+                    if emit {
+                        append_prelude_extern_hdecl_firebreak(
+                            prelude_hdecls, exact_name, abi_name,
+                            def_id, type_params, params,
+                            return_type, effects, is_pub, span)
+                    }
+                },
+                some(_) => {},
+                none => {}
+            }
+        """
+        if (ring_contract_tokens(extern_arm_body)
+                != ring_contract_tokens(expected_arm)):
+            errors.append(
+                "load_prelude direct ExternFn declaration arm must retain "
+                "the exact checked-result, DefId dedupe, canonical-name "
+                "proof, and guarded HIR emission order"
+            )
+    for function_name in (
+        "record_emitted_prelude_extern_firebreak",
+        "append_prelude_extern_hdecl_firebreak",
+    ):
+        count = len(re.findall(
+            rf"\b{function_name}\s*\(", masked))
+        if count != 1:
+            errors.append(
+                f"load_prelude must call {function_name} exactly once; "
+                f"found {count}"
+            )
+    return errors
+
+
+def direct_callable_identity_firebreak_source_errors(source: str) -> List[str]:
+    """Lock the complete HIR If identity join, including its fresh result."""
+    errors: List[str] = []
+    body, extract_error = extract_ring_function_body(
+        source, "hexpr_callable_def_id")
+    if extract_error:
+        return [extract_error]
+    masked = mask_ring_strings_and_comments(body)
+    outer_matches = top_level_pattern_matches(
+        masked, r"\bmatch\s+expr\s*\{")
+    if len(outer_matches) != 1:
+        return [
+            "hexpr_callable_def_id must have one top-level match expr; found "
+            f"{len(outer_matches)}"
+        ]
+    outer_open = outer_matches[0].end() - 1
+    try:
+        outer_close = matching_delimiter(masked, outer_open, "{", "}")
+    except ValueError as exc:
+        return ["hexpr_callable_def_id match expr: " + str(exc)]
+    direct_prefix = masked[:outer_matches[0].start()]
+    if re.fullmatch(
+            r"\s*if\s*!\s*expr_has_reachable_value\s*\(\s*expr\s*\)"
+            r"\s*\{\s*return\s+none\s*\}\s*",
+            direct_prefix,
+            re.DOTALL,
+    ) is None:
+        errors.append(
+            "hexpr_callable_def_id must begin with the exact non-value "
+            "rejection before its reachable match expr"
+        )
+    if masked[outer_close + 1:].strip():
+        errors.append(
+            "hexpr_callable_def_id match expr must be its final top-level "
+            "expression"
+        )
+    match_body_source = body[outer_open + 1:outer_close]
+    match_body = masked[outer_open + 1:outer_close]
+    errors.extend(terminal_top_level_ring_expression_wildcard_errors(
+        match_body_source,
+        "none",
+        "hexpr_callable_def_id match expr",
+    ))
+    direct_headers = (
+        ("Ident", r"HExpr::Ident\s*\{\s*def_id\s*,\s*\.\.\s*\}\s*=>"),
+        ("Lambda", r"HExpr::Lambda\s*\{\s*def_id\s*,\s*\.\.\s*\}\s*=>"),
+        ("Call", r"HExpr::Call\s*\{\s*callable_result_def_id\s*,\s*"
+         r"\.\.\s*\}\s*=>"),
+        ("Block", r"HExpr::Block\s*\{\s*tail\s*,\s*\.\.\s*\}\s*=>"),
+        ("IfExpr", r"HExpr::IfExpr\s*\{\s*then_branch\s*,\s*"
+         r"else_branch\s*,\s*\.\.\s*\}\s*=>"),
+        ("MatchExpr", r"HExpr::MatchExpr\s*\{\s*arms\s*,\s*\.\.\s*\}"
+         r"\s*=>"),
+        ("Clone", r"HExpr::Clone\s*\{\s*inner\s*,\s*\.\.\s*\}\s*=>"),
+        ("UnsafeBlock", r"HExpr::UnsafeBlock\s*\{\s*body\s*,\s*"
+         r"\.\.\s*\}\s*=>"),
+        ("terminal wildcard", r"(?<![A-Za-z0-9_])_\s*=>"),
+    )
+    errors.extend(exact_top_level_ring_match_arm_headers_errors(
+        match_body_source,
+        direct_headers,
+        "hexpr_callable_def_id match expr",
+    ))
+    if_headers = top_level_pattern_matches(
+        match_body,
+        r"HExpr::IfExpr\s*\{\s*then_branch\s*,\s*else_branch\s*,\s*"
+        r"\.\.\s*\}\s*=>\s*\{",
+    )
+    if len(if_headers) != 1:
+        return [
+            "hexpr_callable_def_id must have one exact IfExpr arm; found "
+            f"{len(if_headers)}"
+        ]
+    arm_open = if_headers[0].end() - 1
+    try:
+        arm_close = matching_delimiter(match_body, arm_open, "{", "}")
+    except ValueError as exc:
+        return ["hexpr_callable_def_id IfExpr arm: " + str(exc)]
+    arm_body = match_body[arm_open + 1:arm_close]
+    expected_arm = """
+        let then_id = hexpr_callable_def_id(then_branch)
+        match else_branch {
+            some(branch) => {
+                let else_id = hexpr_callable_def_id(branch)
+                match (then_id, else_id) {
+                    (some(left), some(right)) =>
+                        if left == right {
+                            let owned_left = left
+                            some(owned_left)
+                        } else { none },
+                    (some(left), none) =>
+                        if !expr_has_reachable_value(branch) {
+                            let owned_left = left
+                            some(owned_left)
+                        } else { none },
+                    (none, some(right)) =>
+                        if !expr_has_reachable_value(then_branch) {
+                            let owned_right = right
+                            some(owned_right)
+                        } else { none },
+                    (none, none) => none
+                }
+            },
+            none => none
+        }
+    """
+    if ring_contract_tokens(arm_body) != ring_contract_tokens(expected_arm):
+        errors.append(
+            "hexpr_callable_def_id IfExpr arm must retain the exact "
+            "same-DefId join and fresh selected-result firebreak"
+        )
+    return errors
+
+
+def exact_variant_ctor_identity_firebreak_source_errors(
+    source: str,
+) -> List[str]:
+    """Lock canonical ctor-origin proof before the fresh exact-DefId result."""
+    errors: List[str] = []
+    errors.extend(exact_ring_function_contract_errors(
+        source,
+        "exact_variant_ctor_def_id_result_firebreak",
+        r"\bfn\s+exact_variant_ctor_def_id_result_firebreak\s*\(\s*"
+        r"def_id\s*:\s*Int\s*\)\s*->\s*Int\?\s*\{",
+        """
+        let exact_def_id = def_id
+        some(exact_def_id)
+        """,
+        "exact_variant_ctor_def_id_result_firebreak",
+    ))
+    errors.extend(exact_ring_function_contract_errors(
+        source,
+        "exact_variant_ctor_def_id",
+        r"\bfn\s+exact_variant_ctor_def_id\s*\(\s*env\s*:\s*TypeEnv\s*,"
+        r"\s*def\s*:\s*EnumDef\s*,\s*variant\s*:\s*EnumVariant\s*\)"
+        r"\s*->\s*Int\?\s*\{",
+        """
+        if variant.field_names.is_some() || variant.fields.len() == 0 {
+            return none
+        }
+        let ctor_origin = variant_ctor_name(def.name, variant.name)
+        match env.lookup(ctor_origin) {
+            some(scheme) => match (scheme.def_id, scheme.ty) {
+                (some(def_id), Type::FnType { .. }) => {
+                    match env.types.variant_ctor_origins.get(def_id) {
+                        some(origin) => {
+                            if origin != ctor_origin { panic("") }
+                        },
+                        none => panic("")
+                    }
+                    exact_variant_ctor_def_id_result_firebreak(def_id)
+                },
+                _ => panic("")
+            },
+            none => panic("")
+        }
+        """,
+        "exact_variant_ctor_def_id canonical origin proof",
+    ))
+    errors.extend(exact_ring_function_contract_errors(
+        source,
+        "variant_ctor_scheme",
+        r"\bfn\s+variant_ctor_scheme\s*\(\s*env\s*:\s*TypeEnv\s*,\s*"
+        r"def\s*:\s*EnumDef\s*,\s*variant\s*:\s*EnumVariant\s*\)\s*"
+        r"->\s*TypeScheme\s*\{",
+        """
+        let enum_params = def.type_param_vars.map(fn(id) {
+            Type::TypeVar { id: id, name: none }
+        })
+        let enum_name = def.name
+        let enum_type = Type::EnumType {
+            name: enum_name, type_params: enum_params
+        }
+        let ctor_type = if variant.field_names.is_some() ||
+                           variant.fields.len() == 0 {
+            enum_type
+        } else {
+            let ctor_params = variant.fields
+            Type::FnType {
+                params: ctor_params, return_type: enum_type,
+                meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
+            }
+        }
+        let scheme_type_vars = def.type_param_vars
+        TypeScheme {
+            ty: ctor_type,
+            type_vars: scheme_type_vars,
+            bounds: [],
+            def_id: exact_variant_ctor_def_id(env, def, variant)
+        }
+        """,
+        "variant_ctor_scheme canonical constructor identity",
+    ))
+    scheme_body, extract_error = extract_ring_function_body(
+        source, "variant_ctor_scheme")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        scheme_masked = mask_ring_strings_and_comments(scheme_body)
+        call_count = len(re.findall(
+            r"\bdef_id\s*:\s*exact_variant_ctor_def_id\s*"
+            r"\(\s*env\s*,\s*def\s*,\s*variant\s*\)",
+            scheme_masked,
+        ))
+        if call_count != 1:
+            errors.append(
+                "variant_ctor_scheme must call the canonical exact-identity "
+                f"resolver once; found {call_count}"
+            )
+        if re.search(
+                r"\b(?:let|var|fn)\s+(?:mut\s+)?"
+                r"exact_variant_ctor_def_id\b",
+                scheme_masked):
+            errors.append(
+                "variant_ctor_scheme must not shadow the canonical exact "
+                "variant-constructor identity resolver"
+            )
+    return errors
+
+
+def droppable_producer_lattice_source_errors(
+    perceus_source: str,
+    verify_source: str,
+) -> List[str]:
+    """Lock the independent pre/post-RC droppable-producer lattices."""
+    errors: List[str] = []
+
+    constant_contracts = (
+        (perceus_source, "DROP_PRODUCER_OWNED", 0, "Perceus owned"),
+        (perceus_source, "DROP_PRODUCER_NOOP_NONE", 1, "Perceus none"),
+        (perceus_source, "DROP_PRODUCER_OPAQUE", 2, "Perceus opaque"),
+        (verify_source, "V_DROP_PRODUCER_OWNED", 0, "verifier owned"),
+        (verify_source, "V_DROP_PRODUCER_NOOP_NONE", 1, "verifier none"),
+        (verify_source, "V_DROP_PRODUCER_OPAQUE", 2, "verifier opaque"),
+    )
+    for source, name, value, description in constant_contracts:
+        count = len(re.findall(
+            rf"\bconst\s+{name}\s*:\s*Int\s*=\s*{value}\b",
+            mask_ring_strings_and_comments(source),
+        ))
+        if count != 1:
+            errors.append(
+                f"{description} producer class constant matched {count} "
+                "times (expected 1)"
+            )
+
+    perceus_contracts = (
+        (
+            "merge_droppable_branch_classes",
+            r"\bfn\s+merge_droppable_branch_classes\s*\(\s*"
+            r"classes\s*:\s*List\s*<\s*Int\?\s*>\s*\)\s*"
+            r"->\s*Int\s*\{",
+            """
+                let mut saw_value = false
+                let mut saw_owned = false
+                for maybe_class in classes {
+                    match maybe_class {
+                        some(class) => {
+                            saw_value = true
+                            if class == DROP_PRODUCER_OPAQUE {
+                                return DROP_PRODUCER_OPAQUE
+                            }
+                            if class == DROP_PRODUCER_OWNED {
+                                saw_owned = true
+                            }
+                        },
+                        none => {}
+                    }
+                }
+                if !saw_value {
+                    DROP_PRODUCER_OPAQUE
+                } else if saw_owned {
+                    DROP_PRODUCER_OWNED
+                } else {
+                    DROP_PRODUCER_NOOP_NONE
+                }
+            """,
+            "Perceus droppable producer join",
+        ),
+        (
+            "droppable_branch_producer_class",
+            r"\bfn\s+droppable_branch_producer_class\s*\(\s*"
+            r"body\s*:\s*HExpr\s*,\s*externs\s*:\s*Set\s*<\s*Str\s*>\s*,\s*"
+            r"ownership\s*:\s*OwnershipMetadata\s*\)\s*->\s*Int\?\s*\{",
+            """
+                if expr_diverges(body) {
+                    none
+                } else {
+                    match body {
+                        HExpr::Block { tail, .. } => match tail {
+                            some(value) => some(droppable_producer_class(
+                                value, externs, ownership)),
+                            none => some(DROP_PRODUCER_OPAQUE)
+                        },
+                        _ => some(droppable_producer_class(body, externs, ownership))
+                    }
+                }
+            """,
+            "Perceus droppable branch classifier",
+        ),
+        (
+            "droppable_producer_class",
+            r"\bfn\s+droppable_producer_class\s*\(\s*"
+            r"init\s*:\s*HExpr\s*,\s*externs\s*:\s*Set\s*<\s*Str\s*>\s*,\s*"
+            r"ownership\s*:\s*OwnershipMetadata\s*\)\s*->\s*Int\s*\{",
+            """
+                if !type_is_physical_rc_eligible(hexpr_type(init), externs) {
+                    return DROP_PRODUCER_OPAQUE
+                }
+                if is_option_none_ctor_ident(init) {
+                    return DROP_PRODUCER_NOOP_NONE
+                }
+                match init {
+                    HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
+                        some(other) => merge_droppable_branch_classes([
+                            droppable_branch_producer_class(
+                                then_branch, externs, ownership),
+                            droppable_branch_producer_class(
+                                other, externs, ownership)
+                        ]),
+                        none => DROP_PRODUCER_OPAQUE
+                    },
+                    HExpr::MatchExpr { arms, .. } => {
+                        let mut classes: List<Int?> = []
+                        for arm in arms {
+                            classes.push(droppable_branch_producer_class(
+                                arm.body, externs, ownership))
+                        }
+                        merge_droppable_branch_classes(classes)
+                    },
+                    HExpr::Block { tail, .. } => match tail {
+                        some(value) => droppable_producer_class(
+                            value, externs, ownership),
+                        none => DROP_PRODUCER_OPAQUE
+                    },
+                    _ => if is_droppable_leaf_init(init, externs, ownership) {
+                        DROP_PRODUCER_OWNED
+                    } else {
+                        DROP_PRODUCER_OPAQUE
+                    }
+                }
+            """,
+            "Perceus droppable producer classifier",
+        ),
+        (
+            "is_droppable_init",
+            r"\bfn\s+is_droppable_init\s*\(\s*"
+            r"init\s*:\s*HExpr\s*,\s*externs\s*:\s*Set\s*<\s*Str\s*>\s*,\s*"
+            r"ownership\s*:\s*OwnershipMetadata\s*\)\s*->\s*Bool\s*\{",
+            """
+                droppable_producer_class(init, externs, ownership) ==
+                    DROP_PRODUCER_OWNED
+            """,
+            "Perceus droppable producer wrapper",
+        ),
+    )
+    verify_contracts = (
+        (
+            "v_merge_droppable_branch_classes",
+            r"\bfn\s+v_merge_droppable_branch_classes\s*\(\s*"
+            r"classes\s*:\s*List\s*<\s*Int\?\s*>\s*\)\s*"
+            r"->\s*Int\s*\{",
+            """
+                let mut saw_value = false
+                let mut saw_owned = false
+                for maybe_class in classes {
+                    match maybe_class {
+                        some(class) => {
+                            saw_value = true
+                            if class == V_DROP_PRODUCER_OPAQUE {
+                                return V_DROP_PRODUCER_OPAQUE
+                            }
+                            if class == V_DROP_PRODUCER_OWNED {
+                                saw_owned = true
+                            }
+                        },
+                        none => {}
+                    }
+                }
+                if !saw_value {
+                    V_DROP_PRODUCER_OPAQUE
+                } else if saw_owned {
+                    V_DROP_PRODUCER_OWNED
+                } else {
+                    V_DROP_PRODUCER_NOOP_NONE
+                }
+            """,
+            "verifier droppable producer join",
+        ),
+        (
+            "v_droppable_branch_producer_class",
+            r"\bfn\s+v_droppable_branch_producer_class\s*\(\s*"
+            r"body\s*:\s*HExpr\s*,\s*externs\s*:\s*Set\s*<\s*Str\s*>\s*,\s*"
+            r"ownership\s*:\s*OwnershipMetadata\s*\)\s*->\s*Int\?\s*\{",
+            """
+                if expr_diverges(body) {
+                    none
+                } else {
+                    some(v_droppable_producer_class(body, externs, ownership))
+                }
+            """,
+            "verifier droppable branch classifier",
+        ),
+        (
+            "v_droppable_producer_class",
+            r"\bfn\s+v_droppable_producer_class\s*\(\s*"
+            r"init\s*:\s*HExpr\s*,\s*externs\s*:\s*Set\s*<\s*Str\s*>\s*,\s*"
+            r"ownership\s*:\s*OwnershipMetadata\s*\)\s*->\s*Int\s*\{",
+            """
+                if !type_is_physical_rc_eligible(hexpr_type(init), externs) {
+                    return V_DROP_PRODUCER_OPAQUE
+                }
+                if is_option_none_ctor_ident(init) {
+                    return V_DROP_PRODUCER_NOOP_NONE
+                }
+                match init {
+                    HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
+                        some(other) => v_merge_droppable_branch_classes([
+                            v_droppable_branch_producer_class(
+                                then_branch, externs, ownership),
+                            v_droppable_branch_producer_class(
+                                other, externs, ownership)
+                        ]),
+                        none => V_DROP_PRODUCER_OPAQUE
+                    },
+                    HExpr::MatchExpr { arms, .. } => {
+                        let mut classes: List<Int?> = []
+                        for arm in arms {
+                            classes.push(v_droppable_branch_producer_class(
+                                arm.body, externs, ownership))
+                        }
+                        v_merge_droppable_branch_classes(classes)
+                    },
+                    HExpr::Block { stmts, tail, .. } => match tail {
+                        some(value) => match value {
+                            HExpr::Ident { def_id, .. } => match def_id {
+                                some(id) => match v_block_local_init(stmts, id) {
+                                    some(local_init) => v_droppable_producer_class(
+                                        local_init, externs, ownership),
+                                    none => if is_option_none_ctor_ident(value) {
+                                        V_DROP_PRODUCER_NOOP_NONE
+                                    } else if is_nullary_variant_ctor_ident(value) ||
+                                              is_materialized_fn_value(value) {
+                                        V_DROP_PRODUCER_OWNED
+                                    } else {
+                                        V_DROP_PRODUCER_OPAQUE
+                                    }
+                                },
+                                none => if is_option_none_ctor_ident(value) {
+                                    V_DROP_PRODUCER_NOOP_NONE
+                                } else if is_nullary_variant_ctor_ident(value) ||
+                                          is_materialized_fn_value(value) {
+                                    V_DROP_PRODUCER_OWNED
+                                } else {
+                                    V_DROP_PRODUCER_OPAQUE
+                                }
+                            },
+                            _ => v_droppable_producer_class(
+                                value, externs, ownership)
+                        },
+                        none => V_DROP_PRODUCER_OPAQUE
+                    },
+                    _ => if v_droppable_leaf_init(init, externs, ownership) {
+                        V_DROP_PRODUCER_OWNED
+                    } else {
+                        V_DROP_PRODUCER_OPAQUE
+                    }
+                }
+            """,
+            "verifier droppable producer classifier",
+        ),
+        (
+            "v_droppable_init",
+            r"\bfn\s+v_droppable_init\s*\(\s*"
+            r"init\s*:\s*HExpr\s*,\s*externs\s*:\s*Set\s*<\s*Str\s*>\s*,\s*"
+            r"ownership\s*:\s*OwnershipMetadata\s*\)\s*->\s*Bool\s*\{",
+            """
+                v_droppable_producer_class(init, externs, ownership) ==
+                    V_DROP_PRODUCER_OWNED
+            """,
+            "verifier droppable producer wrapper",
+        ),
+        (
+            "v_block_local_init",
+            r"\bfn\s+v_block_local_init\s*\(\s*"
+            r"stmts\s*:\s*List\s*<\s*HStmt\s*>\s*,\s*"
+            r"def_id\s*:\s*Int\s*\)\s*->\s*HExpr\?\s*\{",
+            """
+                let mut found: HExpr? = none
+                for s in stmts {
+                    match s {
+                        HStmt::Let { def_id: binding_def_id, init, .. } => {
+                            match binding_def_id {
+                                some(actual_def_id) => {
+                                    if actual_def_id == def_id {
+                                        let matched_init = init
+                                        found = some(matched_init)
+                                    }
+                                },
+                                none => {}
+                            }
+                        },
+                        HStmt::Var { def_id: binding_def_id, init, .. } => {
+                            match binding_def_id {
+                                some(actual_def_id) => {
+                                    if actual_def_id == def_id {
+                                        let matched_init = init
+                                        found = some(matched_init)
+                                    }
+                                },
+                                none => {}
+                            }
+                        },
+                        _ => {},
+                    }
+                    if !stmt_reaches_next(s) { return found }
+                }
+                found
+            """,
+            "verifier exact-DefId block-local producer lookup",
+        ),
+    )
+    for function_name, header, body, description in (
+            perceus_contracts + verify_contracts):
+        source = (
+            verify_source if function_name.startswith("v_")
+            else perceus_source
+        )
+        errors.extend(exact_ring_function_contract_errors(
+            source, function_name, header, body, description))
+
+    rc_body, extract_error = extract_ring_function_body(
+        perceus_source, "rc_block_inner")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        expected_tail = ring_contract_tokens("""
+            let tmp_tail = if escape &&
+                    gensym.counters.get(1) != some(1) {
+                HExpr::Take { name: result_name,
+                    source_def_id: result_def_id, ty: result_ty,
+                    effects: te, span: ts }
+            } else {
+                HExpr::Ident { name: result_name,
+                    resolved_name: none, def_id: some(result_def_id),
+                    dict_closure_dicts: none, ty: result_ty,
+                    effects: te, span: ts }
+            }
+        """)
+        actual_tokens = ring_contract_tokens(rc_body)
+        occurrences = sum(
+            actual_tokens[index:index + len(expected_tail)] == expected_tail
+            for index in range(len(actual_tokens) - len(expected_tail) + 1)
+        )
+        if occurrences != 1:
+            errors.append(
+                "rc_block_inner synthetic move-out must retain one exact "
+                "original-escape/mutation-controlled Take-to-Ident contract; "
+                f"found {occurrences}"
+            )
+    return errors
+
+
+def maybe_moved_verifier_source_errors(
+    verify_source: str, *, exercise_mutations: bool = True
+) -> List[str]:
+    """Lock the bounded LIVE/MOVED join and every legal discharge boundary."""
+    errors = exact_ring_function_contract_errors(
+        verify_source,
+        "v_join_binding_state",
+        r"\bfn\s+v_join_binding_state\s*\(\s*kind\s*:\s*Int\s*,\s*"
+        r"left\s*:\s*Int\s*,\s*right\s*:\s*Int\s*\)\s*->\s*"
+        r"\(\s*Int\s*,\s*Bool\s*\)\s*\{",
+        """
+            if !v_state_is_known(left) || !v_state_is_known(right) {
+                panic("unreachable: RC verifier encountered an unknown binding state")
+            }
+            if kind != K_OWNED &&
+               (left == S_MAYBE_MOVED || right == S_MAYBE_MOVED) {
+                panic("unreachable: non-owned RC slot entered MAYBE_MOVED state")
+            }
+            if left == right {
+                return ((left, true))
+            }
+            let left_pending = left == S_LIVE || left == S_MOVED ||
+                left == S_MAYBE_MOVED
+            let right_pending = right == S_LIVE || right == S_MOVED ||
+                right == S_MAYBE_MOVED
+            if kind == K_OWNED && left_pending && right_pending {
+                return ((S_MAYBE_MOVED, true))
+            }
+            ((S_MOVED, false))
+        """,
+        "RC verifier LIVE/MOVED binding-state join",
+    )
+
+    errors.extend(exact_ring_function_contract_errors(
+        verify_source,
+        "v_check_exact_capture_reads",
+        r"\bfn\s+v_check_exact_capture_reads\s*\(\s*body\s*:\s*HExpr\s*,\s*"
+        r"mut\s+ctx\s*:\s*VCtx\s*\)\s*\{",
+        """
+            let mut candidates: Set<Int> = set_new()
+            for candidate in ctx.def_ids {
+                match candidate {
+                    some(def_id) => {
+                        let candidate_def_id = def_id
+                        candidates.insert(candidate_def_id)
+                    },
+                    none => {}
+                }
+            }
+            for capture in collect_exact_free_bindings(body, candidates) {
+                let capture_def_id = capture.def_id
+                let index = v_lookup_def(ctx, capture_def_id)
+                if index >= 0 {
+                    let state = ctx.states[index]
+                    if !v_state_is_known(state) {
+                        panic("unreachable: RC verifier capture read saw unknown state")
+                    }
+                    if state != S_LIVE {
+                        let capture_span = capture.span
+                        v_report(ctx, "uaf-use-after-drop", true,
+                            "capture reads an unavailable slot", capture_span)
+                    }
+                }
+            }
+        """,
+        "capture must reject every non-LIVE joined state",
+    ))
+
+    def direct_if_body_errors(
+        scope: str, header: str, expected_body: str, description: str
+    ) -> List[str]:
+        branch_body, branch_error = extract_unique_top_level_ring_brace_body(
+            scope, header, description)
+        if branch_error:
+            return [branch_error]
+        if ring_contract_tokens(branch_body or "") != ring_contract_tokens(
+                expected_body):
+            return [f"{description} direct branch body must remain exact"]
+        return []
+
+    ident_body, ident_error = extract_ring_function_body(
+        verify_source, "v_ident")
+    if ident_error:
+        errors.append(ident_error)
+    else:
+        errors.extend(direct_if_body_errors(
+            ident_body,
+            r"\bif\s+ctx\.states\s*\[\s*idx\s*\]\s*==\s*"
+            r"S_MAYBE_MOVED\s*\{",
+            """
+                let read_span = span
+                v_report(ctx, "uaf-use-after-drop", true,
+                    "read is not live on every path", read_span)
+                if !type_is_physical_rc_eligible(ty, ctx.externs) {
+                    return CLS_EXCLUDED
+                }
+                return CLS_BORROW
+            """,
+            "read/Take must reject MAYBE_MOVED",
+        ))
+
+    assign_body, assign_error = extract_ring_function_body(
+        verify_source, "v_assign")
+    if assign_error:
+        errors.append(assign_error)
+    else:
+        match_body, match_error = extract_unique_top_level_ring_brace_body(
+            assign_body, r"\bmatch\s+target\s*\{",
+            "assignment target dispatch")
+        if match_error:
+            errors.append(match_error)
+        else:
+            ident_arm, arm_error = extract_unique_top_level_ring_brace_body(
+                match_body or "",
+                r"\bHExpr::Ident\s*\{\s*name\s*,\s*def_id\s*,\s*ty\s*,\s*"
+                r"\.\.\s*\}\s*=>\s*\{",
+                "assignment exact-Ident arm")
+            if arm_error:
+                errors.append(arm_error)
+            else:
+                errors.extend(direct_if_body_errors(
+                    ident_arm or "",
+                    r"\bif\s+ctx\.states\s*\[\s*idx\s*\]\s*==\s*"
+                    r"S_MAYBE_MOVED\s*\{",
+                    """
+                        if ctx.kinds[idx] != K_OWNED {
+                            panic("unreachable: non-owned RC slot entered MAYBE_MOVED state")
+                        }
+                        let overwrite_span = span
+                        v_report(ctx, "rc-imbalance", true,
+                            "assignment overwrites a path-dependent slot",
+                            overwrite_span)
+                    """,
+                    "assignment must reject MAYBE_MOVED",
+                ))
+
+    drop_body, drop_error = extract_ring_function_body(
+        verify_source, "v_drop")
+    if drop_error:
+        errors.append(drop_error)
+    else:
+        errors.extend(direct_if_body_errors(
+            drop_body,
+            r"\bif\s+ctx\.states\s*\[\s*idx\s*\]\s*==\s*"
+            r"S_MAYBE_MOVED\s*\{",
+            """
+                if ctx.kinds[idx] != K_OWNED {
+                    panic("unreachable: non-owned RC slot entered MAYBE_MOVED state")
+                }
+                ctx.states.set(idx, S_DROPPED)
+                return
+            """,
+            "common Drop must be the unique MAYBE_MOVED discharge",
+        ))
+
+    capture_body, capture_error = extract_ring_function_body(
+        verify_source, "v_expr")
+    if capture_error:
+        errors.append(capture_error)
+    elif len(re.findall(
+            r"\bv_check_exact_capture_reads\s*\(",
+            mask_ring_strings_and_comments(capture_body))) != 2:
+        errors.append(
+            "lambda and handler construction must retain two exact capture "
+            "availability checks"
+        )
+
+    # These functions are the complete transition authority for read/Take,
+    # overwrite, and Drop.  Hash the complete normalized function body rather
+    # than a masked/tokenized projection: Ring string interpolation may execute
+    # effectful expressions, so even a standalone string can alter reachability.
+    # Any comment, string, early return, dead wrapper, reordered state check, or
+    # alternate sink must therefore be reviewed as an intentional authority
+    # change. Path.read_text already normalizes CRLF to LF for stable hashing.
+    exact_transition_headers = {
+        "v_ident": (
+            r"\bfn\s+v_ident\s*\(\s*name\s*:\s*Str\s*,\s*"
+            r"def_id\s*:\s*Int\?\s*,\s*ty\s*:\s*Type\s*,\s*"
+            r"span\s*:\s*Span\s*,\s*mode\s*:\s*Int\s*,\s*"
+            r"mut\s+ctx\s*:\s*VCtx\s*\)\s*->\s*Int\s*\{"),
+        "v_assign": (
+            r"\bfn\s+v_assign\s*\(\s*target\s*:\s*HExpr\s*,\s*"
+            r"value\s*:\s*HExpr\s*,\s*span\s*:\s*Span\s*,\s*"
+            r"mut\s+ctx\s*:\s*VCtx\s*\)\s*\{"),
+        "v_drop": (
+            r"\bfn\s+v_drop\s*\(\s*name\s*:\s*Str\s*,\s*"
+            r"def_id\s*:\s*Int\s*,\s*span\s*:\s*Span\s*,\s*"
+            r"mut\s+ctx\s*:\s*VCtx\s*\)\s*\{"),
+    }
+    masked_verify_source = mask_ring_strings_and_comments(verify_source)
+    for function_name, header_pattern in exact_transition_headers.items():
+        header_count = len(re.findall(
+            header_pattern, masked_verify_source, re.DOTALL))
+        if header_count != 1:
+            errors.append(
+                f"{function_name} transition header changed: "
+                f"found {header_count} exact headers (expected 1)"
+            )
+
+    exact_transition_digests = {
+        "v_ident": "18D89D61F2AC0D304F98A89AB4D4E8365578A388BC69751CF79E29BEFE1F96F4",
+        "v_assign": "8D8B2412A8D7B0CD9911E34AD84EE4B273C76E809F8609EAF7EA4BB41C8DF595",
+        "v_drop": "D9E4B00BC9DA92AF12A9193DB6E6FD666A8A20F7EEEB6D3928E968CEC15FE9D0",
+    }
+    for function_name, expected_digest in exact_transition_digests.items():
+        function_body, function_error = extract_ring_function_body(
+            verify_source, function_name)
+        if function_error:
+            errors.append(function_error)
+            continue
+        actual_digest = hashlib.sha256(
+            function_body.encode("utf-8")).hexdigest().upper()
+        if actual_digest != expected_digest:
+            errors.append(
+                f"{function_name} whole transition authority changed: "
+                f"expected {expected_digest}, found {actual_digest}"
+            )
+
+    if exercise_mutations:
+        mutation_specs = (
+            (
+                "overbroad-kind", "v_join_binding_state",
+                r"\bif\s+kind\s*==\s*K_OWNED\s*&&\s*left_pending\s*&&\s*"
+                r"right_pending\s*\{", "binding-state join",
+            ),
+            (
+                "dead capture", "v_check_exact_capture_reads",
+                r"\bif\s+state\s*!=\s*S_LIVE\s*\{",
+                "capture must reject",
+            ),
+            (
+                "dead read", "v_ident",
+                r"\bif\s+ctx\.states\s*\[\s*idx\s*\]\s*==\s*"
+                r"S_MAYBE_MOVED\s*\{", "read/Take must reject",
+            ),
+            (
+                "dead assignment", "v_assign",
+                r"\bif\s+ctx\.states\s*\[\s*idx\s*\]\s*==\s*"
+                r"S_MAYBE_MOVED\s*\{", "assignment must reject",
+            ),
+            (
+                "dead Drop", "v_drop",
+                r"\bif\s+ctx\.states\s*\[\s*idx\s*\]\s*==\s*"
+                r"S_MAYBE_MOVED\s*\{", "common Drop must",
+            ),
+        )
+        for label, function_name, header, expected_error in mutation_specs:
+            function_body, function_error = extract_ring_function_body(
+                verify_source, function_name)
+            if function_error:
+                errors.append(function_error)
+                continue
+            masked_body = mask_ring_strings_and_comments(function_body)
+            matches = list(re.finditer(header, masked_body, re.DOTALL))
+            if len(matches) != 1:
+                errors.append(
+                    f"MAYBE_MOVED {label} mutation found {len(matches)} "
+                    "target blocks (expected 1)"
+                )
+                continue
+            open_index = matches[0].end() - 1
+            try:
+                close_index = matching_delimiter(
+                    masked_body, open_index, "{", "}")
+            except ValueError as exc:
+                errors.append(f"MAYBE_MOVED {label} mutation: {exc}")
+                continue
+            mutated_body = (
+                function_body[:matches[0].start()]
+                + "if false {\n"
+                + function_body[matches[0].start():close_index + 1]
+                + "\n}"
+                + function_body[close_index + 1:]
+            )
+            mutated = verify_source.replace(
+                function_body, mutated_body, 1)
+            mutation_errors = maybe_moved_verifier_source_errors(
+                mutated, exercise_mutations=False)
+            if not any(expected_error in error for error in mutation_errors):
+                errors.append(
+                    f"MAYBE_MOVED {label} mutation escaped targeted "
+                    f"contract {expected_error!r}: {mutation_errors}"
+                )
+        prefix_mutation_specs = (
+            ("v_ident", "return CLS_BORROW\n", "v_ident whole transition"),
+            ("v_assign", "return\n", "v_assign whole transition"),
+            ("v_drop", "return\n", "v_drop whole transition"),
+            (
+                "v_ident", '"${panic(name)}"\n',
+                "v_ident whole transition",
+            ),
+            ("v_ident", '"probe"\n', "v_ident whole transition"),
+        )
+        for function_name, prefix, expected_error in prefix_mutation_specs:
+            function_body, function_error = extract_ring_function_body(
+                verify_source, function_name)
+            if function_error:
+                errors.append(function_error)
+                continue
+            mutated_body = prefix + function_body
+            mutated = verify_source.replace(
+                function_body, mutated_body, 1)
+            mutation_errors = maybe_moved_verifier_source_errors(
+                mutated, exercise_mutations=False)
+            if not any(expected_error in error for error in mutation_errors):
+                errors.append(
+                    f"MAYBE_MOVED {function_name} prefix mutation "
+                    f"escaped whole transition authority: {mutation_errors}"
+                )
+        original_assign_header = (
+            "fn v_assign(target: HExpr, value: HExpr, span: Span, "
+            "mut ctx: VCtx)")
+        swapped_assign_header = (
+            "fn v_assign(value: HExpr, target: HExpr, span: Span, "
+            "mut ctx: VCtx)")
+        if verify_source.count(original_assign_header) != 1:
+            errors.append(
+                "MAYBE_MOVED v_assign formal-swap mutation found "
+                f"{verify_source.count(original_assign_header)} exact headers "
+                "(expected 1)"
+            )
+        else:
+            mutated = verify_source.replace(
+                original_assign_header, swapped_assign_header, 1)
+            mutation_errors = maybe_moved_verifier_source_errors(
+                mutated, exercise_mutations=False)
+            if not any(
+                    "v_assign transition header changed" in error
+                    for error in mutation_errors):
+                errors.append(
+                    "MAYBE_MOVED v_assign formal-swap mutation escaped "
+                    f"transition header authority: {mutation_errors}"
+                )
+    return errors
+
+
+def maybe_moved_fixture_source_errors() -> List[str]:
+    """Keep every control-flow shape that exercises the bounded join live."""
+    path = REPO / "tests" / "cases" / "verify_rc" / "maybe_moved_common_drop.ring"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read {display_path(path)}: {exc}"]
+    contracts = (
+        (
+            "if_let_common_drop",
+            r"\bfn\s+if_let_common_drop\s*\(\s*flag\s*:\s*Bool\s*\)\s*\{",
+            """
+                let value = Resource { id: 4 }
+                let marker = if flag { some(1) } else { none }
+                if let some(_) = marker {
+                    let moved = consume(value)
+                    print(moved.id)
+                }
+            """,
+            "IfLet LIVE/MOVED common Drop fixture",
+        ),
+        (
+            "nested_break_common_drop",
+            r"\bfn\s+nested_break_common_drop\s*\(\s*outer\s*:\s*Bool\s*,\s*"
+            r"inner\s*:\s*Bool\s*\)\s*\{",
+            """
+                let value = Resource { id: 6 }
+                while outer {
+                    while inner {
+                        let moved = consume(value)
+                        print(moved.id)
+                        break
+                    }
+                    break
+                }
+            """,
+            "nested Break LIVE/MOVED common Drop fixture",
+        ),
+        (
+            "multiple_break_common_drop",
+            r"\bfn\s+multiple_break_common_drop\s*\(\s*run\s*:\s*Bool\s*,\s*"
+            r"take_first\s*:\s*Bool\s*\)\s*\{",
+            """
+                let value = Resource { id: 7 }
+                while run {
+                    if take_first {
+                        let moved = consume(value)
+                        print(moved.id)
+                        break
+                    }
+                    break
+                }
+            """,
+            "multiple Break LIVE/MOVED common Drop fixture",
+        ),
+        (
+            "main",
+            r"\bfn\s+main\s*\(\s*\)\s*\{",
+            """
+                if_common_drop(true)
+                if_common_drop(false)
+                match_common_drop(0)
+                match_common_drop(1)
+                guard_common_drop(0)
+                guard_common_drop(1)
+                if_let_common_drop(true)
+                if_let_common_drop(false)
+                break_common_drop(true)
+                break_common_drop(false)
+                nested_break_common_drop(true, true)
+                nested_break_common_drop(true, false)
+                nested_break_common_drop(false, true)
+                multiple_break_common_drop(true, true)
+                multiple_break_common_drop(true, false)
+                multiple_break_common_drop(false, true)
+            """,
+            "LIVE/MOVED fixture call matrix",
+        ),
+    )
+    errors: List[str] = []
+    for function_name, header, body, description in contracts:
+        errors.extend(exact_ring_function_contract_errors(
+            source, function_name, header, body, description))
+    return errors
+
+
+def ownership_bootstrap_transition_source_errors() -> List[str]:
+    """Lock the narrow prelude and fresh-value ownership transition."""
+    errors: List[str] = []
+    paths = {
+        "registration": REPO / "compiler" / "infer_register.ring",
+        "checker": REPO / "compiler" / "checker.ring",
+        "hir": REPO / "compiler" / "hir.ring",
+        "ownership": REPO / "compiler" / "ownership.ring",
+        "infer_ctx": REPO / "compiler" / "infer_ctx.ring",
+        "perceus": REPO / "compiler" / "perceus.ring",
+        "verify_rc": REPO / "compiler" / "verify_rc.ring",
+        "exports": REPO / "compiler" / "exports.ring",
+        "runtime": REPO / "ring_runtime.cpp",
+        "list": REPO / "std" / "list.ring",
+        "map": REPO / "std" / "map.ring",
+        "result": REPO / "std" / "result.ring",
+        "set": REPO / "std" / "set.ring",
+    }
+    sources: Dict[str, str] = {}
+    for label, path in paths.items():
+        try:
+            sources[label] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"cannot read {display_path(path)}: {exc}")
+    if errors:
+        return errors
+
+    errors.extend(prelude_ownership_firebreak_source_errors(
+        sources["registration"], sources["checker"]))
+    errors.extend(droppable_producer_lattice_source_errors(
+        sources["perceus"], sources["verify_rc"]))
+    errors.extend(maybe_moved_verifier_source_errors(sources["verify_rc"]))
+    errors.extend(maybe_moved_fixture_source_errors())
+
+    const_body, extract_error = extract_ring_function_body(
+        sources["registration"], "register_const")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        count = len(re.findall(
+            r"\brecord_callable_ownership\s*\(\s*"
+            r"ctx\.env\.types\.ownership_metadata\s*,\s*did\s*,\s*"
+            r"CALLABLE_BORROW_OWNED\s*,\s*CALLABLE_SOURCE_DECLARED\s*\)",
+            mask_ring_strings_and_comments(const_body),
+        ))
+        if count != 1:
+            errors.append(
+                "register_const must publish one exact zero-argument getter "
+                f"descriptor; found {count}"
+            )
+
+    load_body, extract_error = extract_ring_function_body(
+        sources["checker"], "load_prelude")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(load_body)
+        count = len(re.findall(
+            r"\bregister_prelude_decl_public\s*\(", masked))
+        if count != 1:
+            errors.append(
+                "load_prelude must use register_prelude_decl_public exactly "
+                f"once; found {count}"
+            )
+        dedupe_contracts = (
+            (
+                "final-DefId set",
+                r"\blet\s+mut\s+emitted_prelude_externs\s*:\s*"
+                r"Set\s*<\s*Int\s*>\s*=\s*set_new\s*\(\s*\)",
+            ),
+            (
+                "duplicate test",
+                r"\bemitted_prelude_externs\.contains\s*\(\s*id\s*\)",
+            ),
+        )
+        for description, pattern in dedupe_contracts:
+            count = len(re.findall(pattern, masked))
+            if count != 1:
+                errors.append(
+                    f"load_prelude extern dedupe {description} matched "
+                    f"{count} times (expected 1)"
+                )
+
+    expected_duplicate_externs = {
+        "ring_buf_alloc": ("list.ring", "map.ring", "str.ring"),
+        "ring_buf_copy_at": ("list.ring", "str.ring"),
+        "ring_buf_dealloc": ("list.ring", "map.ring", "str.ring"),
+        "ring_buf_set_byte": ("map.ring", "str.ring"),
+        "ring_slot_alloc": ("list.ring", "map.ring"),
+        "ring_slot_dealloc": ("list.ring", "map.ring"),
+        "ring_slot_drop": ("list.ring", "map.ring"),
+        "ring_slot_read": ("list.ring", "map.ring"),
+        "ring_slot_replace": ("list.ring", "map.ring"),
+        "ring_slot_take": ("list.ring", "map.ring"),
+        "ring_slot_write": ("list.ring", "map.ring"),
+        "ring_str_as_ptr": ("list.ring", "str.ring"),
+        "ring_str_from_ptr": ("list.ring", "str.ring"),
+    }
+    extern_sources: Dict[str, List[str]] = {}
+    for path in sorted((REPO / "std").glob("*.ring")):
+        try:
+            masked = mask_ring_strings_and_comments(
+                path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"cannot inventory {display_path(path)}: {exc}")
+            continue
+        for name in re.findall(
+                r"(?m)^\s*extern\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+                masked):
+            extern_sources.setdefault(name, []).append(path.name)
+    duplicate_externs = {
+        name: tuple(files)
+        for name, files in sorted(extern_sources.items())
+        if len(files) > 1
+    }
+    if duplicate_externs != expected_duplicate_externs:
+        errors.append(
+            "prelude duplicate extern inventory changed: "
+            f"expected {expected_duplicate_externs}, found {duplicate_externs}"
+        )
+
+    clone_body, clone_error = extract_c_function_body(
+        sources["runtime"], "ring_cl_clone_rc")
+    if clone_error:
+        errors.append(clone_error)
+    elif (len(re.findall(r"\bring_dup\s*\(\s*val\s*\)", clone_body)) != 1
+          or len(re.findall(r"\breturn\s+val\s*;", clone_body)) != 1):
+        errors.append(
+            "primitive Clone closure must duplicate and return its exact value")
+    clone_dict_body, clone_dict_error = extract_c_function_body(
+        sources["runtime"], "ring_make_clone_dict")
+    if clone_dict_error:
+        errors.append(clone_dict_error)
+    elif len(re.findall(
+            r"d\s*\[\s*0\s*\]\s*=\s*ring_make_closure\s*\(\s*"
+            r"\(\s*void\s*\*\s*\)\s*ring_cl_clone_rc\s*\)",
+            mask_c_strings_and_comments(clone_dict_body))) != 1:
+        errors.append(
+            "primitive Clone dictionary must publish ring_cl_clone_rc at slot 0")
+    if len(re.findall(
+            r"\bhas_trait_suffix\s*\(\s*\"Clone\"\s*\)",
+            sources["runtime"])) != 1:
+        errors.append(
+            "ring_get_builtin_dict must dispatch exact primitive Clone once")
+
+    pattern_body, extract_error = extract_ring_function_body(
+        sources["ownership"], "register_pattern_slots")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(pattern_body)
+        borrowed = len(re.findall(
+            r"\bregister_slot\s*\(\s*plan\s*,\s*binding\.def_id\s*,"
+            r"\s*true\s*,",
+            masked,
+        ))
+        if borrowed != 1:
+            errors.append(
+                "register_pattern_slots must retain exactly one borrowed slot "
+                f"registration; found {borrowed}"
+            )
+
+    none_body, extract_error = extract_ring_function_body(
+        sources["hir"], "is_option_none_ctor_ident")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(none_body)
+        name_count = len(re.findall(
+            r"\bname\s*==\s*BUILTIN_OPTION\b", masked))
+        identity_count = len(re.findall(
+            r"\brn\s*==\s*variant_ctor_name\s*"
+            r"\(\s*BUILTIN_OPTION\s*,\s*\"none\"\s*\)",
+            none_body,
+        ))
+        if name_count != 1 or identity_count != 1:
+            errors.append(
+                "is_option_none_ctor_ident lost exact Option identity "
+                f"contract: name={name_count}, identity={identity_count}"
+            )
+    for function_name, source_label in (
+        ("move_edge_has_reachable_bare_binding", "hir"),
+        ("plan_expr", "ownership"),
+        ("anf_should_materialize", "perceus"),
+        ("is_owner_bearing", "perceus"),
+        ("droppable_producer_class", "perceus"),
+        ("is_droppable_leaf_init", "perceus"),
+        ("v_droppable_producer_class", "verify_rc"),
+        ("v_droppable_leaf_init", "verify_rc"),
+        ("v_expr", "verify_rc"),
+    ):
+        function_body, extract_error = extract_ring_function_body(
+            sources[source_label], function_name)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        count = len(re.findall(
+            r"\bis_option_none_ctor_ident\s*\(\s*(?:expr|init)\s*\)",
+            mask_ring_strings_and_comments(function_body),
+        ))
+        if count != 1:
+            errors.append(
+                f"{function_name} must classify exact Option::none once; "
+                f"found {count}"
+            )
+
+    identity_sources_body, extract_error = extract_ring_function_body(
+        sources["ownership"], "collect_callable_identity_sources")
+    if extract_error:
+        errors.append(extract_error)
+    elif len(re.findall(
+            r"if\s*!\s*expr_has_reachable_value\s*\(\s*expr\s*\)\s*"
+            r"\{\s*return\s+true\s*\}",
+            mask_ring_strings_and_comments(identity_sources_body))) != 1:
+        errors.append(
+            "callable identity collection must treat non-value paths as neutral")
+
+    direct_identity_body, extract_error = extract_ring_function_body(
+        sources["hir"], "hexpr_callable_def_id")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(direct_identity_body)
+        if len(re.findall(
+                r"if\s*!\s*expr_has_reachable_value\s*\(\s*expr\s*\)\s*"
+                r"\{\s*return\s+none\s*\}", masked)) != 1:
+            errors.append(
+                "direct callable identity must reject non-value expressions")
+    errors.extend(direct_callable_identity_firebreak_source_errors(
+        sources["hir"]))
+    errors.extend(exact_variant_ctor_identity_firebreak_source_errors(
+        sources["exports"]))
+
+    # Keep the exact firebreak validators adversarial: each mutation preserves
+    # plausible Ring syntax while breaking one ownership/identity authority.
+    mutation_specs = (
+        (
+            "Option none droppable producer class",
+            "perceus",
+            "return DROP_PRODUCER_NOOP_NONE",
+            "return DROP_PRODUCER_OPAQUE",
+            lambda mutated: droppable_producer_lattice_source_errors(
+                mutated, sources["verify_rc"]),
+            "Perceus droppable producer classifier",
+        ),
+        (
+            "verifier exact-DefId block lookup",
+            "verify_rc",
+            "v_block_local_init(stmts, id)",
+            "v_block_local_init(stmts, id + 1)",
+            lambda mutated: droppable_producer_lattice_source_errors(
+                sources["perceus"], mutated),
+            "verifier droppable producer classifier",
+        ),
+        (
+            "verifier Let DefId comparison remains borrowed",
+            "verify_rc",
+            "HStmt::Let { def_id: binding_def_id, init, .. } => {\n"
+            "                match binding_def_id {\n"
+            "                    some(actual_def_id) => {\n"
+            "                        if actual_def_id == def_id {\n"
+            "                            let matched_init = init\n"
+            "                            found = some(matched_init)\n"
+            "                        }\n"
+            "                    },\n"
+            "                    none => {}\n"
+            "                }\n"
+            "            },",
+            "HStmt::Let { def_id: binding_def_id, init, .. } => {\n"
+            "                if binding_def_id == some(def_id) {\n"
+            "                    let matched_init = init\n"
+            "                    found = some(matched_init)\n"
+            "                }\n"
+            "            },",
+            lambda mutated: droppable_producer_lattice_source_errors(
+                sources["perceus"], mutated),
+            "verifier exact-DefId block-local producer lookup",
+        ),
+        (
+            "verifier Var DefId comparison remains borrowed",
+            "verify_rc",
+            "HStmt::Var { def_id: binding_def_id, init, .. } => {\n"
+            "                match binding_def_id {\n"
+            "                    some(actual_def_id) => {\n"
+            "                        if actual_def_id == def_id {\n"
+            "                            let matched_init = init\n"
+            "                            found = some(matched_init)\n"
+            "                        }\n"
+            "                    },\n"
+            "                    none => {}\n"
+            "                }\n"
+            "            },",
+            "HStmt::Var { def_id: binding_def_id, init, .. } => {\n"
+            "                if binding_def_id == some(def_id) {\n"
+            "                    let matched_init = init\n"
+            "                    found = some(matched_init)\n"
+            "                }\n"
+            "            },",
+            lambda mutated: droppable_producer_lattice_source_errors(
+                sources["perceus"], mutated),
+            "verifier exact-DefId block-local producer lookup",
+        ),
+        (
+            "synthetic scope original escape",
+            "perceus",
+            "if escape && gensym.counters.get(1) != some(1)",
+            "if tail_escape && gensym.counters.get(1) != some(1)",
+            lambda mutated: droppable_producer_lattice_source_errors(
+                mutated, sources["verify_rc"]),
+            "rc_block_inner synthetic move-out",
+        ),
+        (
+            "trusted prelude set",
+            "registration",
+            "name == BUILTIN_LIST || name == BUILTIN_MAP ||\n"
+            "               name == BUILTIN_SET",
+            "name == BUILTIN_LIST || name == BUILTIN_MAP",
+            lambda mutated: prelude_ownership_firebreak_source_errors(
+                mutated, sources["checker"]),
+            "register_prelude_decl_public trusted branch",
+        ),
+        (
+            "reserved-name early return",
+            "registration",
+            "if reject_reserved_ownership_nominal(ctx, name, span) { return }\n"
+            "    preregister_struct_definition_firebreak("
+            "ctx, name, type_params)",
+            "if reject_reserved_ownership_nominal(ctx, name, span) {}\n"
+            "    preregister_struct_definition_firebreak("
+            "ctx, name, type_params)",
+            lambda mutated: prelude_ownership_firebreak_source_errors(
+                mutated, sources["checker"]),
+            "preregister_struct reserved-name gate",
+        ),
+        (
+            "emitted extern exact DefId",
+            "checker",
+            "record_emitted_prelude_extern_firebreak(\n"
+            "                                                "
+            "emitted_prelude_externs, id)",
+            "record_emitted_prelude_extern_firebreak(\n"
+            "                                                "
+            "emitted_prelude_externs, id + 1)",
+            lambda mutated: prelude_ownership_firebreak_source_errors(
+                sources["registration"], mutated),
+            "load_prelude direct ExternFn declaration arm",
+        ),
+        (
+            "guarded HIR exact name",
+            "checker",
+            "prelude_hdecls, exact_name, abi_name",
+            "prelude_hdecls, name, abi_name",
+            lambda mutated: prelude_ownership_firebreak_source_errors(
+                sources["registration"], mutated),
+            "load_prelude direct ExternFn declaration arm",
+        ),
+        (
+            "prelude file-path authority",
+            "checker",
+            "let file_path = path_join(std_dir, file)",
+            "let file_path = path_join(file, file)",
+            lambda mutated: prelude_ownership_firebreak_source_errors(
+                sources["registration"], mutated),
+            "load_prelude direct std-file loop",
+        ),
+        (
+            "prelude parse-source authority",
+            "checker",
+            "let ast = parse(source, file_path, prelude_sink)",
+            "let ast = parse(file_path, file_path, prelude_sink)",
+            lambda mutated: prelude_ownership_firebreak_source_errors(
+                sources["registration"], mutated),
+            "load_prelude direct std-file loop",
+        ),
+        (
+            "prelude registration reachability",
+            "checker",
+            "register_prelude_decl_public(ctx, registration_decl)",
+            "if false {\n"
+            "                            register_prelude_decl_public("
+            "ctx, registration_decl)\n"
+            "                        }",
+            lambda mutated: prelude_ownership_firebreak_source_errors(
+                sources["registration"], mutated),
+            "load_prelude parsed-declaration loop",
+        ),
+        (
+            "direct callable mixed identity",
+            "hir",
+            "if left == right {",
+            "if left != right {",
+            direct_callable_identity_firebreak_source_errors,
+            "hexpr_callable_def_id IfExpr arm",
+        ),
+        (
+            "direct callable match reachability",
+            "hir",
+            "if !expr_has_reachable_value(expr) { return none }\n"
+            "    match expr {",
+            "if !expr_has_reachable_value(expr) { return none }\n"
+            "    if true { return none }\n"
+            "    match expr {",
+            direct_callable_identity_firebreak_source_errors,
+            "hexpr_callable_def_id must begin",
+        ),
+        (
+            "variant constructor result identity",
+            "exports",
+            "exact_variant_ctor_def_id_result_firebreak(def_id)",
+            "exact_variant_ctor_def_id_result_firebreak("
+            "variant.fields.len())",
+            exact_variant_ctor_identity_firebreak_source_errors,
+            "exact_variant_ctor_def_id canonical origin proof",
+        ),
+        (
+            "variant constructor resolver shadow",
+            "exports",
+            "let ctor_params = variant.fields",
+            "let exact_variant_ctor_def_id = fn(\n"
+            "            env: TypeEnv, def: EnumDef, variant: EnumVariant\n"
+            "        ) -> Int? { none }\n"
+            "        let ctor_params = variant.fields",
+            exact_variant_ctor_identity_firebreak_source_errors,
+            "variant_ctor_scheme must not shadow",
+        ),
+    )
+    for label, source_label, old, new, validator, expected_error in mutation_specs:
+        count = sources[source_label].count(old)
+        if count != 1:
+            errors.append(
+                f"ownership bootstrap {label} mutation matched {count} "
+                "times (expected 1)"
+            )
+            continue
+        mutated = sources[source_label].replace(old, new, 1)
+        mutation_errors = validator(mutated)
+        if not mutation_errors:
+            errors.append(
+                f"ownership bootstrap {label} mutation escaped source gate"
+            )
+        elif not any(expected_error in error for error in mutation_errors):
+            errors.append(
+                f"ownership bootstrap {label} mutation missed its targeted "
+                f"gate {expected_error!r}: {mutation_errors}"
+            )
+
+    direct_body, direct_extract_error = extract_ring_function_body(
+        sources["hir"], "hexpr_callable_def_id")
+    if direct_extract_error:
+        errors.append(direct_extract_error)
+    else:
+        direct_masked = mask_ring_strings_and_comments(direct_body)
+        direct_matches = top_level_pattern_matches(
+            direct_masked, r"\bmatch\s+expr\s*\{")
+        if len(direct_matches) != 1:
+            errors.append(
+                "ownership bootstrap callable wildcard-first mutation found "
+                f"{len(direct_matches)} direct matches (expected 1)"
+            )
+        else:
+            direct_open = direct_matches[0].end() - 1
+            try:
+                direct_close = matching_delimiter(
+                    direct_masked, direct_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "ownership bootstrap callable wildcard-first mutation: "
+                    + str(exc))
+            else:
+                direct_match_body = direct_body[
+                    direct_open + 1:direct_close]
+                mutated_match_body, mutation_error = (
+                    move_top_level_ring_expression_wildcard_first(
+                        direct_match_body, "none")
+                )
+                if mutation_error:
+                    errors.append(
+                        "ownership bootstrap callable " + mutation_error)
+                elif mutated_match_body is not None:
+                    mutated_direct_body = (
+                        direct_body[:direct_open + 1]
+                        + mutated_match_body
+                        + direct_body[direct_close:]
+                    )
+                    direct_body_count = sources["hir"].count(direct_body)
+                    if direct_body_count != 1:
+                        errors.append(
+                            "ownership bootstrap callable wildcard-first "
+                            f"mutation matched {direct_body_count} function "
+                            "bodies (expected 1)"
+                        )
+                    else:
+                        mutated_hir = sources["hir"].replace(
+                            direct_body, mutated_direct_body, 1)
+                        mutation_errors = (
+                            direct_callable_identity_firebreak_source_errors(
+                                mutated_hir)
+                        )
+                        expected_error = (
+                            "hexpr_callable_def_id match expr wildcard arm "
+                            "must remain terminal"
+                        )
+                        if not mutation_errors:
+                            errors.append(
+                                "ownership bootstrap callable wildcard-first "
+                                "mutation escaped source gate"
+                            )
+                        elif not any(
+                                expected_error in error
+                                for error in mutation_errors):
+                            errors.append(
+                                "ownership bootstrap callable wildcard-first "
+                                "mutation missed its terminal-arm gate: "
+                                f"{mutation_errors}"
+                            )
+                binder_match_body = (
+                    "\n        shadow_expr => none,\n" + direct_match_body)
+                binder_direct_body = (
+                    direct_body[:direct_open + 1]
+                    + binder_match_body
+                    + direct_body[direct_close:]
+                )
+                direct_body_count = sources["hir"].count(direct_body)
+                if direct_body_count != 1:
+                    errors.append(
+                        "ownership bootstrap callable binder-first mutation "
+                        f"matched {direct_body_count} function bodies "
+                        "(expected 1)"
+                    )
+                else:
+                    binder_hir = sources["hir"].replace(
+                        direct_body, binder_direct_body, 1)
+                    mutation_errors = (
+                        direct_callable_identity_firebreak_source_errors(
+                            binder_hir)
+                    )
+                    expected_error = (
+                        "hexpr_callable_def_id match expr must retain the "
+                        "exact direct arm-header inventory and order"
+                    )
+                    if not mutation_errors:
+                        errors.append(
+                            "ownership bootstrap callable binder-first "
+                            "mutation escaped source gate"
+                        )
+                    elif not any(
+                            expected_error in error
+                            for error in mutation_errors):
+                        errors.append(
+                            "ownership bootstrap callable binder-first "
+                            "mutation missed its arm-inventory gate: "
+                            f"{mutation_errors}"
+                        )
+
+                clone_header_pattern = re.compile(
+                    r"HExpr::Clone\s*\{\s*inner\s*,\s*\.\.\s*\}\s*=>")
+                or_prefixed_match_body, clone_prefix_count = (
+                    clone_header_pattern.subn(
+                        lambda match: "inner | " + match.group(0),
+                        direct_match_body,
+                        count=1,
+                    )
+                )
+                if clone_prefix_count != 1:
+                    errors.append(
+                        "ownership bootstrap callable OR-prefix mutation "
+                        f"matched {clone_prefix_count} Clone arms (expected 1)"
+                    )
+                else:
+                    or_prefixed_direct_body = (
+                        direct_body[:direct_open + 1]
+                        + or_prefixed_match_body
+                        + direct_body[direct_close:]
+                    )
+                    direct_body_count = sources["hir"].count(direct_body)
+                    if direct_body_count != 1:
+                        errors.append(
+                            "ownership bootstrap callable OR-prefix mutation "
+                            f"matched {direct_body_count} function bodies "
+                            "(expected 1)"
+                        )
+                    else:
+                        or_prefixed_hir = sources["hir"].replace(
+                            direct_body, or_prefixed_direct_body, 1)
+                        mutation_errors = (
+                            direct_callable_identity_firebreak_source_errors(
+                                or_prefixed_hir)
+                        )
+                        expected_error = (
+                            "hexpr_callable_def_id match expr direct Clone arm "
+                            "pattern must remain exact"
+                        )
+                        if not mutation_errors:
+                            errors.append(
+                                "ownership bootstrap callable OR-prefix "
+                                "mutation escaped source gate"
+                            )
+                        elif not any(
+                                expected_error in error
+                                for error in mutation_errors):
+                            errors.append(
+                                "ownership bootstrap callable OR-prefix "
+                                "mutation missed its exact-pattern gate: "
+                                f"{mutation_errors}"
+                            )
+
+    load_body, load_error = extract_ring_function_body(
+        sources["checker"], "load_prelude")
+    if load_error:
+        errors.append(load_error)
+    else:
+        load_masked = mask_ring_strings_and_comments(load_body)
+        extern_headers = list(re.finditer(
+            r"Decl::ExternFn\s*\{\s*\.\.\s*\}\s*=>\s*\{",
+            load_masked,
+        ))
+        if len(extern_headers) != 1:
+            errors.append(
+                "ownership bootstrap checked-ExternFn dead-decoy mutation "
+                f"found {len(extern_headers)} source arms (expected 1)"
+            )
+        else:
+            arm_open = extern_headers[0].end() - 1
+            try:
+                arm_close = matching_delimiter(
+                    load_masked, arm_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "ownership bootstrap checked-ExternFn mutation: "
+                    + str(exc))
+            else:
+                original_arm = load_body[
+                    extern_headers[0].start():arm_close + 1]
+                dead_decoy_arm = (
+                    "Decl::ExternFn { .. } => {\n"
+                    "    let result = some(check_prelude_decl(ctx, decl)) "
+                    "catch { _ => none }\n"
+                    "    match result { some(_) => {}, none => {} }\n"
+                    "    if false { match decl {\n"
+                    + original_arm
+                    + ",\n        _ => {}\n    } }\n}"
+                )
+                mutated_load = (
+                    load_body[:extern_headers[0].start()]
+                    + dead_decoy_arm
+                    + load_body[arm_close + 1:]
+                )
+                mutated_checker = sources["checker"].replace(
+                    load_body, mutated_load, 1)
+                mutation_errors = prelude_ownership_firebreak_source_errors(
+                    sources["registration"], mutated_checker)
+                expected_error = (
+                    "load_prelude direct ExternFn declaration arm")
+                if not mutation_errors:
+                    errors.append(
+                        "ownership bootstrap checked-ExternFn move-to-dead-"
+                        "decoy mutation escaped source gate"
+                    )
+                elif not any(
+                        expected_error in error for error in mutation_errors):
+                    errors.append(
+                        "ownership bootstrap checked-ExternFn move-to-dead-"
+                        "decoy mutation missed its direct-arm gate: "
+                        f"{mutation_errors}"
+                    )
+
+        file_headers = list(re.finditer(
+            r"\bfor\s+file\s+in\s*\(\s*STD_FILES\s*\)\s*\{",
+            load_masked,
+        ))
+        phase_headers = list(re.finditer(
+            r"\bfor\s+decl\s+in\s+all_prelude_decls\s*\{",
+            load_masked,
+        ))
+        if len(file_headers) != 1 or len(phase_headers) != 2:
+            errors.append(
+                "ownership bootstrap phase-order mutation authority found "
+                f"files={len(file_headers)}, phases={len(phase_headers)} "
+                "(expected 1/2)"
+            )
+        else:
+            file_open = file_headers[0].end() - 1
+            phase_two_open = phase_headers[1].end() - 1
+            try:
+                file_close = matching_delimiter(
+                    load_masked, file_open, "{", "}")
+                phase_two_close = matching_delimiter(
+                    load_masked, phase_two_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "ownership bootstrap phase-order mutation: " + str(exc))
+            else:
+                file_segment = load_body[
+                    file_headers[0].start():file_close + 1]
+                reordered_load = (
+                    load_body[:file_headers[0].start()]
+                    + load_body[file_close + 1:phase_two_close + 1]
+                    + "\n            " + file_segment
+                    + load_body[phase_two_close + 1:]
+                )
+                reordered_checker = sources["checker"].replace(
+                    load_body, reordered_load, 1)
+                mutation_errors = prelude_ownership_firebreak_source_errors(
+                    sources["registration"], reordered_checker)
+                expected_error = (
+                    "load_prelude must retain declared-list -> file "
+                    "collection -> phase-one -> emitted-set -> phase-two "
+                    "order"
+                )
+                if not mutation_errors:
+                    errors.append(
+                        "ownership bootstrap file-loop-after-phase-two "
+                        "mutation escaped source gate"
+                    )
+                elif not any(
+                        expected_error in error for error in mutation_errors):
+                    errors.append(
+                        "ownership bootstrap file-loop-after-phase-two "
+                        "mutation missed its order gate: "
+                        f"{mutation_errors}"
+                    )
+
+                phase_two_body = load_body[
+                    phase_two_open + 1:phase_two_close]
+                phase_two_masked = mask_ring_strings_and_comments(
+                    phase_two_body)
+                declaration_matches = top_level_pattern_matches(
+                    phase_two_masked, r"\bmatch\s+decl\s*\{")
+                if len(declaration_matches) != 1:
+                    errors.append(
+                        "ownership bootstrap phase-two wildcard-first "
+                        f"mutation found {len(declaration_matches)} direct "
+                        "matches (expected 1)"
+                    )
+                else:
+                    declaration_open = declaration_matches[0].end() - 1
+                    try:
+                        declaration_close = matching_delimiter(
+                            phase_two_masked, declaration_open, "{", "}")
+                    except ValueError as exc:
+                        errors.append(
+                            "ownership bootstrap phase-two wildcard-first "
+                            f"mutation: {exc}")
+                    else:
+                        declaration_body = phase_two_body[
+                            declaration_open + 1:declaration_close]
+                        mutated_declaration_body, mutation_error = (
+                            move_top_level_ring_empty_wildcard_first(
+                                declaration_body)
+                        )
+                        if mutation_error:
+                            errors.append(
+                                "ownership bootstrap phase-two "
+                                + mutation_error)
+                        elif mutated_declaration_body is not None:
+                            mutated_phase_two = (
+                                phase_two_body[:declaration_open + 1]
+                                + mutated_declaration_body
+                                + phase_two_body[declaration_close:]
+                            )
+                            mutated_load = (
+                                load_body[:phase_two_open + 1]
+                                + mutated_phase_two
+                                + load_body[phase_two_close:]
+                            )
+                            mutated_checker = sources["checker"].replace(
+                                load_body, mutated_load, 1)
+                            mutation_errors = (
+                                prelude_ownership_firebreak_source_errors(
+                                    sources["registration"], mutated_checker)
+                            )
+                            expected_error = (
+                                "load_prelude phase-two declaration match "
+                                "wildcard arm must remain terminal"
+                            )
+                            if not mutation_errors:
+                                errors.append(
+                                    "ownership bootstrap phase-two wildcard-"
+                                    "first mutation escaped source gate"
+                                )
+                            elif not any(
+                                    expected_error in error
+                                    for error in mutation_errors):
+                                errors.append(
+                                    "ownership bootstrap phase-two wildcard-"
+                                    "first mutation missed its terminal-arm "
+                                    f"gate: {mutation_errors}"
+                                )
+                        binder_declaration_body = (
+                            "\n                    shadow_decl => {},\n"
+                            + declaration_body
+                        )
+                        binder_phase_two = (
+                            phase_two_body[:declaration_open + 1]
+                            + binder_declaration_body
+                            + phase_two_body[declaration_close:]
+                        )
+                        binder_load = (
+                            load_body[:phase_two_open + 1]
+                            + binder_phase_two
+                            + load_body[phase_two_close:]
+                        )
+                        binder_checker = sources["checker"].replace(
+                            load_body, binder_load, 1)
+                        mutation_errors = (
+                            prelude_ownership_firebreak_source_errors(
+                                sources["registration"], binder_checker)
+                        )
+                        expected_error = (
+                            "load_prelude phase-two declaration match must "
+                            "retain the exact direct arm-header inventory "
+                            "and order"
+                        )
+                        if not mutation_errors:
+                            errors.append(
+                                "ownership bootstrap phase-two binder-first "
+                                "mutation escaped source gate"
+                            )
+                        elif not any(
+                                expected_error in error
+                                for error in mutation_errors):
+                            errors.append(
+                                "ownership bootstrap phase-two binder-first "
+                                "mutation missed its arm-inventory gate: "
+                                f"{mutation_errors}"
+                            )
+
+                        struct_header_pattern = re.compile(
+                            r"Decl::Struct\s*\{\s*\.\.\s*\}\s*=>")
+                        or_prefixed_declaration_body, struct_prefix_count = (
+                            struct_header_pattern.subn(
+                                lambda match: "_ | " + match.group(0),
+                                declaration_body,
+                                count=1,
+                            )
+                        )
+                        if struct_prefix_count != 1:
+                            errors.append(
+                                "ownership bootstrap phase-two OR-prefix "
+                                f"mutation matched {struct_prefix_count} "
+                                "Struct arms (expected 1)"
+                            )
+                        else:
+                            or_prefixed_phase_two = (
+                                phase_two_body[:declaration_open + 1]
+                                + or_prefixed_declaration_body
+                                + phase_two_body[declaration_close:]
+                            )
+                            or_prefixed_load = (
+                                load_body[:phase_two_open + 1]
+                                + or_prefixed_phase_two
+                                + load_body[phase_two_close:]
+                            )
+                            or_prefixed_checker = sources["checker"].replace(
+                                load_body, or_prefixed_load, 1)
+                            mutation_errors = (
+                                prelude_ownership_firebreak_source_errors(
+                                    sources["registration"],
+                                    or_prefixed_checker,
+                                )
+                            )
+                            expected_error = (
+                                "load_prelude phase-two declaration match "
+                                "direct Struct arm pattern must remain exact"
+                            )
+                            if not mutation_errors:
+                                errors.append(
+                                    "ownership bootstrap phase-two OR-prefix "
+                                    "mutation escaped source gate"
+                                )
+                            elif not any(
+                                    expected_error in error
+                                    for error in mutation_errors):
+                                errors.append(
+                                    "ownership bootstrap phase-two OR-prefix "
+                                    "mutation missed its exact-pattern gate: "
+                                    f"{mutation_errors}"
+                                )
+
+                phase_one_open = phase_headers[0].end() - 1
+                try:
+                    phase_one_close = matching_delimiter(
+                        load_masked, phase_one_open, "{", "}")
+                except ValueError as exc:
+                    errors.append(
+                        "ownership bootstrap phase-one mutation: " + str(exc))
+                else:
+                    empty_phase_one = (
+                        load_body[:phase_one_open + 1]
+                        + "\n            "
+                        + load_body[phase_one_close:]
+                    )
+                    empty_checker = sources["checker"].replace(
+                        load_body, empty_phase_one, 1)
+                    mutation_errors = (
+                        prelude_ownership_firebreak_source_errors(
+                            sources["registration"], empty_checker)
+                    )
+                    expected_error = (
+                        "load_prelude phase-one loop must retain the exact "
+                        "extern identity"
+                    )
+                    if not mutation_errors:
+                        errors.append(
+                            "ownership bootstrap empty phase-one mutation "
+                            "escaped source gate"
+                        )
+                    elif not any(
+                            expected_error in error
+                            for error in mutation_errors):
+                        errors.append(
+                            "ownership bootstrap empty phase-one mutation "
+                            "missed its exact-body gate: "
+                            f"{mutation_errors}"
+                        )
+
+                    shadowed_phase_one = (
+                        load_body[:phase_headers[0].start()]
+                        + "let all_prelude_decls: List<Decl> = []\n            "
+                        + load_body[phase_headers[0].start():]
+                    )
+                    shadowed_checker = sources["checker"].replace(
+                        load_body, shadowed_phase_one, 1)
+                    mutation_errors = (
+                        prelude_ownership_firebreak_source_errors(
+                            sources["registration"], shadowed_checker)
+                    )
+                    expected_error = (
+                        "load_prelude must retain exactly one authoritative "
+                        "all_prelude_decls binding"
+                    )
+                    if not mutation_errors:
+                        errors.append(
+                            "ownership bootstrap all_prelude_decls shadow "
+                            "mutation escaped source gate"
+                        )
+                    elif not any(
+                            expected_error in error
+                            for error in mutation_errors):
+                        errors.append(
+                            "ownership bootstrap all_prelude_decls shadow "
+                            "mutation missed its binding gate: "
+                            f"{mutation_errors}"
+                        )
+
+                    reset_before_phase_two = (
+                        load_body[:phase_headers[1].start()]
+                        + "all_prelude_decls = []\n            "
+                        + load_body[phase_headers[1].start():]
+                    )
+                    reset_checker = sources["checker"].replace(
+                        load_body, reset_before_phase_two, 1)
+                    mutation_errors = (
+                        prelude_ownership_firebreak_source_errors(
+                            sources["registration"], reset_checker)
+                    )
+                    expected_error = (
+                        "load_prelude phase skeleton must not contain extra "
+                        "statements"
+                    )
+                    if not mutation_errors:
+                        errors.append(
+                            "ownership bootstrap pre-phase-two list reset "
+                            "mutation escaped source gate"
+                        )
+                    elif not any(
+                            expected_error in error
+                            for error in mutation_errors):
+                        errors.append(
+                            "ownership bootstrap pre-phase-two list reset "
+                            "mutation missed its phase-skeleton gate: "
+                            f"{mutation_errors}"
+                        )
+
+                    shadowed_phase_two_decl = (
+                        load_body[:phase_two_open + 1]
+                        + "\n                let decl = decl"
+                        + load_body[phase_two_open + 1:]
+                    )
+                    shadowed_checker = sources["checker"].replace(
+                        load_body, shadowed_phase_two_decl, 1)
+                    mutation_errors = (
+                        prelude_ownership_firebreak_source_errors(
+                            sources["registration"], shadowed_checker)
+                    )
+                    expected_error = (
+                        "load_prelude phase-two loop must contain only its "
+                        "direct authoritative match decl expression"
+                    )
+                    if not mutation_errors:
+                        errors.append(
+                            "ownership bootstrap phase-two decl shadow "
+                            "mutation escaped source gate"
+                        )
+                    elif not any(
+                            expected_error in error
+                            for error in mutation_errors):
+                        errors.append(
+                            "ownership bootstrap phase-two decl shadow "
+                            "mutation missed its direct-match gate: "
+                            f"{mutation_errors}"
+                        )
+
+                    panic_after_phase_two = (
+                        load_body[:phase_two_close + 1]
+                        + "\n            panic(\"phase-two suffix probe\")"
+                        + load_body[phase_two_close + 1:]
+                    )
+                    panic_checker = sources["checker"].replace(
+                        load_body, panic_after_phase_two, 1)
+                    mutation_errors = (
+                        prelude_ownership_firebreak_source_errors(
+                            sources["registration"], panic_checker)
+                    )
+                    expected_error = (
+                        "load_prelude phase skeleton must not contain extra "
+                        "statements"
+                    )
+                    if not mutation_errors:
+                        errors.append(
+                            "ownership bootstrap post-phase-two panic "
+                            "mutation escaped source gate"
+                        )
+                    elif not any(
+                            expected_error in error
+                            for error in mutation_errors):
+                        errors.append(
+                            "ownership bootstrap post-phase-two panic "
+                            "mutation missed its phase-skeleton gate: "
+                            f"{mutation_errors}"
+                        )
+
+    ctor_scheme_body, extract_error = extract_ring_function_body(
+        sources["exports"], "variant_ctor_scheme")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        ctor_scheme_masked = mask_ring_strings_and_comments(ctor_scheme_body)
+        count = len(re.findall(
+            r"\bdef_id\s*:\s*exact_variant_ctor_def_id\s*"
+            r"\(\s*env\s*,\s*def\s*,\s*variant\s*\)",
+            ctor_scheme_masked,
+        ))
+        if count != 1:
+            errors.append(
+                "variant_ctor_scheme must retain exactly one canonical "
+                f"constructor DefId; found {count}"
+            )
+        if re.search(
+                r"\b(?:let|var|fn)\s+(?:mut\s+)?"
+                r"exact_variant_ctor_def_id\b",
+                ctor_scheme_masked):
+            errors.append(
+                "variant_ctor_scheme must not shadow the canonical exact "
+                "variant-constructor identity resolver"
+            )
+        scheme_expressions = top_level_pattern_matches(
+            ctor_scheme_masked, r"\bTypeScheme\s*\{")
+        if len(scheme_expressions) != 1:
+            errors.append(
+                "ownership bootstrap ctor pattern-shadow mutation found "
+                f"{len(scheme_expressions)} direct TypeScheme expressions "
+                "(expected 1)"
+            )
+        else:
+            scheme_open = scheme_expressions[0].end() - 1
+            try:
+                scheme_close = matching_delimiter(
+                    ctor_scheme_masked, scheme_open, "{", "}")
+            except ValueError as exc:
+                errors.append(
+                    "ownership bootstrap ctor pattern-shadow mutation: "
+                    + str(exc))
+            else:
+                original_scheme = ctor_scheme_body[
+                    scheme_expressions[0].start():scheme_close + 1]
+                wrapped_scheme = (
+                    "match some(fn(\n"
+                    "        env: TypeEnv, def: EnumDef, "
+                    "variant: EnumVariant\n"
+                    "    ) -> Int? { none }) {\n"
+                    "        some(exact_variant_ctor_def_id) => "
+                    + original_scheme
+                    + ",\n        none => panic(\"\")\n    }"
+                )
+                mutated_ctor_body = (
+                    ctor_scheme_body[:scheme_expressions[0].start()]
+                    + wrapped_scheme
+                    + ctor_scheme_body[scheme_close + 1:]
+                )
+                ctor_body_count = sources["exports"].count(ctor_scheme_body)
+                if ctor_body_count != 1:
+                    errors.append(
+                        "ownership bootstrap ctor pattern-shadow mutation "
+                        f"matched {ctor_body_count} function bodies "
+                        "(expected 1)"
+                    )
+                else:
+                    mutated_exports = sources["exports"].replace(
+                        ctor_scheme_body, mutated_ctor_body, 1)
+                    mutation_errors = (
+                        exact_variant_ctor_identity_firebreak_source_errors(
+                            mutated_exports)
+                    )
+                    expected_error = (
+                        "variant_ctor_scheme canonical constructor identity")
+                    if not mutation_errors:
+                        errors.append(
+                            "ownership bootstrap ctor pattern-shadow mutation "
+                            "escaped source gate"
+                        )
+                    elif not any(
+                            expected_error in error
+                            for error in mutation_errors):
+                        errors.append(
+                            "ownership bootstrap ctor pattern-shadow mutation "
+                            "missed its exact-function gate: "
+                            f"{mutation_errors}"
+                        )
+
+    import_alias_body, extract_error = extract_ring_function_body(
+        sources["infer_ctx"], "localize_exact_import_alias_scheme")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(import_alias_body)
+        alias_contracts = (
+            (
+                "source-state lookup",
+                r"\bcallable_state_by_def_id\.get\s*"
+                r"\(\s*source_def_id\s*\)",
+            ),
+            (
+                "checker-local callable allocation",
+                r"\bnew_local_callable_identity_scheme\s*"
+                r"\(\s*ctx\.env\s*,\s*alias_scheme\s*,\s*"
+                r"ownership_term\s*,\s*source\s*\)",
+            ),
+        )
+        for description, pattern in alias_contracts:
+            count = len(re.findall(pattern, masked))
+            if count != 1:
+                errors.append(
+                    "localize_exact_import_alias_scheme "
+                    f"{description} matched {count} times (expected 1)"
+                )
+
+    project_value_body, extract_error = extract_ring_function_body(
+        sources["infer_ctx"], "apply_project_value_binding")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(project_value_body)
+        count = len(re.findall(
+            r"\blocalize_exact_import_alias_scheme\s*"
+            r"\(\s*ctx\s*,\s*source_scheme\s*\)",
+            masked,
+        ))
+        if count != 1:
+            errors.append(
+                "apply_project_value_binding must localize callable metadata "
+                f"exactly once; found {count}"
+            )
+        if re.search(
+                r"set_current_scope_value\s*\([^;{}]*TypeScheme\s*\{",
+                masked):
+            errors.append(
+                "apply_project_value_binding must not install a raw TypeScheme"
+            )
+
+    initial_mode_body, extract_error = extract_ring_function_body(
+        sources["ownership"], "initial_solver_param_mode")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(initial_mode_body)
+        mode_contracts = (
+            (
+                "authoritative Drop owner",
+                r"\bhparam_is_external_drop_owner\s*\(\s*param\s*\)"
+                r"\s*\{\s*return\s+PARAM_OWNERSHIP_MOVE\b",
+            ),
+            (
+                "mutable receiver",
+                r"\bhparam_is_mutable\s*\(\s*param\s*\)\s*\{\s*"
+                r"PARAM_OWNERSHIP_MUT_BORROW\b",
+            ),
+        )
+        for description, pattern in mode_contracts:
+            count = len(re.findall(pattern, masked))
+            if count != 1:
+                errors.append(
+                    f"initial_solver_param_mode {description} matched "
+                    f"{count} times (expected 1)"
+                )
+    state_body, extract_error = extract_ring_function_body(
+        sources["ownership"], "new_callable_solve_state")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        count = len(re.findall(
+            r"\bmodes\.push\s*\(\s*initial_solver_param_mode\s*"
+            r"\(\s*param\s*\)\s*\)",
+            mask_ring_strings_and_comments(state_body),
+        ))
+        if count != 1:
+            errors.append(
+                "new_callable_solve_state must consume the exact initial "
+                f"parameter mode once; found {count}"
+            )
+
+    plan_body, extract_error = extract_ring_function_body(
+        sources["ownership"], "plan_stmt")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(plan_body)
+        arm_match = re.search(
+            r"HStmt::ForIn\s*\{\s*binding\b(?P<body>.*?)"
+            r"HStmt::Break\s*\{",
+            masked,
+            re.DOTALL,
+        )
+        if arm_match is None:
+            errors.append("plan_stmt Range HStmt::ForIn arm not found")
+        else:
+            arm = arm_match.group("body")
+            owned = len(re.findall(
+                r"\bregister_slot\s*\(\s*body_plan\s*,\s*id\s*,"
+                r"\s*false\s*,\s*none\s*\)",
+                arm,
+            ))
+            borrowed = len(re.findall(
+                r"\bregister_slot\s*\(\s*body_plan\s*,\s*id\s*,"
+                r"\s*true\s*,\s*none\s*\)",
+                arm,
+            ))
+            if owned != 2 or borrowed != 0:
+                errors.append(
+                    "plan_stmt Range bindings must be fresh owned values for "
+                    "both direct and recovery bindings; found "
+                    f"owned={owned}, borrowed={borrowed}"
+                )
+
+    set_transfer_contracts = (
+        ("set_from", "item", 0),
+        ("union", "item", 0),
+        ("intersect", "owned_item", 1),
+        ("difference", "owned_item", 1),
+        ("filter", "kept", 1),
+    )
+    for function_name, owned_name, expected_borrows in set_transfer_contracts:
+        function_body, extract_error = extract_ring_function_body(
+            sources["set"], function_name)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        masked = mask_ring_strings_and_comments(function_body)
+        slot_reads = len(re.findall(
+            rf"\blet\s+{owned_name}\s*=\s*ring_slot_read\s*"
+            r"\(\s*items\.buf\s*,\s*i\s*\)",
+            masked,
+        ))
+        inserts = len(re.findall(
+            rf"\bresult\.insert\s*\(\s*{owned_name}\s*\)", masked))
+        borrowed_projections = len(re.findall(
+            r"\bitems\.get\s*\(\s*i\s*\)", masked))
+        if (slot_reads != 1 or inserts != 1 or
+                borrowed_projections != expected_borrows):
+            errors.append(
+                f"{function_name} must transfer exactly one fresh slot value "
+                "while retaining only predicate projection borrows; found "
+                f"slot_reads={slot_reads}, inserts={inserts}, "
+                f"items.get={borrowed_projections} "
+                f"(expected {expected_borrows})"
+            )
+
+    iter_body, extract_error = extract_ring_function_body(
+        sources["list"], "iter")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(iter_body)
+        clones = len(re.findall(
+            r"\blist\s*:\s*list_clone\s*\(\s*self\s*\)", masked))
+        direct = len(re.findall(r"\blist\s*:\s*self\b", masked))
+        if clones != 1 or direct != 0:
+            errors.append(
+                "List Iterable.iter must preserve its borrow contract with one "
+                f"owned wrapper clone; found clones={clones}, direct={direct}"
+            )
+
+    map_source = mask_ring_strings_and_comments(sources["map"])
+    map_signature = len(re.findall(
+        r"\bfn\s+map_from\s*<\s*K\s*:\s*Hash\s*\+\s*Eq\s*\+\s*"
+        r"Clone\s*,\s*V\s*:\s*Clone\s*>\s*\(",
+        map_source,
+    ))
+    map_body, extract_error = extract_ring_function_body(
+        sources["map"], "map_from")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked = mask_ring_strings_and_comments(map_body)
+        map_contracts = (
+            r"\blet\s+pair\s*=\s*ring_slot_read\s*"
+            r"\(\s*entries\.buf\s*,\s*i\s*\)",
+            r"\bm\.insert\s*\(\s*pair\.0\.clone\s*\(\s*\)\s*,"
+            r"\s*pair\.1\.clone\s*\(\s*\)\s*\)",
+        )
+        counts = [len(re.findall(pattern, masked))
+                  for pattern in map_contracts]
+        if map_signature != 1 or counts != [1, 1]:
+            errors.append(
+                "map_from must clone both borrowed tuple projections from one "
+                "fresh slot value; found "
+                f"signature={map_signature}, contracts={counts}"
+            )
+
+    result_source = mask_ring_strings_and_comments(sources["result"])
+    result_signatures = (
+        r"\bpub\s+impl\s*<\s*T\s*,\s*E\s*:\s*Clone\s*>\s*Result\b",
+        r"\bpub\s+impl\s*<\s*T\s*:\s*Clone\s*,\s*E\s*>\s*Result\b",
+        r"\bpub\s+impl\s*<\s*T\s*,\s*E\s*>\s*Result\b",
+        r"\bfn\s+to_result\s*<\s*T\s*,\s*E\s*:\s*Clone\s*>\s*"
+        r"\(\s*f\s*:\s*fn\s*\(\s*\)\s*->\s*T\s*with\s*"
+        r"\{\s*fail\s*<\s*E\s*>\s*\}\s*\)",
+    )
+    signature_counts = [len(re.findall(pattern, result_source))
+                        for pattern in result_signatures]
+    if signature_counts != [1, 1, 1, 1]:
+        errors.append(
+            "Result ownership/effect signature inventory changed; found "
+            f"{signature_counts}"
+        )
+    result_body_contracts = (
+        ("map", "e", "v"),
+        ("and_then", "e", "v"),
+        ("unwrap_or", "v", "e"),
+        ("to_result", "e", "v"),
+    )
+    for function_name, cloned_name, forbidden_name in result_body_contracts:
+        function_body, extract_error = extract_ring_function_body(
+            sources["result"], function_name)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        masked = mask_ring_strings_and_comments(function_body)
+        clones = len(re.findall(
+            rf"\b{cloned_name}\.clone\s*\(\s*\)", masked))
+        forbidden = len(re.findall(
+            rf"\b{forbidden_name}\.clone\s*\(\s*\)", masked))
+        if clones != 1 or forbidden != 0:
+            errors.append(
+                f"Result.{function_name} clone inventory is not minimal: "
+                f"required={clones}, forbidden={forbidden}"
+            )
+    return errors
+
+
+def callable_inference_limit_generated_c_errors(c_source: str) -> List[str]:
+    """Reject bootstrap codegen that wraps the positive limit negative."""
+    masked = mask_c_strings_and_comments(c_source)
+    pattern = re.compile(
+        r"void\s*\*\s*[A-Za-z_][A-Za-z0-9_]*"
+        r"CALLABLE__INFERENCE__TERM__LIMIT\s*\(\s*void\s*\)\s*\{\s*"
+        r"return\s+RING_INT\s*\(\s*(-?[0-9]+)\s*\)\s*;\s*\}",
+        re.DOTALL,
+    )
+    values = pattern.findall(masked)
+    expected = str(CALLABLE_INFERENCE_TERM_LIMIT)
+    if values != [expected]:
+        return [
+            "generated callable inference limit must be one positive "
+            f"RING_INT({expected}) definition; found {values}"
+        ]
+    return []
+
+
+def callable_nominal_walk_generated_c_errors(c_source: str) -> List[str]:
+    """Reject the old-anchor parameter/Cell layout mismatch in generated C."""
+    symbol = (
+        "ringmod_ring__unify_m_m__"
+        "type__reaches__callable__through__nominals"
+    )
+    body, extract_error = extract_c_function_body(c_source, symbol)
+    if extract_error:
+        return [extract_error]
+    masked = mask_c_strings_and_comments(body)
+    if re.search(
+        r"\*\s*\(\s*void\s*\*\s*\*\s*\)\s*r_nominal_visited\b",
+        masked,
+    ):
+        return [
+            "generated nominal callable walk reads its Set parameter as a "
+            "closure Cell slot"
+        ]
+    return []
+
+
+def callable_contract_merge_generated_c_errors(c_source: str) -> List[str]:
+    """Require both generated NoBase cases to retain their tuple tag guards."""
+    symbol = (
+        "ringmod_ring__ownership_m_m__"
+        "merge__callable__contract__resolution"
+    )
+    body, extract_error = extract_c_function_body(c_source, symbol)
+    if extract_error:
+        return [extract_error]
+    masked = mask_c_strings_and_comments(body)
+    calls = list(re.finditer(
+        r"CallableContractResolution__NoBase\s*\(\s*\)", masked))
+    guards = list(re.finditer(
+        r"if\s*\(\s*\*\s*\(\s*int64_t\s*\*\s*\)\s*"
+        r"[A-Za-z_][A-Za-z0-9_]*\s*!=\s*2\s*\)\s*goto\b",
+        masked,
+    ))
+    if len(calls) != 2:
+        return [
+            "generated callable contract merge must construct NoBase in two "
+            f"separate guarded arms; found {len(calls)} constructors"
+        ]
+    if len(guards) < 2:
+        return [
+            "generated callable contract merge lost one or both NoBase "
+            f"tuple tag guards; found {len(guards)} guards"
+        ]
+    if not (guards[0].start() < calls[0].start() <
+            guards[1].start() < calls[1].start()):
+        return [
+            "generated callable contract merge emitted an unconditional or "
+            "misordered NoBase arm"
+        ]
+    return []
+
+
+def run_callable_inference_boundary_probes(
+    ring_exe: str, clang_path: str, temp_root: Path,
+) -> List[Tuple[str, Optional[str]]]:
+    """Execute the last valid term and the exclusive fail-loud boundary."""
+    source_dir = temp_root / "callable-limit-source"
+    source_dir.mkdir()
+    try:
+        shutil.copy2(REPO / "compiler" / "types.ring", source_dir / "types.ring")
+    except OSError as exc:
+        return [("setup", f"cannot stage compiler/types.ring: {exc}")]
+
+    probes = (
+        (
+            "limit - 1 succeeds",
+            "callable_limit_success.ring",
+            """use types::{CALLABLE_INFERENCE_TERM_LIMIT,
+    fresh_callable_ownership_inference_term, new_ownership_metadata}
+
+fn main() {
+    let mut metadata = new_ownership_metadata()
+    metadata.next_callable_inference_term =
+        CALLABLE_INFERENCE_TERM_LIMIT - 1
+    let term = fresh_callable_ownership_inference_term(metadata)
+    if metadata.next_callable_inference_term !=
+       CALLABLE_INFERENCE_TERM_LIMIT {
+        panic(\"callable inference limit advanced incorrectly\")
+    }
+    print(term)
+}
+""",
+            False,
+        ),
+        (
+            "limit fails loudly",
+            "callable_limit_failure.ring",
+            """use types::{CALLABLE_INFERENCE_TERM_LIMIT,
+    fresh_callable_ownership_inference_term, new_ownership_metadata}
+
+fn main() {
+    let mut metadata = new_ownership_metadata()
+    metadata.next_callable_inference_term = CALLABLE_INFERENCE_TERM_LIMIT
+    let term = fresh_callable_ownership_inference_term(metadata)
+    print(term)
+}
+""",
+            True,
+        ),
+    )
+    results: List[Tuple[str, Optional[str]]] = []
+    for label, filename, source, expect_panic in probes:
+        ring_file = source_dir / filename
+        ring_file.write_text(source, encoding="utf-8", newline="\n")
+        out_dir = temp_root / f"{ring_file.stem}-out"
+        out_dir.mkdir()
+        try:
+            build = ring_build(
+                ring_exe, str(ring_file), out_dir=str(out_dir),
+                extra_args=["--no-c-lines"],
+            )
+        except subprocess.TimeoutExpired:
+            results.append((label, "compile timed out"))
+            continue
+        if build.returncode != 0:
+            results.append((
+                label,
+                "compile failed: " + process_output(build)[:500],
+            ))
+            continue
+
+        object_path = out_dir / f"{ring_file.stem}.o"
+        executable = out_dir / f"{ring_file.stem}.exe"
+        if not object_path.is_file():
+            results.append((label, f"missing object: {object_path}"))
+            continue
+        try:
+            linked = clang_link(
+                clang_path, str(object_path), str(executable))
+        except subprocess.TimeoutExpired:
+            results.append((label, "link timed out"))
+            continue
+        if linked.returncode != 0:
+            results.append((
+                label,
+                "link failed: " + process_output(linked)[:500],
+            ))
+            continue
+        try:
+            executed = run_exe(str(executable))
+        except subprocess.TimeoutExpired:
+            results.append((label, "execution timed out"))
+            continue
+
+        output = process_output(executed)
+        if expect_panic:
+            if executed.returncode == 0:
+                results.append((label, "expected non-zero panic exit"))
+            elif "callable ownership inference namespace exhausted" not in output:
+                results.append((
+                    label,
+                    "wrong panic at exclusive limit: " + output[:300],
+                ))
+            else:
+                results.append((label, None))
+        else:
+            expected_output = str(CALLABLE_INFERENCE_TERM_LIMIT - 1)
+            if executed.returncode != 0:
+                results.append((
+                    label,
+                    f"runtime exit {executed.returncode}: {output[:300]}",
+                ))
+            elif norm(executed.stdout or "").strip() != expected_output:
+                results.append((
+                    label,
+                    f"expected {expected_output}, got "
+                    f"{norm(executed.stdout or '').strip()!r}",
+                ))
+            else:
+                results.append((label, None))
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Self-compile suite
 # ---------------------------------------------------------------------------
 
-def run_self_compile(ring_exe: str, collector: ResultCollector, *,
+def run_self_compile(ring_exe: str, clang_path: str,
+                     collector: ResultCollector, *,
                      name_filter: Optional[str] = None) -> None:
     """Regenerate the tracked C anchor and require an exact fixed point."""
     suite = "self-compile"
@@ -3985,6 +10265,47 @@ def run_self_compile(ring_exe: str, collector: ResultCollector, *,
         return
 
     with tempfile.TemporaryDirectory(prefix="ring_selfcompile_") as tmpdir:
+        duplicate_errors, conflict_errors = (
+            direct_drop_duplicate_source_oracles())
+        collector.add(TestResult(
+            TestResult.PASS if not duplicate_errors else TestResult.FAIL,
+            suite,
+            "direct Drop duplicate: exact declaration is idempotent",
+            "; ".join(duplicate_errors),
+        ))
+        collector.add(TestResult(
+            TestResult.PASS if not conflict_errors else TestResult.FAIL,
+            suite,
+            "direct Drop duplicate: same C name conflict fails loudly",
+            "; ".join(conflict_errors),
+        ))
+        if duplicate_errors or conflict_errors:
+            return
+
+        source_errors = callable_inference_limit_source_errors()
+        source_errors.extend(callable_nominal_walk_source_errors())
+        source_errors.extend(callable_contract_merge_source_errors())
+        source_errors.extend(ownership_bootstrap_transition_source_errors())
+        collector.add(TestResult(
+            TestResult.PASS if not source_errors else TestResult.FAIL,
+            suite,
+            "callable inference limit source",
+            "; ".join(source_errors),
+        ))
+        if source_errors:
+            return
+
+        for label, failure in run_callable_inference_boundary_probes(
+            ring_exe, clang_path, Path(tmpdir)):
+            collector.add(TestResult(
+                TestResult.PASS if failure is None else TestResult.FAIL,
+                suite,
+                f"callable inference boundary: {label}",
+                failure or "",
+            ))
+            if failure is not None:
+                return
+
         try:
             r = ring_build(
                 ring_exe,
@@ -4019,6 +10340,28 @@ def run_self_compile(ring_exe: str, collector: ResultCollector, *,
         collector.add(TestResult(
             TestResult.PASS, suite, "generated object",
             "main.o produced by the tracked C-native compiler"))
+
+        try:
+            generated_source = generated_c.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            collector.add(TestResult(
+                TestResult.FAIL, suite, "callable inference limit generated C",
+                f"cannot read generated main.c: {exc}"))
+            return
+        generated_limit_errors = callable_inference_limit_generated_c_errors(
+            generated_source)
+        generated_limit_errors.extend(
+            callable_nominal_walk_generated_c_errors(generated_source))
+        generated_limit_errors.extend(
+            callable_contract_merge_generated_c_errors(generated_source))
+        collector.add(TestResult(
+            TestResult.PASS if not generated_limit_errors else TestResult.FAIL,
+            suite,
+            "callable inference limit generated C",
+            "; ".join(generated_limit_errors),
+        ))
+        if generated_limit_errors:
+            return
 
         anchor_bytes = DIST_C_MAIN.read_bytes()
         generated_bytes = generated_c.read_bytes()
@@ -4112,7 +10455,11 @@ def main() -> int:
         return 1
 
     # Ensure runtime .o is built
-    needs_runtime = any(suite in suites for suite in ["e2e", "golden"])
+    pure_check_only_e2e = pure_positive_check_only_e2e_selection(
+        suites, args.name_filter)
+    needs_runtime = any(
+        suite in suites for suite in ["e2e", "golden", "self-compile"]
+    ) and not pure_check_only_e2e
     if needs_runtime and clang_path:
         if not ensure_runtime(clang_path):
             print("ERROR: failed to build ring_runtime.o from ring_runtime.cpp.", file=sys.stderr)
@@ -4142,7 +10489,9 @@ def main() -> int:
         run_rc(ring_exe, collector, name_filter=args.name_filter)
 
     if "self-compile" in suites:
-        run_self_compile(ring_exe, collector, name_filter=args.name_filter)
+        run_self_compile(
+            ring_exe, clang_path or "", collector,
+            name_filter=args.name_filter)
 
     if "structural" in suites:
         run_structural(ring_exe, collector, name_filter=args.name_filter)

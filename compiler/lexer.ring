@@ -8,7 +8,7 @@ use codes::{E0101, E0102}
 
 pub enum TokenKind {
     // Keywords
-    TkFn, TkLet, TkMut, TkConst, TkStruct, TkEnum, TkMatch,
+    TkFn, TkLet, TkMut, TkMove, TkConst, TkStruct, TkEnum, TkMatch,
     TkImpl, TkEffect, TkHandle, TkWith,
     TkIf, TkElse, TkCatch, TkTest, TkReturn,
     TkFor, TkIn, TkPub, TkWhere,
@@ -44,7 +44,8 @@ pub enum TokenKind {
 
 pub fn token_kind_value(k: TokenKind) -> Str {
     match k {
-        TkFn => "fn", TkLet => "let", TkMut => "mut", TkConst => "const",
+        TkFn => "fn", TkLet => "let", TkMut => "mut", TkMove => "move",
+        TkConst => "const",
         TkStruct => "struct", TkEnum => "enum", TkMatch => "match",
         TkImpl => "impl", TkEffect => "effect", TkHandle => "handle", TkWith => "with",
         TkIf => "if", TkElse => "else", TkCatch => "catch",
@@ -80,6 +81,7 @@ fn keyword_lookup(word: Str) -> TokenKind? {
         "fn" => some(TokenKind::TkFn),
         "let" => some(TokenKind::TkLet),
         "mut" => some(TokenKind::TkMut),
+        "move" => some(TokenKind::TkMove),
         "const" => some(TokenKind::TkConst),
         "struct" => some(TokenKind::TkStruct),
         "enum" => some(TokenKind::TkEnum),
@@ -275,7 +277,10 @@ impl Lexer {
                 self.advance()
                 self.advance()
                 let end = self.current_position()
-                let interp_span = Span { file: self.file, start: interp_start, end: end }
+                let span_end = end
+                let interp_span = Span {
+                    file: self.file, start: interp_start, end: span_end
+                }
                 if is_new {
                     self.interp_frames.push(InterpFrame { depth: 0, start_span: interp_span })
                     return self.make_token(TokenKind::TkStringInterpStart, value, start, end)
@@ -313,8 +318,17 @@ impl Lexer {
             self.interp_frames.pop()
         }
         let end = self.current_position()
-        let span = Span { file: self.file, start: start, end: end }
-        self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
+        let diagnostic_value = value
+        let diagnostic_start = start
+        let diagnostic_end = end
+        let span = Span {
+            file: self.file, start: diagnostic_start, end: diagnostic_end
+        }
+        self.sink.report(make_diag(E0102, Severity::SevError,
+            "Unterminated string literal", span,
+            DiagnosticContext::ParseError {
+                token: diagnostic_value, expected: none
+            }))
         self.make_token(TokenKind::TkError, value, start, end)
     }
 
@@ -347,8 +361,17 @@ impl Lexer {
                 }
                 self.advance()
             }
-            let span = Span { file: self.file, start: start, end: self.current_position() }
-            self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated raw string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
+            let diagnostic_value = value
+            let diagnostic_start = start
+            let span = Span {
+                file: self.file, start: diagnostic_start,
+                end: self.current_position()
+            }
+            self.sink.report(make_diag(E0102, Severity::SevError,
+                "Unterminated raw string literal", span,
+                DiagnosticContext::ParseError {
+                    token: diagnostic_value, expected: none
+                }))
             let end = self.current_position()
             self.make_token(TokenKind::TkError, value, start, end)
         } else {
@@ -371,8 +394,17 @@ impl Lexer {
                 }
                 self.advance()
             }
-            let span = Span { file: self.file, start: start, end: self.current_position() }
-            self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated raw string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
+            let diagnostic_value = value
+            let diagnostic_start = start
+            let span = Span {
+                file: self.file, start: diagnostic_start,
+                end: self.current_position()
+            }
+            self.sink.report(make_diag(E0102, Severity::SevError,
+                "Unterminated raw string literal", span,
+                DiagnosticContext::ParseError {
+                    token: diagnostic_value, expected: none
+                }))
             let end = self.current_position()
             self.make_token(TokenKind::TkError, value, start, end)
         }
@@ -512,8 +544,15 @@ impl Lexer {
             return self.make_token(TokenKind::TkPipe, "|", start, self.current_position())
         }
 
-        let tok = self.make_token(TokenKind::TkError, ch, start, self.current_position())
-        self.sink.report(make_diag(E0101, Severity::SevError, "Unexpected character '${ch}'", tok.span, DiagnosticContext::ParseError { token: ch, expected: none }))
+        let token_ch = ch
+        let diagnostic_ch = ch
+        let tok = self.make_token(
+            TokenKind::TkError, token_ch, start, self.current_position())
+        self.sink.report(make_diag(E0101, Severity::SevError,
+            "Unexpected character '${ch}'", tok.span,
+            DiagnosticContext::ParseError {
+                token: diagnostic_ch, expected: none
+            }))
         tok
     }
 

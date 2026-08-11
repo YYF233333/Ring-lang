@@ -1,6 +1,6 @@
 use types::{Type, Effect, EffectRow,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
-    type_to_string, nominal_display_name, types_equal,
+    type_to_string, nominal_display_name, types_equal_with_ownership,
     type_to_builtin_name, CALLABLE_BORROW_OWNED, fn_meta}
 use ast::{Expr, Pattern, Span, NamedPatternField}
 use hir::{HExpr, HStmt, TraitDispatch, DictRef, ValueBindingKind,
@@ -14,12 +14,13 @@ use env::{TypeEnv, TypeScheme,
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry,
     type_error, unify_at, resolve_relative_qualifier,
     resolve_dict_ref_for_type, resolve_dicts_from_scheme, variant_ctor_origin,
-    value_binding_kind}
+    value_binding_kind, fresh_call_result_callable_def_id}
 
 
 pub struct MethodLookupResult {
     method_type: Type?,
-    method_scheme: TypeScheme?
+    method_scheme: TypeScheme?,
+    is_authoritative_drop: Bool
 }
 
 
@@ -98,12 +99,16 @@ pub fn cancel_local_mut_effects(
                     match callee_params.get(pi) {
                         some(pt) => {
                             let resolved_pt = apply_subst(s, pt)
-                            if types_equal(resolved_pt, resolved_st) {
+                            if types_equal_with_ownership(
+                                ctx.env.types.ownership_metadata,
+                                resolved_pt, resolved_st
+                            ) {
                                 match hargs.get(ai) {
                                     some(harg) => match harg {
                                         HExpr::Ident { def_id: some(did), .. } => {
                                             if !ctx.env.scope.mut_param_defs.contains(did) {
-                                                cancel_types.push(resolved_st)
+                                                let cancel_type = resolved_st
+                                                cancel_types.push(cancel_type)
                                             }
                                         },
                                         _ => {}
@@ -133,7 +138,9 @@ pub fn cancel_local_mut_effects(
             Effect::MutEffect { state_type } => {
                 let resolved_st = apply_subst(s, state_type)
                 for ct in cancel_types {
-                    if types_equal(ct, resolved_st) {
+                    if types_equal_with_ownership(
+                        ctx.env.types.ownership_metadata, ct, resolved_st
+                    ) {
                         keep = false
                     }
                 }
@@ -141,7 +148,8 @@ pub fn cancel_local_mut_effects(
             _ => {}
         }
         if keep {
-            filtered.push(e)
+            let filtered_effect = e
+            filtered.push(filtered_effect)
         }
     }
     EffectRow { effects: filtered, tail: effects.tail }
@@ -184,7 +192,8 @@ pub fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
             }
         },
         Expr::FieldAccess { receiver, span, .. } => {
-            let root = find_root_expr(receiver)
+            let receiver_for_root = receiver
+            let root = find_root_expr(receiver_for_root)
             match root {
                 Expr::Ident { name, span: rspan, .. } => {
                     let scheme = ctx.env.lookup(name)
@@ -211,7 +220,8 @@ pub fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
         },
         Expr::IndexExpr { receiver, span, .. } => {
             // Index assignment (e.g. list[i] = val) — check receiver mutability
-            let root = find_root_expr(receiver)
+            let receiver_for_root = receiver
+            let root = find_root_expr(receiver_for_root)
             match root {
                 Expr::Ident { name, span: rspan, .. } => {
                     let scheme = ctx.env.lookup(name)
@@ -242,15 +252,22 @@ pub fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
 
 pub fn find_root_expr(e: Expr) -> Expr {
     match e {
-        Expr::FieldAccess { receiver, .. } => find_root_expr(receiver),
-        Expr::IndexExpr { receiver, .. } => find_root_expr(receiver),
+        Expr::FieldAccess { receiver, .. } => {
+            let receiver_for_root = receiver
+            find_root_expr(receiver_for_root)
+        },
+        Expr::IndexExpr { receiver, .. } => {
+            let receiver_for_root = receiver
+            find_root_expr(receiver_for_root)
+        },
         _ => e
     }
 }
 
 // B-056: Get def_id of root variable in an assignment target (AST level).
 pub fn get_assign_target_root_def_id(ctx: InferCtx, target: Expr) -> Int? {
-    let root = find_root_expr(target)
+    let target_for_root = target
+    let root = find_root_expr(target_for_root)
     match root {
         Expr::Ident { name, .. } => {
             match ctx.env.lookup(name) {
@@ -280,7 +297,10 @@ pub fn get_hexpr_root_type(target: HExpr) -> Type {
 fn exact_value_origin(ctx: InferCtx, spelling: Str, scheme: TypeScheme) -> Str {
     match scheme.def_id {
         some(def_id) => match ctx.use_aliases.get(def_id) {
-            some(origin) => origin,
+            some(origin) => {
+                let result_origin = origin
+                result_origin
+            },
             none => spelling
         },
         none => spelling
@@ -299,7 +319,8 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                             // super from top-level mod — name is at root scope
                             resolved_qualifier = none
                         } else {
-                            resolved_qualifier = some(prefix)
+                            let qualifier_prefix = prefix
+                            resolved_qualifier = some(qualifier_prefix)
                         }
                     },
                     none => {
@@ -362,8 +383,11 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             match resolved_qualifier {
                 some(q) => {
                     let qualifier_display = nominal_display_name(q)
+                    let name_for_diagnostic = name
                     let _ = type_error(ctx.sink, E0201, "'${qualifier_display}' has no member '${name}'", span,
-                        DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
+                        DiagnosticContext::UndefinedVariable {
+                            name: name_for_diagnostic, scope_locals: none
+                        })
                     return InferResult {
                         hexpr: HExpr::Ident { name: name, resolved_name: none, def_id: none, dict_closure_dicts: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
                         subst: subst, effects: EMPTY_ROW
@@ -371,8 +395,11 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                 },
                 none => {}
             }
+            let name_for_diagnostic = name
             let _ = type_error(ctx.sink, E0201, "Undefined variable: ${name}", span,
-                DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
+                DiagnosticContext::UndefinedVariable {
+                    name: name_for_diagnostic, scope_locals: none
+                })
             InferResult {
                 hexpr: HExpr::Ident { name: name, resolved_name: none, def_id: none, dict_closure_dicts: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
                 subst: subst, effects: EMPTY_ROW
@@ -387,7 +414,8 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                         match ctx.var_lambda_depth.get(did) {
                             some(def_depth) => {
                                 if ctx.lambda_depth > def_depth {
-                                    ctx.boxed_vars.insert(did)
+                                    let boxed_def_id = did
+                                    ctx.boxed_vars.insert(boxed_def_id)
                                 }
                             },
                             none => {}
@@ -398,7 +426,8 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             }
             // Check if this name was imported via use alias (e.g. use super::value)
             // If so, use the qualified name in HIR for correct codegen
-            let actual_name = exact_value_origin(ctx, name, s)
+            let name_for_origin = name
+            let actual_name = exact_value_origin(ctx, name_for_origin, s)
             match resolved_qualifier {
                 some(q) => {
                     match ctx.env.types.enums.get(q) {
@@ -501,7 +530,8 @@ pub fn resolve_eq_dispatch(ctx: InferCtx, resolved: Type, subst: UnionFind,
             let mut element_dispatches: List<TraitDispatch> = []
             for element in elements {
                 let element_type = apply_subst(subst, element)
-                element_types.push(element_type)
+                let stored_element_type = element_type
+                element_types.push(stored_element_type)
                 element_dispatches.push(resolve_eq_dispatch(
                     ctx, element_type, subst, span, op))
             }
@@ -518,12 +548,21 @@ pub fn resolve_eq_dispatch(ctx: InferCtx, resolved: Type, subst: UnionFind,
 
 fn dispatch_from_dict_ref(dict_ref: DictRef) -> TraitDispatch {
     match dict_ref {
-        DictRef::Static(dict) =>
-            TraitDispatch::Direct { dict: dict, extra_dicts: [] },
-        DictRef::Wrapped { dict, inner_dicts, .. } =>
-            TraitDispatch::Direct { dict: dict, extra_dicts: inner_dicts },
-        DictRef::Simple(param) =>
-            TraitDispatch::Dict { param: param }
+        DictRef::Static(dict) => {
+            let result_dict = dict
+            TraitDispatch::Direct { dict: result_dict, extra_dicts: [] }
+        },
+        DictRef::Wrapped { dict, inner_dicts, .. } => {
+            let result_dict = dict
+            let result_inner_dicts = inner_dicts
+            TraitDispatch::Direct {
+                dict: result_dict, extra_dicts: result_inner_dicts
+            }
+        },
+        DictRef::Simple(param) => {
+            let result_param = param
+            TraitDispatch::Dict { param: result_param }
+        }
     }
 }
 
@@ -603,6 +642,26 @@ pub fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, er
 // Final value-position lowering for callable identifiers
 // ============================================================
 
+fn live_scheme_entry_by_def_id(
+    entry: (Str, TypeScheme), wanted: Int
+) -> LiveSchemeBinding? {
+    let (binding_key, candidate) = entry
+    match candidate.def_id {
+        some(candidate_id) => {
+            if candidate_id == wanted {
+                let result_binding_key = binding_key
+                let result_candidate = candidate
+                return some(LiveSchemeBinding {
+                    binding_key: result_binding_key,
+                    live_scheme: result_candidate
+                })
+            }
+        },
+        none => {}
+    }
+    none
+}
+
 fn live_scheme_by_def_id(ctx: InferCtx, wanted: Int) -> LiveSchemeBinding? {
     let mut scope_idx = ctx.env.scope.scopes.len() - 1
     while scope_idx >= 0 {
@@ -610,15 +669,10 @@ fn live_scheme_by_def_id(ctx: InferCtx, wanted: Int) -> LiveSchemeBinding? {
             some(scope) => {
                 let entries = scope.variables.entries()
                 for entry in entries {
-                    let (binding_key, candidate) = entry
-                    match candidate.def_id {
-                        some(candidate_id) => {
-                            if candidate_id == wanted {
-                                return some(LiveSchemeBinding {
-                                    binding_key: binding_key,
-                                    live_scheme: candidate
-                                })
-                            }
+                    match live_scheme_entry_by_def_id(entry, wanted) {
+                        some(binding) => {
+                            let result_binding = binding
+                            return some(result_binding)
                         },
                         none => {}
                     }
@@ -634,7 +688,8 @@ fn live_scheme_by_def_id(ctx: InferCtx, wanted: Int) -> LiveSchemeBinding? {
 pub fn resolve_callee_metadata(ctx: InferCtx, callee: HExpr) -> CalleeMetadata? {
     match callee {
         HExpr::Ident { def_id: some(def_id), .. } => {
-            let kind = value_binding_kind(ctx, some(def_id))
+            let def_id_for_kind = def_id
+            let kind = value_binding_kind(ctx, some(def_id_for_kind))
             match live_scheme_by_def_id(ctx, def_id) {
                 some(binding) => {
                     let ultimate_origin = match ctx.use_aliases.get(def_id) {
@@ -650,17 +705,25 @@ pub fn resolve_callee_metadata(ctx: InferCtx, callee: HExpr) -> CalleeMetadata? 
                                 ctx.fn_min_arity.get(ultimate_origin),
                                 ctx.fn_defaults.get(ultimate_origin)
                             ) {
-                                (some(min_arity), some(values)) =>
+                                (some(min_arity), some(values)) => {
+                                    let default_values = values
                                     some(CalleeDefaults {
                                         min_arity: min_arity,
-                                        values: values
-                                    }),
+                                        values: default_values
+                                    })
+                                },
                                 _ => none
                             }
                             mut_flags = match ctx.fn_mut_params.get(ultimate_origin) {
-                                some(flags) => some(flags),
+                                some(flags) => {
+                                    let result_flags = flags
+                                    some(result_flags)
+                                },
                                 none => match ctx.fn_mut_params.get(binding.binding_key) {
-                                    some(flags) => some(flags),
+                                    some(flags) => {
+                                        let result_flags = flags
+                                        some(result_flags)
+                                    },
                                     none => none
                                 }
                             }
@@ -719,19 +782,34 @@ pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
             // function, so an outer source call uses the closure ABI.
             match kind {
                 ValueBindingKind::ConstGetter => {
+                    let getter_return_type = ty
                     let getter_ty = Type::FnType {
-                        params: [], return_type: ty,
+                        params: [], return_type: getter_return_type,
                         meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
                     }
+                    let getter_name = name
+                    let getter_def_id = def_id
+                    let getter_span = span
                     let getter = HExpr::Ident {
-                        name: name, resolved_name: none, def_id: def_id,
+                        name: getter_name, resolved_name: none,
+                        def_id: getter_def_id,
                         dict_closure_dicts: none, ty: getter_ty,
-                        effects: EMPTY_ROW, span: span
+                        effects: EMPTY_ROW, span: getter_span
                     }
+                    let call_callee_def_id = def_id
+                    let callable_result_def_id =
+                        fresh_call_result_callable_def_id(ctx, ty)
+                    let call_result_type = ty
+                    let call_effects = effects
+                    let call_span = span
                     return HExpr::Call {
-                        callee: getter, args: [], type_args: [],
+                        callee: getter, callee_def_id: call_callee_def_id,
+                        callable_result_def_id: callable_result_def_id,
+                        args: [], type_args: [],
                         resolved_dicts: [], dict_dispatch: none,
-                        ty: ty, effects: effects, span: span
+                        ty: call_result_type,
+                        effects: call_effects,
+                        span: call_span
                     }
                 },
                 _ => {}
@@ -754,10 +832,20 @@ pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
                         some(m) => {
                             let as_ = m.live_scheme
                             if as_.bounds.len() == 0 {
+                                let result_name = name
+                                let result_resolved_name = resolved_name
+                                let result_def_id = def_id
+                                let result_type = ty
+                                let result_effects = effects
+                                let result_span = span
                                 HExpr::Ident {
-                                    name: name, resolved_name: resolved_name,
-                                    def_id: def_id, dict_closure_dicts: some([]),
-                                    ty: ty, effects: effects, span: span
+                                    name: result_name,
+                                    resolved_name: result_resolved_name,
+                                    def_id: result_def_id,
+                                    dict_closure_dicts: some([]),
+                                    ty: result_type,
+                                    effects: result_effects,
+                                    span: result_span
                                 }
                             } else {
                                 let dicts = resolve_dicts_from_scheme(
@@ -767,8 +855,21 @@ pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
                                 // Never attach partial evidence.  resolve_dicts_from_scheme
                                 // has already emitted one E0503 for every missing bound.
                                 if dicts.len() == as_.bounds.len() {
-                                    HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id,
-                                        dict_closure_dicts: some(dicts), ty: ty, effects: effects, span: span }
+                                    let result_name = name
+                                    let result_resolved_name = resolved_name
+                                    let result_def_id = def_id
+                                    let result_type = ty
+                                    let result_effects = effects
+                                    let result_span = span
+                                    HExpr::Ident {
+                                        name: result_name,
+                                        resolved_name: result_resolved_name,
+                                        def_id: result_def_id,
+                                        dict_closure_dicts: some(dicts),
+                                        ty: result_type,
+                                        effects: result_effects,
+                                        span: result_span
+                                    }
                                 } else { harg }
                             }
                         },
@@ -789,10 +890,20 @@ pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
                                 true
                             }
                             if valid {
+                                let result_name = name
+                                let result_resolved_name = resolved_name
+                                let result_def_id = def_id
+                                let result_type = ty
+                                let result_effects = effects
+                                let result_span = span
                                 HExpr::Ident {
-                                    name: name, resolved_name: resolved_name,
-                                    def_id: def_id, dict_closure_dicts: some([]),
-                                    ty: ty, effects: effects, span: span
+                                    name: result_name,
+                                    resolved_name: result_resolved_name,
+                                    def_id: result_def_id,
+                                    dict_closure_dicts: some([]),
+                                    ty: result_type,
+                                    effects: result_effects,
+                                    span: result_span
                                 }
                             } else {
                                 harg
@@ -807,10 +918,22 @@ pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
                     // DefId provenance and also need a zero-dict direct-ABI
                     // wrapper when used as values.
                     match resolved_name {
-                        some(_) => HExpr::Ident {
-                            name: name, resolved_name: resolved_name,
-                            def_id: def_id, dict_closure_dicts: some([]),
-                            ty: ty, effects: effects, span: span
+                        some(_) => {
+                            let result_name = name
+                            let result_resolved_name = resolved_name
+                            let result_def_id = def_id
+                            let result_type = ty
+                            let result_effects = effects
+                            let result_span = span
+                            HExpr::Ident {
+                                name: result_name,
+                                resolved_name: result_resolved_name,
+                                def_id: result_def_id,
+                                dict_closure_dicts: some([]),
+                                ty: result_type,
+                                effects: result_effects,
+                                span: result_span
+                            }
                         },
                         none => harg
                     }
@@ -858,11 +981,20 @@ pub fn get_expr_def_id(ctx: InferCtx, expr: Expr) -> Int? {
 pub fn is_mut_method_call(ctx: InferCtx, recv_type: Type, method: Str) -> Bool {
     let mut type_name: Str? = none
     match recv_type {
-        Type::StructType { name, .. } => { type_name = some(name) },
-        Type::EnumType { name, .. } => { type_name = some(name) },
+        Type::StructType { name, .. } => {
+            let result_name = name
+            type_name = some(result_name)
+        },
+        Type::EnumType { name, .. } => {
+            let result_name = name
+            type_name = some(result_name)
+        },
         _ => {
             match type_to_builtin_name(recv_type) {
-                some(n) => { type_name = some(n) },
+                some(n) => {
+                    let result_name = n
+                    type_name = some(result_name)
+                },
                 none => {}
             }
         }
@@ -881,11 +1013,20 @@ pub fn is_mut_method_call(ctx: InferCtx, recv_type: Type, method: Str) -> Bool {
 pub fn check_receiver_mutability(mut ctx: InferCtx, receiver: Expr, recv_type: Type, method: Str, span: Span) {
     let mut type_name: Str? = none
     match recv_type {
-        Type::StructType { name, .. } => { type_name = some(name) },
-        Type::EnumType { name, .. } => { type_name = some(name) },
+        Type::StructType { name, .. } => {
+            let result_name = name
+            type_name = some(result_name)
+        },
+        Type::EnumType { name, .. } => {
+            let result_name = name
+            type_name = some(result_name)
+        },
         _ => {
             match type_to_builtin_name(recv_type) {
-                some(n) => { type_name = some(n) },
+                some(n) => {
+                    let result_name = n
+                    type_name = some(result_name)
+                },
                 none => {}
             }
         }
@@ -918,19 +1059,39 @@ pub fn check_receiver_mutability(mut ctx: InferCtx, receiver: Expr, recv_type: T
 pub fn lookup_impl_method(mut ctx: InferCtx, type_name: Str, method: Str) -> MethodLookupResult {
     match ctx.env.trait_reg.impl_methods.get(type_name) {
         some(impl_methods) => match impl_methods.get(method) {
-            some(scheme) => MethodLookupResult {
-                method_type: some(ctx.env.instantiate(scheme)),
-                method_scheme: some(scheme)
+            some(scheme) => {
+                let method_type = ctx.env.instantiate(scheme)
+                let result_scheme = scheme
+                MethodLookupResult {
+                    method_type: some(method_type),
+                    method_scheme: some(result_scheme),
+                    is_authoritative_drop: match
+                        ctx.env.trait_reg.method_origins.get(type_name) {
+                        some(origins) => match origins.get(method) {
+                            some(origin) => origin.is_authoritative_drop,
+                            none => panic(
+                                "unreachable: installed method has no stable origin role")
+                        },
+                        none => panic(
+                            "unreachable: installed method target has no origin table")
+                    }
+                }
             },
-            none => MethodLookupResult { method_type: none, method_scheme: none }
+            none => MethodLookupResult { method_type: none,
+                method_scheme: none, is_authoritative_drop: false }
         },
-        none => MethodLookupResult { method_type: none, method_scheme: none }
+        none => MethodLookupResult { method_type: none,
+            method_scheme: none, is_authoritative_drop: false }
     }
 }
 
-pub fn lookup_trait_method(mut ctx: InferCtx, type_name: Str, method: Str, span: Span) -> Type? {
+pub fn lookup_trait_method(
+    mut ctx: InferCtx, type_name: Str, method: Str, span: Span
+) -> MethodLookupResult {
     let mut found_type: Type? = none
+    let mut found_scheme: TypeScheme? = none
     let mut found_trait_name: Str? = none
+    let mut found_is_authoritative_drop = false
     match ctx.env.trait_reg.trait_impls.get(type_name) {
         some(type_impls) => {
             for impl_entry in type_impls {
@@ -947,11 +1108,26 @@ pub fn lookup_trait_method(mut ctx: InferCtx, type_name: Str, method: Str, span:
                                         let _ = type_error(ctx.sink, E0504,
                                             "Ambiguous method '${method}' on '${type_display}': found in trait '${prev_display}' and '${trait_display}'",
                                             span, DiagnosticContext::OtherContext { detail: some("disambiguate by calling TraitName::${method}") })
-                                        return found_type
+                                        return MethodLookupResult {
+                                            method_type: found_type,
+                                            method_scheme: found_scheme,
+                                            is_authoritative_drop:
+                                                found_is_authoritative_drop
+                                        }
                                     },
                                     none => {
-                                        found_type = some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
+                                        let exact_scheme = TypeScheme {
+                                            ty: found_method.ty,
+                                            type_vars: trait_def.type_param_vars,
+                                            bounds: [],
+                                            def_id: some(found_method.def_id)
+                                        }
+                                        found_type = some(ctx.env.instantiate(
+                                            exact_scheme))
+                                        found_scheme = some(exact_scheme)
                                         found_trait_name = some(impl_entry.trait_name)
+                                        found_is_authoritative_drop =
+                                            impl_entry.is_authoritative_drop
                                     }
                                 }
                             },
@@ -964,12 +1140,40 @@ pub fn lookup_trait_method(mut ctx: InferCtx, type_name: Str, method: Str, span:
         },
         none => {}
     }
-    found_type
+    MethodLookupResult {
+        method_type: found_type,
+        method_scheme: found_scheme,
+        is_authoritative_drop: found_is_authoritative_drop
+    }
 }
 
 // ============================================================
 // rewrite_bare_enum_bindings
 // ============================================================
+
+fn rewrite_bare_enum_pattern_child(env: TypeEnv, child: Pattern) -> Pattern {
+    let child_for_rewrite = child
+    rewrite_bare_enum_bindings(env, child_for_rewrite)
+}
+
+fn rewrite_bare_enum_named_field(
+    env: TypeEnv, field: NamedPatternField
+) -> NamedPatternField {
+    match field {
+        NamedPatternField { name, pattern, span } => {
+            let result_name = name
+            let pattern_for_rewrite = pattern
+            let result_span = span
+            let rewritten_pattern = rewrite_bare_enum_pattern_child(
+                env, pattern_for_rewrite)
+            NamedPatternField {
+                name: result_name,
+                pattern: rewritten_pattern,
+                span: result_span
+            }
+        }
+    }
+}
 
 pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
     match pattern {
@@ -982,7 +1186,14 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
                             some(found_v) => {
                                 if found_v.fields.len() == 0 {
                                     let empty_pats: List<Pattern> = []
-                                    Pattern::Constructor { name: name, qualifier: some(edef.name), fields: empty_pats, span: span }
+                                    let result_name = name
+                                    let result_span = span
+                                    Pattern::Constructor {
+                                        name: result_name,
+                                        qualifier: some(edef.name),
+                                        fields: empty_pats,
+                                        span: result_span
+                                    }
                                 } else {
                                     pattern
                                 }
@@ -998,14 +1209,23 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
         Pattern::TuplePattern { elements, span } => {
             let mut new_elems: List<Pattern> = []
             for elem in elements {
-                new_elems.push(rewrite_bare_enum_bindings(env, elem))
+                let elem_for_rewrite = elem
+                let rewritten_elem = rewrite_bare_enum_pattern_child(
+                    env, elem_for_rewrite)
+                new_elems.push(rewritten_elem)
             }
-            Pattern::TuplePattern { elements: new_elems, span: span }
+            let result_span = span
+            Pattern::TuplePattern {
+                elements: new_elems, span: result_span
+            }
         },
         Pattern::Constructor { name, qualifier, fields, span } => {
             let mut new_fields: List<Pattern> = []
             for f in fields {
-                new_fields.push(rewrite_bare_enum_bindings(env, f))
+                let field_for_rewrite = f
+                let rewritten_field = rewrite_bare_enum_pattern_child(
+                    env, field_for_rewrite)
+                new_fields.push(rewritten_field)
             }
             let canonical_qualifier = match qualifier {
                 some(q) => match env.types.enums.get(q) {
@@ -1013,12 +1233,22 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
                 },
                 none => env.types.variant_to_enum.get(name)
             }
-            Pattern::Constructor { name: name, qualifier: canonical_qualifier, fields: new_fields, span: span }
+            let result_name = name
+            let result_span = span
+            Pattern::Constructor {
+                name: result_name,
+                qualifier: canonical_qualifier,
+                fields: new_fields,
+                span: result_span
+            }
         },
         Pattern::NamedConstructor { name, qualifier, fields, rest, span } => {
             let mut new_fields: List<NamedPatternField> = []
             for f in fields {
-                new_fields.push(NamedPatternField { name: f.name, pattern: rewrite_bare_enum_bindings(env, f.pattern), span: f.span })
+                let field_for_rewrite = f
+                let rewritten_field = rewrite_bare_enum_named_field(
+                    env, field_for_rewrite)
+                new_fields.push(rewritten_field)
             }
             let canonical_enum = match qualifier {
                 some(q) => match env.types.enums.get(q) {
@@ -1027,14 +1257,45 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
                 none => env.types.variant_to_enum.get(name)
             }
             match canonical_enum {
-                some(ename) => Pattern::NamedConstructor { name: name, qualifier: some(ename), fields: new_fields, rest: rest, span: span },
+                some(ename) => {
+                    let result_name = name
+                    let result_enum_name = ename
+                    let result_span = span
+                    Pattern::NamedConstructor {
+                        name: result_name,
+                        qualifier: some(result_enum_name),
+                        fields: new_fields,
+                        rest: rest,
+                        span: result_span
+                    }
+                },
                 none => {
                     let struct_lookup = match qualifier {
                         some(q) => "${q}::${name}", none => name
                     }
                     match env.types.structs.get(struct_lookup) {
-                        some(sdef) => Pattern::NamedConstructor { name: sdef.name, qualifier: none, fields: new_fields, rest: rest, span: span },
-                        none => Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: new_fields, rest: rest, span: span }
+                        some(sdef) => {
+                            let result_span = span
+                            Pattern::NamedConstructor {
+                                name: sdef.name,
+                                qualifier: none,
+                                fields: new_fields,
+                                rest: rest,
+                                span: result_span
+                            }
+                        },
+                        none => {
+                            let result_name = name
+                            let result_qualifier = qualifier
+                            let result_span = span
+                            Pattern::NamedConstructor {
+                                name: result_name,
+                                qualifier: result_qualifier,
+                                fields: new_fields,
+                                rest: rest,
+                                span: result_span
+                            }
+                        }
                     }
                 }
             }
@@ -1042,9 +1303,15 @@ pub fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
         Pattern::OrPattern { patterns, span } => {
             let mut new_pats: List<Pattern> = []
             for p in patterns {
-                new_pats.push(rewrite_bare_enum_bindings(env, p))
+                let pattern_for_rewrite = p
+                let rewritten_pattern = rewrite_bare_enum_pattern_child(
+                    env, pattern_for_rewrite)
+                new_pats.push(rewritten_pattern)
             }
-            Pattern::OrPattern { patterns: new_pats, span: span }
+            let result_span = span
+            Pattern::OrPattern {
+                patterns: new_pats, span: result_span
+            }
         },
         _ => pattern,
     }

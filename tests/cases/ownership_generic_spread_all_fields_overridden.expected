@@ -1,0 +1,4 @@
+resource_replacement=new-resource
+resource_source=old-resource
+str_replacement=new-str
+str_source=old-str

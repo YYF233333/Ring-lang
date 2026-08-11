@@ -64,11 +64,16 @@ pub fn build_call_graph(decls: List<Decl>, registered_fns: Set<Str>) -> Map<Str,
     // Ensure every registered fn has an entry (even if no outgoing edges).
     // Sort to ensure deterministic graph construction order across backends.
     let mut sorted_names: List<Str> = []
-    for name in registered_fns { sorted_names.push(name) }
+    for name in registered_fns {
+        let sorted_name = name
+        sorted_names.push(sorted_name)
+    }
     sorted_names.sort()
     for name in sorted_names {
-        if !graph.contains_key(name) {
-            graph.insert(name, [])
+        let lookup_name = name
+        if !graph.contains_key(lookup_name) {
+            let entry_name = name
+            graph.insert(entry_name, [])
         }
     }
 
@@ -84,22 +89,37 @@ fn collect_decl_edges(decl: Decl, registered_fns: Set<Str>, mut graph: Map<Str, 
     match decl {
         Decl::Fn { name, body, .. } => {
             let caller = match impl_node { some(inode) => inode, none => name }
-            if !graph.contains_key(caller) {
-                graph.insert(caller, [])
+            let caller_lookup = caller
+            if !graph.contains_key(caller_lookup) {
+                let caller_entry = caller
+                graph.insert(caller_entry, [])
             }
             let mut edges: Set<Str> = set_new()
-            collect_expr_callees(body, registered_fns, caller, edges)
+            let body_ = body
+            let registered_for_body = registered_fns
+            let caller_for_body = caller
+            collect_expr_callees(body_, registered_for_body,
+                caller_for_body, edges)
             let mut sorted_edges: List<Str> = []
             for e in edges {
-                if e != caller { sorted_edges.push(e) }
+                if e != caller {
+                    let sorted_edge = e
+                    sorted_edges.push(sorted_edge)
+                }
             }
             sorted_edges.sort()
-            match graph.get(caller) {
+            let graph_lookup = caller
+            match graph.get(graph_lookup) {
                 some(existing) => {
-                    for e in sorted_edges { existing.push(e) }
+                    for e in sorted_edges {
+                        let edge = e
+                        existing.push(edge)
+                    }
                 },
                 none => {
-                    graph.insert(caller, sorted_edges)
+                    let graph_key = caller
+                    let graph_edges = sorted_edges
+                    graph.insert(graph_key, graph_edges)
                 }
             }
         },
@@ -108,11 +128,17 @@ fn collect_decl_edges(decl: Decl, registered_fns: Set<Str>, mut graph: Map<Str, 
                 some(tn) => "impl::${target_type}::${tn}",
                 none => "impl::${target_type}"
             }
-            if !graph.contains_key(inode) {
-                graph.insert(inode, [])
+            let inode_lookup = inode
+            if !graph.contains_key(inode_lookup) {
+                let inode_entry = inode
+                graph.insert(inode_entry, [])
             }
             for method in methods {
-                collect_decl_edges(method, registered_fns, graph, some(inode))
+                let method_ = method
+                let recursive_fns = registered_fns
+                let recursive_inode = inode
+                collect_decl_edges(method_, recursive_fns, graph,
+                    some(recursive_inode))
             }
         },
         Decl::ModBlock { name, decls, .. } => {
@@ -121,7 +147,9 @@ fn collect_decl_edges(decl: Decl, registered_fns: Set<Str>, mut graph: Map<Str, 
                 // but at call-graph time we see the raw AST before prefixing.
                 // The registered_fns set has the prefixed names.
                 // We need to prefix here to match.
-                let prefixed = prefix_mod_decl(name, d)
+                let decl_ = d
+                let prefix_name = name
+                let prefixed = prefix_mod_decl(prefix_name, decl_)
                 collect_decl_edges(prefixed, registered_fns, graph, impl_node)
             }
         },
@@ -134,17 +162,16 @@ fn collect_decl_edges(decl: Decl, registered_fns: Set<Str>, mut graph: Map<Str, 
 // Prefix a declaration name for ModBlock scoping (mirrors prefix_decl_name logic).
 fn prefix_mod_decl(mod_name: Str, decl: Decl) -> Decl {
     match decl {
-        Decl::Fn { name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span } =>
-            Decl::Fn { name: "${mod_name}::${name}", type_params: type_params, params: params,
-                return_type: return_type, declared_effects: declared_effects, body: body,
-                is_pub: is_pub, is_abstract: is_abstract, span: span },
-        Decl::Impl { target_type, type_params, trait_name, methods, span } => {
+        Decl::Fn { name, .. } =>
+            Decl::Fn { ..decl, name: "${mod_name}::${name}" },
+        Decl::Impl { methods, .. } => {
             let mut prefixed_methods: List<Decl> = []
             for m in methods {
-                prefixed_methods.push(prefix_mod_decl(mod_name, m))
+                let method_ = m
+                let prefix_name = mod_name
+                prefixed_methods.push(prefix_mod_decl(prefix_name, method_))
             }
-            Decl::Impl { target_type: target_type, type_params: type_params, trait_name: trait_name,
-                methods: prefixed_methods, span: span }
+            Decl::Impl { ..decl, methods: prefixed_methods }
         },
         _ => decl
     }
@@ -223,31 +250,42 @@ fn walk_expr_callees(expr: Expr, mode: CalleeMode, mut callees: Set<Str>) {
                                     if q == "self" || q.starts_with("self::") || q == "super" || q.starts_with("super::") {
                                         match resolve_relative_callee(scope_prefix, q, name) {
                                             some(exact_name) => {
-                                                if registered_fns.contains(exact_name) { callees.insert(exact_name) }
+                                                if registered_fns.contains(exact_name) {
+                                                    let callee_name = exact_name
+                                                    callees.insert(callee_name)
+                                                }
                                             },
                                             none => {}
                                         }
                                     } else {
-                                        let root = scc_file_root(scope_prefix)
-                                        let root_candidate = scc_join_name(root, q.split("::"), name)
-                                        if registered_fns.contains(root_candidate) {
-                                            callees.insert(root_candidate)
-                                        } else {
+                                         let root = scc_file_root(scope_prefix)
+                                         let root_candidate = scc_join_name(root, q.split("::"), name)
+                                         if registered_fns.contains(root_candidate) {
+                                             let callee_name = root_candidate
+                                             callees.insert(callee_name)
+                                         } else {
                                             let mut current_parts = scc_inline_scope(scope_prefix)
                                             current_parts.extend(q.split("::"))
-                                            let current_candidate = scc_join_name(root, current_parts, name)
-                                            if registered_fns.contains(current_candidate) { callees.insert(current_candidate) }
+                                             let current_candidate = scc_join_name(root, current_parts, name)
+                                             if registered_fns.contains(current_candidate) {
+                                                 let callee_name = current_candidate
+                                                 callees.insert(callee_name)
+                                             }
                                         }
                                     }
                                 },
                                 none => {
                                     let root = scc_file_root(scope_prefix)
-                                    let scoped_name = scc_join_name(root, scc_inline_scope(scope_prefix), name)
-                                    if registered_fns.contains(scoped_name) {
-                                        callees.insert(scoped_name)
-                                    } else {
-                                        let root_name = "${root}${name}"
-                                        if registered_fns.contains(root_name) { callees.insert(root_name) }
+                                     let scoped_name = scc_join_name(root, scc_inline_scope(scope_prefix), name)
+                                     if registered_fns.contains(scoped_name) {
+                                         let callee_name = scoped_name
+                                         callees.insert(callee_name)
+                                     } else {
+                                         let root_name = "${root}${name}"
+                                         if registered_fns.contains(root_name) {
+                                             let callee_name = root_name
+                                             callees.insert(callee_name)
+                                         }
                                     }
                                 }
                             }
@@ -268,9 +306,10 @@ fn walk_expr_callees(expr: Expr, mode: CalleeMode, mut callees: Set<Str>) {
             match mode {
                 CalleeMode::SelfMethod { method_names } => {
                     match receiver {
-                        Expr::Ident { name, .. } => {
-                            if name == "self" && method_names.contains(method) {
-                                callees.insert(method)
+                         Expr::Ident { name, .. } => {
+                             if name == "self" && method_names.contains(method) {
+                                 let callee_method = method
+                                 callees.insert(callee_method)
                             }
                         },
                         _ => {}
@@ -433,7 +472,13 @@ fn fn_scope_prefix(fn_name: Str) -> Str {
     if inline_parts.len() > 1 {
         let mut scope_parts: List<Str> = []
         for i in 0..inline_parts.len() - 1 {
-            match inline_parts.get(i) { some(p) => scope_parts.push(p), none => {} }
+            match inline_parts.get(i) {
+                some(p) => {
+                    let scope_part = p
+                    scope_parts.push(scope_part)
+                },
+                none => {}
+            }
         }
         return "${scope_parts.join("::")}::"
     }
@@ -445,17 +490,25 @@ fn fn_scope_prefix(fn_name: Str) -> Str {
 }
 
 fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, caller: Str, mut callees: Set<Str>) {
-    walk_expr_callees(expr, CalleeMode::TopLevel {
-        registered_fns: registered_fns,
-        scope_prefix: fn_scope_prefix(caller)
-    }, callees)
+    let mode_fns = registered_fns
+    let caller_ = caller
+    let scope_prefix = fn_scope_prefix(caller_)
+    let mode = CalleeMode::TopLevel {
+        registered_fns: mode_fns,
+        scope_prefix: scope_prefix
+    }
+    let expr_ = expr
+    walk_expr_callees(expr_, mode, callees)
 }
 
 // Collect self.method() callees within an AST expression body (B-138).
 // Only captures MethodCall where receiver is Ident("self") and method name
 // is in the provided method_names set. Used for impl-internal SCC ordering.
 pub fn collect_self_method_callees(expr: Expr, method_names: Set<Str>, mut callees: Set<Str>) {
-    walk_expr_callees(expr, CalleeMode::SelfMethod { method_names: method_names }, callees)
+    let mode_names = method_names
+    let mode = CalleeMode::SelfMethod { method_names: mode_names }
+    let expr_ = expr
+    walk_expr_callees(expr_, mode, callees)
 }
 
 // ============================================================
@@ -482,18 +535,25 @@ pub fn tarjan_scc(graph: Map<Str, List<Str>>) -> List<List<Str>> {
     sorted_graph.sort_by(compare_by_first)
     for entry in sorted_graph {
         let (node, targets) = entry
-        all_nodes.insert(node)
+        let source_node = node
+        all_nodes.insert(source_node)
         for t in targets {
-            all_nodes.insert(t)
+            let target_node = t
+            all_nodes.insert(target_node)
         }
     }
 
     let mut sorted_nodes: List<Str> = []
-    for n in all_nodes { sorted_nodes.push(n) }
+    for n in all_nodes {
+        let sorted_node = n
+        sorted_nodes.push(sorted_node)
+    }
     sorted_nodes.sort()
     for node in sorted_nodes {
         if !indices.contains_key(node) {
-            tarjan_strongconnect(node, graph, index_counter, stack, on_stack, indices, lowlinks, result)
+            let root_node = node
+            tarjan_strongconnect(root_node, graph, index_counter, stack,
+                on_stack, indices, lowlinks, result)
         }
     }
     result
@@ -511,28 +571,38 @@ fn tarjan_strongconnect(
 ) {
     let v_index = index_counter[0]
     index_counter.set(0, index_counter[0] + 1)
-    indices.insert(v, v_index)
-    lowlinks.insert(v, v_index)
-    stack.push(v)
-    on_stack.insert(v)
+    let indices_key = v
+    let lowlinks_key = v
+    let stack_value = v
+    let stack_key = v
+    let indices_value = v_index
+    let lowlinks_value = v_index
+    indices.insert(indices_key, indices_value)
+    lowlinks.insert(lowlinks_key, lowlinks_value)
+    stack.push(stack_value)
+    on_stack.insert(stack_key)
 
     // Visit successors
     let successors = match graph.get(v) { some(s) => s, none => [] }
     for w in successors {
         if !indices.contains_key(w) {
             // w has not been visited; recurse
-            tarjan_strongconnect(w, graph, index_counter, stack, on_stack, indices, lowlinks, result)
+            let recursive_node = w
+            tarjan_strongconnect(recursive_node, graph, index_counter, stack,
+                on_stack, indices, lowlinks, result)
             let v_low = lowlinks.get(v).unwrap_or(0)
             let w_low = lowlinks.get(w).unwrap_or(0)
             if w_low < v_low {
-                lowlinks.insert(v, w_low)
+                let lowlink_key = v
+                lowlinks.insert(lowlink_key, w_low)
             }
         } else if on_stack.contains(w) {
             // w is on the stack, so it's part of the current SCC
             let v_low = lowlinks.get(v).unwrap_or(0)
             let w_idx = indices.get(w).unwrap_or(0)
             if w_idx < v_low {
-                lowlinks.insert(v, w_idx)
+                let lowlink_key = v
+                lowlinks.insert(lowlink_key, w_idx)
             }
         }
     }
@@ -546,9 +616,11 @@ fn tarjan_strongconnect(
         while !done {
             match stack.pop() {
                 some(w) => {
+                    let is_root = w == v
                     on_stack.remove(w)
-                    scc.push(w)
-                    if w == v { done = true }
+                    let component_node = w
+                    scc.push(component_node)
+                    if is_root { done = true }
                 },
                 none => { done = true }
             }

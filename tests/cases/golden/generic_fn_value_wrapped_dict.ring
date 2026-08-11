@@ -47,15 +47,15 @@ fn apply_int(f: fn(Int) -> Int, value: Int) -> Int {
 }
 
 fn apply_payload(
-    f: fn(Int) -> Payload,
-    value: Int
+    f: fn(move Int) -> Payload,
+    move value: Int
 ) -> Payload {
     f(value)
 }
 
 fn apply_option(
-    f: fn(Int) -> Option<Int>,
-    value: Int
+    f: fn(move Int) -> Option<Int>,
+    move value: Int
 ) -> Option<Int> {
     f(value)
 }
@@ -144,7 +144,7 @@ fn dynamic_wrapper_callee<T: Hash>(value: Wrap<T>) -> Int {
     ({ hash_one })(value)
 }
 
-fn identity<Renamed>(value: Renamed) -> Renamed {
+fn identity<Renamed>(move value: Renamed) -> Renamed {
     value
 }
 
@@ -153,8 +153,8 @@ fn default_ground(value: Int, f: fn(Int) -> Int = plus_one) -> Int {
 }
 
 fn default_generic<Outer>(
-    value: Outer,
-    f: fn(Outer) -> Outer = identity
+    move value: Outer,
+    f: fn(move Outer) -> Outer = identity
 ) -> Outer {
     f(value)
 }

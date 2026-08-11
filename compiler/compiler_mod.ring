@@ -1,6 +1,9 @@
-use types::{Type, EffectRow, type_to_string, effect_row_to_string, nominal_display_name}
+use types::{Type, EffectRow, type_to_string, effect_row_to_string,
+    nominal_display_name, PARAM_OWNERSHIP_MUT_BORROW,
+    PARAM_OWNERSHIP_MOVE}
 use ast::{Program, UseDecl, TypeParam, Span}
-use hir::{HProgram, HDecl, HParam, module_item_identity, is_module_item_identity}
+use hir::{HProgram, HDecl, HParam, module_item_identity,
+    is_module_item_identity, hparam_is_mutable, hparam_ownership}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use formatter::{format_human, format_llm}
 use env::{TypeEnv}
@@ -73,11 +76,46 @@ fn project_callable_signature(
         // the checker can mark a declaration as an internal forward explicitly,
         // do not bridge this ABI-sensitive shape. Mutable struct/context params
         // are reference-shaped and safe to compare exactly below.
-        if p.is_mutable && is_value_type(p.ty) { return none }
-        let mutability = if p.is_mutable { "mut " } else { "" }
-        param_types.push("${mutability}${type_to_string(p.ty)}")
+        if hparam_is_mutable(p) && is_value_type(p.ty) { return none }
+        let mode = hparam_ownership(p)
+        let modifier = if mode == PARAM_OWNERSHIP_MOVE {
+            "move "
+        } else if mode == PARAM_OWNERSHIP_MUT_BORROW {
+            "mut "
+        } else {
+            ""
+        }
+        param_types.push("${modifier}${type_to_string(p.ty)}")
     }
     some("<${tparams.join(",")}>(${param_types.join(",")})->${type_to_string(return_type)} with {${effect_row_to_string(effects)}}")
+}
+
+fn append_project_ring_candidate_firebreak(
+    mut out: List<ProjectRingFnCandidate>, module_key_: Str,
+    name: Str, signature: Str
+) {
+    let candidate_identity = name
+    let candidate_signature = signature
+    out.push(ProjectRingFnCandidate {
+        module_key: module_key_, identity: candidate_identity,
+        leaf: project_identity_leaf(name),
+        signature: candidate_signature
+    })
+}
+
+fn append_project_extern_forward_firebreak(
+    mut out: List<ProjectExternForward>, module_key_: Str,
+    name: Str, abi_name: Str, signature: Str, span: Span
+) {
+    let forward_identity = name
+    let forward_abi_name = abi_name
+    let forward_signature = signature
+    let forward_span = span
+    out.push(ProjectExternForward {
+        module_key: module_key_, identity: forward_identity,
+        abi_name: forward_abi_name, signature: forward_signature,
+        span: forward_span
+    })
 }
 
 fn collect_project_ring_candidates(
@@ -90,10 +128,11 @@ fn collect_project_ring_candidates(
                 // canonical project definition may satisfy a project forward.
                 if is_pub && is_module_item_identity(name) {
                     match project_callable_signature(type_params, params, return_type, effects) {
-                        some(signature) => out.push(ProjectRingFnCandidate {
-                            module_key: module_key_, identity: name,
-                            leaf: project_identity_leaf(name), signature: signature
-                        }),
+                        some(signature) => {
+                            let candidate_module_key = module_key_
+                            append_project_ring_candidate_firebreak(
+                                out, candidate_module_key, name, signature)
+                        },
                         none => {}
                     }
                 }
@@ -118,10 +157,12 @@ fn collect_project_extern_forwards(
                 // module's exact top-level declaration may cycle-break.
                 if name == module_item_identity(module_prefix_, abi_name) {
                     match project_callable_signature(type_params, params, return_type, effects) {
-                        some(signature) => out.push(ProjectExternForward {
-                            module_key: module_key_, identity: name,
-                            abi_name: abi_name, signature: signature, span: span
-                        }),
+                        some(signature) => {
+                            let forward_module_key = module_key_
+                            append_project_extern_forward_firebreak(
+                                out, forward_module_key, name, abi_name,
+                                signature, span)
+                        },
                         none => {}
                     }
                 }
@@ -198,7 +239,8 @@ fn build_project_extern_forward_bridges(
             if candidate.leaf == forward.abi_name &&
                candidate.signature == forward.signature &&
                module_directly_depends_on(graph, candidate.module_key, forward.module_key) {
-                matching.push(candidate)
+                let matching_candidate = candidate
+                matching.push(matching_candidate)
             }
         }
         if matching.len() == 1 {
@@ -229,7 +271,11 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
             // Use cached ASTs from resolver (already parsed during graph construction)
             for key in graph.topo_order {
                 match graph.asts.get(key) {
-                    some(ast) => { module_asts.insert(key, ast) },
+                    some(ast) => {
+                        let stored_ast = ast
+                        module_asts.insert(
+                            compile_phase_key_result_firebreak(key), stored_ast)
+                    },
                     none => {},
                 }
             }
@@ -251,7 +297,10 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                             let mut dep_exports: List<ModuleExports> = empty_module_exports_list()
                             for dk in deps {
                                 match module_exports_map.get(dk) {
-                                    some(e) => dep_exports.push(e),
+                                    some(e) => {
+                                        let dependency_export = e
+                                        dep_exports.push(dependency_export)
+                                    },
                                     none => {},
                                 }
                             }
@@ -259,8 +308,10 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                 some(mod_) => module_prefix(mod_.path_segments),
                                 none => ""
                             }
+                            let check_ast = ast
+                            let check_key = key
                             let result = check_module(
-                                ast, key, current_prefix,
+                                check_ast, check_key, current_prefix,
                                 graph.namespace_plan, dep_exports, sink)
                             if sink.has_errors() {
                                 let mod_file = match graph.modules.get(key) { some(m) => m.file_path, none => "" }
@@ -282,16 +333,23 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                         eprintln(format_human(sink.diagnostics(), src))
                                     }
                                 }
-                                module_hirs.insert(key, result.program)
-                                module_envs.insert(key, result.env)
+                                let hir_key = key
+                                let stored_program = result.program
+                                module_hirs.insert(hir_key, stored_program)
+                                let env_key = key
+                                let stored_env = result.env
+                                module_envs.insert(env_key, stored_env)
                                 match graph.modules.get(key) {
                                     some(mod_) => {
                                         let prefix = module_prefix(mod_.path_segments)
-                                        let exp = extract_exports(key, prefix, ast, result.program, result.env,
+                                        let exp = extract_exports(
+                                            compile_phase_key_result_firebreak(key),
+                                            prefix, ast, result.program, result.env,
                                             result.fn_mut_params, result.value_origins,
                                             result.value_binding_kinds,
                                             result.impl_facts, dep_exports)
-                                        module_exports_map.insert(key, exp)
+                                        module_exports_map.insert(
+                                            compile_phase_key_result_firebreak(key), exp)
                                     },
                                     none => {},
                                 }
@@ -310,7 +368,10 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
             for key in graph.topo_order {
                 match module_hirs.get(key) {
                     some(hir) => {
-                        for en in hir.extern_type_names { global_externs.insert(en) }
+                        for en in hir.extern_type_names {
+                            global_externs.insert(
+                                compile_phase_extern_name_result_firebreak(en))
+                        }
                     },
                     none => {},
                 }
@@ -329,7 +390,8 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                             // evidence and wins even if a later normal alias
                             // replaced the same leaf in the mutable registry.
                             if hir.extern_type_names.contains(en) {
-                                filtered.insert(en)
+                                filtered.insert(
+                                    compile_phase_extern_name_result_firebreak(en))
                             } else {
                                 // A named import may preserve the extern under
                                 // an alias after a local normal struct replaces
@@ -343,17 +405,19 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                     }
                                 }
                                 if visible_extern {
-                                    filtered.insert(en)
+                                    filtered.insert(
+                                        compile_phase_extern_name_result_firebreak(en))
                                 }
                             }
                         }
-                        module_hirs.insert(key, HProgram {
+                        module_hirs.insert(
+                            compile_phase_key_result_firebreak(key), HProgram {
                             decls: hir.decls,
                             derived_impls: hir.derived_impls,
                             boxed_vars: hir.boxed_vars,
                             static_dicts: hir.static_dicts,
                             extern_type_names: filtered,
-                            drop_types: hir.drop_types
+                            ownership_metadata: hir.ownership_metadata
                         })
                     },
                     _ => {},
@@ -363,15 +427,39 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
             match build_project_extern_forward_bridges(graph, module_hirs, error_format) {
                 none => none,
                 some(extern_forward_bridges) => some(CompilePhaseResult {
-                    graph: graph,
+                    graph: compile_phase_graph_result_firebreak(graph),
                     module_asts: module_asts,
                     module_hirs: module_hirs,
                     module_exports_map: module_exports_map,
-                    extern_forward_bridges: extern_forward_bridges
+                    extern_forward_bridges:
+                        compile_phase_extern_bridges_result_firebreak(
+                            extern_forward_bridges)
                 })
             }
         },
     }
+}
+
+fn compile_phase_key_result_firebreak(key: Str) -> Str {
+    let exact_key = key
+    exact_key
+}
+
+fn compile_phase_extern_name_result_firebreak(name: Str) -> Str {
+    let exact_name = name
+    exact_name
+}
+
+fn compile_phase_graph_result_firebreak(graph: ModuleGraph) -> ModuleGraph {
+    let exact_graph = graph
+    exact_graph
+}
+
+fn compile_phase_extern_bridges_result_firebreak(
+    bridges: Map<Str, Str>
+) -> Map<Str, Str> {
+    let exact_bridges = bridges
+    exact_bridges
 }
 
 // ============================================================
@@ -409,16 +497,20 @@ pub fn compile_project_c(entry_file: Str, c_path: Str, o_path: Str, emit_lines: 
                 match (phases.graph.modules.get(key), phases.module_hirs.get(key), phases.module_asts.get(key)) {
                     (some(mod_), some(hir), some(ast)) => {
                         let prefix = module_prefix(mod_.path_segments)
-                        let rc_hir = perceus_transform(hir)
-                        modules.push((prefix, rc_hir, ast.uses))
+                        let transform_hir = hir
+                        let rc_hir = perceus_transform(transform_hir)
+                        let module_prefix_value = prefix
+                        modules.push((module_prefix_value, rc_hir, ast.uses))
                         if key == entry_key {
                             entry_prefix = prefix
                         }
                     },
                     (some(mod_), some(hir), none) => {
                         let prefix = module_prefix(mod_.path_segments)
-                        let rc_hir = perceus_transform(hir)
-                        modules.push((prefix, rc_hir, []))
+                        let transform_hir = hir
+                        let rc_hir = perceus_transform(transform_hir)
+                        let module_prefix_value = prefix
+                        modules.push((module_prefix_value, rc_hir, []))
                         if key == entry_key {
                             entry_prefix = prefix
                         }
@@ -446,6 +538,13 @@ pub struct RcProjectVerifyResult {
     pub report: Str
 }
 
+fn append_project_rc_finding_firebreak(
+    mut findings: List<RcFinding>, finding: RcFinding
+) {
+    let exact_finding = finding
+    findings.push(exact_finding)
+}
+
 pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool, error_format: Str) -> RcProjectVerifyResult {
     match compile_phases(entry_file, error_format) {
         none => RcProjectVerifyResult { success: false, fatal: 0, exempt: 0, report: "" },
@@ -454,8 +553,12 @@ pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool, error_forma
             for key in phases.graph.topo_order {
                 match phases.module_hirs.get(key) {
                     some(hir) => {
-                        let rc_hir = perceus_transform_mutated(hir, mutate)
-                        for f in verify_rc_program(rc_hir) { all.push(f) }
+                        let verify_hir = hir
+                        let rc_hir = perceus_transform_mutated(
+                            verify_hir, mutate)
+                        for f in verify_rc_program(rc_hir) {
+                            append_project_rc_finding_firebreak(all, f)
+                        }
                     },
                     none => {},
                 }

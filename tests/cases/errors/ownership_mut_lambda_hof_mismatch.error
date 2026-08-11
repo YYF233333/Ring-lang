@@ -1,0 +1,4 @@
+E0801
+callable ownership contract mismatch
+!use of moved value
+!internal compiler error

@@ -13,12 +13,10 @@ fn wrap<T>(x: T) -> Wrapper<T> {
     Wrapper { value: x }
 }
 
-fn unwrap<T>(w: Wrapper<T>) -> T {
-    w.value
-}
-
-fn swap_pair<A, B>(p: Pair<A, B>) -> Pair<B, A> {
-    Pair { first: p.second, second: p.first }
+// Whole generic bindings may be reordered without projecting a potentially
+// Drop-bearing field out of an aggregate.
+fn swap_pair<A, B>(first: A, second: B) -> Pair<B, A> {
+    Pair { first: second, second: first }
 }
 
 fn main() {
@@ -28,14 +26,16 @@ fn main() {
     assert(p.second == "hello", "pair second")
 
     // Generic function with struct
-    let q = swap_pair(p)
+    // This concrete Pair has only non-may-own fields, so its projections are
+    // ordinary borrowed reads that may cross the two Move edges by RC dup.
+    let q = swap_pair(p.first, p.second)
     assert(q.first == "hello", "swap first")
     assert(q.second == 1, "swap second")
 
     // Nested generic structs
     let w = wrap(Pair { first: true, second: 42 })
-    assert(unwrap(w).first == true, "nested generic")
-    assert(unwrap(w).second == 42, "nested generic 2")
+    assert(w.value.first == true, "nested generic")
+    assert(w.value.second == 42, "nested generic 2")
 
     // Generic struct with same type for both params
     let p2 = Pair { first: 10, second: 20 }

@@ -1,0 +1,11 @@
+// expect-error: E0801
+struct Resource { id: Int }
+
+impl Drop for Resource {
+    fn drop(self) {}
+}
+
+fn main() {
+    let mut values = [Resource { id: 1 }]
+    values[0] = Resource { id: 2 }
+}

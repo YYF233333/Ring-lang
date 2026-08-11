@@ -14,12 +14,28 @@
 use ast::{Span, Position, Pattern, BinOp}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler, HEffectOp,
+    HPatternBinding,
     hexpr_type, hexpr_span, hexpr_effects,
-    is_rc_excluded_type, type_contains_extern_handle,
-    is_borrow_returning_call, is_user_drop_type,
-    is_nullary_variant_ctor_ident, is_materialized_fn_value,
-    slot_read_identity, slot_take_identity, slot_write_identity}
-use types::{Type}
+    type_is_physical_rc_eligible,
+    call_returns_borrowed, hparam_ownership,
+    hparam_is_external_drop_owner,
+    is_nullary_variant_ctor_ident, is_option_none_ctor_ident,
+    is_materialized_fn_value,
+    move_edge_has_reachable_bare_binding,
+    expr_has_reachable_value, stmt_reaches_next,
+    hexpr_callable_source_def_ids,
+    synthetic_def_id, is_synthetic_anf_def_id, is_synthetic_rc_def_id,
+    SYNTHETIC_ANF_DEF_ID_BASE, SYNTHETIC_RC_DEF_ID_BASE,
+    validate_hir_binder_def_ids}
+use types::{Type, EffectRow, OwnershipMetadata, CallableOwnershipState,
+    PARAM_OWNERSHIP_MOVE, PARAM_OWNERSHIP_UNKNOWN,
+    CALLABLE_RESULT_ROLE_NONE,
+    CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT,
+    CALLABLE_RESULT_ROLE_UNKNOWN,
+    callable_param_ownership, type_may_own,
+    validate_callable_ownership_metadata,
+    project_synthetic_anf_callable_metadata,
+    project_synthetic_rc_callable_metadata}
 
 // ============================================================
 // Synthetic span for pass-inserted ANF/RC nodes.
@@ -28,7 +44,202 @@ use types::{Type}
 
 fn synthetic_span() -> Span {
     let pos = Position { line: 0, column: 0, offset: 0 }
-    Span { file: "<perceus>", start: pos, end: pos }
+    let start = pos
+    let end = pos
+    Span { file: "<perceus>", start: start, end: end }
+}
+
+fn mutate_missing_call_edge_take(
+    expr: HExpr, control: List<Int>
+) -> HExpr? {
+    if control.get(1) != some(1) { return none }
+    match expr {
+        HExpr::Take { name, source_def_id, ty, effects, span } => {
+            let ident_name = name
+            let ident_def_id = source_def_id
+            let ident_ty = ty
+            let ident_effects = effects
+            let ident_span = span
+            some(HExpr::Ident {
+                name: ident_name, resolved_name: none,
+                def_id: some(ident_def_id), dict_closure_dicts: none,
+                ty: ident_ty, effects: ident_effects, span: ident_span
+            })
+        },
+        _ => none
+    }
+}
+
+fn mutation_borrowed_param_ident(params: List<HParam>) -> HExpr? {
+    match params.get(0) {
+        some(HParam { name, ty, def_id: some(def_id), .. }) => {
+            let ident_name = name
+            let ident_def_id = def_id
+            let ident_ty = ty
+            some(HExpr::Ident {
+                name: ident_name, resolved_name: none,
+                def_id: some(ident_def_id),
+                dict_closure_dicts: none, ty: ident_ty,
+                effects: EffectRow { effects: [], tail: none },
+                span: synthetic_span()
+            })
+        },
+        _ => none
+    }
+}
+
+// Test-only post-plan mutation. The replacement Ident reuses an exact HParam
+// DefId already present in HIR; it does not invent callable identity or alter
+// semantic ownership metadata. The dedicated fixture puts its borrowed
+// aggregate parameter first and has two fresh If branches before mutation.
+fn mutate_mixed_spread_source(source: HExpr, borrowed: HExpr) -> HExpr {
+    match source {
+        HExpr::IfExpr { condition, then_branch,
+                        else_branch: some(_), ty, effects, span } => {
+            let final_condition = condition
+            let final_then = then_branch
+            let final_ty = ty
+            let final_effects = effects
+            let final_span = span
+            HExpr::IfExpr { condition: final_condition,
+                then_branch: final_then,
+                else_branch: some(borrowed), ty: final_ty,
+                effects: final_effects, span: final_span }
+        },
+        HExpr::MatchExpr { scrutinee, arms, ty, effects, span } => {
+            let arms_view = arms
+            match arms_view.get(0) {
+                some(first) => {
+                    let final_scrutinee = scrutinee
+                    let final_ty = ty
+                    let final_effects = effects
+                    let final_span = span
+                    let mut replaced: List<HMatchArm> = [
+                        HMatchArm { ..first, body: borrowed }
+                    ]
+                    let remaining = arms_view.slice(1, arms_view.len())
+                    replaced.extend(remaining)
+                    HExpr::MatchExpr { scrutinee: final_scrutinee,
+                        arms: replaced, ty: final_ty,
+                        effects: final_effects, span: final_span }
+                },
+                none => {
+                    let final_scrutinee = scrutinee
+                    let final_ty = ty
+                    let final_effects = effects
+                    let final_span = span
+                    HExpr::MatchExpr { scrutinee: final_scrutinee,
+                        arms: arms_view, ty: final_ty,
+                        effects: final_effects, span: final_span }
+                }
+            }
+        },
+        HExpr::Block { stmts, tail: some(value), ty, effects, span } => {
+            let final_stmts = stmts
+            let source_value = value
+            let final_ty = ty
+            let final_effects = effects
+            let final_span = span
+            HExpr::Block { stmts: final_stmts,
+                tail: some(mutate_mixed_spread_source(
+                    source_value, borrowed)),
+                ty: final_ty, effects: final_effects, span: final_span }
+        },
+        HExpr::UnsafeBlock { body, ty, effects, span } => {
+            let source_body = body
+            let final_ty = ty
+            let final_effects = effects
+            let final_span = span
+            HExpr::UnsafeBlock {
+                body: mutate_mixed_spread_source(
+                    source_body, borrowed),
+                ty: final_ty, effects: final_effects, span: final_span
+            }
+        },
+        _ => source
+    }
+}
+
+fn mutate_mixed_spread_expr(expr: HExpr, borrowed: HExpr) -> HExpr {
+    match expr {
+        HExpr::Block { stmts, tail: some(value), ty, effects, span } => {
+            let final_stmts = stmts
+            let source_value = value
+            let final_ty = ty
+            let final_effects = effects
+            let final_span = span
+            HExpr::Block { stmts: final_stmts,
+                tail: some(mutate_mixed_spread_expr(
+                    source_value, borrowed)),
+                ty: final_ty, effects: final_effects, span: final_span }
+        },
+        HExpr::StructLit { name, type_args, fields,
+                           spread: some(source), ty, effects, span } => {
+            let final_name = name
+            let final_type_args = type_args
+            let final_fields = fields
+            let source_value = source
+            let borrowed_value = borrowed
+            let final_ty = ty
+            let final_effects = effects
+            let final_span = span
+            HExpr::StructLit { name: final_name,
+                type_args: final_type_args, fields: final_fields,
+                spread: some(mutate_mixed_spread_source(
+                    source_value, borrowed_value)),
+                ty: final_ty, effects: final_effects, span: final_span }
+        },
+        HExpr::NamedVariantConstruct { enum_name, variant_name, fields,
+                                       spread: some(source), ty,
+                                       effects, span } => {
+            let final_enum_name = enum_name
+            let final_variant_name = variant_name
+            let final_fields = fields
+            let source_value = source
+            let borrowed_value = borrowed
+            let final_ty = ty
+            let final_effects = effects
+            let final_span = span
+            HExpr::NamedVariantConstruct { enum_name: final_enum_name,
+                variant_name: final_variant_name, fields: final_fields,
+                spread: some(mutate_mixed_spread_source(
+                    source_value, borrowed_value)),
+                ty: final_ty, effects: final_effects, span: final_span }
+        },
+        _ => expr
+    }
+}
+
+fn mutate_mixed_spread_decl(decl: HDecl) -> HDecl {
+    match decl {
+        HDecl::Fn { params, body, .. } => match mutation_borrowed_param_ident(
+                params) {
+            some(borrowed) => {
+                let source_body = body
+                HDecl::Fn { ..decl,
+                    body: mutate_mixed_spread_expr(
+                        source_body, borrowed) }
+            },
+            none => decl
+        },
+        _ => decl
+    }
+}
+
+fn mutate_mixed_spread_sources(program: HProgram) -> HProgram {
+    let mut decls: List<HDecl> = []
+    for decl in program.decls {
+        let source_decl = decl
+        decls.push(mutate_mixed_spread_decl(source_decl))
+    }
+    HProgram {
+        decls: decls,
+        derived_impls: program.derived_impls,
+        boxed_vars: program.boxed_vars,
+        static_dicts: program.static_dicts,
+        extern_type_names: program.extern_type_names,
+        ownership_metadata: program.ownership_metadata
+    }
 }
 
 // B-084 #131(a): the wildcard `_` is never bound to a real named_values slot
@@ -63,6 +274,44 @@ pub fn perceus_transform(program: HProgram) -> HProgram {
 //   "drop-params" — append a Drop for every function parameter to the function
 //                   body: params are BORROWS (L1 point 4) → the verifier must
 //                   report uaf-drop-borrow.
+//   "missing-take"— replace every Move call-edge Take with the underlying bare
+//                   Ident after planning → the verifier must independently
+//                   report uaf-call-missing-take for both physical-RC owned
+//                   and direct/contains-extern K_NONOWNED slots.
+//   "strip-callable-metadata"
+//                 — after RC planning, remove every DefId-keyed callable
+//                   descriptor. The verifier must fail closed at ordinary
+//                   callable parameter/let/assignment binders instead of
+//                   recovering authority from their FnType annotations.
+//   "strip-callable-result-roles"
+//                 — retain callable descriptors but remove both total result
+//                   role maps; verifier totality must fail independently.
+//   "strip-anf-callable-metadata"
+//                 — remove only synthetic-ANF callable contracts after the
+//                   projection step. This proves ANF temps cannot fall back to
+//                   their FnType while ordinary callable contracts remain.
+//   "strip-anf-callable-result-roles"
+//                 — retain synthetic-ANF descriptors/state but remove only
+//                   their direct/returned result roles.
+//   "missing-slot-result-drop"
+//                 — give only Perceus a private all-NONE result-role view;
+//                   verifier retains the authoritative FRESH slot role and
+//                   must detect the missing materialization/drop.
+//   "skip-spread-materialization"
+//                 — leave fresh spread producers inline; verifier must report
+//                   leak-spread-source instead of sharing ANF's classifier.
+//   "mixed-spread-source"
+//                 — after ownership planning, replace one reachable fresh
+//                   branch in each test-fixture spread with the function's
+//                   exact borrowed parameter DefId. Perceus preserves that
+//                   mixed source only for this mutation so verifier must report
+//                   its own invalid-spread-source finding.
+//   "strip-range-break-cleanup"
+//                 — omit the Range counter's edge Drop before Break; verifier
+//                   must report leak-loop-exit.
+//   "inject-range-continue-cleanup"
+//                 — incorrectly emit that Drop before Continue; verifier must
+//                   report uaf-loop-auto-drop before backend cleanup.
 // Reached only via the `--rc-mutate=` CLI flag (verify path); the build/run
 // pipelines call perceus_transform and cannot be mutated.
 pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
@@ -77,23 +326,236 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     //
     // B-144: use the program-level extern type names (global set collected at
     // checker phase, covers use-imported extern types across modules).
-    let externs = program.extern_type_names
-    let anf_program = if mutate == "skip-anf" { program } else { anf_normalize(program, externs) }
+    let planned_program = if mutate == "mixed-spread-source" {
+        mutate_mixed_spread_sources(program)
+    } else {
+        program
+    }
+    let externs = planned_program.extern_type_names
+    let source_ownership = planned_program.ownership_metadata
+    // This mutation degrades only Perceus's private view.  The returned HIR
+    // keeps the authoritative total role tables so verify_rc can independently
+    // detect the missing materialisation/drop.
+    let anf_input_ownership = if mutate == "missing-slot-result-drop" {
+        ownership_metadata_with_none_result_roles(source_ownership)
+    } else {
+        source_ownership
+    }
+    let anf_result = if mutate == "skip-anf" {
+        AnfNormalization {
+            program: planned_program, callable_projections: [] }
+    } else {
+        anf_normalize(planned_program, externs, anf_input_ownership,
+            mutate == "skip-spread-materialization",
+            mutate == "mixed-spread-source")
+    }
+    let mut anf_program = anf_result.program
+    let source_with_anf = apply_anf_callable_projections(
+        source_ownership, anf_result.callable_projections)
+    // The missing-slot mutation intentionally gives only Perceus a private
+    // all-NONE role view. Rebuild it after ANF publication so its four DefId
+    // tables remain total for every new synthetic callable identity.
+    let input_ownership = if mutate == "missing-slot-result-drop" {
+        ownership_metadata_with_none_result_roles(source_with_anf)
+    } else {
+        source_with_anf
+    }
     // B-091: `boxed_vars` (def_ids of `let mut` vars auto-boxed for write-through
     // closure capture) is threaded through the RC pass so the Assign old-value
     // Drop is suppressed for them — a boxed write mutates `cell.value`, it does
     // NOT consume/free the shared cell pointer.
-    let drops = anf_program.drop_types
-    let new_decls = transform_decls(anf_program.decls, anf_program.boxed_vars, externs, drops)
+    let ownership = input_ownership
+    // Index 0 is the ordinary RC gensym. Remaining cells are test-only mutation
+    // controls, kept outside semantic metadata so no boxed Map/struct alias can
+    // leak them: missing-Take, missing Range Break cleanup, and premature Range
+    // Continue cleanup respectively.
+    let mut rc_gensym = RcState {
+        counters: [0,
+            if mutate == "missing-take" { 1 } else { 0 },
+            if mutate == "strip-range-break-cleanup" { 1 } else { 0 },
+            if mutate == "inject-range-continue-cleanup" { 1 } else { 0 }],
+        callable_projections: []
+    }
+    let new_decls = transform_decls(anf_program.decls,
+        anf_program.boxed_vars, externs, ownership, rc_gensym)
     let mutated_decls = if mutate == "drop-params" { mutate_drop_params(new_decls) } else { new_decls }
-    HProgram {
+    let source_with_rc = apply_rc_callable_projections(
+        source_with_anf, rc_gensym.callable_projections)
+    let output_ownership = if mutate == "strip-callable-metadata" {
+        ownership_metadata_without_callable_contracts(source_with_rc)
+    } else if mutate == "strip-callable-result-roles" {
+        ownership_metadata_without_result_roles(source_with_rc)
+    } else if mutate == "strip-anf-callable-metadata" {
+        ownership_metadata_without_synthetic_anf_callable_contracts(
+            source_with_rc)
+    } else if mutate == "strip-anf-callable-result-roles" {
+        ownership_metadata_without_synthetic_anf_result_roles(source_with_rc)
+    } else {
+        source_with_rc
+    }
+    let transformed = HProgram {
         decls: mutated_decls,
         derived_impls: anf_program.derived_impls,
         boxed_vars: anf_program.boxed_vars,
         static_dicts: anf_program.static_dicts,
         extern_type_names: anf_program.extern_type_names,
-        drop_types: anf_program.drop_types,
-        ownership_metadata: anf_program.ownership_metadata
+        ownership_metadata: output_ownership
+    }
+    // Non-metadata mutations must not alter or smuggle control through the
+    // returned semantic truth.  This runtime assertion executes immediately
+    // before the caller enters verify_rc.
+    if mutate != "strip-callable-metadata" &&
+       mutate != "strip-callable-result-roles" &&
+       mutate != "strip-anf-callable-metadata" &&
+       mutate != "strip-anf-callable-result-roles" {
+        validate_callable_ownership_metadata(transformed.ownership_metadata)
+    }
+    validate_hir_binder_def_ids(transformed)
+    transformed
+}
+
+fn ownership_metadata_with_role_maps(
+    metadata: OwnershipMetadata, direct_roles: Map<Int, Int>,
+    returned_roles: Map<Int, Int>, callable_by_def_id: Map<Int, Int>,
+    callable_states: Map<Int, CallableOwnershipState>
+) -> OwnershipMetadata {
+    OwnershipMetadata {
+        callable_descriptors: metadata.callable_descriptors,
+        callable_by_def_id: callable_by_def_id,
+        callable_state_by_def_id: callable_states,
+        callable_result_role_by_def_id: direct_roles,
+        returned_callable_result_role_by_def_id: returned_roles,
+        callable_inference_parents: metadata.callable_inference_parents,
+        callable_inference_solutions: metadata.callable_inference_solutions,
+        next_callable_inference_term: metadata.next_callable_inference_term,
+        ownership_shapes: metadata.ownership_shapes
+    }
+}
+
+fn ownership_metadata_with_none_result_roles(
+    metadata: OwnershipMetadata
+) -> OwnershipMetadata {
+    let mut direct: Map<Int, Int> = map_new()
+    let mut returned: Map<Int, Int> = map_new()
+    for def_id in metadata.callable_by_def_id.keys() {
+        let direct_def_id = def_id
+        let returned_def_id = def_id
+        direct.insert(direct_def_id, CALLABLE_RESULT_ROLE_NONE)
+        returned.insert(returned_def_id, CALLABLE_RESULT_ROLE_NONE)
+    }
+    ownership_metadata_with_role_maps(metadata, direct, returned,
+        metadata.callable_by_def_id, metadata.callable_state_by_def_id)
+}
+
+fn ownership_metadata_without_callable_contracts(
+    metadata: OwnershipMetadata
+) -> OwnershipMetadata {
+    ownership_metadata_with_role_maps(metadata, map_new(), map_new(),
+        map_new(), map_new())
+}
+
+fn ownership_metadata_without_result_roles(
+    metadata: OwnershipMetadata
+) -> OwnershipMetadata {
+    ownership_metadata_with_role_maps(metadata, map_new(), map_new(),
+        metadata.callable_by_def_id, metadata.callable_state_by_def_id)
+}
+
+fn ownership_metadata_without_synthetic_anf_callable_contracts(
+    metadata: OwnershipMetadata
+) -> OwnershipMetadata {
+    let mut callable_by_def_id: Map<Int, Int> = map_new()
+    let mut callable_states: Map<Int, CallableOwnershipState> = map_new()
+    let mut direct_roles: Map<Int, Int> = map_new()
+    let mut returned_roles: Map<Int, Int> = map_new()
+    for def_id in metadata.callable_by_def_id.keys() {
+        if !is_synthetic_anf_def_id(def_id) {
+            let callable_term = match metadata.callable_by_def_id.get(def_id) {
+                some(term) => term,
+                none => panic("unreachable: callable metadata key disappeared")
+            }
+            let callable_state = match metadata.callable_state_by_def_id.get(
+                    def_id) {
+                some(state) => state,
+                none => panic("unreachable: callable state is not total")
+            }
+            let direct_role = match metadata.callable_result_role_by_def_id.get(
+                    def_id) {
+                some(role) => role,
+                none => panic("unreachable: direct callable role is not total")
+            }
+            let returned_role = match metadata
+                    .returned_callable_result_role_by_def_id.get(def_id) {
+                some(role) => role,
+                none => panic("unreachable: returned callable role is not total")
+            }
+            let callable_term_def_id = def_id
+            let callable_state_def_id = def_id
+            let direct_role_def_id = def_id
+            let returned_role_def_id = def_id
+            callable_by_def_id.insert(callable_term_def_id, callable_term)
+            callable_states.insert(callable_state_def_id, callable_state)
+            direct_roles.insert(direct_role_def_id, direct_role)
+            returned_roles.insert(returned_role_def_id, returned_role)
+        }
+    }
+    ownership_metadata_with_role_maps(metadata, direct_roles, returned_roles,
+        callable_by_def_id, callable_states)
+}
+
+fn ownership_metadata_without_synthetic_anf_result_roles(
+    metadata: OwnershipMetadata
+) -> OwnershipMetadata {
+    let mut direct_roles: Map<Int, Int> = map_new()
+    let mut returned_roles: Map<Int, Int> = map_new()
+    for def_id in metadata.callable_by_def_id.keys() {
+        if !is_synthetic_anf_def_id(def_id) {
+            let direct_role = match metadata.callable_result_role_by_def_id.get(
+                    def_id) {
+                some(role) => role,
+                none => panic("unreachable: direct callable role is not total")
+            }
+            let returned_role = match metadata
+                    .returned_callable_result_role_by_def_id.get(def_id) {
+                some(role) => role,
+                none => panic("unreachable: returned callable role is not total")
+            }
+            let direct_role_def_id = def_id
+            let returned_role_def_id = def_id
+            direct_roles.insert(direct_role_def_id, direct_role)
+            returned_roles.insert(returned_role_def_id, returned_role)
+        }
+    }
+    ownership_metadata_with_role_maps(metadata, direct_roles, returned_roles,
+        metadata.callable_by_def_id, metadata.callable_state_by_def_id)
+}
+
+// Ownership planning has already rejected opaque callables.  Perceus still
+// reads the exact descriptor at each call edge because a Move projection or a
+// borrowed-return call needs its independent non-linear owner materialised
+// here, by the sole Clone-producing pass.
+fn perceus_call_param_mode(
+    ownership: OwnershipMetadata, callee_def_id: Int?, index: Int
+) -> Int {
+    let def_id = match callee_def_id {
+        some(id) => id,
+        none => panic("unreachable: Perceus call has no exact callable DefId")
+    }
+    let ownership_id = match ownership.callable_by_def_id.get(def_id) {
+        some(id) => id,
+        none => panic(
+            "unreachable: Perceus call has no exact ownership descriptor")
+    }
+    let mode = callable_param_ownership(ownership, ownership_id, index)
+    if mode == PARAM_OWNERSHIP_UNKNOWN {
+        panic("unreachable: Perceus call parameter ownership is unknown")
+    }
+    mode
+}
+
+fn assert_perceus_move_edge(expr: HExpr) {
+    if move_edge_has_reachable_bare_binding(expr, false) {
+        panic("unreachable: Perceus Move binding edge has no exact Take")
     }
 }
 
@@ -105,15 +567,16 @@ fn mutate_drop_params(decls: List<HDecl>) -> List<HDecl> {
     let mut out: List<HDecl> = []
     for d in decls {
         match d {
-            HDecl::Fn { name, def_id, type_params, params, return_type, effects, body, is_pub, trait_bounds, span } => {
-                out.push(HDecl::Fn {
-                    name: name, def_id: def_id, type_params: type_params,
-                    params: params, return_type: return_type, effects: effects,
-                    body: mutate_append_param_drops(body, params),
-                    is_pub: is_pub, trait_bounds: trait_bounds, span: span
-                })
+            HDecl::Fn { params, body, .. } => {
+                let params_ = params
+                let body_ = body
+                out.push(HDecl::Fn { ..d,
+                    body: mutate_append_param_drops(body_, params_) })
             },
-            _ => out.push(d),
+            _ => {
+                let decl_ = d
+                out.push(decl_)
+            },
         }
     }
     out
@@ -121,12 +584,19 @@ fn mutate_drop_params(decls: List<HDecl>) -> List<HDecl> {
 
 fn mutate_append_param_drops(body: HExpr, params: List<HParam>) -> HExpr {
     match body {
-        HExpr::Block { stmts, tail, ty, effects, span } => {
+        HExpr::Block { stmts, .. } => {
             let mut new_stmts = stmts.concat([])
             for p in params {
-                new_stmts.push(HStmt::Drop { name: p.name, ty: Type::UnitType, span: synthetic_span() })
+                let param_def_id = match p.def_id {
+                    some(id) => id,
+                    none => panic(
+                        "unreachable: RC mutation parameter has no exact DefId")
+                }
+                new_stmts.push(HStmt::Drop { name: p.name,
+                    def_id: param_def_id, ty: Type::UnitType,
+                    span: synthetic_span() })
             }
-            HExpr::Block { stmts: new_stmts, tail: tail, ty: ty, effects: effects, span: span }
+            HExpr::Block { ..body, stmts: new_stmts }
         },
         _ => body,
     }
@@ -154,10 +624,10 @@ fn mutate_append_param_drops(body: HExpr, params: List<HParam>) -> HExpr {
 // (the #134 risk) — it reuses the existing forward scope-end-drop.
 //
 // HARD RULES (a violation = UAF or changed behaviour):
-//   R1 ONLY materialise FRESH-OWNED compounds: BinOp / UnaryOp / non-borrow Call /
+//   R1 ONLY materialise FRESH-OWNED compounds: BinOp / UnaryOp / exact-owned Call /
 //      StructLit / NamedVariantConstruct / ListLit / TupleLit / RangeExpr /
 //      StringInterp / Lambda.  NEVER Ident / FieldAccess / IndexExpr /
-//      borrow-returning Call (is_borrow_returning_call) — those are BORROWS;
+//      a Call whose exact DefId descriptor returns Borrowed — those are BORROWS;
 //      materialise+drop would UAF.  Literals are skipped (no heap to reclaim) but
 //      they are harmless if bound; we skip them for cleanliness.
 //   R2 DO NOT hoist past a short-circuit / branch boundary.  The RIGHT operand of
@@ -175,81 +645,195 @@ fn mutate_append_param_drops(body: HExpr, params: List<HParam>) -> HExpr {
 //      Clone'd by clone-all-escape and its `let` is scope-dropped — no special
 //      casing here.
 
-fn anf_normalize(program: HProgram, externs: Set<Str>) -> HProgram {
+struct AnfCallableProjection {
+    target_def_id: Int,
+    expected_ownership_term: Int,
+    source_def_ids: List<Int>
+}
+
+struct AnfState {
+    counters: List<Int>,
+    callable_projections: List<AnfCallableProjection>
+}
+
+struct AnfNormalization {
+    program: HProgram,
+    callable_projections: List<AnfCallableProjection>
+}
+
+struct RcCallableProjection {
+    target_def_id: Int,
+    expected_ownership_term: Int,
+    source_def_ids: List<Int>
+}
+
+struct RcState {
+    counters: List<Int>,
+    callable_projections: List<RcCallableProjection>
+}
+
+fn apply_anf_callable_projections(
+    mut metadata: OwnershipMetadata,
+    projections: List<AnfCallableProjection>
+) -> OwnershipMetadata {
+    for projection in projections {
+        if !is_synthetic_anf_def_id(projection.target_def_id) {
+            panic("unreachable: ANF callable projection target is outside the synthetic ANF namespace")
+        }
+        for source_def_id in projection.source_def_ids {
+            if source_def_id < 0 &&
+               !is_synthetic_anf_def_id(source_def_id) {
+                panic("unreachable: ANF callable projection source is in a foreign synthetic DefId namespace")
+            }
+        }
+        project_synthetic_anf_callable_metadata(
+            metadata, projection.target_def_id,
+            projection.expected_ownership_term,
+            projection.source_def_ids)
+    }
+    // Each projection is checked against all four authoritative tables while
+    // it is published.  The transform exit below performs the single global
+    // metadata validation after RC planning, so repeating that full-table scan
+    // here would only duplicate an O(metadata) barrier for every module.
+    metadata
+}
+
+fn apply_rc_callable_projections(
+    mut metadata: OwnershipMetadata,
+    projections: List<RcCallableProjection>
+) -> OwnershipMetadata {
+    for projection in projections {
+        if !is_synthetic_rc_def_id(projection.target_def_id) {
+            panic("unreachable: RC callable projection target is outside the synthetic RC namespace")
+        }
+        for source_def_id in projection.source_def_ids {
+            if source_def_id < 0 &&
+               !is_synthetic_anf_def_id(source_def_id) &&
+               !is_synthetic_rc_def_id(source_def_id) {
+                panic("unreachable: RC callable projection source is in a foreign synthetic DefId namespace")
+            }
+        }
+        project_synthetic_rc_callable_metadata(
+            metadata, projection.target_def_id,
+            projection.expected_ownership_term,
+            projection.source_def_ids)
+    }
+    metadata
+}
+
+fn record_rc_callable_projection(
+    expr: HExpr, target_def_id: Int, mut state: RcState
+) {
+    match hexpr_type(expr) {
+        Type::FnType { meta, .. } => {
+            let source_def_ids = match hexpr_callable_source_def_ids(expr) {
+                some(ids) => ids,
+                none => panic(
+                    "unreachable: RC callable hoist has no exact producer DefId set")
+            }
+            state.callable_projections.push(RcCallableProjection {
+                target_def_id: target_def_id,
+                expected_ownership_term: meta.ownership_term,
+                source_def_ids: source_def_ids
+            })
+        },
+        _ => {}
+    }
+}
+
+fn anf_normalize(
+    program: HProgram, externs: Set<Str>, ownership: OwnershipMetadata,
+    skip_spread_materialization: Bool, allow_mixed_spread_mutation: Bool
+) -> AnfNormalization {
     // Per-program monotonic temp counter (single-element mutable cell, same idiom
     // as perceus's gensym).  Identical across runs of the same source, so it does
     // not perturb double-bootstrap byte-equivalence.
-    let mut counter: List<Int> = [0]
+    let mut counter = AnfState {
+        counters: [0,
+            if skip_spread_materialization { 1 } else { 0 },
+            if allow_mixed_spread_mutation { 1 } else { 0 }],
+        callable_projections: []
+    }
     let mut new_decls: List<HDecl> = []
     for d in program.decls {
-        new_decls.push(anf_decl(d, externs, counter))
+        let decl_ = d
+        new_decls.push(anf_decl(decl_, externs, ownership, counter))
     }
-    HProgram {
+    let normalized_program = HProgram {
         decls: new_decls,
         derived_impls: program.derived_impls,
         boxed_vars: program.boxed_vars,
         static_dicts: program.static_dicts,
         extern_type_names: program.extern_type_names,
-        drop_types: program.drop_types,
         ownership_metadata: program.ownership_metadata
     }
+    AnfNormalization { program: normalized_program,
+        callable_projections: counter.callable_projections }
 }
 
-fn fresh_anf_tmp(mut counter: List<Int>) -> Str {
-    let n = match counter.get(0) { some(v) => v, none => 0 }
-    counter.set(0, n + 1)
-    "__anf_${n + 1}"
+fn fresh_anf_tmp(mut counter: AnfState) -> (Str, Int) {
+    let n = match counter.counters.get(0) { some(v) => v, none => 0 }
+    let ordinal = n + 1
+    counter.counters.set(0, ordinal)
+    ("__anf_${ordinal}",
+        synthetic_def_id(SYNTHETIC_ANF_DEF_ID_BASE, ordinal))
 }
 
-fn anf_decl(decl: HDecl, externs: Set<Str>, mut counter: List<Int>) -> HDecl {
+fn anf_decl(
+    decl: HDecl, externs: Set<Str>, ownership: OwnershipMetadata,
+    mut counter: AnfState
+) -> HDecl {
     match decl {
-        HDecl::Fn { name, def_id, type_params, params, return_type, effects, body, is_pub, trait_bounds, span } => {
-            HDecl::Fn {
-                name: name, def_id: def_id, type_params: type_params,
-                params: params, return_type: return_type, effects: effects,
-                body: anf_fn_body(body, externs, counter), is_pub: is_pub,
-                trait_bounds: trait_bounds, span: span
-            }
+        HDecl::Fn { body, .. } => {
+            let body_ = body
+            HDecl::Fn { ..decl,
+                body: anf_fn_body(body_, externs, ownership, counter) }
         },
-        HDecl::Impl { target_type, type_params, trait_name, methods, assoc_types, span } => {
+        HDecl::Impl { methods, .. } => {
             let mut new_methods: List<HDecl> = []
-            for m in methods { new_methods.push(anf_decl(m, externs, counter)) }
-            HDecl::Impl {
-                target_type: target_type, type_params: type_params,
-                trait_name: trait_name, methods: new_methods,
-                assoc_types: assoc_types, span: span
+            for m in methods {
+                let method_ = m
+                new_methods.push(anf_decl(method_, externs, ownership, counter))
             }
+            HDecl::Impl { ..decl, methods: new_methods }
         },
-        HDecl::Test { description, body, span } => {
-            HDecl::Test { description: description, body: anf_fn_body(body, externs, counter), span: span }
+        HDecl::Test { body, .. } => {
+            let body_ = body
+            HDecl::Test { ..decl,
+                body: anf_fn_body(body_, externs, ownership, counter) }
         },
-        HDecl::Const { name, def_id, ty, init, is_pub, span } => {
+        HDecl::Const { init, .. } => {
             // Const init is in escape position with no enclosing statement list to
             // hoist into; normalise its nested subexprs into a Block tail if any
             // materialisation is needed.
-            HDecl::Const { name: name, def_id: def_id, ty: ty,
-                init: anf_value_in_own_scope(init, externs, counter), is_pub: is_pub, span: span }
+            let init_ = init
+            HDecl::Const { ..decl, init: anf_value_in_own_scope(
+                init_, externs, ownership, counter) }
         },
-        HDecl::ModBlock { name, decls: mod_decls, is_pub, span } => {
+        HDecl::ModBlock { decls: mod_decls, .. } => {
             let mut new_mod: List<HDecl> = []
-            for md in mod_decls { new_mod.push(anf_decl(md, externs, counter)) }
-            HDecl::ModBlock { name: name, decls: new_mod, is_pub: is_pub, span: span }
+            for md in mod_decls {
+                let decl_ = md
+                new_mod.push(anf_decl(decl_, externs, ownership, counter))
+            }
+            HDecl::ModBlock { ..decl, decls: new_mod }
         },
         HDecl::Struct { .. } => decl,
         HDecl::Enum { .. } => decl,
-        HDecl::Effect { name, type_params, ops, is_pub, span } => {
+        HDecl::Effect { ops, .. } => {
             let mut new_ops: List<HEffectOp> = []
             for op in ops {
                 let new_default_body = match op.default_body {
-                    some(body) => some(anf_fn_body(body, externs, counter)),
+                    some(body) => {
+                        let body_ = body
+                        some(anf_fn_body(body_, externs, ownership, counter))
+                    },
                     none => none,
                 }
-                new_ops.push(HEffectOp {
-                    name: op.name, params: op.params, return_type: op.return_type,
-                    has_default: op.has_default, default_body: new_default_body
-                })
+                new_ops.push(HEffectOp { ..op,
+                    default_body: new_default_body })
             }
-            HDecl::Effect { name: name, type_params: type_params, ops: new_ops, is_pub: is_pub, span: span }
+            HDecl::Effect { ..decl, ops: new_ops }
         },
         HDecl::Trait { .. } => decl,
         HDecl::ExternFn { .. } => decl,
@@ -260,13 +844,16 @@ fn anf_decl(decl: HDecl, externs: Set<Str>, mut counter: List<Int>) -> HDecl {
 }
 
 // A function/lambda body: a Block (or a single tail expr) in escape position.
-fn anf_fn_body(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
-    anf_block_expr(body, externs, counter)
+fn anf_fn_body(
+    body: HExpr, externs: Set<Str>, ownership: OwnershipMetadata,
+    mut counter: AnfState
+) -> HExpr {
+    anf_block_expr(body, externs, ownership, counter)
 }
 
 // Whether an expression is a FRESH-OWNED compound that should be materialised when
-// it sits in a hoistable (non-binding) position (R1).  A borrow-returning Call is
-// excluded — its result aliases a live reference, so binding+dropping it would UAF.
+// it sits in a hoistable (non-binding) position (R1). A descriptor-Borrowed Call
+// is excluded — its result aliases a live reference, so binding+dropping it would UAF.
 // SYNC NOTE (#205): anf_should_materialize and is_droppable_init (below, ~line
 // 1658) both classify HExpr variants but answer DIFFERENT questions:
 //   - anf_should_materialize: "Is this a fresh-owned value in OPERAND position
@@ -279,7 +866,7 @@ fn anf_fn_body(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr 
 // StrLit, BoolLit → true in both).  INTENTIONAL divergences:
 //   - Ident/FieldAccess/non-Str IndexExpr/Clone: NOT materialized (borrows in
 //     operand position → UAF), but IS droppable (rc_escape Clone-wraps them)
-//   - Call (borrow-returning): NOT materialized, IS droppable (same reason)
+//   - Call (exact descriptor returns Borrowed): NOT materialized, IS droppable
 //   - MatchExpr/Block/DictConstruct: NOT materialized (conservative), IS
 //     droppable (binding position needs branch-recursive analysis)
 // When adding a NEW HExpr variant, update BOTH functions.
@@ -289,13 +876,15 @@ fn anf_fn_body(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr 
 // wrapper/lambda or returns a fresh Call result. Diverging paths produce no
 // value and therefore do not veto that proof. Keep this helper public so the
 // post-RC verifier rejects any such shape that survives ANF in a borrow site.
-pub fn is_materializable_fn_value(expr: HExpr, externs: Set<Str>) -> Bool {
+pub fn is_materializable_fn_value(
+    expr: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Bool {
     let ty = hexpr_type(expr)
     let is_fn = match ty { Type::FnType { .. } => true, _ => false }
     if is_fn == false {
         return false
     }
-    if is_rc_excluded_type(ty, externs) || type_contains_extern_handle(ty, externs) {
+    if !type_is_physical_rc_eligible(ty, externs) {
         return false
     }
     if is_unresolved_var_type(ty) || expr_diverges(expr) {
@@ -305,42 +894,51 @@ pub fn is_materializable_fn_value(expr: HExpr, externs: Set<Str>) -> Bool {
         HExpr::Ident { dict_closure_dicts, .. } =>
             dict_closure_dicts.is_some(),
         HExpr::Lambda { .. } => true,
-        HExpr::Call { callee, .. } => is_borrow_returning_call(callee) == false,
+        HExpr::Call { callee_def_id, .. } =>
+            call_returns_borrowed(ownership, callee_def_id) == false,
         HExpr::Clone { .. } => true,
+        HExpr::Take { .. } => false,
         HExpr::Block { tail, .. } => match tail {
-            some(value) => is_materializable_fn_value(value, externs),
+            some(value) => is_materializable_fn_value(
+                value, externs, ownership),
             none => false
         },
         HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
             some(value) =>
-                is_materializable_fn_branch(then_branch, externs) &&
-                is_materializable_fn_branch(value, externs),
+                is_materializable_fn_branch(
+                    then_branch, externs, ownership) &&
+                is_materializable_fn_branch(value, externs, ownership),
             none => false
         },
         HExpr::MatchExpr { arms, .. } => {
             let mut all = arms.len() > 0
             for arm in arms {
-                if is_materializable_fn_branch(arm.body, externs) == false {
+                if is_materializable_fn_branch(
+                        arm.body, externs, ownership) == false {
                     all = false
                 }
             }
             all
         },
         HExpr::UnsafeBlock { body, .. } =>
-            is_materializable_fn_value(body, externs),
+            is_materializable_fn_value(body, externs, ownership),
         _ => false
     }
 }
 
-fn is_materializable_fn_branch(body: HExpr, externs: Set<Str>) -> Bool {
+fn is_materializable_fn_branch(
+    body: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Bool {
     if expr_diverges(body) {
         true
     } else {
-        is_materializable_fn_value(body, externs)
+        is_materializable_fn_value(body, externs, ownership)
     }
 }
 
-fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
+fn anf_should_materialize(
+    expr: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Bool {
     // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
     //   ② a Unit-typed expression has no value semantics (checker-guaranteed).
     //     At the ABI level a Unit-typed builtin call
@@ -356,18 +954,29 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     // Leave both inline: borrowed by the consumer, never dropped (the pre-D1
     // status quo for these values — crash-free).
     let ty = hexpr_type(expr)
-    if is_rc_excluded_type(ty, externs) {
+    if !type_is_physical_rc_eligible(ty, externs) {
         return false
     }
-    if type_contains_extern_handle(ty, externs) {
+    // Option::none is an exact global constructor Ident, but unlike ordinary
+    // nullary variants the runtime returns an immortal singleton.  It has no
+    // fresh reference to materialise or scope-end-drop.
+    if is_option_none_ctor_ident(expr) {
         return false
     }
     // The slot bridge contract is stronger than an unresolved generic result:
     // read duplicates and take moves out, so both always produce an owned
     // reference.  Impl-level K/V variables are not always name-labelled by
     // zonk, therefore this exact leaf must override the unnamed-TypeVar guard.
-    if is_owned_slot_result_call(expr) {
-        return true
+    match exact_call_result_role(expr, ownership) {
+        some(role) => {
+            if role == CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT {
+                return true
+            } else if role == CALLABLE_RESULT_ROLE_UNKNOWN &&
+                      is_unresolved_var_type(ty) {
+                panic("unreachable: Perceus received an unresolved call result with unknown semantic role")
+            }
+        },
+        none => {}
     }
     // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #149): an expression
     // whose HIR type is an unresolved TypeVar must never be materialised.  The
@@ -389,7 +998,7 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     // at codegen.  The explicit some([]) marker is just as owned as a bounded
     // some(dicts) wrapper; control-flow/Block forms share this classification
     // through hir.is_materialized_fn_value.
-    if is_materializable_fn_value(expr, externs) {
+    if is_materializable_fn_value(expr, externs, ownership) {
         return true
     }
     let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
@@ -403,7 +1012,8 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
         // register_impl_method/is_mutable ASan UAF).
         HExpr::BinOp { .. } => true,
         HExpr::UnaryOp { .. } => true,
-        HExpr::Call { callee, .. } => is_borrow_returning_call(callee) == false,
+        HExpr::Call { callee_def_id, .. } =>
+            call_returns_borrowed(ownership, callee_def_id) == false,
         HExpr::StructLit { .. } => true,
         HExpr::NamedVariantConstruct { .. } => true,
         HExpr::ListLit { .. } => true,
@@ -471,8 +1081,9 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
         HExpr::IfExpr { then_branch, else_branch, .. } => {
             match else_branch {
                 none => false,
-                some(eb) => anf_branch_materializable(then_branch, externs)
-                    && anf_branch_materializable(eb, externs),
+                some(eb) => anf_branch_materializable(
+                    then_branch, externs, ownership)
+                    && anf_branch_materializable(eb, externs, ownership),
             }
         },
         // NEVER materialise: Ident / FieldAccess / non-Str IndexExpr (borrows),
@@ -487,18 +1098,279 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
 // Mirrors is_droppable_branch_value's divergence handling (a diverging branch
 // yields no value, so it never vetoes) and bottoms out on the same
 // anf_should_materialize leaf classification.
-fn anf_branch_materializable(body: HExpr, externs: Set<Str>) -> Bool {
+fn anf_branch_materializable(
+    body: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Bool {
     if expr_diverges(body) {
         true
     } else {
         match body {
             HExpr::Block { tail, .. } => match tail {
-                some(t) => anf_should_materialize(t, externs),
+                some(t) => anf_should_materialize(t, externs, ownership),
                 none => false,
             },
-            _ => anf_should_materialize(body, externs),
+            _ => anf_should_materialize(body, externs, ownership),
         }
     }
+}
+
+// Spread reads fields from its source and therefore needs the source to remain
+// live until the constructor has copied its final uncovered field.  A direct
+// binding/projection stays a borrow; a proven fresh source is bound exactly
+// once so normal scope cleanup drops it after the constructor expression.
+const SPREAD_SOURCE_ALL_BORROW: Int = 0
+const SPREAD_SOURCE_ALL_FRESH: Int = 1
+const SPREAD_SOURCE_MIXED_OR_UNKNOWN: Int = 2
+const SPREAD_SOURCE_NO_REACHABLE_VALUE: Int = 3
+
+fn merge_spread_source_classifications(left: Int, right: Int) -> Int {
+    if left == SPREAD_SOURCE_NO_REACHABLE_VALUE { return right }
+    if right == SPREAD_SOURCE_NO_REACHABLE_VALUE { return left }
+    if left == SPREAD_SOURCE_MIXED_OR_UNKNOWN ||
+       right == SPREAD_SOURCE_MIXED_OR_UNKNOWN {
+        return SPREAD_SOURCE_MIXED_OR_UNKNOWN
+    }
+    if left == right { left } else { SPREAD_SOURCE_MIXED_OR_UNKNOWN }
+}
+
+fn spread_match_arm_source_classification(
+    arm: HMatchArm, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Int {
+    match arm {
+        HMatchArm { guard, body, .. } => {
+            match guard {
+                some(value) => if !expr_has_reachable_value(value) {
+                    return SPREAD_SOURCE_NO_REACHABLE_VALUE
+                },
+                none => {}
+            }
+            spread_branch_source_classification(body, externs, ownership)
+        }
+    }
+}
+
+// Keep the iterator body's HStmt payload in a named-function frame.  Besides
+// making the ownership edge explicit, this prevents the C bootstrap from
+// treating a nested `init` pattern binding as an undefined iterator capture.
+fn spread_block_local_stmt_classification(
+    stmt: HStmt, stmts: List<HStmt>, target_id: Int,
+    externs: Set<Str>, ownership: OwnershipMetadata, fuel: Int
+) -> Int? {
+    match stmt {
+        HStmt::Let { def_id: some(local_id), init, .. } => {
+            if local_id == target_id {
+                let identity_init = init
+                let classification_init = init
+                match identity_init {
+                    HExpr::Take { source_def_id, .. } => {
+                        match spread_block_local_init_classification(
+                                stmts, source_def_id, externs,
+                                ownership, fuel - 1) {
+                            some(local_classification) => {
+                                let result = local_classification
+                                return some(result)
+                            },
+                            // A planned Take whose exact source is outside
+                            // this block is the authoritative whole-binding
+                            // ownership edge into the local slot.
+                            none => return some(SPREAD_SOURCE_ALL_FRESH)
+                        }
+                    },
+                    HExpr::Ident { .. } =>
+                        return some(SPREAD_SOURCE_MIXED_OR_UNKNOWN),
+                    _ => return some(spread_source_classification(
+                        classification_init, externs, ownership))
+                }
+            }
+        },
+        HStmt::Var { def_id: some(local_id), .. } => {
+            if local_id == target_id {
+                return some(SPREAD_SOURCE_MIXED_OR_UNKNOWN)
+            }
+        },
+        _ => {}
+    }
+    none
+}
+
+fn spread_block_local_init_classification(
+    stmts: List<HStmt>, target_id: Int, externs: Set<Str>,
+    ownership: OwnershipMetadata, fuel: Int
+) -> Int? {
+    if fuel <= 0 { return some(SPREAD_SOURCE_MIXED_OR_UNKNOWN) }
+    for stmt in stmts {
+        match spread_block_local_stmt_classification(
+                stmt, stmts, target_id, externs,
+                ownership, fuel) {
+            some(classification) => {
+                let result = classification
+                return some(result)
+            },
+            none => {}
+        }
+    }
+    none
+}
+
+fn spread_block_source_classification(
+    stmts: List<HStmt>, tail: HExpr?, externs: Set<Str>,
+    ownership: OwnershipMetadata
+) -> Int {
+    let (tail_local_id, tail_is_take, initial_classification) = match tail {
+        some(value) => {
+            let identity_value = value
+            let classification_value = value
+            let (local_id, is_take) = match identity_value {
+                HExpr::Ident { def_id, .. } => {
+                    let result_def_id = def_id
+                    (result_def_id, false)
+                },
+                HExpr::Take { source_def_id, .. } => {
+                    let result_source_def_id = source_def_id
+                    (some(result_source_def_id), true)
+                },
+                _ => (none, false)
+            }
+            let fallback = spread_source_classification(
+                classification_value, externs, ownership)
+            let result_local_id = local_id
+            (result_local_id, is_take, fallback)
+        },
+        none => return SPREAD_SOURCE_MIXED_OR_UNKNOWN
+    }
+    let mut classification = initial_classification
+    match tail_local_id {
+        some(target_id) => {
+            let search_fuel = stmts.len() + 1
+            match spread_block_local_init_classification(
+                    stmts, target_id, externs, ownership, search_fuel) {
+                some(init_classification) => {
+                    classification = if init_classification ==
+                            SPREAD_SOURCE_NO_REACHABLE_VALUE {
+                        SPREAD_SOURCE_NO_REACHABLE_VALUE
+                    } else if tail_is_take && init_classification ==
+                              SPREAD_SOURCE_ALL_FRESH {
+                        SPREAD_SOURCE_ALL_FRESH
+                    } else {
+                        SPREAD_SOURCE_MIXED_OR_UNKNOWN
+                    }
+                },
+                none => {}
+            }
+        },
+        none => {}
+    }
+    classification
+}
+
+fn spread_source_classification(
+    expr: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Int {
+    let reachability_expr = expr
+    let typed_expr = expr
+    let option_expr = expr
+    let role_expr = expr
+    let shape_expr = expr
+    if !expr_has_reachable_value(reachability_expr) {
+        return SPREAD_SOURCE_NO_REACHABLE_VALUE
+    }
+    let ty = hexpr_type(typed_expr)
+    if !type_is_physical_rc_eligible(ty, externs) ||
+       is_option_none_ctor_ident(option_expr) {
+        return SPREAD_SOURCE_ALL_BORROW
+    }
+    match exact_call_result_role(role_expr, ownership) {
+        some(role) => {
+            if role == CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT {
+                return SPREAD_SOURCE_ALL_FRESH
+            } else if role == CALLABLE_RESULT_ROLE_UNKNOWN &&
+                      is_unresolved_var_type(ty) {
+                return SPREAD_SOURCE_MIXED_OR_UNKNOWN
+            }
+        },
+        none => {}
+    }
+    if is_unresolved_var_type(ty) {
+        return SPREAD_SOURCE_MIXED_OR_UNKNOWN
+    }
+    match shape_expr {
+        HExpr::Ident { .. } | HExpr::FieldAccess { .. } |
+        HExpr::IndexExpr { .. } | HExpr::Take { .. } =>
+            SPREAD_SOURCE_ALL_BORROW,
+        HExpr::Clone { .. } | HExpr::DictConstruct { .. } =>
+            SPREAD_SOURCE_ALL_FRESH,
+        HExpr::Call { callee_def_id, .. } =>
+            if call_returns_borrowed(ownership, callee_def_id) {
+                SPREAD_SOURCE_ALL_BORROW
+            } else {
+                SPREAD_SOURCE_ALL_FRESH
+            },
+        HExpr::Block { stmts, tail, .. } =>
+            spread_block_source_classification(
+                stmts, tail, externs, ownership),
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            let mut classification = spread_branch_source_classification(
+                then_branch, externs, ownership)
+            match else_branch {
+                some(other) => {
+                    classification = merge_spread_source_classifications(
+                        classification, spread_branch_source_classification(
+                            other, externs, ownership))
+                },
+                none => return SPREAD_SOURCE_MIXED_OR_UNKNOWN
+            }
+            classification
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut classification = SPREAD_SOURCE_NO_REACHABLE_VALUE
+            for arm in arms {
+                classification = merge_spread_source_classifications(
+                    classification, spread_match_arm_source_classification(
+                        arm, externs, ownership))
+            }
+            classification
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            spread_source_classification(body, externs, ownership),
+        _ => if anf_should_materialize(expr, externs, ownership) {
+            SPREAD_SOURCE_ALL_FRESH
+        } else {
+            SPREAD_SOURCE_MIXED_OR_UNKNOWN
+        }
+    }
+}
+
+fn spread_branch_source_classification(
+    body: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Int {
+    if expr_diverges(body) {
+        SPREAD_SOURCE_NO_REACHABLE_VALUE
+    } else {
+        spread_source_classification(body, externs, ownership)
+    }
+}
+
+fn anf_spread_source(
+    expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>,
+    ownership: OwnershipMetadata, mut counter: AnfState
+) -> HExpr {
+    let source_expr = expr
+    let normalized = anf_expr(
+        source_expr, hoists, externs, ownership, counter)
+    let materialize_check = normalized
+    let materialize_value = normalized
+    let result_value = normalized
+    let skip = counter.counters.get(1) == some(1)
+    let allow_mixed = counter.counters.get(2) == some(1)
+    let classification = spread_source_classification(
+        materialize_check, externs, ownership)
+    if classification == SPREAD_SOURCE_ALL_FRESH && !skip {
+        return anf_materialize(materialize_value, hoists, counter)
+    }
+    if classification == SPREAD_SOURCE_MIXED_OR_UNKNOWN && !allow_mixed {
+        panic("unreachable: Perceus received a mixed or unknown spread source")
+    }
+    result_value
 }
 
 // B-104 D1 rule ③ helper: whether an IndexExpr's receiver is a Str, making the
@@ -531,40 +1403,71 @@ pub fn is_unresolved_var_type(ty: Type) -> Bool {
     }
 }
 
-// Exact low-level slot leaves whose result is FRESH-OWNED by ABI contract.
-// Keep this narrow: all other unresolved call results retain audit #149's
-// conservative posture.  Shared with verify_rc so production and accounting
-// use the same leaf table.
-pub fn is_owned_slot_result_call(expr: HExpr) -> Bool {
+// Exact semantic result role lookup.  Registration is the only place that may
+// recognize a prelude ABI spelling; Perceus consumes the frozen, total DefId
+// table and never inspects the callee expression or its arity.
+fn exact_call_result_role(
+    expr: HExpr, ownership: OwnershipMetadata
+) -> Int? {
     match expr {
-        HExpr::Call { callee, args, .. } =>
-            args.len() == 2 && is_owned_slot_result_callee(callee),
-        _ => false,
-    }
-}
-
-pub fn is_owned_slot_result_callee(callee: HExpr) -> Bool {
-    match callee {
-        HExpr::Ident { name, resolved_name, .. } => {
-            let actual = match resolved_name { some(rn) => rn, none => name }
-            actual == slot_read_identity() || actual == slot_take_identity()
+        HExpr::Call { callee_def_id, .. } => {
+            let def_id = match callee_def_id {
+                some(id) => id,
+                none => panic(
+                    "unreachable: Perceus call has no exact callable DefId")
+            }
+            match ownership.callable_result_role_by_def_id.get(def_id) {
+                some(role) => {
+                    let result = role
+                    some(result)
+                },
+                none => panic(
+                    "unreachable: Perceus call has no total semantic result role")
+            }
         },
-        _ => false,
+        _ => none,
     }
 }
 
 // Materialise `expr` (already normalised) into a fresh `let __anf_N = expr`
 // appended to `hoists`, returning an Ident referencing it.  Caller guarantees
 // anf_should_materialize(expr) — i.e. fresh-owned, droppable.
-fn anf_materialize(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
-    let tmp = fresh_anf_tmp(counter)
+fn anf_materialize(
+    expr: HExpr, mut hoists: List<HStmt>, mut counter: AnfState
+) -> HExpr {
+    let (tmp, tmp_def_id) = fresh_anf_tmp(counter)
+    let projection_ty = hexpr_type(expr)
+    match projection_ty {
+        Type::FnType { meta, .. } => {
+            let source_def_ids = match hexpr_callable_source_def_ids(expr) {
+                some(ids) => ids,
+                none => panic(
+                    "unreachable: materialized callable has no exact producer DefId set")
+            }
+            counter.callable_projections.push(AnfCallableProjection {
+                target_def_id: tmp_def_id,
+                expected_ownership_term: meta.ownership_term,
+                source_def_ids: source_def_ids
+            })
+        },
+        _ => {}
+    }
     let t = hexpr_type(expr)
     let e = hexpr_effects(expr)
     let s = hexpr_span(expr)
-    hoists.push(HStmt::Let { name: tmp, name_span: synthetic_span(),
-        def_id: none, ty: t, init: expr, span: synthetic_span() })
-    HExpr::Ident { name: tmp, resolved_name: none, def_id: none,
-        dict_closure_dicts: none, ty: t, effects: e, span: s }
+    let binding_name = tmp
+    let ident_name = tmp
+    let binding_def_id = tmp_def_id
+    let ident_def_id = tmp_def_id
+    let binding_ty = t
+    let ident_ty = t
+    hoists.push(HStmt::Let { name: binding_name,
+        name_span: synthetic_span(), def_id: some(binding_def_id),
+        ty: binding_ty, init: expr,
+        span: synthetic_span() })
+    HExpr::Ident { name: ident_name, resolved_name: none,
+        def_id: some(ident_def_id),
+        dict_closure_dicts: none, ty: ident_ty, effects: e, span: s }
 }
 
 // Normalise a sub-expression that sits in a CONSUMING operand position — one where
@@ -582,43 +1485,65 @@ fn anf_materialize(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>)
 // verbatim-arg-returning callee (`fold` on an empty list) was closed at the
 // runtime by the #150 dup-on-empty (B-104 D1 Stage 3) — no callee hands back an
 // un-dup'd argument any more, so materialise+scope-drop is sound everywhere.
-fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
-    let normalized = anf_expr(expr, hoists, externs, counter)
-    if anf_should_materialize(normalized, externs) {
-        anf_materialize(normalized, hoists, counter)
+fn anf_operand(
+    expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>,
+    ownership: OwnershipMetadata, mut counter: AnfState
+) -> HExpr {
+    let expr_ = expr
+    let normalized = anf_expr(expr_, hoists, externs, ownership, counter)
+    let materialize_check = normalized
+    let materialize_value = normalized
+    let result_value = normalized
+    if anf_should_materialize(materialize_check, externs, ownership) {
+        anf_materialize(materialize_value, hoists, counter)
     } else {
-        normalized
+        result_value
     }
 }
 
 // A Block (or non-block single expr) used as a function/branch/loop body or value.
 // Normalises its statement list and tail in place; no hoisting escapes the block.
-fn anf_block_expr(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
+fn anf_block_expr(
+    body: HExpr, externs: Set<Str>, ownership: OwnershipMetadata,
+    mut counter: AnfState
+) -> HExpr {
     match body {
-        HExpr::Block { stmts, tail, ty, effects, span } => {
-            let new_stmts = anf_stmt_list(stmts, externs, counter)
-            let new_tail = match tail {
+        HExpr::Block { stmts, tail, .. } => {
+            let stmt_result = anf_stmt_list(
+                stmts, externs, ownership, counter)
+            let new_stmts = stmt_result.0
+            let new_tail = if stmt_result.1 {
+                match tail {
                 // The tail is in escape position; its OWN nested subexprs are
                 // hoisted into a trailing fragment appended to this block (the
                 // hoists precede the tail value, preserving order + scope).
                 some(t) => {
                     let mut tail_hoists: List<HStmt> = []
-                    let nt = anf_tail_value(t, tail_hoists, externs, counter)
+                    let nt = anf_tail_value(
+                        t, tail_hoists, externs, ownership, counter)
                     if tail_hoists.len() == 0 {
                         (new_stmts, some(nt))
                     } else {
                         let mut merged = new_stmts.concat([])
-                        for h in tail_hoists { merged.push(h) }
+                        for h in tail_hoists {
+                            let hoist = h
+                            merged.push(hoist)
+                        }
                         (merged, some(nt))
                     }
                 },
                 none => (new_stmts, none),
+                }
+            } else {
+                // The ownership planner normally prunes this already. Keep
+                // ANF defensive when handed an earlier/unplanned HIR snapshot.
+                (new_stmts, none)
             }
-            HExpr::Block { stmts: new_tail.0, tail: new_tail.1, ty: ty, effects: effects, span: span }
+            HExpr::Block { ..body, stmts: new_tail.0, tail: new_tail.1 }
         },
         // Single-expression body (no block): treat as a tail value in its own
         // scope (materialised temps wrap into a Block so they are scope-dropped).
-        _ => anf_value_in_own_scope(body, externs, counter),
+        _ => anf_value_in_own_scope(body, externs, ownership, counter),
     }
 }
 
@@ -626,14 +1551,20 @@ fn anf_block_expr(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HEx
 // init, a single-expr body).  If normalising it produces hoists, wrap them in a
 // fresh Block whose tail is the value — the temps are then scope-end-dropped by
 // the RC pass.  The value itself is NOT materialised (it is the escaping result).
-fn anf_value_in_own_scope(expr: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
+fn anf_value_in_own_scope(
+    expr: HExpr, externs: Set<Str>, ownership: OwnershipMetadata,
+    mut counter: AnfState
+) -> HExpr {
     let mut hoists: List<HStmt> = []
-    let nv = anf_tail_value(expr, hoists, externs, counter)
+    let result_ty = hexpr_type(expr)
+    let result_effects = hexpr_effects(expr)
+    let result_span = hexpr_span(expr)
+    let nv = anf_tail_value(expr, hoists, externs, ownership, counter)
     if hoists.len() == 0 {
         nv
     } else {
         HExpr::Block { stmts: hoists, tail: some(nv),
-            ty: hexpr_type(expr), effects: hexpr_effects(expr), span: hexpr_span(expr) }
+            ty: result_ty, effects: result_effects, span: result_span }
     }
 }
 
@@ -642,45 +1573,70 @@ fn anf_value_in_own_scope(expr: HExpr, externs: Set<Str>, mut counter: List<Int>
 // but DO NOT materialise the expression itself — it escapes into the owning slot
 // and the RC pass handles that binding directly.  Control-flow tails (if/match/
 // block) recurse into their branches structurally (R2).
-fn anf_tail_value(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
-    anf_expr(expr, hoists, externs, counter)
+fn anf_tail_value(
+    expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>,
+    ownership: OwnershipMetadata, mut counter: AnfState
+) -> HExpr {
+    let expr_ = expr
+    anf_expr(expr_, hoists, externs, ownership, counter)
 }
 
 // Normalise a statement list, returning a new list with __anf_ hoists inserted
 // before each statement that needs them.
-fn anf_stmt_list(stmts: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> List<HStmt> {
+fn anf_stmt_list(
+    stmts: List<HStmt>, externs: Set<Str>, ownership: OwnershipMetadata,
+    mut counter: AnfState
+) -> (List<HStmt>, Bool) {
     let mut out: List<HStmt> = []
     for s in stmts {
-        for ns in anf_stmt(s, externs, counter) { out.push(ns) }
+        let transformed_stmt = s
+        let reachability_stmt = s
+        for ns in anf_stmt(transformed_stmt, externs, ownership, counter) {
+            let stmt_ = ns
+            out.push(stmt_)
+        }
+        if !stmt_reaches_next(reachability_stmt) { return ((out, false)) }
     }
-    out
+    ((out, true))
 }
 
 // Normalise a single statement, returning [hoisted lets..., transformed stmt].
-fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStmt> {
+fn anf_stmt(
+    stmt: HStmt, externs: Set<Str>, ownership: OwnershipMetadata,
+    mut counter: AnfState
+) -> List<HStmt> {
     match stmt {
-        HStmt::Let { name, name_span, def_id, ty, init, span } => {
+        HStmt::Let { init, .. } => {
             let mut hoists: List<HStmt> = []
-            let new_init = anf_tail_value(init, hoists, externs, counter)
-            hoists.push(HStmt::Let { name: name, name_span: name_span, def_id: def_id, ty: ty, init: new_init, span: span })
+            let init_ = init
+            let new_init = anf_tail_value(
+                init_, hoists, externs, ownership, counter)
+            hoists.push(HStmt::Let { ..stmt, init: new_init })
             hoists
         },
-        HStmt::Var { name, name_span, def_id, ty, init, span } => {
+        HStmt::Var { init, .. } => {
             let mut hoists: List<HStmt> = []
-            let new_init = anf_tail_value(init, hoists, externs, counter)
-            hoists.push(HStmt::Var { name: name, name_span: name_span, def_id: def_id, ty: ty, init: new_init, span: span })
+            let init_ = init
+            let new_init = anf_tail_value(
+                init_, hoists, externs, ownership, counter)
+            hoists.push(HStmt::Var { ..stmt, init: new_init })
             hoists
         },
-        HStmt::Assign { target, value, span } => {
+        HStmt::Assign { target, value, .. } => {
             let mut hoists: List<HStmt> = []
             // The target is a write destination (lvalue) — recurse to normalise any
             // index/receiver subexprs, but it is not a value to materialise.
-            let new_target = anf_lvalue(target, hoists, externs, counter)
-            let new_value = anf_tail_value(value, hoists, externs, counter)
-            hoists.push(HStmt::Assign { target: new_target, value: new_value, span: span })
+            let target_ = target
+            let value_ = value
+            let new_target = anf_lvalue(
+                target_, hoists, externs, ownership, counter)
+            let new_value = anf_tail_value(
+                value_, hoists, externs, ownership, counter)
+            hoists.push(HStmt::Assign { ..stmt,
+                target: new_target, value: new_value })
             hoists
         },
-        HStmt::ExprStmt { expr, span } => {
+        HStmt::ExprStmt { expr, .. } => {
             let mut hoists: List<HStmt> = []
             // Statement position: the value is DISCARDED — the textbook "parent
             // drops it" fresh-owned temporary (B-104 D1 Stage 2).  A non-Unit
@@ -688,38 +1644,46 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
             // had no owner and leaked.  Materialise the top expression
             // (anf_operand): `let __anf = xs.pop()` → scope-end drop reclaims it.
             // Zero churn for the common cases: Unit-typed calls (print / push /
-            // insert — rule ②) and borrow-returning calls fail
+            // insert — rule ②) and descriptor-Borrowed calls fail
             // anf_should_materialize and stay plain statements; control-flow
             // statements (if/match/block) are normalised structurally as before
             // (their discarded branch values stay borrows — residual).  A
             // NeverType call (panic/exit) materialises harmlessly (the drop is
             // unreachable).
-            let new_expr = anf_operand(expr, hoists, externs, counter)
-            hoists.push(HStmt::ExprStmt { expr: new_expr, span: span })
+            let expr_ = expr
+            let new_expr = anf_operand(
+                expr_, hoists, externs, ownership, counter)
+            hoists.push(HStmt::ExprStmt { ..stmt, expr: new_expr })
             hoists
         },
-        HStmt::Return { value, span } => {
+        HStmt::Return { value, .. } => {
             match value {
                 some(v) => {
                     let mut hoists: List<HStmt> = []
-                    let new_v = anf_tail_value(v, hoists, externs, counter)
-                    hoists.push(HStmt::Return { value: some(new_v), span: span })
+                    let value_ = v
+                    let new_v = anf_tail_value(
+                        value_, hoists, externs, ownership, counter)
+                    hoists.push(HStmt::Return { ..stmt, value: some(new_v) })
                     hoists
                 },
-                none => [HStmt::Return { value: none, span: span }],
+                none => [stmt],
             }
         },
-        HStmt::While { condition, body, span } => {
+        HStmt::While { condition, body, .. } => {
             // R3: the condition is re-evaluated each iteration.  Materialised temps
             // from the condition must be dropped PER ITERATION, so they wrap into a
             // Block whose tail is the condition (the Block is re-run each round, and
             // the RC pass scope-end-drops its temps each round).  They must NOT be
             // hoisted before the loop.
-            let new_cond = anf_cond_in_own_scope(condition, externs, counter)
-            let new_body = anf_block_expr(body, externs, counter)
-            [HStmt::While { condition: new_cond, body: new_body, span: span }]
+            let condition_ = condition
+            let body_ = body
+            let new_cond = anf_cond_in_own_scope(
+                condition_, externs, ownership, counter)
+            let new_body = anf_block_expr(body_, externs, ownership, counter)
+            [HStmt::While { ..stmt,
+                condition: new_cond, body: new_body }]
         },
-        HStmt::ForIn { binding, binding_span, def_id, destructure, iterable, body, iterable_type_name, iter_type_name, span } => {
+        HStmt::ForIn { iterable, body, .. } => {
             // The iterable is evaluated ONCE before the loop → its temps may hoist
             // before the ForIn statement.  The body is its own per-iteration scope.
             //
@@ -739,19 +1703,20 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
             // the heavier range-var path for zero RC gain (the direct lowering
             // already drops the bound boxes).
             let mut hoists: List<HStmt> = []
-            let new_iter = match iterable {
-                HExpr::RangeExpr { .. } => anf_expr(iterable, hoists, externs, counter),
-                _ => anf_operand(iterable, hoists, externs, counter),
+            let iterable_ = iterable
+            let new_iter = match iterable_ {
+                HExpr::RangeExpr { .. } => anf_expr(
+                    iterable_, hoists, externs, ownership, counter),
+                _ => anf_operand(
+                    iterable_, hoists, externs, ownership, counter),
             }
-            let new_body = anf_block_expr(body, externs, counter)
-            hoists.push(HStmt::ForIn {
-                binding: binding, binding_span: binding_span, def_id: def_id,
-                destructure: destructure, iterable: new_iter, body: new_body,
-                iterable_type_name: iterable_type_name, iter_type_name: iter_type_name, span: span
-            })
+            let body_ = body
+            let new_body = anf_block_expr(body_, externs, ownership, counter)
+            hoists.push(HStmt::ForIn { ..stmt,
+                iterable: new_iter, body: new_body })
             hoists
         },
-        HStmt::LetDestructure { pattern, bindings, init, span } => {
+        HStmt::LetDestructure { init, .. } => {
             // B-104 D1 Stage 2 — DESTRUCTURE INIT position: `let (a, b) = f()` /
             // `let (a, b) = (x, y)`.  The destructure only PROJECTS borrows out
             // of the init value (codegen emit_let_destructure: ring_list_get
@@ -763,11 +1728,13 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
             // processes the init as a BORROW (rc_expr) instead of rc_escape —
             // see rc_stmt's LetDestructure arm.
             let mut hoists: List<HStmt> = []
-            let new_init = anf_operand(init, hoists, externs, counter)
-            hoists.push(HStmt::LetDestructure { pattern: pattern, bindings: bindings, init: new_init, span: span })
+            let init_ = init
+            let new_init = anf_operand(
+                init_, hoists, externs, ownership, counter)
+            hoists.push(HStmt::LetDestructure { ..stmt, init: new_init })
             hoists
         },
-        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
             // Scrutinee evaluated once → hoist before the IfLet.  Branch blocks are
             // their own scopes (R2).
             //
@@ -781,17 +1748,25 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
             // dup-before-drop balanced.  Borrow scrutinees (Ident/field/index)
             // fail anf_should_materialize and stay inline.
             let mut hoists: List<HStmt> = []
-            let new_expr = anf_operand(expr, hoists, externs, counter)
-            let new_then = anf_block_expr(then_block, externs, counter)
+            let expr_ = expr
+            let then_block_ = then_block
+            let new_expr = anf_operand(
+                expr_, hoists, externs, ownership, counter)
+            let new_then = anf_block_expr(
+                then_block_, externs, ownership, counter)
             let new_else = match else_block {
-                some(eb) => some(anf_block_expr(eb, externs, counter)),
+                some(eb) => {
+                    let else_ = eb
+                    some(anf_block_expr(
+                        else_, externs, ownership, counter))
+                },
                 none => none,
             }
-            hoists.push(HStmt::IfLet { pattern: pattern, expr: new_expr, then_block: new_then, else_block: new_else, span: span })
+            hoists.push(HStmt::IfLet { ..stmt, expr: new_expr,
+                then_block: new_then, else_block: new_else })
             hoists
         },
-        HStmt::Break { span } => [HStmt::Break { span: span }],
-        HStmt::Continue { span } => [HStmt::Continue { span: span }],
+        HStmt::Break { .. } | HStmt::Continue { .. } => [stmt],
         // Drop is not present in the input HIR to the ANF pass (perceus runs
         // after); pass it through idempotently if ever seen.
         HStmt::Drop { .. } => [stmt]
@@ -803,34 +1778,50 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
 // and if any temps are produced, wrap them in a Block whose tail is the
 // condition value so they are scope-end-dropped at each evaluation (R3).
 // (If-conds are one-shot eager operands — they go through anf_operand instead.)
-fn anf_cond_in_own_scope(cond: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
+fn anf_cond_in_own_scope(
+    cond: HExpr, externs: Set<Str>, ownership: OwnershipMetadata,
+    mut counter: AnfState
+) -> HExpr {
     let mut hoists: List<HStmt> = []
-    let nc = anf_expr(cond, hoists, externs, counter)
+    let type_input = cond
+    let effects_input = cond
+    let span_input = cond
+    let transform_input = cond
+    let result_ty = hexpr_type(type_input)
+    let result_effects = hexpr_effects(effects_input)
+    let result_span = hexpr_span(span_input)
+    let nc = anf_expr(transform_input, hoists, externs, ownership, counter)
     if hoists.len() == 0 {
         nc
     } else {
         HExpr::Block { stmts: hoists, tail: some(nc),
-            ty: hexpr_type(cond), effects: hexpr_effects(cond), span: hexpr_span(cond) }
+            ty: result_ty, effects: result_effects, span: result_span }
     }
 }
 
 // Normalise an lvalue (Assign target): descend into receiver/index subexprs but
 // never materialise — a write destination is a place, not an owned value.
-fn anf_lvalue(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
+fn anf_lvalue(
+    expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>,
+    ownership: OwnershipMetadata, mut counter: AnfState
+) -> HExpr {
     match expr {
-        HExpr::FieldAccess { receiver, field, ty, effects, span } => {
-            HExpr::FieldAccess { receiver: anf_lvalue(receiver, hoists, externs, counter),
-                field: field, ty: ty, effects: effects, span: span }
+        HExpr::FieldAccess { receiver, .. } => {
+            let receiver_ = receiver
+            HExpr::FieldAccess { ..expr, receiver: anf_lvalue(
+                    receiver_, hoists, externs, ownership, counter) }
         },
-        HExpr::IndexExpr { receiver, index, ty, effects, span } => {
+        HExpr::IndexExpr { receiver, index, .. } => {
             // The index expression IS a read operand — it can be materialised.
-            HExpr::IndexExpr { receiver: anf_lvalue(receiver, hoists, externs, counter),
-                index: anf_operand(index, hoists, externs, counter),
-                ty: ty, effects: effects, span: span }
+            let receiver_ = receiver
+            let index_ = index
+            HExpr::IndexExpr { ..expr, receiver: anf_lvalue(
+                    receiver_, hoists, externs, ownership, counter),
+                index: anf_operand(
+                    index_, hoists, externs, ownership, counter) }
         },
         // Ident lvalue (plain variable) — nothing to normalise.
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
-            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
+        HExpr::Ident { .. } => expr,
         // Other HExpr variants are unreachable as lvalues.
         _ => expr,
     }
@@ -842,26 +1833,21 @@ fn anf_lvalue(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut count
 // control-flow branches are normalised structurally (no hoisting across the
 // boundary — R2).  `hoists` accumulates `let __anf_N` statements emitted before
 // the enclosing statement.
-fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
+fn anf_expr(
+    expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>,
+    ownership: OwnershipMetadata, mut counter: AnfState
+) -> HExpr {
     match expr {
         // Leaves — nothing to normalise.
-        HExpr::IntLit { value, ty, effects, span } =>
-            HExpr::IntLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::FloatLit { value, ty, effects, span } =>
-            HExpr::FloatLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::StrLit { value, ty, effects, span } =>
-            HExpr::StrLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::BoolLit { value, ty, effects, span } =>
-            HExpr::BoolLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
-            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
+        HExpr::Ident { .. } => expr,
         // B-104 D4: a dict construction is a leaf (its inners are DictRefs, not
         // sub-expressions) and is ALWAYS the init of a dict_lower-synthesised
         // `let __ring_dictlocal_N` — already bound, nothing to materialise.
-        HExpr::DictConstruct { base_dict, trait_name, inner, ty, effects, span } =>
-            HExpr::DictConstruct { base_dict: base_dict, trait_name: trait_name, inner: inner, ty: ty, effects: effects, span: span },
+        HExpr::DictConstruct { .. } => expr,
 
-        HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
+        HExpr::BinOp { op, left, right, .. } => {
             // B-104 D7: `&&`/`||` never reach this pass — andor_lower (checker
             // end) rewrites them to IfExpr, whose branch blocks are their own
             // materialisation scopes (the R2 lazy boundary that
@@ -873,45 +1859,69 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             }
             // Eager arithmetic/comparison: both operands always evaluated
             // left→right → materialise fresh-owned operands (R4).
-            let new_left = anf_operand(left, hoists, externs, counter)
-            let new_right = anf_operand(right, hoists, externs, counter)
-            HExpr::BinOp { op: op, left: new_left, right: new_right,
-                eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
-                ty: ty, effects: effects, span: span }
+            let left_ = left
+            let right_ = right
+            let new_left = anf_operand(
+                left_, hoists, externs, ownership, counter)
+            let new_right = anf_operand(
+                right_, hoists, externs, ownership, counter)
+            HExpr::BinOp { ..expr, left: new_left, right: new_right }
         },
 
-        HExpr::UnaryOp { op, operand, ty, effects, span } => {
-            HExpr::UnaryOp { op: op, operand: anf_operand(operand, hoists, externs, counter),
-                ty: ty, effects: effects, span: span }
+        HExpr::UnaryOp { operand, .. } => {
+            let operand_ = operand
+            HExpr::UnaryOp { ..expr, operand: anf_operand(
+                    operand_, hoists, externs, ownership, counter) }
         },
 
-        HExpr::Call { callee, args, type_args, resolved_dicts, dict_dispatch, ty, effects, span } => {
-            // Callee is a borrow read (FieldAccess receiver / Ident) — normalise its
-            // subexprs but it is not itself a materialisable value.
-            let new_callee = anf_callee(callee, hoists, externs, counter)
-            // B-104 W1: args are BORROW-passed (the callee never drops them).  A
-            // fresh-owned arg (`f(some(x))`, `f(xs.get(i))`, `f(a+b)`, `f(5)`) is
-            // otherwise read by the callee and never dropped → the big residual
-            // arg-position leak (OPTION / boxed-INT bulk).  Materialise + scope-end-
-            // drop it (anf_operand) so it is reclaimed — SOUND because every Ring
-            // function return-clones its tail (clone-all-escape) so it never hands
-            // back an un-dup'd arg, and owned/borrow builtins are likewise safe (a
-            // borrow-returning result is Clone-wrapped at the binding, balancing the
-            // materialised arg's drop — see is_borrow_returning_call).  The last
-            // verbatim-arg-returning callee (`fold` on an empty list, a MOVED
-            // result) was closed at the runtime by the #150 dup-on-empty (B-104 D1
-            // Stage 3) — every callee now returns OWNED on every path, so EVERY
-            // arg materialises (the anf_arg conservative mechanism is retired).
-            let mut new_args: List<HExpr> = []
-            for a in args {
-                new_args.push(anf_operand(a, hoists, externs, counter))
+        HExpr::Call { callee, callee_def_id, args, .. } => {
+            // Borrow/MutBorrow edges keep the historical operand
+            // materialisation: the caller owns and later drops any fresh temp.
+            // Move edges are escape positions instead.  Their top value must
+            // stay inline so a Take/fresh producer transfers directly, while a
+            // non-linear projection can be Clone-wrapped exactly once by RC.
+            let mut is_method = false
+            let callee_ = callee
+            let new_callee = match callee_ {
+                HExpr::FieldAccess { receiver, field, ty: callee_ty,
+                                     effects: callee_effects,
+                                     span: callee_span } => {
+                    is_method = true
+                    let mode = perceus_call_param_mode(
+                        ownership, callee_def_id, 0)
+                    let receiver_ = receiver
+                    let new_receiver = if mode == PARAM_OWNERSHIP_MOVE {
+                        anf_tail_value(receiver_, hoists, externs,
+                            ownership, counter)
+                    } else {
+                        anf_operand(receiver_, hoists, externs,
+                            ownership, counter)
+                    }
+                    HExpr::FieldAccess { ..callee_, receiver: new_receiver }
+                },
+                _ => anf_callee(
+                    callee_, hoists, externs, ownership, counter)
             }
-            HExpr::Call { callee: new_callee, args: new_args, type_args: type_args,
-                resolved_dicts: resolved_dicts, dict_dispatch: dict_dispatch,
-                ty: ty, effects: effects, span: span }
+            let mut new_args: List<HExpr> = []
+            let mut index = 0
+            for a in args {
+                let arg_ = a
+                let descriptor_index = index + if is_method { 1 } else { 0 }
+                let mode = perceus_call_param_mode(
+                    ownership, callee_def_id, descriptor_index)
+                if mode == PARAM_OWNERSHIP_MOVE {
+                    new_args.push(anf_tail_value(
+                        arg_, hoists, externs, ownership, counter))
+                } else {
+                    new_args.push(anf_operand(
+                        arg_, hoists, externs, ownership, counter))
+                }
+                index = index + 1
+            }
+            HExpr::Call { ..expr, callee: new_callee, args: new_args }
         },
 
-        HExpr::FieldAccess { receiver, field, ty, effects, span } => {
+        HExpr::FieldAccess { receiver, .. } => {
             // B-104 D1 Stage 2 — RECEIVER position: a FRESH-OWNED receiver
             // (`f(x).method()`, `make().field`, `s.char_at(i).unwrap_or("")`'s
             // char_at Option — the lexer per-char leak) was read in place and
@@ -920,7 +1930,7 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             //
             // SOUNDNESS (why a projection/method result never dangles):
             //   * The projection (FieldAccess/IndexExpr) and every borrow-
-            //     returning method result (is_borrow_returning_call) are OWNER-
+            //     returning method result (from exact DefId metadata) are OWNER-
             //     BEARING — any escape of them is Clone-wrapped by rc_escape, so
             //     a binding/sink owns an independent dup before __anf's scope-end
             //     drop runs.  Non-escaping uses are transient borrows consumed
@@ -933,108 +1943,181 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             //     reclaimed (the receiver-returning ABI result is excluded by
             //     rule ② everywhere).
             //   * Borrow receivers (Ident / FieldAccess chains / non-Str index /
-            //     borrow-returning calls) fail anf_should_materialize and stay
+            //     descriptor-Borrowed calls) fail anf_should_materialize and stay
             //     in-place reads — unchanged.
             // Evaluation order preserved: the receiver's hoist precedes the
             // args' hoists (anf_callee runs before the args loop in the Call arm).
-            HExpr::FieldAccess { receiver: anf_operand(receiver, hoists, externs, counter),
-                field: field, ty: ty, effects: effects, span: span }
+            let receiver_ = receiver
+            HExpr::FieldAccess { ..expr, receiver: anf_operand(
+                    receiver_, hoists, externs, ownership, counter) }
         },
 
-        HExpr::IndexExpr { receiver, index, ty, effects, span } => {
+        HExpr::IndexExpr { receiver, index, .. } => {
             // Read: receiver follows the same Stage 2 receiver-position rule as
             // FieldAccess above (`f(x)[0]` materialises f(x); the element read
             // borrows __anf, Clone-wrapped on escape, dropped at scope end);
             // index is a read operand.
-            HExpr::IndexExpr { receiver: anf_operand(receiver, hoists, externs, counter),
-                index: anf_operand(index, hoists, externs, counter),
-                ty: ty, effects: effects, span: span }
+            let receiver_ = receiver
+            let index_ = index
+            HExpr::IndexExpr { ..expr, receiver: anf_operand(
+                    receiver_, hoists, externs, ownership, counter),
+                index: anf_operand(
+                    index_, hoists, externs, ownership, counter) }
         },
 
-        HExpr::StructLit { name, type_args, fields, spread, ty, effects, span } => {
+        HExpr::StructLit { fields, spread, .. } => {
+            // C evaluates the spread source before explicit field values. A
+            // fresh source becomes an outer hoist before field hoists. A
+            // borrowed source must stay inline and must never acquire an owner
+            // Drop, so keep each field's nested hoists in that field's own
+            // scope. A source with no reachable value physically prunes fields.
+            let mut source_classification = SPREAD_SOURCE_ALL_BORROW
+            let new_spread = match spread {
+                some(s) => {
+                    let spread_ = s
+                    source_classification = spread_source_classification(
+                        spread_, externs, ownership)
+                    some(anf_spread_source(
+                        spread_, hoists, externs, ownership, counter))
+                },
+                none => none,
+            }
             // Each field value escapes into the struct → tail/escape position; its
             // OWN nested subexprs hoist, but the field value itself is not
             // materialised (it is stored directly into the struct by the RC pass).
             let mut new_fields: List<HStructFieldInit> = []
-            for f in fields {
-                new_fields.push(HStructFieldInit { name: f.name, value: anf_tail_value(f.value, hoists, externs, counter) })
+            if source_classification !=
+                    SPREAD_SOURCE_NO_REACHABLE_VALUE {
+                for f in fields {
+                    let field_value = f.value
+                    let new_value = if source_classification ==
+                            SPREAD_SOURCE_ALL_FRESH {
+                        anf_tail_value(field_value, hoists, externs,
+                            ownership, counter)
+                    } else {
+                        anf_value_in_own_scope(field_value, externs,
+                            ownership, counter)
+                    }
+                    new_fields.push(HStructFieldInit { ..f,
+                        value: new_value })
+                }
             }
-            let new_spread = match spread {
-                some(s) => some(anf_borrow(s, hoists, externs, counter)),
-                none => none,
-            }
-            HExpr::StructLit { name: name, type_args: type_args, fields: new_fields,
-                spread: new_spread, ty: ty, effects: effects, span: span }
+            HExpr::StructLit { ..expr,
+                fields: new_fields, spread: new_spread }
         },
 
-        HExpr::NamedVariantConstruct { enum_name, variant_name, fields, spread, ty, effects, span } => {
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            let mut source_classification = SPREAD_SOURCE_ALL_BORROW
+            let new_spread = match spread {
+                some(s) => {
+                    let spread_ = s
+                    source_classification = spread_source_classification(
+                        spread_, externs, ownership)
+                    some(anf_spread_source(
+                        spread_, hoists, externs, ownership, counter))
+                },
+                none => none,
+            }
             let mut new_fields: List<HStructFieldInit> = []
-            for f in fields {
-                new_fields.push(HStructFieldInit { name: f.name, value: anf_tail_value(f.value, hoists, externs, counter) })
+            if source_classification !=
+                    SPREAD_SOURCE_NO_REACHABLE_VALUE {
+                for f in fields {
+                    let field_value = f.value
+                    let new_value = if source_classification ==
+                            SPREAD_SOURCE_ALL_FRESH {
+                        anf_tail_value(field_value, hoists, externs,
+                            ownership, counter)
+                    } else {
+                        anf_value_in_own_scope(field_value, externs,
+                            ownership, counter)
+                    }
+                    new_fields.push(HStructFieldInit { ..f,
+                        value: new_value })
+                }
             }
-            let new_spread = match spread {
-                some(s) => some(anf_borrow(s, hoists, externs, counter)),
-                none => none,
+            HExpr::NamedVariantConstruct { ..expr,
+                fields: new_fields, spread: new_spread }
+        },
+
+        HExpr::ListLit { elements, .. } => {
+            let mut new_elems: List<HExpr> = []
+            for e in elements {
+                let element_ = e
+                new_elems.push(anf_tail_value(
+                    element_, hoists, externs, ownership, counter))
             }
-            HExpr::NamedVariantConstruct { enum_name: enum_name, variant_name: variant_name,
-                fields: new_fields, spread: new_spread, ty: ty, effects: effects, span: span }
+            HExpr::ListLit { ..expr, elements: new_elems }
         },
 
-        HExpr::ListLit { elements, ty, effects, span } => {
+        HExpr::TupleLit { elements, .. } => {
             let mut new_elems: List<HExpr> = []
-            for e in elements { new_elems.push(anf_tail_value(e, hoists, externs, counter)) }
-            HExpr::ListLit { elements: new_elems, ty: ty, effects: effects, span: span }
+            for e in elements {
+                let element_ = e
+                new_elems.push(anf_tail_value(
+                    element_, hoists, externs, ownership, counter))
+            }
+            HExpr::TupleLit { ..expr, elements: new_elems }
         },
 
-        HExpr::TupleLit { elements, ty, effects, span } => {
-            let mut new_elems: List<HExpr> = []
-            for e in elements { new_elems.push(anf_tail_value(e, hoists, externs, counter)) }
-            HExpr::TupleLit { elements: new_elems, ty: ty, effects: effects, span: span }
+        HExpr::RangeExpr { start, end, .. } => {
+            let start_ = start
+            let end_ = end
+            HExpr::RangeExpr { ..expr, start: anf_tail_value(
+                    start_, hoists, externs, ownership, counter),
+                end: anf_tail_value(
+                    end_, hoists, externs, ownership, counter) }
         },
 
-        HExpr::RangeExpr { start, end, inclusive, ty, effects, span } => {
-            HExpr::RangeExpr { start: anf_tail_value(start, hoists, externs, counter),
-                end: anf_tail_value(end, hoists, externs, counter),
-                inclusive: inclusive, ty: ty, effects: effects, span: span }
-        },
-
-        HExpr::StringInterp { parts, ty, effects, span } => {
+        HExpr::StringInterp { parts, .. } => {
             // Interpolated expressions are read (stringified) operands — materialise
             // each fresh-owned piece so it is reclaimed (the boxed temps that feed
             // string building are a notable Str-leak source).
             let mut new_parts: List<HStringInterpPart> = []
             for p in parts {
                 match p {
-                    HStringInterpPart::Expression(e) =>
-                        new_parts.push(HStringInterpPart::Expression(anf_operand(e, hoists, externs, counter))),
-                    HStringInterpPart::Literal(s) =>
-                        new_parts.push(HStringInterpPart::Literal(s)),
+                    HStringInterpPart::Expression(e) => {
+                        let expression_ = e
+                        new_parts.push(HStringInterpPart::Expression(anf_operand(
+                            expression_, hoists, externs, ownership, counter)))
+                    },
+                    HStringInterpPart::Literal(_) => {
+                        let literal_ = p
+                        new_parts.push(literal_)
+                    },
                 }
             }
-            HExpr::StringInterp { parts: new_parts, ty: ty, effects: effects, span: span }
+            HExpr::StringInterp { ..expr, parts: new_parts }
         },
 
-        HExpr::Block { stmts, tail, ty, effects, span } => {
+        HExpr::Block { .. } => {
             // A nested block expression: it is its own scope (R2) — normalise its
             // statements/tail in place; nothing escapes to the outer `hoists`.
-            anf_block_expr(expr, externs, counter)
+            anf_block_expr(expr, externs, ownership, counter)
         },
 
-        HExpr::IfExpr { condition, then_branch, else_branch, ty, effects, span } => {
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
             // Condition is ALWAYS evaluated → its temps hoist into the enclosing
             // statement list (R4).  Each branch is its own scope (R2) — branch
             // values are materialised inside the branch block, never lifted out.
-            let new_cond = anf_operand(condition, hoists, externs, counter)
-            let new_then = anf_block_expr(then_branch, externs, counter)
+            let condition_ = condition
+            let then_branch_ = then_branch
+            let new_cond = anf_operand(
+                condition_, hoists, externs, ownership, counter)
+            let new_then = anf_block_expr(
+                then_branch_, externs, ownership, counter)
             let new_else = match else_branch {
-                some(eb) => some(anf_block_expr(eb, externs, counter)),
+                some(eb) => {
+                    let else_ = eb
+                    some(anf_block_expr(
+                        else_, externs, ownership, counter))
+                },
                 none => none,
             }
-            HExpr::IfExpr { condition: new_cond, then_branch: new_then,
-                else_branch: new_else, ty: ty, effects: effects, span: span }
+            HExpr::IfExpr { ..expr, condition: new_cond,
+                then_branch: new_then, else_branch: new_else }
         },
 
-        HExpr::MatchExpr { scrutinee, arms, ty, effects, span } => {
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
             // B-104 W2: materialise a FRESH-OWNED scrutinee (`match map.get(k) {…}`,
             // `match find(…) {…}` — the dominant residual OPTION leak: fresh Option
             // temporaries read once by the match and never dropped).  anf_operand
@@ -1059,57 +2142,76 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             // owner-bearing returns.  ASan-verified
             // (real_program matches + self-compile).
             // Arm bodies + guards are their own scopes (R2).
-            let new_scrutinee = anf_operand(scrutinee, hoists, externs, counter)
+            let scrutinee_ = scrutinee
+            let new_scrutinee = anf_operand(
+                scrutinee_, hoists, externs, ownership, counter)
             let mut new_arms: List<HMatchArm> = []
             for arm in arms {
                 let new_guard = match arm.guard {
-                    some(g) => some(anf_cond_in_own_scope(g, externs, counter)),
+                    some(g) => {
+                        let guard_ = g
+                        some(anf_cond_in_own_scope(
+                            guard_, externs, ownership, counter))
+                    },
                     none => none,
                 }
-                let new_body = anf_block_expr(arm.body, externs, counter)
-                new_arms.push(HMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body, span: arm.span })
+                let arm_body = arm.body
+                let new_body = anf_block_expr(
+                    arm_body, externs, ownership, counter)
+                new_arms.push(HMatchArm { ..arm,
+                    guard: new_guard, body: new_body })
             }
-            HExpr::MatchExpr { scrutinee: new_scrutinee, arms: new_arms, ty: ty, effects: effects, span: span }
+            HExpr::MatchExpr { ..expr,
+                scrutinee: new_scrutinee, arms: new_arms }
         },
 
-        HExpr::TryCatch { body, arms, ty, effects, span } => {
+        HExpr::TryCatch { body, arms, .. } => {
             // body + catch arms are their own scopes (R2); abort-path RC is out of
             // scope (B-002).
-            let new_body = anf_block_expr(body, externs, counter)
+            let body_ = body
+            let new_body = anf_block_expr(body_, externs, ownership, counter)
             let mut new_arms: List<HMatchArm> = []
             for arm in arms {
                 let new_guard = match arm.guard {
-                    some(g) => some(anf_cond_in_own_scope(g, externs, counter)),
+                    some(g) => {
+                        let guard_ = g
+                        some(anf_cond_in_own_scope(
+                            guard_, externs, ownership, counter))
+                    },
                     none => none,
                 }
-                let new_body_arm = anf_block_expr(arm.body, externs, counter)
-                new_arms.push(HMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body_arm, span: arm.span })
+                let arm_body = arm.body
+                let new_body_arm = anf_block_expr(
+                    arm_body, externs, ownership, counter)
+                new_arms.push(HMatchArm { ..arm,
+                    guard: new_guard, body: new_body_arm })
             }
-            HExpr::TryCatch { body: new_body, arms: new_arms, ty: ty, effects: effects, span: span }
+            HExpr::TryCatch { ..expr, body: new_body, arms: new_arms }
         },
 
-        HExpr::HandleExpr { body, handlers, ty, effects, span } => {
-            let new_body = anf_block_expr(body, externs, counter)
+        HExpr::HandleExpr { body, handlers, .. } => {
+            let body_ = body
+            let new_body = anf_block_expr(body_, externs, ownership, counter)
             let mut new_handlers: List<HEffectHandler> = []
             for h in handlers {
-                let h_body = anf_block_expr(h.body, externs, counter)
-                new_handlers.push(HEffectHandler {
-                    effect_name: h.effect_name, op_name: h.op_name,
-                    params: h.params, resume_name: h.resume_name, body: h_body
-                })
+                let handler_body = h.body
+                let h_body = anf_block_expr(
+                    handler_body, externs, ownership, counter)
+                new_handlers.push(HEffectHandler { ..h, body: h_body })
             }
-            HExpr::HandleExpr { body: new_body, handlers: new_handlers, ty: ty, effects: effects, span: span }
+            HExpr::HandleExpr { ..expr,
+                body: new_body, handlers: new_handlers }
         },
 
-        HExpr::Lambda { params, return_type, body, ty, effects, span } => {
+        HExpr::Lambda { body, .. } => {
             // The lambda body is its own function scope.  Captures are dup'd by
             // gen_lambda; perceus handles the body.  Normalise the body in place.
-            HExpr::Lambda { params: params, return_type: return_type,
-                body: anf_block_expr(body, externs, counter),
-                ty: ty, effects: effects, span: span }
+            let body_ = body
+            HExpr::Lambda { ..expr,
+                body: anf_block_expr(body_, externs, ownership, counter) }
         },
 
-        HExpr::EffectOp { effect_name, op_name, args, ty, effects, span } => {
+        HExpr::EffectOp { args, .. } => {
             // B-104 D1 Stage 2 — EFFECT-OP ARG position (closes the W1-era
             // conservative hold-out).  Args are BORROW-passed to the handler
             // closure (gen_effect_op → gen_closure_call; closure params are
@@ -1130,27 +2232,44 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             //     the raised value stay valid (the owner binding is simply
             //     never released).
             let mut new_args: List<HExpr> = []
-            for a in args { new_args.push(anf_operand(a, hoists, externs, counter)) }
-            HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: new_args,
-                ty: ty, effects: effects, span: span }
+            for a in args {
+                let arg_ = a
+                new_args.push(anf_operand(
+                    arg_, hoists, externs, ownership, counter))
+            }
+            HExpr::EffectOp { ..expr, args: new_args }
         },
 
-        // Clone is inserted by perceus (after ANF); never present in input.
-        HExpr::Clone { inner, ty, effects, span } =>
-            HExpr::Clone { inner: inner, ty: ty, effects: effects, span: span },
+        // Ownership planning may insert the unique dup proof before ANF.  The
+        // proof node stays in place, while its borrowed inner is still fully
+        // normalised (including any required operand hoists).
+        HExpr::Clone { inner, .. } => {
+            let inner_ = inner
+            HExpr::Clone { ..expr, inner: anf_expr(
+                inner_, hoists, externs, ownership, counter) }
+        },
+
+        // Ownership planning precedes ANF. Take is already one atomic
+        // materialising read/clear operation and must not be split or cloned.
+        HExpr::Take { .. } => expr,
 
         // B-113: return in expression position (match arm).
         // Normalise the return value as a tail value (same as HStmt::Return in anf_stmt).
-        HExpr::ReturnExpr { value, ty, effects, span } => match value {
+        HExpr::ReturnExpr { value, .. } => match value {
             some(v) => {
-                let new_v = anf_tail_value(v, hoists, externs, counter)
-                HExpr::ReturnExpr { value: some(new_v), ty: ty, effects: effects, span: span }
+                let value_ = v
+                let new_v = anf_tail_value(
+                    value_, hoists, externs, ownership, counter)
+                HExpr::ReturnExpr { ..expr, value: some(new_v) }
             },
-            none => HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span },
+            none => expr,
         },
         // B-125: unsafe block — transparent, normalise the body
-        HExpr::UnsafeBlock { body, ty, effects, span } =>
-            HExpr::UnsafeBlock { body: anf_block_expr(body, externs, counter), ty: ty, effects: effects, span: span },
+        HExpr::UnsafeBlock { body, .. } => {
+            let body_ = body
+            HExpr::UnsafeBlock { ..expr, body: anf_block_expr(
+                    body_, externs, ownership, counter) }
+        },
     }
 }
 
@@ -1158,9 +2277,14 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
 // reads, but a checker-marked wrapper (including a dynamic-dict Block wrapper)
 // and any other provably fresh callee Call must be materialised so the closure
 // pair/env is scope-end-dropped after the immediate invocation.
-fn anf_callee(callee: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
-    let normalized = anf_borrow(callee, hoists, externs, counter)
-    if is_materializable_fn_value(normalized, externs) || anf_should_materialize(normalized, externs) {
+fn anf_callee(
+    callee: HExpr, mut hoists: List<HStmt>, externs: Set<Str>,
+    ownership: OwnershipMetadata, mut counter: AnfState
+) -> HExpr {
+    let normalized = anf_borrow(
+        callee, hoists, externs, ownership, counter)
+    if is_materializable_fn_value(normalized, externs, ownership) ||
+       anf_should_materialize(normalized, externs, ownership) {
         anf_materialize(normalized, hoists, counter)
     } else {
         normalized
@@ -1173,73 +2297,92 @@ fn anf_callee(callee: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut cou
 // anf_operand — see the FieldAccess/IndexExpr arms) this helper first normalises:
 //   * the CALLEE expression itself; anf_callee then materialises a fresh Call or
 //     checker-marked wrapper while leaving Ident/method borrows in place;
-//   * a STRUCT/VARIANT SPREAD source: codegen copies the source's field pointers
-//     RAW (no dup) into the new struct — materialising a fresh spread source
-//     would scope-end-drop it, deep-freeing the fields the new struct now holds
-//     → UAF.  Spread sources must stay un-owned reads (leak-on-spread, the
-//     documented L1 posture).
-fn anf_borrow(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
-    anf_expr(expr, hoists, externs, counter)
+//   * a STRUCT/VARIANT SPREAD source: the dedicated spread ANF path first proves
+//     one uniform source class. Fresh sources are materialised exactly once and
+//     scope-dropped after codegen duplicates uncovered fields; direct borrowed
+//     sources remain unowned reads. Mixed/unknown control flow is rejected by
+//     ownership before normal Perceus entry.
+fn anf_borrow(
+    expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>,
+    ownership: OwnershipMetadata, mut counter: AnfState
+) -> HExpr {
+    let expr_ = expr
+    anf_expr(expr_, hoists, externs, ownership, counter)
 }
 
-fn transform_decls(decls: List<HDecl>, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>) -> List<HDecl> {
+fn transform_decls(
+    decls: List<HDecl>, boxed: Set<Int>, externs: Set<Str>,
+    drop_types: OwnershipMetadata, mut gensym: RcState
+) -> List<HDecl> {
     let mut result: List<HDecl> = []
     for d in decls {
-        result.push(transform_decl(d, boxed, externs, drop_types))
+        let decl_ = d
+        result.push(transform_decl(
+            decl_, boxed, externs, drop_types, gensym))
     }
     result
 }
 
-fn transform_decl(decl: HDecl, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>) -> HDecl {
+fn transform_decl(
+    decl: HDecl, boxed: Set<Int>, externs: Set<Str>,
+    drop_types: OwnershipMetadata, mut gensym: RcState
+) -> HDecl {
     match decl {
-        HDecl::Fn { name, def_id, type_params, params, return_type, effects, body, is_pub, trait_bounds, span } => {
-            let new_body = transform_fn_body(params, body, boxed, externs, drop_types)
-            HDecl::Fn {
-                name: name, def_id: def_id, type_params: type_params,
-                params: params, return_type: return_type, effects: effects,
-                body: new_body, is_pub: is_pub, trait_bounds: trait_bounds, span: span
-            }
+        HDecl::Fn { params, body, .. } => {
+            let params_ = params
+            let body_ = body
+            let new_body = transform_fn_body(
+                params_, body_, boxed, externs, drop_types, gensym)
+            HDecl::Fn { ..decl, body: new_body }
         },
-        HDecl::Impl { target_type, type_params, trait_name, methods, assoc_types, span } => {
-            let new_methods = transform_decls(methods, boxed, externs, drop_types)
-            HDecl::Impl {
-                target_type: target_type, type_params: type_params,
-                trait_name: trait_name, methods: new_methods,
-                assoc_types: assoc_types, span: span
-            }
+        HDecl::Impl { methods, .. } => {
+            let methods_ = methods
+            let new_methods = transform_decls(
+                methods_, boxed, externs, drop_types, gensym)
+            HDecl::Impl { ..decl, methods: new_methods }
         },
-        HDecl::Test { description, body, span } => {
+        HDecl::Test { body, .. } => {
             // Transform test bodies as parameterless functions
-            let new_body = transform_fn_body([], body, boxed, externs, drop_types)
-            HDecl::Test { description: description, body: new_body, span: span }
+            let body_ = body
+            let new_body = transform_fn_body(
+                [], body_, boxed, externs, drop_types, gensym)
+            HDecl::Test { ..decl, body: new_body }
         },
-        HDecl::Const { name, def_id, ty, init, is_pub, span } => {
+        HDecl::Const { init, .. } => {
             // B-098: the const owns its value → the initialiser is in escape
             // position, with an empty enclosing owned scope (no locals at top level).
-            let owned: List<Str> = []
-            let mut gensym: List<Int> = [0]
-            let new_init = rc_escape(init, owned, boxed, externs, drop_types, gensym, 0 - 1)
-            HDecl::Const { name: name, def_id: def_id, ty: ty, init: new_init, is_pub: is_pub, span: span }
+            let owned: List<OwnedSlot> = []
+            let init_ = init
+            let new_init = rc_escape(
+                init_, owned, boxed, externs, drop_types, gensym, 0 - 1)
+            HDecl::Const { ..decl, init: new_init }
         },
-        HDecl::ModBlock { name, decls: mod_decls, is_pub, span } => {
-            HDecl::ModBlock { name: name, decls: transform_decls(mod_decls, boxed, externs, drop_types), is_pub: is_pub, span: span }
+        HDecl::ModBlock { decls: mod_decls, .. } => {
+            let decls_ = mod_decls
+            HDecl::ModBlock { ..decl,
+                decls: transform_decls(decls_, boxed, externs,
+                    drop_types, gensym) }
         },
         // Non-function declarations pass through unchanged
         HDecl::Struct { .. } => decl,
         HDecl::Enum { .. } => decl,
-        HDecl::Effect { name, type_params, ops, is_pub, span } => {
+        HDecl::Effect { ops, .. } => {
             let mut new_ops: List<HEffectOp> = []
             for op in ops {
                 let new_default_body = match op.default_body {
-                    some(body) => some(transform_fn_body(op.params, body, boxed, externs, drop_types)),
+                    some(body) => {
+                        let params_ = op.params
+                        let body_ = body
+                        some(transform_fn_body(
+                            params_, body_, boxed, externs,
+                            drop_types, gensym))
+                    },
                     none => none,
                 }
-                new_ops.push(HEffectOp {
-                    name: op.name, params: op.params, return_type: op.return_type,
-                    has_default: op.has_default, default_body: new_default_body
-                })
+                new_ops.push(HEffectOp { ..op,
+                    default_body: new_default_body })
             }
-            HDecl::Effect { name: name, type_params: type_params, ops: new_ops, is_pub: is_pub, span: span }
+            HDecl::Effect { ..decl, ops: new_ops }
         },
         HDecl::Trait { .. } => decl,
         HDecl::ExternFn { .. } => decl,
@@ -1283,25 +2426,148 @@ fn transform_decl(decl: HDecl, boxed: Set<Int>, externs: Set<Str>, drop_types: S
 //      escape is cloned then scope-end-dropped.  More churn than a perfect
 //      analysis, but fewer dups than always-own (reads ≫ escapes) and crash-free.
 //
-// `owned` (List<Str>): the owned local bindings currently in scope, in definition
-// order (outermost block first).  Threaded by VALUE (each block passes a fresh
-// concat down) so there is no aliasing across siblings.  A `return` drops the
-// full `owned` set it receives.
+// `owned` (List<OwnedSlot>): exact owned bindings currently in scope, in
+// definition order (outermost block first). Threaded by value so siblings do
+// not share scope state. DefId keeps same-spelled shadows as distinct cleanup
+// slots; a return drops the full visible set in reverse order. Range iteration
+// slots are included with backend_loop_cleanup=true: only break/return emit their
+// HIR Drop, because normal/continue reach the backend increment-label cleanup.
 // ============================================================
 
-fn transform_fn_body(params: List<HParam>, body: HExpr, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>) -> HExpr {
-    // All parameters BORROW (point 4): the function entry owns nothing — params
-    // belong to the caller.  So the function body's enclosing owned set starts
-    // empty.  rc_block then inserts scope-end drops for body-local bindings and
-    // return-path drops, and clones escapes.  The function body is a tail/escape
-    // position: its value is the return value (the caller takes ownership).
-    let owned: List<Str> = []
-    // Per-function hoist-temp counter (single-element mutable cell).  Per-function
-    // scope guarantees the `__rc_scope_N` names are unique within each function's
-    // flat named_values map.
-    let mut gensym: List<Int> = [0]
+struct OwnedSlot {
+    name: Str,
+    def_id: Int,
+    // Range iteration slots are real per-iteration owners, but normal and
+    // continue edges are cleaned by the backend increment block. Perceus only
+    // emits their cleanup on edges that skip that block (break/return).
+    backend_loop_cleanup: Bool
+}
+
+fn owned_slot_equal(a: OwnedSlot, b: OwnedSlot) -> Bool {
+    a.def_id == b.def_id
+}
+
+fn owned_contains(slots: List<OwnedSlot>, candidate: OwnedSlot) -> Bool {
+    for slot in slots {
+        if owned_slot_equal(slot, candidate) { return true }
+    }
+    false
+}
+
+fn owned_find_def_id(slots: List<OwnedSlot>, def_id: Int) -> OwnedSlot? {
+    for slot in slots {
+        if slot.def_id == def_id {
+            let found = slot
+            return some(found)
+        }
+    }
+    none
+}
+
+fn transform_fn_body(
+    params: List<HParam>, body: HExpr, boxed: Set<Int>,
+    externs: Set<Str>, drop_types: OwnershipMetadata,
+    mut gensym: RcState
+) -> HExpr {
+    // Borrow/MutBorrow parameters remain caller-owned. Move parameters are
+    // callee-owned slots and therefore enter the same reverse-order cleanup
+    // account as locals; an explicit Take clears the slot before that cleanup.
+    let mut owned: List<OwnedSlot> = []
+    for param in params {
+        if hparam_ownership(param) == PARAM_OWNERSHIP_MOVE &&
+           !hparam_is_external_drop_owner(param) &&
+           type_is_physical_rc_eligible(param.ty, externs) &&
+           !rc_name_skippable(param.name) {
+            let def_id = match param.def_id {
+                some(id) => id,
+                none => panic(
+                    "unreachable: Move parameter has no cleanup DefId")
+            }
+            let param_name = param.name
+            owned.push(OwnedSlot { name: param_name, def_id: def_id,
+                backend_loop_cleanup: false })
+        }
+    }
+    // One program-global traversal counter supplies both an unspellable name
+    // and a disjoint negative DefId for every RC hoist.
     // loop_base = -1: not inside a loop (break/continue cannot occur).
-    rc_block_root(body, true, owned, boxed, externs, drop_types, gensym, 0 - 1)
+    let transformed = rc_block_root(
+        body, true, owned, boxed, externs, drop_types, gensym, 0 - 1)
+    add_fn_param_cleanup(transformed, owned, drop_types, gensym)
+}
+
+fn add_fn_param_cleanup(
+    body: HExpr, owned_params: List<OwnedSlot>,
+    drop_types: OwnershipMetadata, mut gensym: RcState
+) -> HExpr {
+    if owned_params.len() == 0 { return body }
+    let fallback_ty = hexpr_type(body)
+    let fallback_effects = hexpr_effects(body)
+    let fallback_span = hexpr_span(body)
+    let (stmts, tail, ty, effects, span) = match body {
+        HExpr::Block { stmts, tail, ty, effects, span } => {
+            let stmts_ = stmts
+            let tail_ = tail
+            let ty_ = ty
+            let effects_ = effects
+            let span_ = span
+            (stmts_, tail_, ty_, effects_, span_)
+        },
+        _ => ([], some(body), fallback_ty, fallback_effects, fallback_span)
+    }
+    if block_diverges(stmts, tail) {
+        let result_stmts = stmts
+        let result_tail = tail
+        let result_ty = ty
+        let result_effects = effects
+        let result_span = span
+        return HExpr::Block { stmts: result_stmts, tail: result_tail,
+            ty: result_ty, effects: result_effects, span: result_span }
+    }
+    let mut final_stmts = stmts
+    match tail {
+        some(value) => {
+            let (tmp, tmp_def_id) = fresh_scope_tmp(gensym)
+            record_rc_callable_projection(value, tmp_def_id, gensym)
+            let value_ty = hexpr_type(value)
+            let value_effects = hexpr_effects(value)
+            let value_span = hexpr_span(value)
+            let binding_name = tmp
+            let result_name = tmp
+            let binding_def_id = tmp_def_id
+            let result_def_id = tmp_def_id
+            let binding_ty = value_ty
+            let result_value_ty = value_ty
+            let value_ = value
+            final_stmts.push(HStmt::Let { name: binding_name,
+                name_span: synthetic_span(), def_id: some(binding_def_id),
+                ty: binding_ty, init: value_, span: synthetic_span() })
+            for drop_stmt in drops_for(owned_params) {
+                let cleanup = drop_stmt
+                final_stmts.push(cleanup)
+            }
+            let result_ty = ty
+            let result_effects = effects
+            let result_span = span
+            HExpr::Block { stmts: final_stmts,
+                tail: some(HExpr::Ident { name: result_name,
+                    resolved_name: none, def_id: some(result_def_id),
+                    dict_closure_dicts: none, ty: result_value_ty,
+                    effects: value_effects, span: value_span }),
+                ty: result_ty, effects: result_effects, span: result_span }
+        },
+        none => {
+            for drop_stmt in drops_for(owned_params) {
+                let cleanup = drop_stmt
+                final_stmts.push(cleanup)
+            }
+            let result_ty = ty
+            let result_effects = effects
+            let result_span = span
+            HExpr::Block { stmts: final_stmts, tail: none,
+                ty: result_ty, effects: result_effects, span: result_span }
+        }
+    }
 }
 
 // hexpr_effects is imported from hir
@@ -1319,7 +2585,9 @@ fn transform_fn_body(params: List<HParam>, body: HExpr, boxed: Set<Int>, externs
 // result, literal, struct/variant construction, binop, range, fresh container,
 // closure, string-interp, .values()/.entries() which build owned containers):
 // it has no other owner, so the sink moves it in (no clone — cloning would leak).
-fn is_owner_bearing(expr: HExpr) -> Bool {
+fn is_owner_bearing(
+    expr: HExpr, ownership: OwnershipMetadata
+) -> Bool {
     // Module callable markers are productions, not reads: evaluating them
     // allocates a fresh {thunk, env} pair. Clone-wrapping would dup the fresh
     // pair and strand its original construction reference.
@@ -1327,11 +2595,15 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
         return false
     }
     let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
+    let option_none_ctor = is_option_none_ctor_ident(expr)
     match expr {
         // Ordinary identifiers read an existing owner.  A fieldless variant is
         // the one Ident-shaped exception: codegen calls a constructor, so the
-        // result is fresh and must move without an escape Clone.
-        HExpr::Ident { .. } => nullary_variant_ctor == false,
+        // result is fresh and must move without an escape Clone. Option::none
+        // is the second exception: its exact constructor Ident evaluates to an
+        // immortal singleton, outside the physical RC account.
+        HExpr::Ident { .. } =>
+            nullary_variant_ctor == false && option_none_ctor == false,
         HExpr::FieldAccess { .. } => true,
         // B-104 D1 rule ③: `s[i]` on a Str is NOT owner-bearing — ring_str_get
         // returns a FRESH 1-char string (new ring_alloc, verified), so an escape
@@ -1340,7 +2612,8 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
         // indexing returns a borrowed element pointer → owner-bearing (escape
         // Clones) as before.
         HExpr::IndexExpr { receiver, .. } => is_str_index(receiver) == false,
-        HExpr::Call { callee, .. } => is_borrow_returning_call(callee),
+        HExpr::Call { callee_def_id, .. } =>
+            call_returns_borrowed(ownership, callee_def_id),
         _ => false,
     }
 }
@@ -1365,15 +2638,13 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   NULL/NEVER — returns nullptr (ring_drop(null) is a no-op → RC-inert) or
 //              never returns (exit/panic/longjmp).
 //
-// ── BORROW returners (every one MUST be covered by this predicate, by
+// ── BORROW returners (every one MUST have an exact builtin DefId descriptor, by
 //    is_owner_bearing's Ident/FieldAccess/IndexExpr arms, or — for the
 //    Unit-typed receiver-returning mutators — by the D1 rule ② type-level
 //    Unit exclusion) ─────────────────────────────────────────────────────────
 //   ring_Option_unwrap        .unwrap          → Some payload slot (no dup).
 //   ring_Option_unwrap_or     .unwrap_or       → payload slot, or the `default`
 //                                                ARGUMENT verbatim on None.
-//   ring_Option_unwrap_or_else .unwrap_or_else → payload slot, or the closure's
-//                                                result forwarded.
 //   ring_Option_to_fail       .to_fail         → payload slot (None raises).
 //   ring_list_get             list[i] / tuple .0 / for-in   → element ptr, no dup
 //                             (HIR: IndexExpr / tuple FieldAccess — covered by
@@ -1437,7 +2708,9 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //     ring_str_char_at / char_code_at / index_of / last_index_of / ring_parse_int
 //     / parse_float (fresh boxed payload), ring_list_pop / shift (payload
 //     OWNERSHIP TRANSFERRED out of the vector — vec erases its ref, no dup
-//     needed), ring_Option_map (wraps the closure's owned result).
+//     needed), ring_Option_map (wraps the closure's owned result),
+//     ring_Option_unwrap_or_else (Some duplicates the payload; None forwards
+//     the callback's owned result, so both paths satisfy Owned).
 //   Container builders: ring_list_new / pure Ring map_new / set_new /
 //     sb_new / ring_args / pure Ring Map keys/values/entries
 //     (ring_slot_read duplicates elements) / pure Ring Set to_list/from_list /
@@ -1481,7 +2754,7 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //
 // ── Static (not extern, runtime-internal only) ────────────────────────────────
 //   ring_enum_some / enum_none (FRESH; HIR surface = variant-ctor call, whose
-//   args are sink positions — is_variant_constructor_call), ring_make_closure /
+//   ownership edges are explicit Take nodes), ring_make_closure /
 //   make_eq_dict / make_ord_dict (FRESH, dict plumbing), drop_* destructors.
 //
 // NOTE: `.get()` is NOT here — list.get / map.get build a FRESH owned Option
@@ -1490,23 +2763,16 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // ring_dup in ring_list_first/last) and `.values()` / `.entries()` / `.keys()` /
 // `.pop` / `.shift` likewise build FRESH owned containers — not borrows.
 //
-// Safety asymmetry: mis-listing a fresh-temp call here only LEAKS (an extra dup
-// whose source leaks); OMITTING a genuine borrow-returner CRASHES (UAF when the
-// escaped borrow is scope-end-dropped).  So this list errs toward inclusion.
-// Known leak-side cost of the name-grain match: a USER method that happens to
-// share a listed name and returns a real fresh value gets Clone-wrapped on
-// escape → its result leaks one refcount (crash-free; the cost class of a user
-// method named `unwrap`).  B-104 D1 rule ② removed the 9 receiver-returning
-// mutator names from this list (push/set/insert/remove/add/clear/extend/line/
-// add_int — their UAF protection is now the TYPE-level Unit exclusion, see the
-// classification table above), shrinking that cost to the 4 Option projections.
+// Safety is exact-identity keyed: builtin registration records these modes on
+// their DefIds, while same-spelled user methods keep their independently solved
+// Owned/Borrowed result descriptor. Missing metadata fails loudly before RC.
 //
 // ⚠️ THE PREDICATE ITSELF NOW LIVES IN hir.ring (B-104 D1 Stage 2): the LLVM
 // codegen's condition-box drops (emit_while / match-guard post-unbox,
 // is_fresh_owned_bool_value) need the same classification, and cross-stage
 // contracts belong in hir.ring.  THIS TABLE REMAINS THE EVIDENCE RECORD —
-// update it together with any membership change in hir.ring's
-// is_borrow_returning_call.
+// update it together with the builtin descriptors consumed by
+// hir.call_returns_borrowed.
 
 // B-104 W1 arg-returning classification (is_arg_returning_call, sole member
 // `fold`) — RETIRED 2026-06-12 (B-104 D1 Stage 3, audit #150).  ring_list_fold
@@ -1514,8 +2780,8 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // argument verbatim with a MOVED result any more: every call result is OWNED
 // on every path, all call args materialise (anf_operand), and the anf_arg
 // conservative mechanism is deleted.  The B-103 completeness audit's two exempt
-// classes stand unchanged (Option projections balance via is_borrow_returning_
-// call's escape Clone; receiver-returning mutators are excluded type-level by
+// classes stand unchanged (descriptor-Borrowed projections balance via escape
+// Clone; receiver-returning mutators are excluded type-level by
 // D1 rule ②), and Ring-level functions still always return OWNED
 // (clone-all-escape, the B-103 "no fixpoint needed" theorem).  Decision record:
 // design.md appendix decision table「fold 空表 verbatim-init 修复方向」; full
@@ -1527,7 +2793,7 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // re-dug.
 //
 // The tempting fix for the apply_subst-family LEAK (§7.11-correction-#2: "Call
-// result conservatively not dropped") is a DUAL of is_borrow_returning_call: a
+// result conservatively not dropped") is a DUAL of exact return descriptors: a
 // whitelist of calls whose result is a FRESH, UNSHARED owned value, safe to
 // scope-end-drop.  Wave A proved this whitelist must be EMPTY:
 //   - apply_subst / apply_subst_map (env.ring): scalar `=> t` arms and the
@@ -1554,7 +2820,7 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //
 // B-103 (2026-06-07) — the ban above still holds (no per-call FRESH-vs-aliased
 // whitelist), but is_droppable_init's Call arm now returns `true` UNIVERSALLY, not
-// just for borrow-returners.  This is sound WITHOUT a whitelist precisely because
+// just for descriptor-Borrowed calls. This is sound WITHOUT a whitelist precisely because
 // of the clone-all-escape reasoning above: every apply_subst-family return value
 // reaches its caller's `let x = ...` already Clone-wrapped (the aliased arm's value
 // is in tail/escape position → rc_escape Clones it), so `x` owns a FRESH dup,
@@ -1565,21 +2831,17 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // Wrap an escaping expression: clone it iff it has an independent owner; the
 // inner expression is processed in VALUE (borrow) position so its own reads do
 // not clone.  Carries inner's type/effects/span on the Clone node.
-fn rc_escape(expr: HExpr, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>, mut gensym: List<Int>, loop_base: Int) -> HExpr {
+fn rc_escape(expr: HExpr, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<Str>, drop_types: OwnershipMetadata, mut gensym: RcState, loop_base: Int) -> HExpr {
     // B-102 R-clean: Type-DAG values participate in normal clone-all-escape RC —
     // an escaping owner-bearing Type substructure is Clone-wrapped (ring_dup) so
     // the new parent Type owns its own (shallow) reference, symmetric with the
     // recursive drop_T that releases it.  (A1's never-drop special case is removed.)
     //
     // B-104 D1 rule ① (audit #139) + rule ② (Unit), both TYPE-level:
-    //   ① a DIRECT extern-handle value never Clones — ring_dup would WRITE a
-    //     refcount into foreign (non-ring_alloc) memory.  It escapes as a MOVE
-    //     (the sink stores the raw handle; no holder ever drops it —
-    //     extern-typed/extern-containing bindings are excluded from the owned
-    //     set and drop_T skips extern-typed fields).  DIRECT-type test only: a
-    //     CONTAINER of extern handles (List<LLVMTypeRef>, LLVMValueRef?) has a
-    //     real RC header, so its shallow Clone stays allowed/safe — only its
-    //     DROP is excluded (type_contains_extern_handle in is_droppable_init).
+    //   ① a direct extern handle OR a value containing one never Clones. A
+    //     direct ring_dup would touch foreign memory; cloning a container would
+    //     manufacture another owner whose eventual deep Drop reaches its raw
+    //     payload. Both therefore escape without physical RC work.
     //   ② a Unit-typed value never Clones — Unit has no value semantics, and at
     //     the LLVM ABI a Unit-typed mutator call result IS the receiver
     //     (`return list;`), so Cloning it ring_dup-pins the caller's container
@@ -1587,23 +2849,52 @@ fn rc_escape(expr: HExpr, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, 
     //     binding/sink is RC-inert because Unit is excluded from droppability
     //     and materialisation everywhere (is_rc_excluded_type).
     //
-    // B-002p1: Drop types never Clone (move semantics — rc == 1 invariant,
-    // guaranteed by the move checker).  Skip the Clone wrapper; the value moves
-    // into the sink and the source binding is excluded from scope-end drops
-    // (see rc_block_inner's moved_from_drop logic).
-    if is_owner_bearing(expr) && is_rc_excluded_type(hexpr_type(expr), externs) == false && is_user_drop_type(hexpr_type(expr), drop_types) == false {
-        let inner = rc_expr(expr, false, owned, boxed, externs, drop_types, gensym, loop_base)
+    // Take is the sole move proof. It already carries an owned value and clears
+    // its exact source slot in native lowering, so cloning it would duplicate a
+    // linear resource and violate the callable contract.
+    match expr {
+        HExpr::Clone { ty, .. } => {
+            if type_may_own(drop_types, ty) {
+                panic("unreachable: Perceus received owner-bearing HExpr::Clone")
+            }
+            // Ownership planning may already have materialised a non-linear
+            // borrowed escape.  Clone is the ownership operation itself, so
+            // the RC pass must be idempotent at this boundary.
+            let clone_expr = expr
+            return rc_expr(clone_expr, true, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+        },
+        HExpr::Take { .. } => {
+            let take_expr = expr
+            return rc_expr(take_expr, true, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+        },
+        _ => {}
+    }
+    if is_owner_bearing(expr, drop_types) &&
+       type_is_physical_rc_eligible(hexpr_type(expr), externs) {
+        if type_may_own(drop_types, hexpr_type(expr)) {
+            panic("unreachable: owner-bearing escape reached Perceus without Take")
+        }
+        let clone_ty = hexpr_type(expr)
+        let clone_effects = hexpr_effects(expr)
+        let clone_span = hexpr_span(expr)
+        let inner_input = expr
+        let inner = rc_expr(inner_input, false, owned, boxed, externs,
+            drop_types, gensym, loop_base)
         HExpr::Clone {
             inner: inner,
-            ty: hexpr_type(expr),
-            effects: hexpr_effects(expr),
-            span: hexpr_span(expr)
+            ty: clone_ty,
+            effects: clone_effects,
+            span: clone_span
         }
     } else {
         // Fresh temporary: move (no clone).  Recurse so nested escape positions
         // inside it (struct fields, list elements, container-sink args, branch
         // bodies, etc.) are still handled.
-        rc_expr(expr, true, owned, boxed, externs, drop_types, gensym, loop_base)
+        let fresh_expr = expr
+        rc_expr(fresh_expr, true, owned, boxed, externs, drop_types, gensym,
+            loop_base)
     }
 }
 
@@ -1624,11 +2915,14 @@ fn rc_escape(expr: HExpr, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, 
 // continue) skips the block-end drops: they are unreachable, and a `return`
 // inside has already dropped the full owned set.
 
-fn rc_block_root(body: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>, mut gensym: List<Int>, loop_base: Int) -> HExpr {
+fn rc_block_root(body: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<Str>, drop_types: OwnershipMetadata, mut gensym: RcState, loop_base: Int) -> HExpr {
     match body {
-        HExpr::Block { stmts, tail, ty, effects, span } => {
-            let res = rc_block_inner(stmts, tail, escape, owned, boxed, externs, drop_types, gensym, loop_base)
-            HExpr::Block { stmts: res.0, tail: res.1, ty: ty, effects: effects, span: span }
+        HExpr::Block { stmts, tail, .. } => {
+            let stmts_ = stmts
+            let tail_ = tail
+            let res = rc_block_inner(stmts_, tail_, escape, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+            HExpr::Block { ..body, stmts: res.0, tail: res.1 }
         },
         _ => {
             // Non-block body (single expression): it is the tail in escape (return)
@@ -1639,9 +2933,9 @@ fn rc_block_root(body: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, e
 }
 
 // Process a block's statement list + tail.  Returns (new_stmts, new_tail).
-fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>, mut gensym: List<Int>, loop_base: Int) -> (List<HStmt>, HExpr?) {
+fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<Str>, drop_types: OwnershipMetadata, mut gensym: RcState, loop_base: Int) -> (List<HStmt>, HExpr?) {
     // Bindings defined directly by these statements (not nested loop/branch scopes).
-    let block_locals = direct_block_locals(stmts, externs)
+    let block_locals = direct_block_locals(stmts, externs, drop_types)
 
     // The owned set visible to each statement = enclosing owned ++ the bindings of
     // THIS block declared BEFORE that statement.  This must be built INCREMENTALLY
@@ -1663,44 +2957,45 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<St
     // `return`, freeing the never-initialised alloca).
     let mut visible_owned = owned.concat([])
     let mut new_stmts: List<HStmt> = []
+    let mut reaches_tail = true
     for s in stmts {
+        let rc_input = s
+        let reachability_input = s
+        let local_input = s
         // A statement (or any early return inside it) sees only locals already declared.
-        for ns in rc_stmt(s, visible_owned, boxed, externs, drop_types, gensym, loop_base) { new_stmts.push(ns) }
-        // After processing, this statement's own droppable binding (if any, and not
-        // already owned by an enclosing scope) becomes visible to later statements.
-        for n in stmt_droppable_locals(s, externs) {
-            if visible_owned.contains(n) == false { visible_owned.push(n) }
+        for ns in rc_stmt(rc_input, visible_owned, boxed, externs,
+                drop_types, gensym, loop_base) {
+            let stmt_ = ns
+            new_stmts.push(stmt_)
         }
-    }
-
-    // B-002p1: collect variables that were moved-from due to Drop-type assignment.
-    // These should NOT be scope-end-dropped (the move transferred ownership).
-    let mut moved_from_drop: Set<Str> = set_new()
-    for s in stmts {
-        match s {
-            HStmt::Let { init, .. } => {
-                match init {
-                    HExpr::Ident { name: src_name, ty: src_ty, .. } => {
-                        if is_user_drop_type(src_ty, drop_types) {
-                            moved_from_drop.insert(src_name)
-                        }
-                    },
-                    _ => {}
+        let reaches_next = stmt_reaches_next(reachability_input)
+        // After processing, this statement's own droppable binding (if any,
+        // and not already owned by an enclosing scope) becomes visible only
+        // when its initializer returns normally.
+        if reaches_next {
+            for n in stmt_droppable_locals(
+                    local_input, externs, drop_types) {
+                if !owned_contains(visible_owned, n) {
+                    let owned_local = n
+                    visible_owned.push(owned_local)
                 }
-            },
-            _ => {}
+            }
+        } else {
+            reaches_tail = false
+            break
         }
     }
 
-    // This block's OWN fresh bindings (dropped at block end, fall-through path).
-    // A block-local that shadows an enclosing owned name (same flat alloca) is NOT
-    // re-dropped here — the enclosing scope owns that drop; re-dropping would free
-    // the one shared alloca twice (B-102 layer-3 over-free).  Computed BEFORE the
-    // tail so the tail's escape mode can depend on it (below).
-    let mut own_block_locals: List<Str> = []
+    // This block's own fresh bindings (dropped at block end, fall-through path).
+    // DefId identity means a same-spelled shadow has its own C slot and cleanup;
+    // only the same exact binding is suppressed. Computed before the tail so
+    // the tail's escape mode can depend on it.
+    let mut own_block_locals: List<OwnedSlot> = []
     for n in block_locals {
-        // B-002p1: exclude moved-from Drop variables from scope-end drops
-        if owned.contains(n) == false && moved_from_drop.contains(n) == false { own_block_locals.push(n) }
+        if !owned_contains(owned, n) {
+            let owned_local = n
+            own_block_locals.push(owned_local)
+        }
     }
 
     // B-104 D1 (Stage 2) — DROPPING-BLOCK TAIL-ESCAPE INVARIANT: a block that
@@ -1725,9 +3020,17 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<St
     let tail_escape = if own_block_locals.len() > 0 { true } else { escape }
 
     // The tail sees every block-local (all `let`s precede the tail).
-    let new_tail = match tail {
-        some(t) => some(rc_escape_or_value(t, tail_escape, visible_owned, boxed, externs, drop_types, gensym, loop_base)),
-        none => none,
+    let new_tail = if reaches_tail {
+        match tail {
+            some(t) => {
+                let tail_ = t
+                some(rc_escape_or_value(tail_, tail_escape, visible_owned,
+                    boxed, externs, drop_types, gensym, loop_base))
+            },
+            none => none,
+        }
+    } else {
+        none
     }
     if own_block_locals.len() == 0 {
         ((new_stmts, new_tail))
@@ -1741,20 +3044,54 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<St
         match new_tail {
             some(t) => {
                 // Hoist the tail so the drops run AFTER it is evaluated.
-                let tmp = fresh_scope_tmp(gensym)
+                let (tmp, tmp_def_id) = fresh_scope_tmp(gensym)
+                record_rc_callable_projection(t, tmp_def_id, gensym)
                 let tt = hexpr_type(t)
                 let te = hexpr_effects(t)
                 let ts = hexpr_span(t)
-                new_stmts.push(HStmt::Let { name: tmp, name_span: synthetic_span(),
-                    def_id: none, ty: tt, init: t, span: synthetic_span() })
-                for d in drops { new_stmts.push(d) }
-                let tmp_tail = HExpr::Ident { name: tmp, resolved_name: none, def_id: none,
-                    dict_closure_dicts: none, ty: tt, effects: te, span: ts }
+                let binding_name = tmp
+                let result_name = tmp
+                let binding_def_id = tmp_def_id
+                let result_def_id = tmp_def_id
+                let binding_ty = tt
+                let result_ty = tt
+                let tail_ = t
+                new_stmts.push(HStmt::Let { name: binding_name,
+                    name_span: synthetic_span(),
+                    def_id: some(binding_def_id), ty: binding_ty,
+                    init: tail_, span: synthetic_span() })
+                for d in drops {
+                    let cleanup = d
+                    new_stmts.push(cleanup)
+                }
+                // The hoist slot is created by this pass, after ownership
+                // planning.  When the ORIGINAL parent position consumes the
+                // block value, publish that transfer as an exact Take of the
+                // synthetic slot.  A borrow parent can still force
+                // tail_escape=true merely to keep the value alive across the
+                // local drops; that path must remain an Ident borrow.
+                //
+                // The missing-Take mutation deliberately restores the old bare
+                // Ident on the consuming edge so verify_rc independently proves
+                // this post-planner transfer contract.
+                let tmp_tail = if escape && gensym.counters.get(1) != some(1) {
+                    HExpr::Take { name: result_name,
+                        source_def_id: result_def_id, ty: result_ty,
+                        effects: te, span: ts }
+                } else {
+                    HExpr::Ident { name: result_name,
+                        resolved_name: none, def_id: some(result_def_id),
+                        dict_closure_dicts: none, ty: result_ty,
+                        effects: te, span: ts }
+                }
                 ((new_stmts, some(tmp_tail)))
             },
             none => {
                 // No tail value: drops simply run at block end.
-                for d in drops { new_stmts.push(d) }
+                for d in drops {
+                    let cleanup = d
+                    new_stmts.push(cleanup)
+                }
                 ((new_stmts, none))
             },
         }
@@ -1763,11 +3100,15 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<St
 
 // Dispatch an expression that is itself the tail/value of a block or branch.
 // In escape position, owner-bearing exprs clone; in value position they borrow.
-fn rc_escape_or_value(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>, mut gensym: List<Int>, loop_base: Int) -> HExpr {
+fn rc_escape_or_value(expr: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<Str>, drop_types: OwnershipMetadata, mut gensym: RcState, loop_base: Int) -> HExpr {
     if escape {
-        rc_escape(expr, owned, boxed, externs, drop_types, gensym, loop_base)
+        let escape_expr = expr
+        rc_escape(escape_expr, owned, boxed, externs, drop_types, gensym,
+            loop_base)
     } else {
-        rc_expr(expr, false, owned, boxed, externs, drop_types, gensym, loop_base)
+        let value_expr = expr
+        rc_expr(value_expr, false, owned, boxed, externs, drop_types, gensym,
+            loop_base)
     }
 }
 
@@ -1776,10 +3117,12 @@ fn rc_escape_or_value(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<In
 // counter is monotonic for one compilation and identical across runs of the same
 // source, so double-bootstrap byte-equivalence is preserved.  The reserved
 // `__rc_scope_` prefix never collides with a user binding.
-fn fresh_scope_tmp(mut gensym: List<Int>) -> Str {
-    let n = match gensym.get(0) { some(v) => v, none => 0 }
-    gensym.set(0, n + 1)
-    "__rc_scope_${n + 1}"
+fn fresh_scope_tmp(mut gensym: RcState) -> (Str, Int) {
+    let n = match gensym.counters.get(0) { some(v) => v, none => 0 }
+    let ordinal = n + 1
+    gensym.counters.set(0, ordinal)
+    ("__rc_scope_${ordinal}",
+        synthetic_def_id(SYNTHETIC_RC_DEF_ID_BASE, ordinal))
 }
 
 // Direct (non-nested) OWNED-AND-DROPPABLE bindings introduced by a statement
@@ -1797,14 +3140,26 @@ fn fresh_scope_tmp(mut gensym: List<Int>) -> Str {
 // state (observed as native self-compile UAF, B-098 GATE 1).  Leaking these
 // bindings is crash-free and still far below always-own (reads no longer dup);
 // tightening them to precise ownership is L3 reuse / B-096 scope.  Other binders
-// (LetDestructure / for-in / match-if-let patterns) project BORROWS and are never
-// dropped (handled by their exclusion from `owned`).
-fn direct_block_locals(stmts: List<HStmt>, externs: Set<Str>) -> List<Str> {
-    let mut out: List<Str> = []
+// (LetDestructure / match-if-let patterns) project BORROWS and are never dropped
+// (handled by their exclusion from `owned`). Range for-in bindings are the one
+// exception: each iteration creates a fresh owner tracked with edge-sensitive
+// backend_loop_cleanup semantics.
+fn direct_block_locals(
+    stmts: List<HStmt>, externs: Set<Str>, ownership: OwnershipMetadata
+) -> List<OwnedSlot> {
+    let mut out: List<OwnedSlot> = []
     for s in stmts {
-        for n in stmt_droppable_locals(s, externs) {
-            if out.contains(n) == false { out.push(n) }
+        let locals_stmt = s
+        let reachability_stmt = s
+        for n in stmt_droppable_locals(
+                locals_stmt, externs, ownership) {
+            let membership_slot = n
+            if !owned_contains(out, membership_slot) {
+                let output_slot = n
+                out.push(output_slot)
+            }
         }
+        if !stmt_reaches_next(reachability_stmt) { return out }
     }
     out
 }
@@ -1813,18 +3168,42 @@ fn direct_block_locals(stmts: List<HStmt>, externs: Set<Str>) -> List<Str> {
 // classification as direct_block_locals, factored out so rc_block_inner can grow
 // the visible-owned set incrementally (a binding is only droppable from its `let`
 // onward — see rc_block_inner).
-fn stmt_droppable_locals(s: HStmt, externs: Set<Str>) -> List<Str> {
+fn stmt_droppable_locals(
+    s: HStmt, externs: Set<Str>, ownership: OwnershipMetadata
+) -> List<OwnedSlot> {
     match s {
-        HStmt::Let { name, init, .. } => {
+        HStmt::Let { name, def_id, init, .. } => {
             // B-102 R-clean: Type-DAG bindings participate in normal RC — a
             // droppable Type binding is scope-end-dropped (recursive drop_T), and
             // its owner-bearing init was Clone-wrapped at the escape site, so the
             // drop releases the binding's own (dup'd) reference.  (A1's
             // is_type_dag_type suppression is removed.)
-            if rc_name_skippable(name) == false && is_droppable_init(init, externs) { [name] } else { [] }
+            let skippable_name = name
+            if rc_name_skippable(skippable_name) == false &&
+               is_droppable_init(init, externs, ownership) {
+                let output_name = name
+                let exact = match def_id {
+                    some(id) => id,
+                    none => panic(
+                        "unreachable: cleanup-visible let has no exact DefId")
+                }
+                [OwnedSlot { name: output_name, def_id: exact,
+                    backend_loop_cleanup: false }]
+            } else { [] }
         },
-        HStmt::Var { name, init, .. } => {
-            if rc_name_skippable(name) == false && is_droppable_init(init, externs) { [name] } else { [] }
+        HStmt::Var { name, def_id, init, .. } => {
+            let skippable_name = name
+            if rc_name_skippable(skippable_name) == false &&
+               is_droppable_init(init, externs, ownership) {
+                let output_name = name
+                let exact = match def_id {
+                    some(id) => id,
+                    none => panic(
+                        "unreachable: cleanup-visible var has no exact DefId")
+                }
+                [OwnedSlot { name: output_name, def_id: exact,
+                    backend_loop_cleanup: false }]
+            } else { [] }
         },
         _ => [],
     }
@@ -1841,7 +3220,109 @@ fn stmt_droppable_locals(s: HStmt, externs: Set<Str>) -> List<Str> {
 // 248) both classify HExpr variants.  See the SYNC NOTE on
 // anf_should_materialize for the shared/divergent variant table.
 // When adding a NEW HExpr variant, update BOTH functions.
-fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
+// Binding-position producer classification.  Option::none is the one neutral
+// value: it is the exact process-wide never-drop singleton, so a common Drop is
+// a no-op on that path while still reclaiming an owned `some(...)` sibling.
+// Every other non-owned producer remains opaque; in particular Unit, externs,
+// unresolved values, and ordinary effect/control aliases are never promoted by
+// this lattice.
+const DROP_PRODUCER_OWNED: Int = 0
+const DROP_PRODUCER_NOOP_NONE: Int = 1
+const DROP_PRODUCER_OPAQUE: Int = 2
+
+fn merge_droppable_branch_classes(classes: List<Int?>) -> Int {
+    let mut saw_value = false
+    let mut saw_owned = false
+    for maybe_class in classes {
+        match maybe_class {
+            some(class) => {
+                saw_value = true
+                if class == DROP_PRODUCER_OPAQUE {
+                    return DROP_PRODUCER_OPAQUE
+                }
+                if class == DROP_PRODUCER_OWNED {
+                    saw_owned = true
+                }
+            },
+            none => {}
+        }
+    }
+    if !saw_value {
+        DROP_PRODUCER_OPAQUE
+    } else if saw_owned {
+        DROP_PRODUCER_OWNED
+    } else {
+        DROP_PRODUCER_NOOP_NONE
+    }
+}
+
+fn droppable_branch_producer_class(
+    body: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Int? {
+    if expr_diverges(body) {
+        none
+    } else {
+        match body {
+            HExpr::Block { tail, .. } => match tail {
+                some(value) => some(droppable_producer_class(
+                    value, externs, ownership)),
+                none => some(DROP_PRODUCER_OPAQUE)
+            },
+            _ => some(droppable_producer_class(body, externs, ownership))
+        }
+    }
+}
+
+fn droppable_producer_class(
+    init: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Int {
+    if !type_is_physical_rc_eligible(hexpr_type(init), externs) {
+        return DROP_PRODUCER_OPAQUE
+    }
+    if is_option_none_ctor_ident(init) {
+        return DROP_PRODUCER_NOOP_NONE
+    }
+    match init {
+        HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
+            some(other) => merge_droppable_branch_classes([
+                droppable_branch_producer_class(
+                    then_branch, externs, ownership),
+                droppable_branch_producer_class(
+                    other, externs, ownership)
+            ]),
+            none => DROP_PRODUCER_OPAQUE
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut classes: List<Int?> = []
+            for arm in arms {
+                classes.push(droppable_branch_producer_class(
+                    arm.body, externs, ownership))
+            }
+            merge_droppable_branch_classes(classes)
+        },
+        HExpr::Block { tail, .. } => match tail {
+            some(value) => droppable_producer_class(
+                value, externs, ownership),
+            none => DROP_PRODUCER_OPAQUE
+        },
+        _ => if is_droppable_leaf_init(init, externs, ownership) {
+            DROP_PRODUCER_OWNED
+        } else {
+            DROP_PRODUCER_OPAQUE
+        }
+    }
+}
+
+fn is_droppable_init(
+    init: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Bool {
+    droppable_producer_class(init, externs, ownership) ==
+        DROP_PRODUCER_OWNED
+}
+
+fn is_droppable_leaf_init(
+    init: HExpr, externs: Set<Str>, ownership: OwnershipMetadata
+) -> Bool {
     // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
     //   ② a Unit-typed binding is never dropped: Unit has no value semantics
     //     (checker-guaranteed), and at the LLVM ABI a Unit-typed builtin call
@@ -1849,7 +3330,7 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     //     mutators (`let x = xs.push(v)` → result IS the caller's container,
     //     `return list;`), so dropping it would free a live container → UAF.
     //     This TYPE-level rule replaces the B-103 name-grain listing of the 9
-    //     mutator field names in is_borrow_returning_call (push/set/insert/
+    //     mutator field names in the retired spelling classifier (push/set/insert/
     //     remove/add/clear/extend/line/add_int — all declared `-> Unit` in std,
     //     verified per declaration), eliminating its leak-side cost: a USER
     //     method that shares a listed name but returns a real value is no
@@ -1866,17 +3347,28 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     //     Both leak instead — crash-free direction; foreign handles are owned
     //     by the foreign API (LLVMContextDispose et al.), not by Ring RC.
     let ty = hexpr_type(init)
-    if is_rc_excluded_type(ty, externs) {
+    if !type_is_physical_rc_eligible(ty, externs) {
         return false
     }
-    if type_contains_extern_handle(ty, externs) {
+    // ring_Option_none returns the immortal runtime singleton.  Its exact
+    // constructor Ident is neither a local owner read (which rc_escape would
+    // Clone) nor a fresh allocation, so a binding must never Drop it.
+    if is_option_none_ctor_ident(init) {
         return false
     }
     // Same exact owned-slot override as anf_should_materialize.  In pure
     // List/Map impl bodies the K/V result may still be an unnamed TypeVar, but
     // the bridge has already dup'd/moved an independent reference.
-    if is_owned_slot_result_call(init) {
-        return true
+    match exact_call_result_role(init, ownership) {
+        some(role) => {
+            if role == CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT {
+                return true
+            } else if role == CALLABLE_RESULT_ROLE_UNKNOWN &&
+                      is_unresolved_var_type(ty) {
+                panic("unreachable: droppable call has unknown semantic result role")
+            }
+        },
+        none => {}
     }
     // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #149, mirrors
     // anf_should_materialize): a binding whose type is an unresolved TypeVar is
@@ -1928,9 +3420,9 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         HExpr::StrLit { .. } => true,
         HExpr::BoolLit { .. } => true,
         HExpr::Clone { .. } => true,
+        HExpr::Take { .. } => true,
         // B-103: every Call result is droppable.  Two sub-cases, both safe:
-        //   (a) BORROW-returning call (.unwrap / .unwrap_or / .unwrap_or_else /
-        //       .to_fail, per is_borrow_returning_call): is_owner_bearing(Call) is
+        //   (a) exact descriptor-Borrowed call: is_owner_bearing(Call) is
         //       also true, so rc_stmt's rc_escape wraps the init in HExpr::Clone
         //       (ring_dup) — the binding owns a fresh dup, and the scope-end Drop
         //       releases that dup, NOT the borrowed source.  Balanced.
@@ -1939,13 +3431,13 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         //       ops, ctor calls, …): the result is a fresh, solely-owned value moved
         //       into the binding; the scope-end Drop releases it (rc N→N-1).  This is
         //       what finally RECLAIMS the apply_subst transients (G-a memory gate).
-        // PRE-CONDITION: the borrow-leaf classification in is_borrow_returning_call
+        // PRE-CONDITION: exact callee return descriptors
         // (+ the owned-container-constructor dups in ring_runtime.cpp: list_first/
         // last — B-103, and pure Ring Map ring_slot_read paths) must be COMPLETE,
         // else a missed
         // borrow leaf would be scope-end-dropped → UAF.  ASan (real_program ×3 +
         // self-compile) is the completeness safety net: an over-free pinpoints the
-        // missed leaf, which is then added to is_borrow_returning_call.
+        // missed descriptor, which is then fixed at builtin registration.
         HExpr::Call { .. } => true,
         // B-104: arithmetic/comparison BinOp + UnaryOp results are FRESH owned
         // (builtin arith/compare/negate box a new value via box_int/box_bool/
@@ -1961,45 +3453,9 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         // rc_escape — the binding always owns its value.)
         HExpr::BinOp { .. } => true,
         HExpr::UnaryOp { .. } => true,
-        // B-104 W3a: control-flow value (If / Match / Block) is droppable IFF every
-        // value-producing branch yields a droppable owned value.  Each branch / arm /
-        // block tail is in ESCAPE position (rc_block_root/rc_block_inner thread escape
-        // down), so rc_escape already makes an owner-bearing tail (Ident / field /
-        // borrow-call) a fresh Clone and a fresh tail (constructor / Call / arith) a
-        // move — both OWNED.  So `let x = if/match/block` binds an owned value,
-        // balanced by the scope-end Drop — same reasoning as the Call arm (B-103),
-        // reclaiming the `let x = if c {…} else {…}` / `let x = match …` residual.
-        //
-        // ⚠️ BUT NOT a blanket true — branch values are MIXED-ownership: an
-        // EffectOp / TryCatch / HandleExpr tail can alias resumed/handler state
-        // or sit on an abort path (B-002).  So we RECURSE: the control-flow
-        // value is droppable only if each non-diverging branch tail is itself
-        // is_droppable_init (an effect-value tail → false → whole node not
-        // dropped).  A DIVERGING branch (return/break/continue) yields no value
-        // to the binding, so it never constrains droppability.  (This IS the
-        // W3a "branch-value analysis", bottoming out on the same per-expr
-        // classification recursively.  Its original motivation — `&&`/`||`
-        // branch tails whose phi yielded a borrow VERBATIM — was retired by
-        // B-104 D7's andor_lower: And/Or no longer exist at this stage, and
-        // the recursion remains solely for the effect-value tails.)
-        HExpr::IfExpr { then_branch, else_branch, .. } => {
-            match else_branch {
-                // No else → the if is statement-typed (Unit value), not a fresh owned
-                // value worth dropping; conservatively not droppable.
-                none => false,
-                some(eb) => is_droppable_branch_value(then_branch, externs) && is_droppable_branch_value(eb, externs),
-            }
-        },
-        HExpr::MatchExpr { arms, .. } => {
-            let mut all = arms.len() > 0
-            for arm in arms {
-                if is_droppable_branch_value(arm.body, externs) == false { all = false }
-            }
-            all
-        },
-        HExpr::Block { tail, .. } => {
-            match tail { some(t) => is_droppable_init(t, externs), none => false }
-        },
+        HExpr::IfExpr { .. } | HExpr::MatchExpr { .. } |
+        HExpr::Block { .. } => panic(
+            "unreachable: control-flow droppability bypassed producer lattice"),
         // B-104 D4: a dict construction (dict_lower's `let __ring_dictlocal_N`
         // init) is a FRESH TUPLE-of-closures the binding solely owns — the
         // scope-end drop (runtime drop_dict, typeid DICT_DYN) reclaims it.  Its
@@ -2012,40 +3468,47 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     }
 }
 
-// Whether a branch / arm body (a Block, or a bare single-expr body) yields a
-// DROPPABLE owned value.  A diverging branch (return/break/continue) yields no
-// value to the enclosing binding, so it never vetoes droppability.  Otherwise the
-// branch value is its tail expression, classified by is_droppable_init (recursing
-// through nested control flow; an EffectOp-family tail → not droppable).
-fn is_droppable_branch_value(body: HExpr, externs: Set<Str>) -> Bool {
-    if expr_diverges(body) {
-        true
-    } else {
-        match body {
-            HExpr::Block { tail, .. } => match tail { some(t) => is_droppable_init(t, externs), none => false },
-            _ => is_droppable_init(body, externs),
-        }
-    }
-}
-
 // B-104 D2: the owned bindings declared inside the innermost loop body — the
 // set a break/continue edge must drop (the loop-scoped suffix of the visible
 // owned list).  loop_base < 0 = not inside a loop (break/continue cannot
 // occur there; checker enforces loop context).
-fn loop_scoped_owned(owned: List<Str>, loop_base: Int) -> List<Str> {
+fn loop_scoped_owned(
+    owned: List<OwnedSlot>, loop_base: Int,
+    include_backend_loop_cleanup: Bool
+) -> List<OwnedSlot> {
     if loop_base < 0 {
         []
     } else {
-        owned.slice(loop_base, owned.len())
+        let mut result: List<OwnedSlot> = []
+        for slot in owned.slice(loop_base, owned.len()) {
+            if include_backend_loop_cleanup || !slot.backend_loop_cleanup {
+                let output = slot
+                result.push(output)
+            }
+        }
+        result
     }
 }
 
-// Build a Drop stmt list for a name list (skipping `_`), in the given order.
-fn drops_for(names: List<Str>) -> List<HStmt> {
+// Build unconditional cleanup in reverse declaration order. A slot cleared by
+// Take is null, so the same Drop node is valid on moved and non-moved paths.
+fn drops_for(names: List<OwnedSlot>) -> List<HStmt> {
     let mut out: List<HStmt> = []
-    for n in names {
-        if rc_name_skippable(n) == false {
-            out.push(HStmt::Drop { name: n, ty: Type::UnitType, span: synthetic_span() })
+    let mut index = names.len()
+    while index > 0 {
+        index = index - 1
+        match names.get(index) {
+            some(slot) => {
+                let skippable_name = slot.name
+                let drop_name = slot.name
+                let drop_def_id = slot.def_id
+                if rc_name_skippable(skippable_name) == false {
+                    out.push(HStmt::Drop { name: drop_name,
+                        def_id: drop_def_id, ty: Type::UnitType,
+                        span: synthetic_span() })
+                }
+            },
+            none => {}
         }
     }
     out
@@ -2054,48 +3517,25 @@ fn drops_for(names: List<Str>) -> List<HStmt> {
 // Whether a transformed statement list + tail diverges (ends in return/break/
 // continue on every path), so block-end drops would be unreachable.
 fn block_diverges(stmts: List<HStmt>, tail: HExpr?) -> Bool {
-    let mut any = false
-    for s in stmts { if stmt_diverges(s) { any = true } }
-    if any { return true }
+    for s in stmts {
+        if !stmt_reaches_next(s) { return true }
+    }
     match tail {
-        some(t) => expr_diverges(t),
+        some(t) => !expr_has_reachable_value(t),
         none => false,
     }
 }
 
-// B-104 W4 — scalar mut-var reassignment: classify whether an Assign target is a
-// plain (non-auto-boxed) mut variable holding a SCALAR (Int/Bool/Float).  Such a
-// reassignment leaks the old boxed scalar today (L0/L1 convention: the old value is
-// overwritten and never dropped — the diagnosed INT① mut-counter leak, `i = i + 1`).
-//
-// Dropping the old box on reassignment is SOUND only for scalars: they have value
-// semantics with NO interior aliasing, and at the Assign statement no transient
-// borrow of the variable is live (scalar borrows do not span statements; every
-// cross-statement holder dup'd the box via clone-all-escape's escape→Clone).  So the
-// old box is either rc=1 (freed — the leak we reclaim) or rc>1 (decremented, sharers
-// stay valid).  ring_box_int allocates fresh (no interning) and INT/BOOL/FLOAT are
-// not never-drop, so the drop is real and safe.  Returns the binding name to drop
-// (the source `name` — codegen keys named_values and the scope-end drops by it, and
-// emit_assign's store resolves to the same alloca via its `name` fallback), or none.
-//
-// Excluded (out of W4 scope, conservatively left to leak):
-//   - auto-boxed mut cells (def_id ∈ boxed, B-091): the write stores into cell.value
-//     and the alloca holds the SHARED cell pointer — dropping it would free the cell
-//     other holders still reference.
-//   - non-scalar lvalues (struct/list/string/Option, FieldAccess/IndexExpr targets):
-//     interior borrows may alias the old value; needs stronger analysis (later wave).
-fn scalar_reassign_drop_name(target: HExpr, boxed: Set<Int>) -> Str? {
+// Exact owned-local reassignment. The planner rejects owner-bearing borrowed,
+// boxed and projection targets; visible `owned` membership below is the final
+// cleanup authority for the remaining Ident target.
+fn reassign_drop_def_id(target: HExpr, boxed: Set<Int>) -> Int? {
     match target {
-        HExpr::Ident { name, def_id, ty, .. } => {
-            let not_boxed = match def_id {
-                some(did) => boxed.contains(did) == false,
-                none => true,
-            }
-            if not_boxed && is_scalar_type(ty) {
-                some(name)
-            } else {
-                none
-            }
+        HExpr::Ident { def_id: some(did), .. } => {
+            if !boxed.contains(did) {
+                let result_def_id = did
+                some(result_def_id)
+            } else { none }
         },
         _ => none,
     }
@@ -2115,71 +3555,87 @@ pub fn is_scalar_type(ty: Type) -> Bool {
 // Statement transform
 // ============================================================
 
-fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>, mut gensym: List<Int>, loop_base: Int) -> List<HStmt> {
+fn rc_stmt(stmt: HStmt, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<Str>, drop_types: OwnershipMetadata, mut gensym: RcState, loop_base: Int) -> List<HStmt> {
     match stmt {
-        HStmt::Let { name, name_span, def_id, ty, init, span } => {
+        HStmt::Let { init, .. } => {
             // The binding takes ownership of its initialiser → escape position.
-            let new_init = rc_escape(init, owned, boxed, externs, drop_types, gensym, loop_base)
-            [HStmt::Let { name: name, name_span: name_span, def_id: def_id, ty: ty, init: new_init, span: span }]
+            let init_ = init
+            let new_init = rc_escape(init_, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            [HStmt::Let { ..stmt, init: new_init }]
         },
-        HStmt::Var { name, name_span, def_id, ty, init, span } => {
-            let new_init = rc_escape(init, owned, boxed, externs, drop_types, gensym, loop_base)
-            [HStmt::Var { name: name, name_span: name_span, def_id: def_id, ty: ty, init: new_init, span: span }]
+        HStmt::Var { init, .. } => {
+            let init_ = init
+            let new_init = rc_escape(init_, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            [HStmt::Var { ..stmt, init: new_init }]
         },
-        HStmt::Assign { target, value, span } => {
+        HStmt::Assign { target, value, .. } => {
             // The R-value escapes into the assigned location (it takes ownership).
             // The L-value (target) is a write destination — not rc-transformed.
-            let new_value = rc_escape(value, owned, boxed, externs, drop_types, gensym, loop_base)
-            // B-104 W4: a plain mut var holding a SCALAR (Int/Bool/Float) — drop the
-            // old boxed scalar before overwriting (reclaims the INT① mut-counter leak,
-            // `i = i + 1`).  Order is critical: materialise the (already-escaped) RHS
-            // FIRST — it may read the old target (`x = x + 1`) — THEN drop the old
-            // value, THEN store the temp.  Dropping first would UAF the RHS read.
-            // Non-scalar / auto-boxed targets keep the leak-on-overwrite behaviour
-            // (see scalar_reassign_drop_name for the soundness argument).
-            //
-            // B-104 D2 (verifier-found latent UAF, zero compiler instances): the
-            // drop additionally requires the binding to be in the VISIBLE OWNED
-            // set — i.e. its init was droppable.  W4's soundness argument ("every
-            // cross-statement holder dup'd the box") fails exactly for the
-            // non-droppable inits the rest of the pass already excludes — e.g.
-            // an EffectOp-valued init holding a possibly-aliased box un-Cloned.
-            // Not in `owned` → no drop → the documented leak-on-overwrite
-            // posture instead.  (The D2-#3 instance that found this gate —
-            // `let mut ok = a && obj.flag` holding the And/Or phi's RHS box
-            // VERBATIM — was retired by B-104 D7's andor_lower: the lowered
-            // IfExpr init Clone-wraps borrow arm tails, so such a binding now
-            // OWNS its value and the reassign drop is balanced.)
-            let w4_target = match scalar_reassign_drop_name(target, boxed) {
-                some(dn) => if owned.contains(dn) { some(dn) } else { none },
+            let value_type_input = value
+            let value_effects_input = value
+            let value_span_input = value
+            let value_transform_input = value
+            let vt = hexpr_type(value_type_input)
+            let value_effects = hexpr_effects(value_effects_input)
+            let value_span = hexpr_span(value_span_input)
+            let new_value = rc_escape(value_transform_input, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+            // Materialise RHS first (it may read or Take the target), then Drop
+            // the exact old slot, then store. A self-move Take clears the slot,
+            // making the intervening Drop(NULL) a no-op.
+            let lookup_target = target
+            let result_target = target
+            let w4_target = match reassign_drop_def_id(lookup_target, boxed) {
+                some(def_id) => owned_find_def_id(owned, def_id),
                 none => none,
             }
             match w4_target {
-                some(dname) => {
-                    let tmp = fresh_scope_tmp(gensym)
-                    let vt = hexpr_type(value)
+                some(drop_slot) => {
+                    let (tmp, tmp_def_id) = fresh_scope_tmp(gensym)
+                    record_rc_callable_projection(
+                        new_value, tmp_def_id, gensym)
+                    let binding_name = tmp
+                    let result_name = tmp
+                    let binding_def_id = tmp_def_id
+                    let result_def_id = tmp_def_id
+                    let binding_ty = vt
+                    let result_ty = vt
+                    let drop_name = drop_slot.name
+                    let drop_def_id = drop_slot.def_id
                     let tmp_id = HExpr::Ident {
-                        name: tmp, resolved_name: none, def_id: none,
-                        dict_closure_dicts: none, ty: vt,
-                        effects: hexpr_effects(value), span: hexpr_span(value)
+                        name: result_name, resolved_name: none,
+                        def_id: some(result_def_id),
+                        dict_closure_dicts: none, ty: result_ty,
+                        effects: value_effects, span: value_span
                     }
                     [
-                        HStmt::Let { name: tmp, name_span: synthetic_span(), def_id: none,
-                            ty: vt, init: new_value, span: synthetic_span() },
-                        HStmt::Drop { name: dname, ty: Type::UnitType, span: synthetic_span() },
-                        HStmt::Assign { target: target, value: tmp_id, span: span },
+                        HStmt::Let { name: binding_name,
+                            name_span: synthetic_span(),
+                            def_id: some(binding_def_id),
+                            ty: binding_ty, init: new_value,
+                            span: synthetic_span() },
+                        HStmt::Drop { name: drop_name,
+                            def_id: drop_def_id, ty: Type::UnitType,
+                            span: synthetic_span() },
+                        HStmt::Assign { ..stmt,
+                            target: result_target, value: tmp_id },
                     ]
                 },
-                none => [HStmt::Assign { target: target, value: new_value, span: span }],
+                none => [HStmt::Assign { ..stmt,
+                    target: result_target, value: new_value }],
             }
         },
-        HStmt::ExprStmt { expr, span } => {
+        HStmt::ExprStmt { expr, .. } => {
             // Statement position: the value is discarded (borrow / fresh-temp that
             // leaks if unowned — acceptable; usually a Unit-returning call).
-            let new_expr = rc_expr(expr, false, owned, boxed, externs, drop_types, gensym, loop_base)
-            [HStmt::ExprStmt { expr: new_expr, span: span }]
+            let expr_ = expr
+            let new_expr = rc_expr(expr_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            [HStmt::ExprStmt { ..stmt, expr: new_expr }]
         },
-        HStmt::Return { value, span } => {
+        HStmt::Return { value, .. } => {
             match value {
                 some(v) => {
                     // Clone the returned value if owner-bearing (the caller takes
@@ -2187,61 +3643,107 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, dr
                     // every owned local in scope.  Order matters: the Clone bumps
                     // the rc, so the subsequent drops leave the returned object with
                     // the caller's reference.  Diverges → block-end drops unreachable.
-                    let new_v = rc_escape(v, owned, boxed, externs, drop_types, gensym, loop_base)
+                    let value_type_input = v
+                    let value_effects_input = v
+                    let value_span_input = v
+                    let value_transform_input = v
+                    let tt = hexpr_type(value_type_input)
+                    let te = hexpr_effects(value_effects_input)
+                    let ts = hexpr_span(value_span_input)
+                    let new_v = rc_escape(value_transform_input, owned, boxed,
+                        externs, drop_types, gensym, loop_base)
                     let mut out: List<HStmt> = []
                     // Hoist the (cloned) return value so the drops run AFTER it.
-                    let tmp = fresh_scope_tmp(gensym)
-                    let tt = hexpr_type(v)
-                    let te = hexpr_effects(v)
-                    let ts = hexpr_span(v)
-                    out.push(HStmt::Let { name: tmp, name_span: synthetic_span(),
-                        def_id: none, ty: tt, init: new_v, span: synthetic_span() })
-                    for d in drops_for(owned) { out.push(d) }
-                    let tmp_id = HExpr::Ident { name: tmp, resolved_name: none, def_id: none,
-                        dict_closure_dicts: none, ty: tt, effects: te, span: ts }
-                    out.push(HStmt::Return { value: some(tmp_id), span: span })
+                    let (tmp, tmp_def_id) = fresh_scope_tmp(gensym)
+                    record_rc_callable_projection(new_v, tmp_def_id, gensym)
+                    let binding_name = tmp
+                    let result_name = tmp
+                    let binding_def_id = tmp_def_id
+                    let result_def_id = tmp_def_id
+                    let binding_ty = tt
+                    let result_ty = tt
+                    out.push(HStmt::Let { name: binding_name,
+                        name_span: synthetic_span(),
+                        def_id: some(binding_def_id), ty: binding_ty,
+                        init: new_v, span: synthetic_span() })
+                    for d in drops_for(owned) {
+                        let cleanup = d
+                        out.push(cleanup)
+                    }
+                    let tmp_id = HExpr::Ident { name: result_name,
+                        resolved_name: none, def_id: some(result_def_id),
+                        dict_closure_dicts: none, ty: result_ty,
+                        effects: te, span: ts }
+                    out.push(HStmt::Return { ..stmt, value: some(tmp_id) })
                     out
                 },
                 none => {
                     // void return — drop all owned locals in scope.
                     let mut out: List<HStmt> = []
-                    for d in drops_for(owned) { out.push(d) }
-                    out.push(HStmt::Return { value: none, span: span })
+                    for d in drops_for(owned) {
+                        let cleanup = d
+                        out.push(cleanup)
+                    }
+                    out.push(stmt)
                     out
                 },
             }
         },
-        HStmt::While { condition, body, span } => {
+        HStmt::While { condition, body, .. } => {
             // Condition is a borrow (boolean test).  The body is its own scope: its
             // bindings drop per-iteration at the body's block end.  No loop-carried
             // dup is needed — reads borrow, escapes clone, so the loop neither
             // consumes nor leaks outer locals (this is what kills the #134
             // conditional-loop double-free at the root).
-            let new_cond = rc_expr(condition, false, owned, boxed, externs, drop_types, gensym, loop_base)
+            let condition_ = condition
+            let body_ = body
+            let new_cond = rc_expr(condition_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
             // B-104 D2: the body opens a NEW loop scope — bindings declared past
             // this point (visible_owned index >= owned.len()) are loop-scoped and
             // must be dropped on break/continue edges (see the Break/Continue arms).
-            let new_body = rc_block_root(body, false, owned, boxed, externs, drop_types, gensym, owned.len())
-            [HStmt::While { condition: new_cond, body: new_body, span: span }]
+            let new_body = rc_block_root(body_, false, owned, boxed, externs,
+                drop_types, gensym, owned.len())
+            [HStmt::While { ..stmt,
+                condition: new_cond, body: new_body }]
         },
-        HStmt::ForIn { binding, binding_span, def_id, destructure, iterable, body, iterable_type_name, iter_type_name, span } => {
-            // The iterable is read once (borrow).  The for-binding (and any
-            // destructure names) alias a BORROWED container element each iteration
-            // (codegen's ring_list_get no longer dups — B-098 read-borrow), so they
-            // are NOT owned and must NOT be scope-end-dropped (dropping would free
-            // the container's element → UAF / double-free with the container drop).
-            // If a loop value escapes, rc_escape clones it like any other borrow.
-            let new_iter = rc_expr(iterable, false, owned, boxed, externs, drop_types, gensym, loop_base)
+        HStmt::ForIn { binding, def_id, destructure, iterable, body, .. } => {
+            // Inference lowers every non-Range iterable through protocol calls;
+            // the only surviving ForIn is a Range loop (literal or range-typed
+            // value). Codegen creates a
+            // fresh boxed counter binding each iteration and owns its normal/
+            // continue cleanup at the increment label. Track that binding as a
+            // special enclosing owner so return/break edges that skip the label
+            // emit a Drop, while ordinary block-end/continue cleanup filters it.
+            // An exact Take clears the slot, so either cleanup remains a no-op.
+            match destructure {
+                some(_) => panic(
+                    "unreachable: Range for-in destructure reached Perceus"),
+                none => {}
+            }
+            let iterable_ = iterable
+            let body_ = body
+            let new_iter = rc_expr(iterable_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            let range_loop_base = owned.len()
+            let mut range_owned = owned.concat([])
+            if !rc_name_skippable(binding) {
+                let range_def_id = match def_id {
+                    some(id) => id,
+                    none => panic(
+                        "unreachable: Range for-in binding has no exact cleanup DefId")
+                }
+                let range_name = binding
+                range_owned.push(OwnedSlot { name: range_name,
+                    def_id: range_def_id, backend_loop_cleanup: true })
+            }
             // B-104 D2: the body opens a NEW loop scope — bindings declared past
-            // this point (visible_owned index >= owned.len()) are loop-scoped and
-            // must be dropped on break/continue edges (see the Break/Continue arms).
-            let new_body = rc_block_root(body, false, owned, boxed, externs, drop_types, gensym, owned.len())
-            [HStmt::ForIn {
-                binding: binding, binding_span: binding_span, def_id: def_id,
-                destructure: destructure, iterable: new_iter,
-                body: new_body, iterable_type_name: iterable_type_name,
-                iter_type_name: iter_type_name, span: span
-            }]
+            // range_loop_base are loop-scoped. Break drops all of them; Continue
+            // drops ordinary locals only, then reaches the backend Range cleanup.
+            let new_body = rc_block_root(body_, false, range_owned, boxed,
+                externs, drop_types, gensym, range_loop_base)
+            [HStmt::ForIn { ..stmt,
+                iterable: new_iter, body: new_body }]
         },
         // B-104 D2 fix-forward (verifier finding leak-loop-exit, 264 sites in the
         // compiler alone): a break/continue edge jumps past the loop body's
@@ -2255,19 +3757,31 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, dr
         // are inside the diverging branch) and runs the block-end drops.
         // Enclosing (pre-loop) bindings are untouched — the loop exit continues
         // into code that still uses them.
-        HStmt::Break { span } => {
+        HStmt::Break { .. } => {
             let mut out: List<HStmt> = []
-            for d in drops_for(loop_scoped_owned(owned, loop_base)) { out.push(d) }
-            out.push(HStmt::Break { span: span })
+            let include_backend_cleanup =
+                gensym.counters.get(2) != some(1)
+            for d in drops_for(loop_scoped_owned(
+                    owned, loop_base, include_backend_cleanup)) {
+                let cleanup = d
+                out.push(cleanup)
+            }
+            out.push(stmt)
             out
         },
-        HStmt::Continue { span } => {
+        HStmt::Continue { .. } => {
             let mut out: List<HStmt> = []
-            for d in drops_for(loop_scoped_owned(owned, loop_base)) { out.push(d) }
-            out.push(HStmt::Continue { span: span })
+            let include_backend_cleanup =
+                gensym.counters.get(3) == some(1)
+            for d in drops_for(loop_scoped_owned(
+                    owned, loop_base, include_backend_cleanup)) {
+                let cleanup = d
+                out.push(cleanup)
+            }
+            out.push(stmt)
             out
         },
-        HStmt::LetDestructure { pattern, bindings, init, span } => {
+        HStmt::LetDestructure { init, .. } => {
             // B-104 D1 Stage 2: the destructure does NOT take ownership of the
             // init — codegen (emit_let_destructure) PROJECTS each element via
             // ring_list_get (a borrow load, no dup) into the binding allocas,
@@ -2280,21 +3794,32 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, dr
             // let (a, b) = __anf`) so the borrow source is an owned, scope-end-
             // dropped binding; binding escapes are Clone-wrapped as usual
             // (dup-before-drop balance, same as the W2 scrutinee).
-            let new_init = rc_expr(init, false, owned, boxed, externs, drop_types, gensym, loop_base)
-            [HStmt::LetDestructure { pattern: pattern, bindings: bindings, init: new_init, span: span }]
+            let init_ = init
+            let new_init = rc_expr(init_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            [HStmt::LetDestructure { ..stmt, init: new_init }]
         },
-        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
             // Scrutinee is a borrow.  Pattern bindings PROJECT borrows from the
             // scrutinee (codegen loads them without a dup), so they are NOT owned
             // and are excluded from the branch's owned set — no scope-end drop, no
             // double-free with the scrutinee.  No branch balancing.
-            let new_expr = rc_expr(expr, false, owned, boxed, externs, drop_types, gensym, loop_base)
-            let new_then = rc_block_root(then_block, false, owned, boxed, externs, drop_types, gensym, loop_base)
+            let expr_ = expr
+            let then_block_ = then_block
+            let new_expr = rc_expr(expr_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            let new_then = rc_block_root(then_block_, false, owned, boxed,
+                externs, drop_types, gensym, loop_base)
             let new_else = match else_block {
-                some(eb) => some(rc_block_root(eb, false, owned, boxed, externs, drop_types, gensym, loop_base)),
+                some(eb) => {
+                    let else_ = eb
+                    some(rc_block_root(else_, false, owned, boxed, externs,
+                        drop_types, gensym, loop_base))
+                },
                 none => none,
             }
-            [HStmt::IfLet { pattern: pattern, expr: new_expr, then_block: new_then, else_block: new_else, span: span }]
+            [HStmt::IfLet { ..stmt, expr: new_expr,
+                then_block: new_then, else_block: new_else }]
         },
         // Drop is inserted by this pass; pass through if seen (idempotent).
         HStmt::Drop { .. } => [stmt]
@@ -2307,193 +3832,274 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, dr
 //   owned  = owned local bindings in scope (for nested return drops).
 // ============================================================
 
-fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, drop_types: Set<Str>, mut gensym: List<Int>, loop_base: Int) -> HExpr {
+fn rc_expr(expr: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<Str>, drop_types: OwnershipMetadata, mut gensym: RcState, loop_base: Int) -> HExpr {
     match expr {
         // Leaves: nothing to transform.  Owner-bearing leaves (Ident) are cloned
         // by rc_escape at the escape site, never here (here = value position).
-        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
-            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
-        HExpr::IntLit { value, ty, effects, span } =>
-            HExpr::IntLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::FloatLit { value, ty, effects, span } =>
-            HExpr::FloatLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::StrLit { value, ty, effects, span } =>
-            HExpr::StrLit { value: value, ty: ty, effects: effects, span: span },
-        HExpr::BoolLit { value, ty, effects, span } =>
-            HExpr::BoolLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::Ident { .. } | HExpr::IntLit { .. } |
+        HExpr::FloatLit { .. } | HExpr::StrLit { .. } |
+        HExpr::BoolLit { .. } => expr,
         // B-104 D4: a dict construction is a FRESH value (leaf — its inners are
         // DictRef borrows of params/locals/singletons, not sub-expressions).
         // It only occurs as a dict_lower-synthesised Let init: the binding is
         // owned (is_droppable_init → true) and scope-end-dropped.
-        HExpr::DictConstruct { base_dict, trait_name, inner, ty, effects, span } =>
-            HExpr::DictConstruct { base_dict: base_dict, trait_name: trait_name, inner: inner, ty: ty, effects: effects, span: span },
+        HExpr::DictConstruct { .. } => expr,
 
-        HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
+        HExpr::BinOp { left, right, .. } => {
             // Operands are borrows (read for the operation; comparison/arith does
             // not take ownership).
-            HExpr::BinOp { op: op, left: rc_expr(left, false, owned, boxed, externs, drop_types, gensym, loop_base),
-                right: rc_expr(right, false, owned, boxed, externs, drop_types, gensym, loop_base),
-                eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
-                ty: ty, effects: effects, span: span }
+            let left_ = left
+            let right_ = right
+            let new_left = rc_expr(left_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            let new_right = rc_expr(right_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            HExpr::BinOp { ..expr, left: new_left, right: new_right }
         },
 
-        HExpr::UnaryOp { op, operand, ty, effects, span } => {
-            HExpr::UnaryOp { op: op, operand: rc_expr(operand, false, owned, boxed, externs, drop_types, gensym, loop_base),
-                ty: ty, effects: effects, span: span }
+        HExpr::UnaryOp { operand, .. } => {
+            let operand_ = operand
+            let new_operand = rc_expr(operand_, false, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+            HExpr::UnaryOp { ..expr, operand: new_operand }
         },
 
-        HExpr::Call { callee, args, type_args, resolved_dicts, dict_dispatch, ty, effects, span } => {
-            // Callee is a borrow.  Arguments BORROW by default (the callee does not
-            // drop them — point 4) EXCEPT two ownership-taking sinks:
-            //   1. a known container-sink (push/insert/set): the value escapes into
-            //      the container (it must co-own with the container);
-            //   2. an ENUM VARIANT CONSTRUCTOR call (`some(x)` / `ok(v)` / `err(e)` /
-            //      a user `Variant(payload)` written in call syntax): the runtime
-            //      constructor (`ring_enum_some` / `gen_named_variant_construct`)
-            //      STORES the argument pointer WITHOUT a dup, exactly like a
-            //      StructLit/NamedVariantConstruct field store.  So every value arg
-            //      escapes and must be Clone'd if owner-bearing — otherwise the
-            //      argument's own scope-end drop frees the payload the new enum holds
-            //      (the native prelude `match find_std_dir() { some(std_dir) => … }`
-            //      UAF, B-101).  The literal-syntax forms already escape their fields
-            //      (StructLit / NamedVariantConstruct arms below); this closes the
-            //      call-syntax gap so both lower identically.
-            let new_callee = rc_expr(callee, false, owned, boxed, externs, drop_types, gensym, loop_base)
-            let ctor_sink = is_variant_constructor_call(callee, ty)
-            let sink = sink_arg_indices(callee, args.len())
-            let mut new_args: List<HExpr> = []
-            let mut i = 0
-            for a in args {
-                let new_a = if ctor_sink || list_contains_int(sink, i) {
-                    rc_escape(a, owned, boxed, externs, drop_types, gensym, loop_base)
-                } else {
-                    rc_expr(a, false, owned, boxed, externs, drop_types, gensym, loop_base)
-                }
-                new_args.push(new_a)
-                i = i + 1
+        HExpr::Call { callee, callee_def_id, args, .. } => {
+            // The exact descriptor, not a callee spelling, determines every
+            // edge.  A planner Take/fresh producer moves through rc_escape
+            // unchanged.  A borrowed non-linear projection or borrowed-return
+            // call is cloned here, making Perceus the sole Clone producer.
+            let mut is_method = false
+            let callee_ = callee
+            let new_callee = match callee_ {
+                HExpr::FieldAccess { receiver, .. } => {
+                    is_method = true
+                    let mode = perceus_call_param_mode(
+                        drop_types, callee_def_id, 0)
+                    let assert_receiver = receiver
+                    let mutation_receiver = receiver
+                    let escape_receiver = receiver
+                    let borrow_receiver = receiver
+                    let new_receiver = if mode == PARAM_OWNERSHIP_MOVE {
+                        assert_perceus_move_edge(assert_receiver)
+                        match mutate_missing_call_edge_take(
+                                mutation_receiver, gensym.counters) {
+                            some(raw) => {
+                                let raw_ = raw
+                                rc_expr(raw_, false, owned, boxed, externs,
+                                    drop_types, gensym, loop_base)
+                            },
+                            none => rc_escape(escape_receiver, owned, boxed,
+                                externs, drop_types, gensym, loop_base)
+                        }
+                    } else {
+                        rc_expr(borrow_receiver, false, owned, boxed, externs,
+                            drop_types, gensym, loop_base)
+                    }
+                    HExpr::FieldAccess { ..callee_, receiver: new_receiver }
+                },
+                _ => rc_expr(callee_, false, owned, boxed, externs,
+                    drop_types, gensym, loop_base)
             }
-            HExpr::Call { callee: new_callee, args: new_args, type_args: type_args,
-                resolved_dicts: resolved_dicts, dict_dispatch: dict_dispatch,
-                ty: ty, effects: effects, span: span }
+            let mut new_args: List<HExpr> = []
+            let mut index = 0
+            for a in args {
+                let assert_arg = a
+                let mutation_arg = a
+                let escape_arg = a
+                let borrow_arg = a
+                let descriptor_index = index + if is_method { 1 } else { 0 }
+                let mode = perceus_call_param_mode(
+                    drop_types, callee_def_id, descriptor_index)
+                if mode == PARAM_OWNERSHIP_MOVE {
+                    assert_perceus_move_edge(assert_arg)
+                    match mutate_missing_call_edge_take(
+                            mutation_arg, gensym.counters) {
+                        some(raw) => {
+                            let raw_ = raw
+                            new_args.push(rc_expr(raw_, false, owned, boxed,
+                                externs, drop_types, gensym, loop_base))
+                        },
+                        none => new_args.push(rc_escape(escape_arg, owned, boxed,
+                            externs, drop_types, gensym, loop_base))
+                    }
+                } else {
+                    new_args.push(rc_expr(borrow_arg, false, owned, boxed, externs,
+                        drop_types, gensym, loop_base))
+                }
+                index = index + 1
+            }
+            HExpr::Call { ..expr, callee: new_callee, args: new_args }
         },
 
-        HExpr::FieldAccess { receiver, field, ty, effects, span } => {
+        HExpr::FieldAccess { receiver, .. } => {
             // Read: receiver is a borrow.  (If this field access itself escapes,
             // rc_escape wraps the whole node in Clone before we get here in value
             // position — so here the result is just a borrow.)
-            HExpr::FieldAccess { receiver: rc_expr(receiver, false, owned, boxed, externs, drop_types, gensym, loop_base),
-                field: field, ty: ty, effects: effects, span: span }
+            let receiver_ = receiver
+            let new_receiver = rc_expr(receiver_, false, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+            HExpr::FieldAccess { ..expr, receiver: new_receiver }
         },
 
-        HExpr::StructLit { name, type_args, fields, spread, ty, effects, span } => {
+        HExpr::StructLit { fields, spread, .. } => {
+            // Runtime evaluates the spread source first. ANF has already
+            // materialized every fresh producer; an inline source is therefore
+            // a proven borrow (or unreachable) and is visited without escape.
+            let new_spread = match spread {
+                some(s) => {
+                    let spread_ = s
+                    some(rc_expr(spread_, false, owned, boxed, externs,
+                        drop_types, gensym, loop_base))
+                },
+                none => none,
+            }
             // Each field value escapes into the new struct (the struct owns it).
             let mut new_fields: List<HStructFieldInit> = []
             for f in fields {
-                new_fields.push(HStructFieldInit { name: f.name, value: rc_escape(f.value, owned, boxed, externs, drop_types, gensym, loop_base) })
+                let value_ = f.value
+                let new_value = rc_escape(value_, owned, boxed, externs,
+                    drop_types, gensym, loop_base)
+                new_fields.push(HStructFieldInit { ..f, value: new_value })
             }
-            // Spread copies the source struct's field pointers into the new struct
-            // (codegen does a raw field-pointer copy without dup), so the spread
-            // source is read as a borrow here; correctness of spread + RC is an
-            // existing-scope concern (leak-on-spread acceptable at L1).
-            let new_spread = match spread {
-                some(s) => some(rc_expr(s, false, owned, boxed, externs, drop_types, gensym, loop_base)),
-                none => none,
-            }
-            HExpr::StructLit { name: name, type_args: type_args, fields: new_fields,
-                spread: new_spread, ty: ty, effects: effects, span: span }
+            HExpr::StructLit { ..expr,
+                fields: new_fields, spread: new_spread }
         },
 
-        HExpr::NamedVariantConstruct { enum_name, variant_name, fields, spread, ty, effects, span } => {
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            let new_spread = match spread {
+                some(s) => {
+                    let spread_ = s
+                    some(rc_expr(spread_, false, owned, boxed, externs,
+                        drop_types, gensym, loop_base))
+                },
+                none => none,
+            }
             let mut new_fields: List<HStructFieldInit> = []
             for f in fields {
-                new_fields.push(HStructFieldInit { name: f.name, value: rc_escape(f.value, owned, boxed, externs, drop_types, gensym, loop_base) })
+                let value_ = f.value
+                let new_value = rc_escape(value_, owned, boxed, externs,
+                    drop_types, gensym, loop_base)
+                new_fields.push(HStructFieldInit { ..f, value: new_value })
             }
-            let new_spread = match spread {
-                some(s) => some(rc_expr(s, false, owned, boxed, externs, drop_types, gensym, loop_base)),
-                none => none,
-            }
-            HExpr::NamedVariantConstruct { enum_name: enum_name, variant_name: variant_name,
-                fields: new_fields, spread: new_spread, ty: ty, effects: effects, span: span }
+            HExpr::NamedVariantConstruct { ..expr,
+                fields: new_fields, spread: new_spread }
         },
 
-        HExpr::Block { stmts, tail, ty, effects, span } => {
+        HExpr::Block { stmts, tail, .. } => {
             // A nested block: it owns its own bindings (dropped at its block end)
             // and its value carries this expression's escape position.
-            let res = rc_block_inner(stmts, tail, escape, owned, boxed, externs, drop_types, gensym, loop_base)
-            HExpr::Block { stmts: res.0, tail: res.1, ty: ty, effects: effects, span: span }
+            let stmts_ = stmts
+            let tail_ = tail
+            let res = rc_block_inner(stmts_, tail_, escape, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+            HExpr::Block { ..expr, stmts: res.0, tail: res.1 }
         },
 
-        HExpr::IfExpr { condition, then_branch, else_branch, ty, effects, span } => {
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
             // Condition borrows.  Branches inherit this expression's escape
             // position; each branch is its own scope (block-end drops its locals).
             // No branch balancing: outer locals are only read (borrow) in branches,
             // so they drop once at the OUTER block end regardless of branch taken.
-            let new_cond = rc_expr(condition, false, owned, boxed, externs, drop_types, gensym, loop_base)
-            let new_then = rc_block_root(then_branch, escape, owned, boxed, externs, drop_types, gensym, loop_base)
+            let condition_ = condition
+            let then_branch_ = then_branch
+            let new_cond = rc_expr(condition_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            let new_then = rc_block_root(then_branch_, escape, owned, boxed,
+                externs, drop_types, gensym, loop_base)
             let new_else = match else_branch {
-                some(eb) => some(rc_block_root(eb, escape, owned, boxed, externs, drop_types, gensym, loop_base)),
+                some(eb) => {
+                    let else_ = eb
+                    some(rc_block_root(else_, escape, owned, boxed, externs,
+                        drop_types, gensym, loop_base))
+                },
                 none => none,
             }
-            HExpr::IfExpr { condition: new_cond, then_branch: new_then,
-                else_branch: new_else, ty: ty, effects: effects, span: span }
+            HExpr::IfExpr { ..expr, condition: new_cond,
+                then_branch: new_then, else_branch: new_else }
         },
 
-        HExpr::MatchExpr { scrutinee, arms, ty, effects, span } => {
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
             // Scrutinee borrows.  Each arm body inherits escape.  Arm pattern
             // bindings PROJECT borrows from the scrutinee (loaded without a dup),
             // so they are NOT owned — excluded from the arm's owned set (no
             // scope-end drop, no double-free with the scrutinee).  No balancing:
             // outer owned locals are only read in arms, dropping once at the
             // OUTER block end regardless of which arm runs.
-            let new_scrutinee = rc_expr(scrutinee, false, owned, boxed, externs, drop_types, gensym, loop_base)
+            let scrutinee_ = scrutinee
+            let new_scrutinee = rc_expr(scrutinee_, false, owned, boxed,
+                externs, drop_types, gensym, loop_base)
             let mut new_arms: List<HMatchArm> = []
             for arm in arms {
                 // Guard borrows (boolean test).
                 let new_guard = match arm.guard {
-                    some(g) => some(rc_expr(g, false, owned, boxed, externs, drop_types, gensym, loop_base)),
+                    some(g) => {
+                        let guard_ = g
+                        some(rc_expr(guard_, false, owned, boxed, externs,
+                            drop_types, gensym, loop_base))
+                    },
                     none => none,
                 }
-                let new_body = rc_block_root(arm.body, escape, owned, boxed, externs, drop_types, gensym, loop_base)
-                new_arms.push(HMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body, span: arm.span })
+                let body_ = arm.body
+                let new_body = rc_block_root(body_, escape, owned, boxed,
+                    externs, drop_types, gensym, loop_base)
+                new_arms.push(HMatchArm { ..arm,
+                    guard: new_guard, body: new_body })
             }
-            HExpr::MatchExpr { scrutinee: new_scrutinee, arms: new_arms, ty: ty, effects: effects, span: span }
+            HExpr::MatchExpr { ..expr,
+                scrutinee: new_scrutinee, arms: new_arms }
         },
 
-        HExpr::StringInterp { parts, ty, effects, span } => {
+        HExpr::StringInterp { parts, .. } => {
             // Interpolated parts are read (stringified) — borrows.
             let mut new_parts: List<HStringInterpPart> = []
             for p in parts {
                 match p {
-                    HStringInterpPart::Expression(e) =>
-                        new_parts.push(HStringInterpPart::Expression(rc_expr(e, false, owned, boxed, externs, drop_types, gensym, loop_base))),
-                    HStringInterpPart::Literal(s) =>
-                        new_parts.push(HStringInterpPart::Literal(s)),
+                    HStringInterpPart::Expression(e) => {
+                        let expr_ = e
+                        new_parts.push(HStringInterpPart::Expression(rc_expr(
+                            expr_, false, owned, boxed, externs, drop_types,
+                            gensym, loop_base)))
+                    },
+                    HStringInterpPart::Literal(s) => {
+                        let literal = s
+                        new_parts.push(HStringInterpPart::Literal(literal))
+                    },
                 }
             }
-            HExpr::StringInterp { parts: new_parts, ty: ty, effects: effects, span: span }
+            HExpr::StringInterp { ..expr, parts: new_parts }
         },
 
-        HExpr::TryCatch { body, arms, ty, effects, span } => {
+        HExpr::TryCatch { body, arms, .. } => {
             // body + catch arms inherit escape; each is its own scope.  abort-path
             // RC (longjmp) is out of B-098 scope (B-002 drop-aware unwind); on the
             // normal path the body/arm blocks drop their own locals.
-            let new_body = rc_block_root(body, escape, owned, boxed, externs, drop_types, gensym, loop_base)
+            let body_ = body
+            let new_body = rc_block_root(body_, escape, owned, boxed, externs,
+                drop_types, gensym, loop_base)
             let mut new_arms: List<HMatchArm> = []
             for arm in arms {
                 // catch-arm pattern bindings project borrows from the caught error
                 // value — not owned, excluded from the arm's owned set.
                 // Guard borrows (boolean test).
                 let new_guard = match arm.guard {
-                    some(g) => some(rc_expr(g, false, owned, boxed, externs, drop_types, gensym, loop_base)),
+                    some(g) => {
+                        let guard_ = g
+                        some(rc_expr(guard_, false, owned, boxed, externs,
+                            drop_types, gensym, loop_base))
+                    },
                     none => none,
                 }
-                let new_body_arm = rc_block_root(arm.body, escape, owned, boxed, externs, drop_types, gensym, loop_base)
-                new_arms.push(HMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body_arm, span: arm.span })
+                let arm_body_ = arm.body
+                let new_body_arm = rc_block_root(arm_body_, escape, owned,
+                    boxed, externs, drop_types, gensym, loop_base)
+                new_arms.push(HMatchArm { ..arm,
+                    guard: new_guard, body: new_body_arm })
             }
-            HExpr::TryCatch { body: new_body, arms: new_arms, ty: ty, effects: effects, span: span }
+            HExpr::TryCatch { ..expr, body: new_body, arms: new_arms }
         },
 
-        HExpr::HandleExpr { body, handlers, ty, effects, span } => {
+        HExpr::HandleExpr { body, handlers, .. } => {
             // body inherits escape.  Each handler arm becomes a closure at codegen
             // (gen_handle_expr → build_handler_evidence).  B-098 closure model:
             // captures are owned and DUP'd at construction by gen_lambda (not in
@@ -2501,77 +4107,108 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
             // scope.  B-096: evidence structs are dropped at handle scope end by
             // codegen (emit_evidence_drops); perceus doesn't see them (codegen-only
             // construct).
-            let new_body = rc_block_root(body, escape, owned, boxed, externs, drop_types, gensym, loop_base)
+            let body_ = body
+            let new_body = rc_block_root(body_, escape, owned, boxed, externs,
+                drop_types, gensym, loop_base)
             let mut new_handlers: List<HEffectHandler> = []
             for h in handlers {
                 // Handler arm body is its own (closure) scope — no outer owned
                 // locals are in scope inside (captures are accessed through the env,
                 // not `owned`).  The arm body's value is the resume/abort value →
                 // escape position.
-                let h_body = rc_block_root(h.body, true, [], boxed, externs, drop_types, gensym, 0 - 1)
-                new_handlers.push(HEffectHandler {
-                    effect_name: h.effect_name, op_name: h.op_name,
-                    params: h.params, resume_name: h.resume_name, body: h_body
-                })
+                let params_ = h.params
+                let handler_body_ = h.body
+                let h_body = transform_fn_body(params_, handler_body_, boxed,
+                    externs, drop_types, gensym)
+                new_handlers.push(HEffectHandler { ..h, body: h_body })
             }
-            HExpr::HandleExpr { body: new_body, handlers: new_handlers, ty: ty, effects: effects, span: span }
+            HExpr::HandleExpr { ..expr,
+                body: new_body, handlers: new_handlers }
         },
 
-        HExpr::Lambda { params, return_type, body, ty, effects, span } => {
+        HExpr::Lambda { params, body, .. } => {
             // Conservative closure model (B-098 all-owned captures): every captured
             // outer owned local is DUP'd at CONSTRUCTION by gen_lambda (the env
             // takes its own reference), released when the env dies (B-084
             // drop_closure_env).  leak-free + crash-free: binding rc=1 → capture dup
             // → 2 → env drop → 1 → binding scope-end drop → 0.  Perceus therefore
-            // does NOT touch captures here; it only transforms the lambda body in
-            // its own fresh function scope (params borrow, tail = return = escape,
-            // no enclosing owned locals — captures come through the env).
-            let new_body = rc_block_root(body, true, [], boxed, externs, drop_types, gensym, 0 - 1)
-            HExpr::Lambda { params: params, return_type: return_type, body: new_body,
-                ty: ty, effects: effects, span: span }
+            // does not touch captures here; it transforms the lambda as a fresh
+            // function scope, including cleanup for solver-inferred Move params.
+            let params_ = params
+            let body_ = body
+            let new_body = transform_fn_body(params_, body_, boxed, externs,
+                drop_types, gensym)
+            HExpr::Lambda { ..expr, body: new_body }
         },
 
-        HExpr::EffectOp { effect_name, op_name, args, ty, effects, span } => {
+        HExpr::EffectOp { args, .. } => {
             // Effect-op args: treat like ordinary call args — borrow (the handler
             // closure receives them; full effect-arg ownership is B-096 scope).
             let mut new_args: List<HExpr> = []
-            for a in args { new_args.push(rc_expr(a, false, owned, boxed, externs, drop_types, gensym, loop_base)) }
-            HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: new_args,
-                ty: ty, effects: effects, span: span }
+            for a in args {
+                let arg_ = a
+                new_args.push(rc_expr(arg_, false, owned, boxed, externs,
+                    drop_types, gensym, loop_base))
+            }
+            HExpr::EffectOp { ..expr, args: new_args }
         },
 
-        HExpr::RangeExpr { start, end, inclusive, ty, effects, span } => {
+        HExpr::RangeExpr { start, end, .. } => {
             // Range stores start/end into a fresh range struct → they escape.
-            HExpr::RangeExpr { start: rc_escape(start, owned, boxed, externs, drop_types, gensym, loop_base),
-                end: rc_escape(end, owned, boxed, externs, drop_types, gensym, loop_base),
-                inclusive: inclusive, ty: ty, effects: effects, span: span }
+            let start_ = start
+            let end_ = end
+            let new_start = rc_escape(start_, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            let new_end = rc_escape(end_, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            HExpr::RangeExpr { ..expr, start: new_start, end: new_end }
         },
 
-        HExpr::ListLit { elements, ty, effects, span } => {
+        HExpr::ListLit { elements, .. } => {
             // Each element escapes into the new list (the list owns it).
             let mut new_elems: List<HExpr> = []
-            for e in elements { new_elems.push(rc_escape(e, owned, boxed, externs, drop_types, gensym, loop_base)) }
-            HExpr::ListLit { elements: new_elems, ty: ty, effects: effects, span: span }
+            for e in elements {
+                let element_ = e
+                new_elems.push(rc_escape(element_, owned, boxed, externs,
+                    drop_types, gensym, loop_base))
+            }
+            HExpr::ListLit { ..expr, elements: new_elems }
         },
 
-        HExpr::TupleLit { elements, ty, effects, span } => {
+        HExpr::TupleLit { elements, .. } => {
             let mut new_elems: List<HExpr> = []
-            for e in elements { new_elems.push(rc_escape(e, owned, boxed, externs, drop_types, gensym, loop_base)) }
-            HExpr::TupleLit { elements: new_elems, ty: ty, effects: effects, span: span }
+            for e in elements {
+                let element_ = e
+                new_elems.push(rc_escape(element_, owned, boxed, externs,
+                    drop_types, gensym, loop_base))
+            }
+            HExpr::TupleLit { ..expr, elements: new_elems }
         },
 
-        HExpr::IndexExpr { receiver, index, ty, effects, span } => {
+        HExpr::IndexExpr { receiver, index, .. } => {
             // Read: receiver + index are borrows.  (Escape wrapping of the whole
             // index result happens in rc_escape before reaching value position.)
-            HExpr::IndexExpr { receiver: rc_expr(receiver, false, owned, boxed, externs, drop_types, gensym, loop_base),
-                index: rc_expr(index, false, owned, boxed, externs, drop_types, gensym, loop_base),
-                ty: ty, effects: effects, span: span }
+            let receiver_ = receiver
+            let index_ = index
+            let new_receiver = rc_expr(receiver_, false, owned, boxed,
+                externs, drop_types, gensym, loop_base)
+            let new_index = rc_expr(index_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            HExpr::IndexExpr { ..expr,
+                receiver: new_receiver, index: new_index }
         },
 
-        // Clone should not appear in the input HIR (this pass inserts it); pass
-        // through idempotently if seen.
-        HExpr::Clone { inner, ty, effects, span } =>
-            HExpr::Clone { inner: inner, ty: ty, effects: effects, span: span },
+        // A planned Clone is already the unique dup proof.  Recurse through its
+        // inner in value/borrow position, but never route the node through
+        // rc_escape again.
+        HExpr::Clone { inner, .. } => {
+            let inner_ = inner
+            let new_inner = rc_expr(inner_, false, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            HExpr::Clone { ..expr, inner: new_inner }
+        },
+
+        HExpr::Take { .. } => expr,
 
         // B-113: return in expression position (match arm).
         // Same drop semantics as HStmt::Return in rc_stmt: escape the return value,
@@ -2580,108 +4217,75 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
         // (unreachable for the surrounding match, but structurally sound).
         HExpr::ReturnExpr { value, ty, effects, span } => match value {
             some(v) => {
-                let new_v = rc_escape(v, owned, boxed, externs, drop_types, gensym, loop_base)
+                let value_type_input = v
+                let value_effects_input = v
+                let value_span_input = v
+                let value_transform_input = v
+                let tt = hexpr_type(value_type_input)
+                let te = hexpr_effects(value_effects_input)
+                let ts = hexpr_span(value_span_input)
+                let new_v = rc_escape(value_transform_input, owned, boxed,
+                    externs, drop_types, gensym, loop_base)
                 let mut out: List<HStmt> = []
-                let tmp = fresh_scope_tmp(gensym)
-                let tt = hexpr_type(v)
-                let te = hexpr_effects(v)
-                let ts = hexpr_span(v)
-                out.push(HStmt::Let { name: tmp, name_span: synthetic_span(),
-                    def_id: none, ty: tt, init: new_v, span: synthetic_span() })
-                for d in drops_for(owned) { out.push(d) }
-                let tmp_id = HExpr::Ident { name: tmp, resolved_name: none, def_id: none,
-                    dict_closure_dicts: none, ty: tt, effects: te, span: ts }
-                let ret_expr = HExpr::ReturnExpr { value: some(tmp_id), ty: ty, effects: effects, span: span }
+                let (tmp, tmp_def_id) = fresh_scope_tmp(gensym)
+                record_rc_callable_projection(new_v, tmp_def_id, gensym)
+                let binding_name = tmp
+                let result_name = tmp
+                let binding_def_id = tmp_def_id
+                let result_def_id = tmp_def_id
+                let binding_ty = tt
+                let result_ty = tt
+                let return_ty = ty
+                let block_ty = ty
+                let return_effects = effects
+                let block_effects = effects
+                let return_span = span
+                let block_span = span
+                out.push(HStmt::Let { name: binding_name,
+                    name_span: synthetic_span(),
+                    def_id: some(binding_def_id), ty: binding_ty,
+                    init: new_v, span: synthetic_span() })
+                for d in drops_for(owned) {
+                    let cleanup = d
+                    out.push(cleanup)
+                }
+                let tmp_id = HExpr::Ident { name: result_name,
+                    resolved_name: none, def_id: some(result_def_id),
+                    dict_closure_dicts: none, ty: result_ty,
+                    effects: te, span: ts }
+                let ret_expr = HExpr::ReturnExpr { value: some(tmp_id),
+                    ty: return_ty, effects: return_effects,
+                    span: return_span }
                 HExpr::Block { stmts: out, tail: some(ret_expr),
-                    ty: ty, effects: effects, span: span }
+                    ty: block_ty, effects: block_effects, span: block_span }
             },
             none => {
+                let return_ty = ty
+                let block_ty = ty
+                let return_effects = effects
+                let block_effects = effects
+                let return_span = span
+                let block_span = span
                 let mut out: List<HStmt> = []
-                for d in drops_for(owned) { out.push(d) }
-                let ret_expr = HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span }
+                for d in drops_for(owned) {
+                    let cleanup = d
+                    out.push(cleanup)
+                }
+                let ret_expr = HExpr::ReturnExpr { value: none,
+                    ty: return_ty, effects: return_effects,
+                    span: return_span }
                 HExpr::Block { stmts: out, tail: some(ret_expr),
-                    ty: ty, effects: effects, span: span }
+                    ty: block_ty, effects: block_effects, span: block_span }
             }
         },
         // B-125: unsafe block — transparent, recurse into body
-        HExpr::UnsafeBlock { body, ty, effects, span } => {
-            let new_body = rc_block_root(body, escape, owned, boxed, externs, drop_types, gensym, loop_base)
-            HExpr::UnsafeBlock { body: new_body, ty: ty, effects: effects, span: span }
+        HExpr::UnsafeBlock { body, .. } => {
+            let body_ = body
+            let new_body = rc_block_root(body_, escape, owned, boxed, externs,
+                drop_types, gensym, loop_base)
+            HExpr::UnsafeBlock { ..expr, body: new_body }
         },
     }
-}
-
-// ============================================================
-// Container-sink argument detection
-// ============================================================
-//
-// Returns the arg indices (0-based) whose call boundary takes ownership.
-// Pure Ring List/Map/Set methods borrow their parameters; StringBuilder copies
-// its inputs.  The remaining sinks are exact raw-storage boundaries:
-// ring_slot_write, Cell.set, and Ptr.write.  Anything else is a borrow.
-// (pub: shared with verify_rc.ring — the verifier must agree on which call args
-// are ownership sinks, or it would mis-report escapes/leaks.)
-pub fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
-    match callee {
-        HExpr::Ident { name, resolved_name, .. } => {
-            // Slot storage is the single ownership boundary for the pure Ring
-            // List/Map implementations.  The buffer takes arg 2 by ownership;
-            // method parameters outside this call remain borrows.
-            let actual = match resolved_name { some(rn) => rn, none => name }
-            if actual == slot_write_identity() && arg_count == 3 { [2] } else { [] }
-        },
-        HExpr::FieldAccess { receiver, field, .. } => {
-            let recv_ty = hexpr_type(receiver)
-            match recv_ty {
-                Type::StructType { name, .. } => {
-                    if name == "Cell" && field == "set" && arg_count == 1 { [0] } else { [] }
-                },
-                Type::PtrType { .. } => {
-                    if field == "write" && arg_count == 1 { [0] } else { [] }
-                },
-                _ => [],
-            }
-        },
-        _ => [],
-    }
-}
-
-// Whether a Call is an enum VARIANT CONSTRUCTOR written in call syntax
-// (`some(x)`, `ok(v)`, `err(e)`, or a user `Variant(payload)`).  Such a call
-// lowers to `ring_enum_some` / a `gen_named_variant_construct`-style store that
-// takes the argument BY OWNERSHIP without a dup — so its value args are escape
-// (sink) positions, like StructLit / NamedVariantConstruct fields.
-//
-// Detection (no enum-registry access in perceus): the callee is a BARE Ident
-// (not a method / FieldAccess) whose `resolved_name` is the variant's ctor name
-// `${Enum}_${variant}` (set by infer when the call name resolves through
-// `variant_to_enum`), AND the call's result type is that EnumType.  Requiring
-// resolved_name to start with the result enum's `${name}_` distinguishes a
-// constructor from an ordinary function that merely returns an enum (whose
-// callee resolved_name is its own mangled fn name, not `${Enum}_…`).
-//
-// Safety asymmetry (mirrors sink_arg_indices): a false POSITIVE only adds an
-// extra Clone on an already-owned arg → a leak (crash-free); a false NEGATIVE
-// (missing a real constructor) leaves the arg un-cloned → UAF.  The predicate
-// therefore errs toward inclusion for enum-returning bare-Ident calls.
-// (pub: shared with verify_rc.ring — same sink-agreement requirement as
-// sink_arg_indices.)
-pub fn is_variant_constructor_call(callee: HExpr, result_ty: Type) -> Bool {
-    match callee {
-        HExpr::Ident { resolved_name, .. } => match resolved_name {
-            some(rn) => match result_ty {
-                Type::EnumType { name, .. } => rn.starts_with("${name}_"),
-                _ => false,
-            },
-            none => false,
-        },
-        _ => false,
-    }
-}
-
-fn list_contains_int(xs: List<Int>, x: Int) -> Bool {
-    for v in xs { if v == x { return true } }
-    false
 }
 
 // ============================================================
@@ -2696,67 +4300,10 @@ fn list_contains_int(xs: List<Int>, x: Int) -> Bool {
 
 // (pub: shared with verify_rc.ring's path accounting.)
 pub fn stmt_diverges(stmt: HStmt) -> Bool {
-    match stmt {
-        HStmt::Return { .. } => true,
-        HStmt::Break { .. } => true,
-        HStmt::Continue { .. } => true,
-        HStmt::ExprStmt { expr, .. } => expr_diverges(expr),
-        _ => false,
-    }
+    !stmt_reaches_next(stmt)
 }
 
 // (pub: shared with verify_rc.ring's path accounting.)
 pub fn expr_diverges(expr: HExpr) -> Bool {
-    // Never is the type-level proof of divergence.  In particular, a direct
-    // `panic(...)` is a Call rather than a ReturnExpr, so structural matching
-    // alone would incorrectly treat it as a value-producing branch.  Every
-    // HExpr variant carries a type, making this guard both total and the most
-    // precise first check for new Never-producing expression forms.
-    let is_never = match hexpr_type(expr) {
-        Type::NeverType => true,
-        _ => false
-    }
-    if is_never {
-        return true
-    }
-    match expr {
-        HExpr::Block { stmts, tail, .. } => {
-            // Diverges if any top-level statement diverges (statements after it
-            // are dead) or, failing that, the tail expression diverges.
-            let mut any = false
-            for s in stmts {
-                if stmt_diverges(s) { any = true }
-            }
-            if any {
-                true
-            } else {
-                match tail {
-                    some(t) => expr_diverges(t),
-                    none => false,
-                }
-            }
-        },
-        HExpr::IfExpr { then_branch, else_branch, .. } => {
-            // Diverges only if BOTH arms diverge; a missing else leaves a
-            // fall-through path that reaches the merge.
-            match else_branch {
-                some(eb) => expr_diverges(then_branch) && expr_diverges(eb),
-                none => false,
-            }
-        },
-        HExpr::MatchExpr { arms, .. } => {
-            // Diverges if every arm body diverges (match is exhaustive).
-            let mut all = arms.len() > 0
-            for arm in arms {
-                if expr_diverges(arm.body) == false { all = false }
-            }
-            all
-        },
-        // B-113: return in expression position always diverges.
-        HExpr::ReturnExpr { .. } => true,
-        // Unsafe is ownership-transparent; its body's control transfer still
-        // prevents the enclosing scope end from being reached.
-        HExpr::UnsafeBlock { body, .. } => expr_diverges(body),
-        _ => false,
-    }
+    !expr_has_reachable_value(expr)
 }

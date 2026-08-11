@@ -9,6 +9,13 @@ use parser::{parse}
 use perceus::{perceus_transform, perceus_transform_mutated}
 use verify_rc::{verify_rc_program, rc_fatal_count, format_rc_findings}
 
+fn append_cli_warning_diag_firebreak(
+    mut warning_diags: List<Diagnostic>, diagnostic: Diagnostic
+) {
+    let appended_diagnostic = diagnostic
+    warning_diags.push(appended_diagnostic)
+}
+
 pub fn cli_main() {
     let args = argv()
     let parsed = parse_cli_args(args)
@@ -146,8 +153,12 @@ pub fn cli_main() {
     // exit code is unchanged. Includes parser warnings (e.g. W0002 refinement
     // 'where' clause) and checker warnings (e.g. W0001 catch on pure expr).
     let mut warning_diags: List<Diagnostic> = []
-    for d in parse_sink.items { warning_diags.push(d) }
-    for d in sink.items { warning_diags.push(d) }
+    for d in parse_sink.items {
+        append_cli_warning_diag_firebreak(warning_diags, d)
+    }
+    for d in sink.items {
+        append_cli_warning_diag_firebreak(warning_diags, d)
+    }
     if warning_diags.len() > 0 {
         if parsed.error_format == "llm" {
             eprintln(format_llm(warning_diags, file_path))
@@ -232,6 +243,13 @@ fn normalize_cli_args(args: List<Str>) -> List<Str> {
     result
 }
 
+fn append_cli_positional_arg_firebreak(
+    mut positional: List<Str>, arg: Str
+) {
+    let positional_arg = arg
+    positional.push(positional_arg)
+}
+
 fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
     let args = normalize_cli_args(raw_args)
     let mut debug = false
@@ -276,7 +294,8 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
                                 if arg.starts_with("--target=") {
                                     target = arg.slice(9, arg.len())
                                 } else {
-                                    positional.push(arg)
+                                    append_cli_positional_arg_firebreak(
+                                        positional, arg)
                                 }
                             }
                         }

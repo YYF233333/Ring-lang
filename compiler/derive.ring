@@ -11,7 +11,10 @@ use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef,
     TraitBound, TypeKind, trait_dict_name, trait_bound_param_name, compare_by_first}
 
 fn str_at(list: List<Str>, i: Int) -> Str {
-    match list.get(i) { some(v) => v, none => panic("unreachable: str_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: str_at out of bounds")
+    }
 }
 
 fn int_at(list: List<Int>, i: Int) -> Int {
@@ -19,11 +22,17 @@ fn int_at(list: List<Int>, i: Int) -> Int {
 }
 
 fn type_at(list: List<Type>, i: Int) -> Type {
-    match list.get(i) { some(v) => v, none => panic("unreachable: type_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: type_at out of bounds")
+    }
 }
 
 fn df_at(list: List<DerivedField>, i: Int) -> DerivedField {
-    match list.get(i) { some(v) => v, none => panic("unreachable: df_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: df_at out of bounds")
+    }
 }
 
 const BUILTIN_TYPES: Set<Str> = set_from(["Option", "Cell", "List", "Map", "Set", "Range"])
@@ -84,7 +93,13 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         // type-checking, but they have no observable runtime structure to derive.
         if def.is_extern { continue }
         if builtins.contains(name) == false {
-            result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none })
+            let user_type_name = name
+            let struct_definition = def
+            result.push(UserType {
+                name: user_type_name,
+                type_kind: TypeKind::StructKind,
+                struct_def: some(struct_definition), enum_def: none
+            })
         }
     }
     let mut sorted_enums = env.types.enums.entries()
@@ -94,7 +109,13 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         // Skip mod aliases to avoid duplicate derives
         if name != def.name { continue }
         if builtins.contains(name) == false {
-            result.push(UserType { name: name, type_kind: TypeKind::EnumKind, struct_def: none, enum_def: some(def) })
+            let user_type_name = name
+            let enum_definition = def
+            result.push(UserType {
+                name: user_type_name,
+                type_kind: TypeKind::EnumKind,
+                struct_def: none, enum_def: some(enum_definition)
+            })
         }
     }
     result
@@ -130,15 +151,33 @@ fn derive_trait(
         changed = false
         for ut in all_types {
             if known.contains(ut.name) { } else {
-                // B-002p1: Drop types cannot auto-derive Clone (mutual exclusion)
-                if trait_name == "Clone" && has_impl(env.trait_reg, ut.name, "Drop") { } else {
+                // Drop identity is carried by the authoritative ownership
+                // shape.  Never rediscover it through the display spelling of
+                // a trait: a shadow trait named Drop is unrelated.  Inspect the
+                // open nominal shape directly instead of calling type_may_own
+                // on Struct<TVar>, whose param_deps are intentionally
+                // fail-closed before the Clone bounds are proven.
+                let blocks_clone = if trait_name == "Clone" {
+                    match env.types.ownership_metadata.ownership_shapes.get(ut.name) {
+                        some(shape) => shape.direct_drop || shape.may_own,
+                        none => panic("unreachable: derive target has no ownership shape")
+                    }
+                } else { false }
+                if blocks_clone { } else {
                 if has_manual_impl(env, ut.name, trait_name) { } else {
-                    let result = try_derive(env, ut, trait_name, known)
+                    let derived_trait_name = trait_name
+                    let result = try_derive(
+                        env, ut, derived_trait_name, known)
                     match result {
                         some(di) => {
                             known.insert(ut.name)
-                            register_derived_impl(env, sink, di, trait_name)
-                            derived_impls.push(di)
+                            let registered_impl = di
+                            let recorded_impl = di
+                            let registered_trait_name = trait_name
+                            register_derived_impl(
+                                env, sink, registered_impl,
+                                registered_trait_name)
+                            derived_impls.push(recorded_impl)
                             changed = true
                         },
                         none => {},
@@ -188,8 +227,11 @@ fn derive_hash_trait(
                         match result {
                             some(di) => {
                                 known.insert(ut.name)
-                                register_derived_impl(env, sink, di, "Hash")
-                                derived_impls.push(di)
+                                let registered_impl = di
+                                let recorded_impl = di
+                                register_derived_impl(
+                                    env, sink, registered_impl, "Hash")
+                                derived_impls.push(recorded_impl)
                                 changed = true
                             },
                             none => {},
@@ -218,15 +260,18 @@ fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> D
                 let field_entries = def.fields.map(fn(f) { FieldEntry { name: f.name, ty: f.ty } })
                 let fields = try_derive_fields(env, field_entries, def.type_param_vars, def.type_params, trait_name, known, ut.name, bounds)
                 match fields {
-                    some(fs) => some(DerivedImpl {
+                    some(fs) => {
+                        let derived_fields = fs
+                        some(DerivedImpl {
                         type_name: ut.name,
                         trait_name: trait_name,
                         type_params: def.type_params,
                         bounds: bounds,
                         type_kind: TypeKind::StructKind,
-                        struct_fields: some(fs),
+                        struct_fields: some(derived_fields),
                         enum_variants: none
-                    }),
+                        })
+                    },
                     none => none,
                 }
             },
@@ -318,9 +363,18 @@ fn try_derive_fields(
 ) -> List<DerivedField>? {
     let mut result: List<DerivedField> = []
     for field in fields {
-        let action = resolve_field_action(env, field.ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
+        let field_trait_name = trait_name
+        let action = resolve_field_action(
+            env, field.ty, type_param_vars, type_param_names,
+            field_trait_name, known, self_type_name, bounds)
         match action {
-            some(a) => result.push(DerivedField { name: field.name, positional_index: none, action: a }),
+            some(a) => {
+                let field_action = a
+                result.push(DerivedField {
+                    name: field.name, positional_index: none,
+                    action: field_action
+                })
+            },
             none => { return none },
         }
     }
@@ -359,11 +413,21 @@ fn resolve_field_action(
             let param_idx = index_of_int(type_param_vars, id)
             if param_idx < 0 { return none }
             let param_name = str_at(type_param_names, param_idx)
-            if has_bound(bounds, param_name, trait_name) == false {
-                bounds.push(TraitBound { type_param: param_name, trait_name: trait_name })
+            let tested_param_name = param_name
+            let tested_trait_name = trait_name
+            if has_bound(bounds, tested_param_name, tested_trait_name) == false {
+                let bound_param_name = param_name
+                let bound_trait_name = trait_name
+                bounds.push(TraitBound {
+                    type_param: bound_param_name,
+                    trait_name: bound_trait_name
+                })
             }
+            let dict_param_name = param_name
+            let dict_trait_name = trait_name
             some(FieldAction::Call {
-                dict_name: trait_bound_param_name(param_name, trait_name),
+                dict_name: trait_bound_param_name(
+                    dict_param_name, dict_trait_name),
                 extra_dicts: []
             })
         },
@@ -371,14 +435,26 @@ fn resolve_field_action(
             if name == self_type_name {
                 let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                 match extra {
-                    some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                    some(e) => {
+                        let extra_dicts = e
+                        some(FieldAction::Call {
+                            dict_name: trait_dict_name(name, trait_name),
+                            extra_dicts: extra_dicts
+                        })
+                    },
                     none => none,
                 }
             } else {
                 if known.contains(name) {
                     let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                     match extra {
-                        some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                        some(e) => {
+                            let extra_dicts = e
+                            some(FieldAction::Call {
+                                dict_name: trait_dict_name(name, trait_name),
+                                extra_dicts: extra_dicts
+                            })
+                        },
                         none => none,
                     }
                 } else {
@@ -390,14 +466,26 @@ fn resolve_field_action(
             if name == self_type_name {
                 let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                 match extra {
-                    some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                    some(e) => {
+                        let extra_dicts = e
+                        some(FieldAction::Call {
+                            dict_name: trait_dict_name(name, trait_name),
+                            extra_dicts: extra_dicts
+                        })
+                    },
                     none => none,
                 }
             } else {
                 if known.contains(name) {
                     let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                     match extra {
-                        some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                        some(e) => {
+                            let extra_dicts = e
+                            some(FieldAction::Call {
+                                dict_name: trait_dict_name(name, trait_name),
+                                extra_dicts: extra_dicts
+                            })
+                        },
                         none => none,
                     }
                 } else {
@@ -410,9 +498,21 @@ fn resolve_field_action(
             let mut ok = true
             for elem_ty in elements {
                 if ok {
-                    let elem_action = resolve_field_action(env, elem_ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
+                    let elem_type_param_vars = type_param_vars
+                    let elem_type_param_names = type_param_names
+                    let elem_trait_name = trait_name
+                    let elem_known = known
+                    let elem_self_type_name = self_type_name
+                    let elem_bounds = bounds
+                    let elem_action = resolve_field_action(
+                        env, elem_ty, elem_type_param_vars,
+                        elem_type_param_names, elem_trait_name, elem_known,
+                        elem_self_type_name, elem_bounds)
                     match elem_action {
-                        some(a) => elem_actions.push(a),
+                        some(a) => {
+                            let action = a
+                            elem_actions.push(action)
+                        },
                         none => { ok = false },
                     }
                 }
@@ -460,11 +560,16 @@ fn resolve_hash_field_action(
             let param_idx = index_of_int(type_param_vars, id)
             if param_idx < 0 { return none }
             let param_name = str_at(type_param_names, param_idx)
-            if has_bound(bounds, param_name, "Hash") == false {
-                bounds.push(TraitBound { type_param: param_name, trait_name: "Hash" })
+            let tested_param_name = param_name
+            if has_bound(bounds, tested_param_name, "Hash") == false {
+                let bound_param_name = param_name
+                bounds.push(TraitBound {
+                    type_param: bound_param_name, trait_name: "Hash"
+                })
             }
+            let dict_param_name = param_name
             some(FieldAction::Call {
-                dict_name: trait_bound_param_name(param_name, "Hash"),
+                dict_name: trait_bound_param_name(dict_param_name, "Hash"),
                 extra_dicts: []
             })
         },
@@ -476,9 +581,13 @@ fn resolve_hash_field_action(
                 type_params, type_param_vars, type_param_names,
                 "Hash", known, self_type_name, bounds)
             match extra {
-                some(e) => some(FieldAction::Call {
-                    dict_name: trait_dict_name(name, "Hash"), extra_dicts: e
-                }),
+                some(e) => {
+                    let extra_dicts = e
+                    some(FieldAction::Call {
+                        dict_name: trait_dict_name(name, "Hash"),
+                        extra_dicts: extra_dicts
+                    })
+                },
                 none => none,
             }
         },
@@ -490,20 +599,33 @@ fn resolve_hash_field_action(
                 type_params, type_param_vars, type_param_names,
                 "Hash", known, self_type_name, bounds)
             match extra {
-                some(e) => some(FieldAction::Call {
-                    dict_name: trait_dict_name(name, "Hash"), extra_dicts: e
-                }),
+                some(e) => {
+                    let extra_dicts = e
+                    some(FieldAction::Call {
+                        dict_name: trait_dict_name(name, "Hash"),
+                        extra_dicts: extra_dicts
+                    })
+                },
                 none => none,
             }
         },
         Type::TupleType { elements } => {
             let mut elem_actions: List<FieldAction> = []
             for elem_ty in elements {
+                let elem_type_param_vars = type_param_vars
+                let elem_type_param_names = type_param_names
+                let elem_known = known
+                let elem_self_type_name = self_type_name
+                let elem_bounds = bounds
                 let elem_action = resolve_hash_field_action(
-                    env, elem_ty, type_param_vars, type_param_names,
-                    known, self_type_name, bounds)
+                    env, elem_ty, elem_type_param_vars,
+                    elem_type_param_names, elem_known,
+                    elem_self_type_name, elem_bounds)
                 match elem_action {
-                    some(a) => elem_actions.push(a),
+                    some(a) => {
+                        let action = a
+                        elem_actions.push(action)
+                    },
                     none => { return none },
                 }
             }
@@ -529,9 +651,20 @@ fn resolve_extra_dicts(
 ) -> List<DictRef>? {
     let mut dicts: List<DictRef> = []
     for arg in type_args {
-        let dict = resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
+        let arg_type_param_vars = type_param_vars
+        let arg_type_param_names = type_param_names
+        let arg_trait_name = trait_name
+        let arg_known = known
+        let arg_self_type_name = self_type_name
+        let arg_bounds = bounds
+        let dict = resolve_type_arg_dict(
+            arg, arg_type_param_vars, arg_type_param_names,
+            arg_trait_name, arg_known, arg_self_type_name, arg_bounds)
         match dict {
-            some(d) => dicts.push(d),
+            some(d) => {
+                let resolved_dict = d
+                dicts.push(resolved_dict)
+            },
             none => { return none },
         }
     }
@@ -568,10 +701,20 @@ fn resolve_type_arg_dict(
             let param_idx = index_of_int(type_param_vars, id)
             if param_idx < 0 { return none }
             let param_name = str_at(type_param_names, param_idx)
-            if has_bound(bounds, param_name, trait_name) == false {
-                bounds.push(TraitBound { type_param: param_name, trait_name: trait_name })
+            let tested_param_name = param_name
+            let tested_trait_name = trait_name
+            if has_bound(bounds, tested_param_name, tested_trait_name) == false {
+                let bound_param_name = param_name
+                let bound_trait_name = trait_name
+                bounds.push(TraitBound {
+                    type_param: bound_param_name,
+                    trait_name: bound_trait_name
+                })
             }
-            some(DictRef::Simple(trait_bound_param_name(param_name, trait_name)))
+            let dict_param_name = param_name
+            let dict_trait_name = trait_name
+            some(DictRef::Simple(trait_bound_param_name(
+                dict_param_name, dict_trait_name)))
         },
         Type::StructType { name, type_params, .. } => {
             if name != self_type_name && known.contains(name) == false {
@@ -581,15 +724,20 @@ fn resolve_type_arg_dict(
             if type_params.len() == 0 {
                 return some(DictRef::Static(dict_name))
             }
+            let nested_trait_name = trait_name
+            let wrapped_trait_name = trait_name
             let inner = resolve_extra_dicts(
                 type_params, type_param_vars, type_param_names,
-                trait_name, known, self_type_name, bounds)
+                nested_trait_name, known, self_type_name, bounds)
             match inner {
-                some(inner_dicts) => some(DictRef::Wrapped {
-                    dict: dict_name,
-                    trait_name: trait_name,
-                    inner_dicts: inner_dicts
-                }),
+                some(inner_dicts) => {
+                    let wrapped_inner_dicts = inner_dicts
+                    some(DictRef::Wrapped {
+                        dict: dict_name,
+                        trait_name: wrapped_trait_name,
+                        inner_dicts: wrapped_inner_dicts
+                    })
+                },
                 none => none,
             }
         },
@@ -601,15 +749,20 @@ fn resolve_type_arg_dict(
             if type_params.len() == 0 {
                 return some(DictRef::Static(dict_name))
             }
+            let nested_trait_name = trait_name
+            let wrapped_trait_name = trait_name
             let inner = resolve_extra_dicts(
                 type_params, type_param_vars, type_param_names,
-                trait_name, known, self_type_name, bounds)
+                nested_trait_name, known, self_type_name, bounds)
             match inner {
-                some(inner_dicts) => some(DictRef::Wrapped {
-                    dict: dict_name,
-                    trait_name: trait_name,
-                    inner_dicts: inner_dicts
-                }),
+                some(inner_dicts) => {
+                    let wrapped_inner_dicts = inner_dicts
+                    some(DictRef::Wrapped {
+                        dict: dict_name,
+                        trait_name: wrapped_trait_name,
+                        inner_dicts: wrapped_inner_dicts
+                    })
+                },
                 none => none,
             }
         },
@@ -631,8 +784,12 @@ fn register_derived_impl(
     let mut self_type_params: List<Type> = []
     for i in 0..di.type_params.len() {
         let var_id = env.fresh_var_id()
-        type_var_ids.push(var_id)
-        self_type_params.push(Type::TypeVar { id: var_id, name: none })
+        let recorded_var_id = var_id
+        let self_var_id = var_id
+        type_var_ids.push(recorded_var_id)
+        self_type_params.push(Type::TypeVar {
+            id: self_var_id, name: none
+        })
     }
 
     let self_type = build_self_type(env, di.type_name, di.type_kind, self_type_params)
@@ -648,44 +805,67 @@ fn register_derived_impl(
     }
 
     let method_names = get_method_names(trait_name)
-    register_trait_methods(methods, trait_name, self_type, type_var_ids, scheme_bounds)
+    let registered_trait_name = trait_name
+    register_trait_methods(methods, registered_trait_name, self_type,
+        type_var_ids, scheme_bounds)
 
     let mut localized_methods: Map<Str, TypeScheme> = map_new()
     let mut raw_methods = methods.entries()
     raw_methods.sort_by(compare_by_first)
     for entry in raw_methods {
         let (method_name, scheme) = entry
-        localized_methods.insert(method_name, new_local_callable_scheme(
-            env, scheme, CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, none))
+        let localized_method_name = method_name
+        let unlocalized_scheme = scheme
+        localized_methods.insert(localized_method_name,
+            new_local_callable_scheme(
+                env, unlocalized_scheme,
+                CALLABLE_SOURCE_CONSERVATIVE_INTERFACE))
     }
     methods = localized_methods
 
     let origin = "<derive>:${di.type_name}:${trait_name}"
     let span = span_zero()
     let exact = map_clone(methods)
+    let entry_trait_name = trait_name
+    let method_origin_trait_name = trait_name
+    let entry_origin = origin
+    let method_origin = origin
+    let entry_span = span
+    let method_span = span
+    let entry_type_name = di.type_name
+    let method_target_type_name = di.type_name
 
     add_impl(env.trait_reg, ImplEntry {
-        trait_name: trait_name,
-        target_type_name: di.type_name,
+        trait_name: entry_trait_name,
+        target_type_name: entry_type_name,
         type_params: di.type_params,
         dict_bounds: dict_bounds,
         method_names: method_names,
         assoc_types: map_new(),
         method_schemes: exact,
-        origin: origin,
-        span: span
+        is_authoritative_drop: false,
+        origin: entry_origin,
+        span: entry_span
     })
 
     let mut sorted_methods = methods.entries()
     sorted_methods.sort_by(compare_by_first)
     for entry in sorted_methods {
         let (method_name, scheme) = entry
+        let installed_method_name = method_name
+        let installed_scheme = scheme
+        let installed_target_type_name = method_target_type_name
+        let installed_origin = method_origin
+        let installed_trait_name = method_origin_trait_name
+        let installed_span = method_span
         let _ = install_method_scheme(
-            env.trait_reg, sink, di.type_name, method_name, scheme,
+            env.trait_reg, sink, installed_target_type_name,
+            installed_method_name, installed_scheme,
             MethodOrigin {
-                origin: origin,
-                trait_name: some(trait_name),
-                span: span
+                origin: installed_origin,
+                trait_name: some(installed_trait_name),
+                is_authoritative_drop: false,
+                span: installed_span
             })
     }
 }
@@ -717,17 +897,48 @@ fn register_trait_methods(
 ) {
     match trait_name {
         "Eq" => {
-            let eq_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
-            methods.insert("eq", TypeScheme { ty: eq_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-            let ne_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
-            methods.insert("ne", TypeScheme { ty: ne_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
+            let eq_left = self_type
+            let eq_right = self_type
+            let ne_left = self_type
+            let ne_right = self_type
+            let eq_type_var_ids = type_var_ids
+            let ne_type_var_ids = type_var_ids
+            let eq_bounds = bounds
+            let ne_bounds = bounds
+            let eq_fn = Type::FnType {
+                params: [eq_left, eq_right], return_type: BOOL,
+                meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
+            }
+            methods.insert("eq", TypeScheme {
+                ty: eq_fn, type_vars: eq_type_var_ids,
+                bounds: eq_bounds, def_id: none
+            })
+            let ne_fn = Type::FnType {
+                params: [ne_left, ne_right], return_type: BOOL,
+                meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
+            }
+            methods.insert("ne", TypeScheme {
+                ty: ne_fn, type_vars: ne_type_var_ids,
+                bounds: ne_bounds, def_id: none
+            })
         },
         "Clone" => {
-            let clone_fn = Type::FnType { params: [self_type], return_type: self_type, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
+            let clone_param_type = self_type
+            let clone_return_type = self_type
+            let clone_fn = Type::FnType {
+                params: [clone_param_type],
+                return_type: clone_return_type,
+                meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
+            }
             methods.insert("clone", TypeScheme { ty: clone_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         "Ord" => {
-            let cmp_fn = Type::FnType { params: [self_type, self_type], return_type: INT, meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED) }
+            let cmp_left = self_type
+            let cmp_right = self_type
+            let cmp_fn = Type::FnType {
+                params: [cmp_left, cmp_right], return_type: INT,
+                meta: fn_meta(EMPTY_ROW, CALLABLE_BORROW_OWNED)
+            }
             methods.insert("cmp", TypeScheme { ty: cmp_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         },
         "Debug" => {

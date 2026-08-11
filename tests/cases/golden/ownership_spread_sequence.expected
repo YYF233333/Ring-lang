@@ -1,0 +1,16 @@
+direct=direct-copy:10|holder=holder
+trace:struct-source
+trace:struct-field
+ordered=struct-field:10|holder=holder
+direct_variant=direct-variant-copy:20|holder=true
+trace:variant-source
+trace:variant-field
+ordered_variant=variant-field:20|holder=true
+trace:fresh-source
+trace:fresh-field
+fresh=fresh-field:30
+dead_struct=dead-struct-return:40|struct-payload-live
+dead_variant=dead-variant-return:50|variant-payload-live
+dead_if=-1|if-payload-live
+dead_scrutinee=-2|scrutinee-payload-live
+dead_guard=1|guard-payload-live

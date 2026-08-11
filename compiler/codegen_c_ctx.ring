@@ -8,7 +8,7 @@
 //     [rc:u32 | typeid:u32] header at ptr-8 (Perceus RC)
 //   * ring_runtime.cpp C ABI functions are called directly by name.
 
-use types::{Type, EffectRow}
+use types::{Type, EffectRow, OwnershipMetadata, new_ownership_metadata}
 use ast::{Span}
 use hir::{HDictDef, TraitBound, HEffectOp, CHECKER_ONLY_EXTERN_CALLABLES}
 
@@ -18,6 +18,27 @@ use hir::{HDictDef, TraitBound, HEffectOp, CHECKER_ONLY_EXTERN_CALLABLES}
 pub struct CFnInfo {
     pub c_name: Str,
     pub total_params: Int
+}
+
+// Exact destructor identity discovered from the checker-authored HParam role.
+// fn_key remains available for evidence-parameter lookup; c_name is the
+// already-resolved emitted C symbol and is never reconstructed from spelling.
+pub struct CDirectDropInfo {
+    pub fn_key: Str,
+    pub c_name: Str,
+    pub total_params: Int,
+    // The C ABI is uniformly void*, so arity alone cannot distinguish two
+    // checker declarations.  Retain the complete checked Ring signature and
+    // the ABI-only evidence suffix to make project-prelude dedupe exact.
+    pub param_types: List<Type>,
+    pub param_flags: List<Int>,
+    pub return_type: Type,
+    pub declared_effects: EffectRow,
+    pub trait_bounds: List<TraitBound>,
+    pub evidence_params: List<Str>,
+    // Parameter index carrying HPARAM_EXTERNAL_DROP_OWNER.  The authoritative
+    // Drop ABI requires exactly one such role, on self at index zero.
+    pub drop_owner_param: Int
 }
 
 // Struct field layout registration (field ORDER is the C struct layout:
@@ -82,10 +103,12 @@ pub struct CCtx {
 
     // ---- registries ----
     pub named_values: Map<Str, Str>,           // ring var name -> C var name
+    // Exact cleanup-visible binding identity -> C slot. Take lowering must use
+    // this map exclusively; name lookup is not ownership authority.
+    pub value_slots_by_def_id: Map<Int, Str>,
     pub functions: Map<Str, CFnInfo>,          // C mangled name -> info
     pub fn_evidence_params: Map<Str, List<Str>>, // C mangled name -> evidence param names
     pub local_fn_effects: Map<Str, EffectRow>,
-    pub fn_mut_params: Map<Str, List<Bool>>,
     pub struct_types: Map<Str, CStructInfo>,
     pub enum_types: Map<Str, CEnumInfo>,
     pub rt_protos: Map<Str, Str>,              // runtime fn name -> full C prototype line
@@ -114,9 +137,15 @@ pub struct CCtx {
     pub next_user_typeid: Int,
 
     // ---- step 7: per-type drop functions (emit_c_drop_functions) ----
-    // B-002p1: types with user `impl Drop` — the generated ring_drop_<T> calls
-    // the user drop body BEFORE the recursive field drops.
-    pub drop_types: Set<Str>,
+    // Exact projection of OwnershipMetadata.ownership_shapes.direct_drop.
+    pub direct_drop_types: Set<Str>,
+    // Canonical target identity -> the one HIR method whose first parameter
+    // carries HPARAM_EXTERNAL_DROP_OWNER.  This is the sole source used by
+    // generated drop glue to invoke a user destructor.
+    pub direct_drop_methods: Map<Str, CDirectDropInfo>,
+    // Full cross-module shape union. This validates may_own/param_deps as well
+    // as direct_drop before the projection above drives global emission.
+    pub merged_ownership_metadata: OwnershipMetadata,
     // `ring_register_drop(tid, (void*)ring_drop_<T>);` statements, emitted
     // into C main() right after ring_runtime_init (LLVM parity:
     // emit_drop_registrations runs in main's entry block).
@@ -186,7 +215,8 @@ pub struct CCtx {
     pub local_names: Set<Str>,
     // Exact mangled extern declaration key -> exact mangled Ring target key.
     // Absence deliberately preserves real FFI.
-    pub extern_forward_bridges: Map<Str, Str>
+    pub extern_forward_bridges: Map<Str, Str>,
+    pub ownership_metadata: OwnershipMetadata
 }
 
 pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
@@ -195,8 +225,11 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
     // Checker-only builtins have no HDecl to discover in the forward pass.
     for name in (CHECKER_ONLY_EXTERN_CALLABLES) {
         let key = c_mangle_fn(name)
-        extern_callable_names.insert(key)
-        extern_abi_names.insert(key, name)
+        let callable_key = key
+        let abi_key = key
+        let abi_name = name
+        extern_callable_names.insert(callable_key)
+        extern_abi_names.insert(abi_key, abi_name)
     }
     CCtx {
         globals: [],
@@ -213,10 +246,10 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         label_counter: 0,
         match_counter: 0,
         named_values: map_new(),
+        value_slots_by_def_id: map_new(),
         functions: map_new(),
         fn_evidence_params: map_new(),
         local_fn_effects: map_new(),
-        fn_mut_params: map_new(),
         struct_types: map_new(),
         enum_types: map_new(),
         rt_protos: map_new(),
@@ -229,7 +262,9 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         boxed_vars: set_new(),
         type_to_typeid: map_new(),
         next_user_typeid: 64,
-        drop_types: set_new(),
+        direct_drop_types: set_new(),
+        direct_drop_methods: map_new(),
+        merged_ownership_metadata: new_ownership_metadata(),
         drop_registrations: [],
         trait_method_order: map_new(),
         trait_supertraits: map_new(),
@@ -252,7 +287,8 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         module_prefix: none,
         imports_map: map_new(),
         local_names: set_new(),
-        extern_forward_bridges: map_new()
+        extern_forward_bridges: map_new(),
+        ownership_metadata: new_ownership_metadata()
     }
 }
 
@@ -363,21 +399,33 @@ pub fn c_resolve_fn(ctx: CCtx, name: Str) -> Str {
         // canonical identity.  It still needs the exact extern-forward plan;
         // otherwise only unqualified calls made inside that module bridge.
         match ctx.extern_forward_bridges.get(direct_key) {
-            some(target) => { return target },
+            some(target) => {
+                let resolved = target
+                return resolved
+            },
             none => { return direct_key },
         }
     }
     match ctx.imports_map.get(name) {
         some(qualified) => match ctx.extern_forward_bridges.get(qualified) {
-            some(target) => target,
-            none => qualified,
+            some(target) => {
+                let resolved = target
+                resolved
+            },
+            none => {
+                let resolved = qualified
+                resolved
+            },
         },
         none => {
             match ctx.module_prefix {
                 some(prefix) => {
                     let bridge_key = c_mangle_fn_with_prefix(prefix, name)
                     match ctx.extern_forward_bridges.get(bridge_key) {
-                        some(target) => target,
+                        some(target) => {
+                            let resolved = target
+                            resolved
+                        },
                         none => {
                             if ctx.local_names.contains(name) {
                                 bridge_key
@@ -445,19 +493,66 @@ pub fn fresh_label(mut ctx: CCtx, prefix: Str) -> Str {
 }
 
 // Register a Ring local binding: unique C name + hoisted decl + name map.
-pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
+pub fn c_local_def(mut ctx: CCtx, ring_name: Str, def_id: Int?) -> Str {
+    match def_id {
+        some(id) => if ctx.value_slots_by_def_id.contains_key(id) {
+            panic("C codegen: duplicate local DefId ${id}")
+        },
+        none => {}
+    }
     let cname = c_unique_local(ctx, ring_name)
-    ctx.cur_decls.push("    void* ${cname};")
-    ctx.named_values.insert(ring_name, cname)
+    // Every cleanup-visible slot starts null. A Take can therefore clear it
+    // before any later unconditional scope cleanup, and unentered branches are
+    // also safe to clean up.
+    ctx.cur_decls.push("    void* ${cname} = NULL;")
+    let named_cname = cname
+    ctx.named_values.insert(ring_name, named_cname)
+    match def_id {
+        some(id) => {
+            let slot_id = id
+            let slot_cname = cname
+            ctx.value_slots_by_def_id.insert(slot_id, slot_cname)
+        },
+        none => {}
+    }
     cname
+}
+
+pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
+    let local_name = ring_name
+    c_local_def(ctx, local_name, none)
 }
 
 // Register a Ring parameter: unique C name + name map (declared in the
 // function signature, so no hoisted decl).
-pub fn c_param(mut ctx: CCtx, ring_name: Str) -> Str {
+pub fn c_param_def(mut ctx: CCtx, ring_name: Str, def_id: Int?) -> Str {
+    match def_id {
+        some(id) => if ctx.value_slots_by_def_id.contains_key(id) {
+            panic("C codegen: duplicate parameter DefId ${id}")
+        },
+        none => {}
+    }
     let cname = c_unique_local(ctx, ring_name)
-    ctx.named_values.insert(ring_name, cname)
+    let named_cname = cname
+    ctx.named_values.insert(ring_name, named_cname)
+    match def_id {
+        some(id) => {
+            let slot_id = id
+            let slot_cname = cname
+            ctx.value_slots_by_def_id.insert(slot_id, slot_cname)
+        },
+        none => {}
+    }
     cname
+}
+
+pub fn c_param(mut ctx: CCtx, ring_name: Str) -> Str {
+    let param_name = ring_name
+    c_param_def(ctx, param_name, none)
+}
+
+pub fn c_value_slot(ctx: CCtx, def_id: Int) -> Str? {
+    ctx.value_slots_by_def_id.get(def_id)
 }
 
 fn c_unique_local(mut ctx: CCtx, ring_name: Str) -> Str {
@@ -468,7 +563,8 @@ fn c_unique_local(mut ctx: CCtx, ring_name: Str) -> Str {
         cname = "${base}_${k}"
         k = k + 1
     }
-    ctx.used_locals.insert(cname)
+    let used_name = cname
+    ctx.used_locals.insert(used_name)
     cname
 }
 
@@ -486,6 +582,7 @@ pub struct CEmitState {
     pub cur_body: List<Str>,
     pub used_locals: Set<Str>,
     pub named_values: Map<Str, Str>,
+    pub value_slots_by_def_id: Map<Int, Str>,
     pub indent: Int,
     pub in_function: Bool,
     pub current_fn_name: Str,
@@ -507,6 +604,7 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
         cur_body: ctx.cur_body,
         used_locals: ctx.used_locals,
         named_values: ctx.named_values,
+        value_slots_by_def_id: ctx.value_slots_by_def_id,
         indent: ctx.indent,
         in_function: ctx.in_function,
         current_fn_name: ctx.current_fn_name,
@@ -520,6 +618,7 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
     ctx.cur_body = []
     ctx.used_locals = set_new()
     ctx.named_values = map_new()
+    ctx.value_slots_by_def_id = map_new()
     ctx.indent = 1
     ctx.in_function = true
     ctx.current_fn_name = fn_name
@@ -536,14 +635,21 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
 pub fn c_pop_fn(mut ctx: CCtx, c_name: Str, params_str: Str, saved: CEmitState) {
     let mut def: List<Str> = []
     def.push("void* ${c_name}(${params_str}) {")
-    for d in ctx.cur_decls { def.push(d) }
-    for l in ctx.cur_body { def.push(l) }
+    for d in ctx.cur_decls {
+        let declaration = d
+        def.push(declaration)
+    }
+    for l in ctx.cur_body {
+        let line = l
+        def.push(line)
+    }
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
     ctx.cur_decls = saved.cur_decls
     ctx.cur_body = saved.cur_body
     ctx.used_locals = saved.used_locals
     ctx.named_values = saved.named_values
+    ctx.value_slots_by_def_id = saved.value_slots_by_def_id
     ctx.indent = saved.indent
     ctx.in_function = saved.in_function
     ctx.current_fn_name = saved.current_fn_name
@@ -607,10 +713,14 @@ pub fn c_global_cstr(mut ctx: CCtx, s: Str) -> Str {
 // stub messages emitted while step 4+ features are not yet ported.
 pub fn c_interned_cstr(mut ctx: CCtx, s: Str) -> Str {
     match ctx.cstr_cache.get(s) {
-        some(name) => name,
+        some(name) => {
+            let cached_name = name
+            cached_name
+        },
         none => {
             let name = c_global_cstr(ctx, s)
-            ctx.cstr_cache.insert(s, name)
+            let cached_name = name
+            ctx.cstr_cache.insert(s, cached_name)
             name
         },
     }
@@ -646,7 +756,8 @@ pub fn c_line_directive(mut ctx: CCtx, span: Span) {
     let file = span.file
     if line == ctx.last_line && file == ctx.last_file { return }
     ctx.last_line = line
-    ctx.last_file = file
+    let last_file = file
+    ctx.last_file = last_file
     let esc = file.replace("\\", "\\\\")
     c_raw(ctx, "#line ${line} \"${esc}\"")
 }
@@ -670,7 +781,8 @@ pub fn get_or_assign_c_typeid(mut ctx: CCtx, type_name: Str) -> Int {
             }
             let id = ctx.next_user_typeid
             ctx.next_user_typeid = id + 1
-            ctx.type_to_typeid.insert(type_name, id)
+            let stored_id = id
+            ctx.type_to_typeid.insert(type_name, stored_id)
             id
         },
     }
@@ -695,7 +807,9 @@ pub fn rt_use(mut ctx: CCtx, name: Str, arity: Int) {
             "${ps.join("")}>p"
         },
     }
-    ctx.rt_protos.insert(name, sig_to_proto(name, enc))
+    let proto_name = name
+    let proto = sig_to_proto(proto_name, enc)
+    ctx.rt_protos.insert(name, proto)
 }
 
 // Insert a hand-written prototype verbatim (signatures the p/i/d/c encoding
@@ -723,7 +837,10 @@ pub fn rt_known_arity(name: Str) -> Int? {
     match rt_sig(name) {
         some(s) => {
             match s.index_of(">") {
-                some(idx) => some(idx),
+                some(idx) => {
+                    let arity = idx
+                    some(arity)
+                },
                 none => none,
             }
         },

@@ -1,6 +1,6 @@
-// B-104 D2 negative case: re-binding a live owned name in the same scope
-// (variable shadowing on a shared alloca) leaks the previous value.  The
-// verifier must report the documented x-shadow-overwrite class.
+// Exact DefIds give same-spelled lexical bindings independent RC slots.  This
+// regression proves that shadowing does not revive the retired shared-alloca
+// overwrite exemption.
 
 fn main() {
     let s = "hello"

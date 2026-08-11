@@ -1,11 +1,16 @@
 use types::{Type, EnumVariant, OwnershipMetadata, EMPTY_ROW,
-    CALLABLE_MOVE_OWNED, fn_meta}
+    CALLABLE_MOVE_OWNED, fn_meta, freeze_callable_ownership_type,
+    validate_callable_ownership_metadata,
+    require_exact_callable_ownership_term}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use hir::{HProgram, HDecl, ValueBindingKind, ModuleImplFact, compare_by_first,
     variant_ctor_name}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry,
     TypeAliasDef, EffectAliasDef, SigDef, MethodOrigin,
-    exact_scheme_value_origin}
+    exact_scheme_value_origin, freeze_scheme_ownership,
+    freeze_struct_def_ownership, freeze_enum_def_ownership,
+    freeze_effect_def_ownership, freeze_trait_def_ownership,
+    freeze_impl_entry_ownership, freeze_sig_def_ownership}
 use infer_register::{prefix_decl_name, module_prefix_decl_name}
 
 // ============================================================
@@ -46,6 +51,148 @@ pub struct ModuleExports {
 pub enum TypeDef {
     StructDef_(StructDef),
     EnumDef_(EnumDef)
+}
+
+fn validate_export_callable_identity(
+    metadata: OwnershipMetadata, def_id: Int?, ty: Type
+) {
+    match (def_id, ty) {
+        (some(id), Type::FnType { meta, .. }) => {
+            let by_def = match metadata.callable_by_def_id.get(id) {
+                some(term) => require_exact_callable_ownership_term(
+                    metadata, term),
+                none => panic(
+                    "unreachable: exported callable has no DefId ownership contract")
+            }
+            if !metadata.callable_state_by_def_id.contains_key(id) {
+                panic(
+                    "unreachable: exported callable has no DefId ownership source")
+            }
+            let by_type = require_exact_callable_ownership_term(
+                metadata, meta.ownership_term)
+            if by_def != by_type {
+                panic(
+                    "unreachable: exported callable DefId/type ownership contract mismatch")
+            }
+        },
+        (none, Type::FnType { .. }) => panic(
+            "unreachable: exported callable has no exact DefId"),
+        _ => {}
+    }
+}
+
+fn validate_export_const_getter_identity(
+    metadata: OwnershipMetadata, def_id: Int?
+) {
+    let id = match def_id {
+        some(value) => value,
+        none => panic(
+            "unreachable: exported const getter has no exact DefId")
+    }
+    match metadata.callable_by_def_id.get(id) {
+        some(term) => {
+            let _ = require_exact_callable_ownership_term(metadata, term)
+        },
+        none => panic(
+            "unreachable: exported const getter has no DefId ownership contract")
+    }
+    if !metadata.callable_state_by_def_id.contains_key(id) {
+        panic(
+            "unreachable: exported const getter has no DefId ownership source")
+    }
+}
+
+fn validate_module_exports_callable_identities(exports: ModuleExports) {
+    let metadata = exports.ownership_metadata
+    for entry in exports.values.entries() {
+        validate_export_callable_identity(
+            metadata, entry.1.def_id, entry.1.ty)
+        match exports.value_binding_kinds.get(entry.0) {
+            some(ValueBindingKind::ConstGetter) =>
+                validate_export_const_getter_identity(
+                    metadata, entry.1.def_id),
+            _ => {}
+        }
+    }
+    for target in exports.impl_methods.entries() {
+        for method in target.1.entries() {
+            validate_export_callable_identity(
+                metadata, method.1.def_id, method.1.ty)
+        }
+    }
+    for trait_entry in exports.traits.entries() {
+        for method in trait_entry.1.methods {
+            validate_export_callable_identity(
+                metadata, some(method.def_id), method.ty)
+        }
+    }
+    for sig_entry in exports.sigs.entries() {
+        for member in sig_entry.1.members.entries() {
+            validate_export_callable_identity(
+                metadata, member.1.def_id, member.1.ty)
+        }
+    }
+    for impl_ in exports.trait_impls {
+        for method in impl_.method_schemes.entries() {
+            validate_export_callable_identity(
+                metadata, method.1.def_id, method.1.ty)
+        }
+    }
+}
+
+// ModuleExports is a final checker boundary, not a second inference arena.
+// Re-freezing is intentionally idempotent and recursively validates every
+// callable term reachable from an exported registry payload.
+pub fn freeze_module_exports_ownership(
+    mut exports: ModuleExports
+) -> ModuleExports {
+    let metadata = exports.ownership_metadata
+    validate_callable_ownership_metadata(metadata)
+    validate_module_exports_callable_identities(exports)
+    for entry in exports.values.entries() {
+        exports.values.insert(entry.0,
+            freeze_scheme_ownership(metadata, entry.1))
+    }
+    for entry in exports.types.entries() {
+        let frozen = match entry.1 {
+            TypeDef::StructDef_(def) => TypeDef::StructDef_(
+                freeze_struct_def_ownership(metadata, def)),
+            TypeDef::EnumDef_(def) => TypeDef::EnumDef_(
+                freeze_enum_def_ownership(metadata, def))
+        }
+        exports.types.insert(entry.0, frozen)
+    }
+    for entry in exports.type_aliases.entries() {
+        exports.type_aliases.insert(entry.0,
+            TypeAliasDef { ..entry.1,
+                ty: freeze_callable_ownership_type(metadata, entry.1.ty) })
+    }
+    for entry in exports.effects.entries() {
+        exports.effects.insert(entry.0,
+            freeze_effect_def_ownership(metadata, entry.1))
+    }
+    for entry in exports.traits.entries() {
+        exports.traits.insert(entry.0,
+            freeze_trait_def_ownership(metadata, entry.1))
+    }
+    for entry in exports.sigs.entries() {
+        exports.sigs.insert(entry.0,
+            freeze_sig_def_ownership(metadata, entry.1))
+    }
+    exports.trait_impls = exports.trait_impls.map(fn(impl_) {
+        freeze_impl_entry_ownership(metadata, impl_)
+    })
+    for target in exports.impl_methods.entries() {
+        let mut methods: Map<Str, TypeScheme> = map_new()
+        for method in target.1.entries() {
+            methods.insert(method.0,
+                freeze_scheme_ownership(metadata, method.1))
+        }
+        exports.impl_methods.insert(target.0, methods)
+    }
+    validate_callable_ownership_metadata(metadata)
+    validate_module_exports_callable_identities(exports)
+    exports
 }
 
 fn export_display_name(identity: Str) -> Str {
@@ -125,29 +272,74 @@ fn declared_value_kind(kinds: Map<Int, ValueBindingKind>, scheme: TypeScheme) ->
     }
 }
 
+// Resolve a positional constructor through its unshadowable canonical payload.
+// ModuleExports carries the current checker's ownership metadata, so a callable
+// scheme must retain the matching checker-local DefId until a consumer rebinds
+// the canonical origin into its own environment.
+fn exact_variant_ctor_def_id_result_firebreak(def_id: Int) -> Int? {
+    let exact_def_id = def_id
+    some(exact_def_id)
+}
+
+fn exact_variant_ctor_def_id(
+    env: TypeEnv, def: EnumDef, variant: EnumVariant
+) -> Int? {
+    if variant.field_names.is_some() || variant.fields.len() == 0 {
+        return none
+    }
+    let ctor_origin = variant_ctor_name(def.name, variant.name)
+    match env.lookup(ctor_origin) {
+        some(scheme) => match (scheme.def_id, scheme.ty) {
+            (some(def_id), Type::FnType { .. }) => {
+                match env.types.variant_ctor_origins.get(def_id) {
+                    some(origin) => {
+                        if origin != ctor_origin {
+                            panic("unreachable: enum constructor origin was replaced")
+                        }
+                    },
+                    none => panic(
+                        "unreachable: enum constructor has no exact origin")
+                }
+                exact_variant_ctor_def_id_result_firebreak(def_id)
+            },
+            _ => panic(
+                "unreachable: positional enum constructor has no exact callable identity")
+        },
+        none => panic(
+            "unreachable: canonical enum constructor is not registered")
+    }
+}
+
 // Reconstruct an enum constructor from its canonical definition. Looking up the
 // variant leaf in the value environment is unsound: a later module-local value
 // with the same spelling may shadow that leaf while the public enum must still
-// export its own constructor. Consumers allocate a fresh local DefId, so export
-// schemes deliberately carry none here.
-fn variant_ctor_scheme(def: EnumDef, variant: EnumVariant) -> TypeScheme {
+// export its own constructor. Positional constructors recover only the DefId of
+// the exact canonical payload; their type is still rebuilt from EnumDef.
+fn variant_ctor_scheme(
+    env: TypeEnv, def: EnumDef, variant: EnumVariant
+) -> TypeScheme {
     let enum_params = def.type_param_vars.map(fn(id) {
         Type::TypeVar { id: id, name: none }
     })
-    let enum_type = Type::EnumType { name: def.name, type_params: enum_params }
+    let enum_name = def.name
+    let enum_type = Type::EnumType {
+        name: enum_name, type_params: enum_params
+    }
     let ctor_type = if variant.field_names.is_some() || variant.fields.len() == 0 {
         enum_type
     } else {
+        let ctor_params = variant.fields
         Type::FnType {
-            params: variant.fields, return_type: enum_type,
+            params: ctor_params, return_type: enum_type,
             meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
         }
     }
+    let scheme_type_vars = def.type_param_vars
     TypeScheme {
         ty: ctor_type,
-        type_vars: def.type_param_vars,
+        type_vars: scheme_type_vars,
         bounds: [],
-        def_id: none
+        def_id: exact_variant_ctor_def_id(env, def, variant)
     }
 }
 
@@ -202,18 +394,35 @@ fn copy_inline_export(
     mut extern_values: Set<Str>, mut mut_methods: Map<Str, Set<Str>>,
     mut fn_mut_params: Map<Str, List<Bool>>
 ) {
+    let fn_mut_source = source
+    let struct_source = source
+    let extern_decl_source = source
+    let extern_abi_source = source
+    let enum_source = source
+    let type_alias_source = source
+    let effect_source = source
+    let effect_alias_source = source
+    let trait_source = source
+    let sig_source = source
     match env.lookup(source) {
         some(scheme) => {
             let exact_origin = exact_scheme_value_origin(
                 exact_value_origins, scheme, source)
-            values.insert(local, scheme)
-            value_origins.insert(local, exact_origin)
+            let value_local = local
+            let stored_scheme = scheme
+            values.insert(value_local, stored_scheme)
+            let origin_local = local
+            let stored_exact_origin = exact_origin
+            value_origins.insert(origin_local, stored_exact_origin)
             match declared_value_kind(exact_value_binding_kinds, scheme) {
                 some(kind) => {
-                    value_binding_kinds.insert(local, kind)
+                    let kind_local = local
+                    let stored_kind = kind
+                    value_binding_kinds.insert(kind_local, stored_kind)
                     match kind {
                         ValueBindingKind::ExternCallable => {
-                            extern_values.insert(local)
+                            let extern_local = local
+                            extern_values.insert(extern_local)
                         },
                         _ => {}
                     }
@@ -222,15 +431,28 @@ fn copy_inline_export(
             }
             match scheme.def_id {
                 some(def_id) => match env.types.variant_ctor_origins.get(def_id) {
-                    some(origin) => { variant_ctor_origins.insert(local, origin) },
+                    some(origin) => {
+                        let ctor_local = local
+                        let stored_ctor_origin = origin
+                        variant_ctor_origins.insert(
+                            ctor_local, stored_ctor_origin)
+                    },
                     none => {}
                 },
                 none => {}
             }
-            match fn_mut_params_map.get(source) {
-                some(flags) => { fn_mut_params.insert(local, flags) },
+            match fn_mut_params_map.get(fn_mut_source) {
+                some(flags) => {
+                    let fn_mut_local = local
+                    let stored_flags = flags
+                    fn_mut_params.insert(fn_mut_local, stored_flags)
+                },
                 none => match fn_mut_params_map.get(exact_origin) {
-                    some(flags) => { fn_mut_params.insert(local, flags) },
+                    some(flags) => {
+                        let fn_mut_local = local
+                        let stored_flags = flags
+                        fn_mut_params.insert(fn_mut_local, stored_flags)
+                    },
                     none => {}
                 }
             }
@@ -241,40 +463,62 @@ fn copy_inline_export(
             // an unrelated same-spelled extern to leak across module scopes.
         }
     }
-    match env.types.structs.get(source) {
+    match env.types.structs.get(struct_source) {
         some(def) => {
-            types.insert(local, TypeDef::StructDef_(def))
+            let struct_local = local
+            let stored_struct_def = def
+            types.insert(struct_local, TypeDef::StructDef_(stored_struct_def))
             let mut fields: List<Str> = []
             for field in def.fields { fields.push(field.name) }
-            struct_field_orders.insert(local, fields)
+            let field_order_local = local
+            struct_field_orders.insert(field_order_local, fields)
             match env.trait_reg.impl_methods.get(def.name) {
-                some(methods) => { impl_methods.insert(def.name, map_clone(methods)) }, none => {}
+                some(methods) => {
+                    let impl_target = def.name
+                    impl_methods.insert(impl_target, map_clone(methods))
+                }, none => {}
             }
             match env.trait_reg.method_origins.get(def.name) {
-                some(origins) => { method_origins.insert(def.name, map_clone(origins)) }, none => {}
+                some(origins) => {
+                    let origin_target = def.name
+                    method_origins.insert(origin_target, map_clone(origins))
+                }, none => {}
             }
             match env.trait_reg.mut_methods.get(def.name) {
-                some(methods) => { mut_methods.insert(def.name, methods) }, none => {}
+                some(methods) => {
+                    let mut_target = def.name
+                    let stored_mut_methods = methods
+                    mut_methods.insert(mut_target, stored_mut_methods)
+                }, none => {}
             }
         },
         none => {
             // Extern types retain a raw ABI identity. Permit that lookup only
             // after the complete canonical source path is proven against this
             // file's recursive AST; never infer ownership from a unique leaf.
-            if program_declares_exact_extern_source(program, source) {
-                let abi_name = identity_leaf(source)
+            if program_declares_exact_extern_source(
+                    program, extern_decl_source) {
+                let abi_name = identity_leaf(extern_abi_source)
                 match env.types.extern_structs.get(abi_name) {
                     some(def) => {
-                        if def.is_extern { types.insert(local, TypeDef::StructDef_(def)) }
+                        if def.is_extern {
+                            let extern_local = local
+                            let stored_extern_def = def
+                            types.insert(
+                                extern_local,
+                                TypeDef::StructDef_(stored_extern_def))
+                        }
                     },
                     none => {}
                 }
             }
         }
     }
-    match env.types.enums.get(source) {
+    match env.types.enums.get(enum_source) {
         some(def) => {
-            types.insert(local, TypeDef::EnumDef_(def))
+            let enum_local = local
+            let stored_enum_def = def
+            types.insert(enum_local, TypeDef::EnumDef_(stored_enum_def))
             // A facade enum must carry its constructors even when the source
             // inline module itself is private. Reconstruct the registration
             // scheme from the canonical EnumDef instead of consulting the
@@ -283,49 +527,101 @@ fn copy_inline_export(
             // gives inference an exact lookup; the legacy leaf binding keeps
             // named enum imports compatible when it is not already occupied.
             for variant in def.variants {
-                let ctor_scheme = variant_ctor_scheme(def, variant)
+                let ctor_def = def
+                let ctor_variant = variant
+                let ctor_scheme = variant_ctor_scheme(
+                    env, ctor_def, ctor_variant)
                 let ctor_origin = variant_ctor_name(def.name, variant.name)
                 let facade_ctor = "${local}::${variant.name}"
-                values.insert(facade_ctor, ctor_scheme)
-                value_origins.insert(facade_ctor, ctor_origin)
+                let facade_value_name = facade_ctor
+                let facade_scheme = ctor_scheme
+                values.insert(facade_value_name, facade_scheme)
+                let facade_origin_name = facade_ctor
+                let facade_origin = ctor_origin
+                value_origins.insert(facade_origin_name, facade_origin)
                 if variant.field_names.is_none() {
-                    variant_ctor_origins.insert(facade_ctor, ctor_origin)
+                    let facade_ctor_origin = ctor_origin
+                    variant_ctor_origins.insert(
+                        facade_ctor, facade_ctor_origin)
                 }
                 if !values.contains_key(variant.name) {
-                    values.insert(variant.name, ctor_scheme)
-                    value_origins.insert(variant.name, ctor_origin)
+                    let variant_value_name = variant.name
+                    values.insert(variant_value_name, ctor_scheme)
+                    let variant_origin_name = variant.name
+                    let variant_origin = ctor_origin
+                    value_origins.insert(
+                        variant_origin_name, variant_origin)
                     if variant.field_names.is_none() {
-                        variant_ctor_origins.insert(variant.name, ctor_origin)
+                        let variant_ctor_name_ = variant.name
+                        variant_ctor_origins.insert(
+                            variant_ctor_name_, ctor_origin)
                     }
                 }
             }
             match env.trait_reg.impl_methods.get(def.name) {
-                some(methods) => { impl_methods.insert(def.name, map_clone(methods)) }, none => {}
+                some(methods) => {
+                    let impl_target = def.name
+                    impl_methods.insert(impl_target, map_clone(methods))
+                }, none => {}
             }
             match env.trait_reg.method_origins.get(def.name) {
-                some(origins) => { method_origins.insert(def.name, map_clone(origins)) }, none => {}
+                some(origins) => {
+                    let origin_target = def.name
+                    method_origins.insert(origin_target, map_clone(origins))
+                }, none => {}
             }
             match env.trait_reg.mut_methods.get(def.name) {
-                some(methods) => { mut_methods.insert(def.name, methods) }, none => {}
+                some(methods) => {
+                    let mut_target = def.name
+                    let stored_mut_methods = methods
+                    mut_methods.insert(mut_target, stored_mut_methods)
+                }, none => {}
             }
         },
         none => {}
     }
-    match env.types.type_aliases.get(source) {
-        some(def) => { type_aliases.insert(local, def) }, none => {}
+    match env.types.type_aliases.get(type_alias_source) {
+        some(def) => {
+            let alias_local = local
+            let stored_alias_def = def
+            type_aliases.insert(alias_local, stored_alias_def)
+        }, none => {}
     }
-    match env.types.effects.get(source) {
-        some(def) => { effects.insert(local, def) }, none => {}
+    match env.types.effects.get(effect_source) {
+        some(def) => {
+            let effect_local = local
+            let stored_effect_def = def
+            effects.insert(effect_local, stored_effect_def)
+        }, none => {}
     }
-    match env.types.effect_aliases.get(source) {
-        some(def) => { effect_aliases.insert(local, def) }, none => {}
+    match env.types.effect_aliases.get(effect_alias_source) {
+        some(def) => {
+            let effect_alias_local = local
+            let stored_effect_alias_def = def
+            effect_aliases.insert(
+                effect_alias_local, stored_effect_alias_def)
+        }, none => {}
     }
-    match env.trait_reg.traits.get(source) {
-        some(def) => { traits.insert(local, def) }, none => {}
+    match env.trait_reg.traits.get(trait_source) {
+        some(def) => {
+            let trait_local = local
+            let stored_trait_def = def
+            traits.insert(trait_local, stored_trait_def)
+        }, none => {}
     }
-    match env.types.sigs.get(source) {
-        some(def) => { sigs.insert(local, def) }, none => {}
+    match env.types.sigs.get(sig_source) {
+        some(def) => {
+            let sig_local = local
+            let stored_sig_def = def
+            sigs.insert(sig_local, stored_sig_def)
+        }, none => {}
     }
+}
+
+fn prefix_export_subdecl_firebreak(mod_name: Str, decl: Decl) -> Decl {
+    let current_mod_name = mod_name
+    let current_decl = decl
+    prefix_decl_name(current_mod_name, current_decl)
 }
 
 fn extract_decl_export(
@@ -357,30 +653,45 @@ fn extract_decl_export(
     match decl {
         Decl::Fn { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let fn_display_source = name
+                let display = export_display_name(fn_display_source)
                 match env.lookup(name) {
                     some(scheme) => {
-                        values.insert(display, scheme)
-                        value_origins.insert(display, name)
-                        value_binding_kinds.insert(display, ValueBindingKind::DirectCallable)
+                        let value_display = display
+                        let stored_scheme = scheme
+                        values.insert(value_display, stored_scheme)
+                        let origin_display = display
+                        let origin_name = name
+                        value_origins.insert(origin_display, origin_name)
+                        let kind_display = display
+                        value_binding_kinds.insert(
+                            kind_display, ValueBindingKind::DirectCallable)
                     },
                     none => {},
                 }
                 match fn_mut_params_map.get(name) {
-                    some(flags) => { fn_mut_params.insert(display, flags) },
+                    some(flags) => {
+                        let stored_flags = flags
+                        fn_mut_params.insert(display, stored_flags)
+                    },
                     none => {},
                 }
             }
         },
         Decl::Struct { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let struct_display_source = name
+                let display = export_display_name(struct_display_source)
                 match env.types.structs.get(name) {
                     some(sdef) => {
-                        types.insert(display, TypeDef::StructDef_(sdef))
+                        let type_display = display
+                        let stored_struct_def = sdef
+                        types.insert(
+                            type_display, TypeDef::StructDef_(stored_struct_def))
                         let mut field_names: List<Str> = []
                         for f in sdef.fields { field_names.push(f.name) }
-                        struct_field_orders.insert(display, field_names)
+                        struct_field_orders.insert(
+                            display, field_names)
                     },
                     none => {},
                 }
@@ -388,23 +699,35 @@ fn extract_decl_export(
         },
         Decl::Enum { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let enum_display_source = name
+                let display = export_display_name(enum_display_source)
                 match env.types.enums.get(name) {
                     some(edef) => {
-                        types.insert(display, TypeDef::EnumDef_(edef))
+                        let stored_enum_def = edef
+                        types.insert(
+                            display, TypeDef::EnumDef_(stored_enum_def))
                         // The module's final leaf scope may contain an unrelated
                         // same-spelled private fn/const. Export the enum's exact
                         // constructor scheme and identity from EnumDef instead.
                         for v in edef.variants {
-                            let ctor_scheme = variant_ctor_scheme(edef, v)
+                            let ctor_def = edef
+                            let ctor_variant = v
+                            let ctor_scheme = variant_ctor_scheme(
+                                env, ctor_def, ctor_variant)
                             let ctor_origin = variant_ctor_name(edef.name, v.name)
-                            values.insert(v.name, ctor_scheme)
-                            value_origins.insert(v.name, ctor_origin)
+                            let value_name = v.name
+                            values.insert(value_name, ctor_scheme)
+                            let origin_name = v.name
+                            let stored_ctor_origin = ctor_origin
+                            value_origins.insert(
+                                origin_name, stored_ctor_origin)
                             // Fieldless and positional constructors lower via
                             // Ident/Call and therefore need provenance. Named
                             // construction uses its dedicated HIR node.
                             if v.field_names.is_none() {
-                                variant_ctor_origins.insert(v.name, ctor_origin)
+                                let ctor_name = v.name
+                                variant_ctor_origins.insert(
+                                    ctor_name, ctor_origin)
                             }
                         }
                     },
@@ -414,36 +737,53 @@ fn extract_decl_export(
         },
         Decl::Effect { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let effect_display_source = name
+                let display = export_display_name(effect_display_source)
                 match env.types.effects.get(name) {
-                    some(effdef) => { effects.insert(display, effdef) },
+                    some(effdef) => {
+                        let stored_effect_def = effdef
+                        effects.insert(display, stored_effect_def)
+                    },
                     none => {},
                 }
             }
         },
         Decl::EffectAlias { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let effect_alias_display_source = name
+                let display = export_display_name(
+                    effect_alias_display_source)
                 match env.types.effect_aliases.get(name) {
-                    some(adef) => { effect_aliases.insert(display, adef) },
+                    some(adef) => {
+                        let stored_alias_def = adef
+                        effect_aliases.insert(display, stored_alias_def)
+                    },
                     none => {},
                 }
             }
         },
         Decl::Trait { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let trait_display_source = name
+                let display = export_display_name(trait_display_source)
                 match env.trait_reg.traits.get(name) {
-                    some(tdef) => { traits.insert(display, tdef) },
+                    some(tdef) => {
+                        let stored_trait_def = tdef
+                        traits.insert(display, stored_trait_def)
+                    },
                     none => {},
                 }
             }
         },
         Decl::Sig { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let sig_display_source = name
+                let display = export_display_name(sig_display_source)
                 match env.types.sigs.get(name) {
-                    some(sigdef) => { sigs.insert(display, sigdef) },
+                    some(sigdef) => {
+                        let stored_sig_def = sigdef
+                        sigs.insert(display, stored_sig_def)
+                    },
                     none => {},
                 }
             }
@@ -453,13 +793,21 @@ fn extract_decl_export(
         // whose targets were resolved while the namespace frames were live.
         Decl::ExternFn { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
-                extern_values.insert(display)
+                let extern_fn_display_source = name
+                let display = export_display_name(
+                    extern_fn_display_source)
+                let extern_display = display
+                extern_values.insert(extern_display)
                 match env.lookup(name) {
                     some(scheme) => {
-                        values.insert(display, scheme)
-                        value_origins.insert(display, name)
-                        value_binding_kinds.insert(display, ValueBindingKind::ExternCallable)
+                        let value_display = display
+                        let stored_scheme = scheme
+                        values.insert(value_display, stored_scheme)
+                        let origin_display = display
+                        let origin_name = name
+                        value_origins.insert(origin_display, origin_name)
+                        value_binding_kinds.insert(
+                            display, ValueBindingKind::ExternCallable)
                     },
                     none => {},
                 }
@@ -467,12 +815,17 @@ fn extract_decl_export(
         },
         Decl::ExternType { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let extern_type_display_source = name
+                let display = export_display_name(
+                    extern_type_display_source)
                 let abi_name = identity_leaf(name)
                 match env.types.extern_structs.get(abi_name) {
                     some(sdef) => {
                         if sdef.is_extern {
-                            types.insert(display, TypeDef::StructDef_(sdef))
+                            let stored_extern_def = sdef
+                            types.insert(
+                                display,
+                                TypeDef::StructDef_(stored_extern_def))
                         }
                     },
                     none => {},
@@ -481,21 +834,32 @@ fn extract_decl_export(
         },
         Decl::TypeAlias { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let type_alias_display_source = name
+                let display = export_display_name(
+                    type_alias_display_source)
                 match env.types.type_aliases.get(name) {
-                    some(adef) => { type_aliases.insert(display, adef) },
+                    some(adef) => {
+                        let stored_alias_def = adef
+                        type_aliases.insert(display, stored_alias_def)
+                    },
                     none => {},
                 }
             }
         },
         Decl::Const { name, is_pub, .. } => {
             if is_pub {
-                let display = export_display_name(name)
+                let const_display_source = name
+                let display = export_display_name(const_display_source)
                 match env.lookup(name) {
                     some(scheme) => {
-                        values.insert(display, scheme)
-                        value_origins.insert(display, name)
-                        value_binding_kinds.insert(display, ValueBindingKind::ConstGetter)
+                        let value_display = display
+                        let stored_scheme = scheme
+                        values.insert(value_display, stored_scheme)
+                        let origin_display = display
+                        let origin_name = name
+                        value_origins.insert(origin_display, origin_name)
+                        value_binding_kinds.insert(
+                            display, ValueBindingKind::ConstGetter)
                     },
                     none => {},
                 }
@@ -504,7 +868,8 @@ fn extract_decl_export(
         Decl::ModBlock { name: mod_name, uses: mod_uses, decls: mod_decls, is_pub: mpub, .. } => {
             if mpub {
                 for subdecl in mod_decls {
-                    let prefixed = prefix_decl_name(mod_name, subdecl)
+                    let prefixed = prefix_export_subdecl_firebreak(
+                        mod_name, subdecl)
                     extract_decl_export(prefixed, env, fn_mut_params_map, program,
                         values, value_origins, exact_value_origins,
                         exact_value_binding_kinds, value_binding_kinds,
@@ -513,7 +878,8 @@ fn extract_decl_export(
                         impl_methods, method_origins, inherent_methods, struct_field_orders,
                         extern_values, mut_methods, fn_mut_params, false)
                 }
-                let facade = export_display_name(mod_name)
+                let facade_module_name = mod_name
+                let facade = export_display_name(facade_module_name)
                 for use_decl in mod_uses {
                     if !use_decl.is_pub { continue }
                     match inline_use_source_prefix(mod_name, use_decl) {
@@ -578,22 +944,37 @@ fn copy_exported_name(
                     // scheme together with the current module's metadata; a
                     // foreign scheme DefId would no longer key this bundle.
                     match env.lookup(origin) {
-                        some(local_scheme) => values.insert(
-                            local_name, local_scheme),
+                        some(local_scheme) => {
+                            let value_local_name = local_name
+                            let stored_local_scheme = local_scheme
+                            values.insert(
+                                value_local_name, stored_local_scheme)
+                        },
                         none => panic(
                             "unreachable: re-export canonical value is not hydrated")
                     }
-                    value_origins.insert(local_name, origin)
+                    let origin_local_name = local_name
+                    let stored_origin = origin
+                    value_origins.insert(origin_local_name, stored_origin)
                 },
                 none => panic(
                     "unreachable: re-exported value has no canonical origin")
             }
             match source.value_binding_kinds.get(source_name) {
-                some(kind) => { value_binding_kinds.insert(local_name, kind) },
+                some(kind) => {
+                    let kind_local_name = local_name
+                    let stored_kind = kind
+                    value_binding_kinds.insert(kind_local_name, stored_kind)
+                },
                 none => {}
             }
             match source.variant_ctor_origins.get(source_name) {
-                some(origin) => { variant_ctor_origins.insert(local_name, origin) },
+                some(origin) => {
+                    let ctor_local_name = local_name
+                    let stored_ctor_origin = origin
+                    variant_ctor_origins.insert(
+                        ctor_local_name, stored_ctor_origin)
+                },
                 none => {}
             }
         },
@@ -601,25 +982,29 @@ fn copy_exported_name(
     }
     match source.types.get(source_name) {
         some(def) => {
-            types.insert(local_name, def)
+            let type_local_name = local_name
+            let stored_type_def = def
+            types.insert(type_local_name, stored_type_def)
             let canonical_type = match def {
                 TypeDef::StructDef_(sdef) => sdef.name,
                 TypeDef::EnumDef_(edef) => edef.name
             }
             match source.impl_methods.get(canonical_type) {
                 some(methods) => {
-                    let current_methods = env.trait_reg.impl_methods.get(
-                        canonical_type)
-                    let current_origins = env.trait_reg.method_origins.get(
-                        canonical_type)
-                    let source_origins = source.method_origins.get(
-                        canonical_type)
                     let mut localized: Map<Str, TypeScheme> = map_new()
                     let mut method_entries = methods.entries()
                     method_entries.sort_by(compare_by_first)
                     for method_entry in method_entries {
                         let (method_name, _) = method_entry
-                        match (current_methods, current_origins, source_origins) {
+                        let current_methods = env.trait_reg.impl_methods.get(
+                            canonical_type)
+                        let current_origins = env.trait_reg.method_origins.get(
+                            canonical_type)
+                        let source_origins = source.method_origins.get(
+                            canonical_type)
+                        let stored_local_scheme = match (
+                                current_methods, current_origins,
+                                source_origins) {
                             (some(local_methods), some(local_origins),
                              some(exported_origins)) =>
                                 match (local_methods.get(method_name),
@@ -630,58 +1015,106 @@ fn copy_exported_name(
                                         if local_origin.origin != exported_origin.origin {
                                             panic("unreachable: re-export method origin was replaced")
                                         }
-                                        localized.insert(method_name, local_scheme)
+                                        local_scheme
                                     },
                                     _ => panic("unreachable: re-export method is not hydrated")
                                 },
                             _ => panic("unreachable: re-export method registry is missing")
                         }
+                        let localized_method_name = method_name
+                        localized.insert(
+                            localized_method_name, stored_local_scheme)
                     }
-                    impl_methods.insert(canonical_type, localized)
+                    let impl_target = canonical_type
+                    impl_methods.insert(impl_target, localized)
                 },
                 none => {}
             }
             match source.method_origins.get(canonical_type) {
-                some(origins) => { method_origins.insert(canonical_type, map_clone(origins)) }, none => {}
+                some(origins) => {
+                    let origin_target = canonical_type
+                    method_origins.insert(origin_target, map_clone(origins))
+                }, none => {}
             }
             match source.inherent_methods.get(canonical_type) {
-                some(methods) => { inherent_methods.insert(canonical_type, list_clone(methods)) }, none => {}
+                some(methods) => {
+                    let inherent_target = canonical_type
+                    inherent_methods.insert(
+                        inherent_target, list_clone(methods))
+                }, none => {}
             }
             match source.mut_methods.get(canonical_type) {
-                some(methods) => { mut_methods.insert(canonical_type, methods) }, none => {}
+                some(methods) => {
+                    let mut_target = canonical_type
+                    let stored_mut_methods = methods
+                    mut_methods.insert(mut_target, stored_mut_methods)
+                }, none => {}
             }
         },
         none => {}
     }
     match source.type_aliases.get(source_name) {
-        some(def) => { type_aliases.insert(local_name, def) }, none => {}
+        some(def) => {
+            let alias_local_name = local_name
+            let stored_alias_def = def
+            type_aliases.insert(alias_local_name, stored_alias_def)
+        }, none => {}
     }
     match source.effects.get(source_name) {
-        some(def) => { effects.insert(local_name, def) }, none => {}
+        some(def) => {
+            let effect_local_name = local_name
+            let stored_effect_def = def
+            effects.insert(effect_local_name, stored_effect_def)
+        }, none => {}
     }
     match source.effect_aliases.get(source_name) {
-        some(def) => { effect_aliases.insert(local_name, def) }, none => {}
+        some(def) => {
+            let effect_alias_local_name = local_name
+            let stored_effect_alias_def = def
+            effect_aliases.insert(
+                effect_alias_local_name, stored_effect_alias_def)
+        }, none => {}
     }
     match source.traits.get(source_name) {
         some(def) => match env.trait_reg.traits.get(def.name) {
-            some(local_def) => { traits.insert(local_name, local_def) },
+            some(local_def) => {
+                let trait_local_name = local_name
+                let stored_trait_def = local_def
+                traits.insert(trait_local_name, stored_trait_def)
+            },
             none => panic("unreachable: re-export trait is not hydrated")
         },
         none => {}
     }
     match source.sigs.get(source_name) {
         some(def) => match env.types.sigs.get(def.name) {
-            some(local_def) => { sigs.insert(local_name, local_def) },
+            some(local_def) => {
+                let sig_local_name = local_name
+                let stored_sig_def = local_def
+                sigs.insert(sig_local_name, stored_sig_def)
+            },
             none => panic("unreachable: re-export sig is not hydrated")
         },
         none => {}
     }
     match source.struct_field_orders.get(source_name) {
-        some(fields) => { struct_field_orders.insert(local_name, fields) }, none => {}
+        some(fields) => {
+            let field_order_local_name = local_name
+            let stored_fields = fields
+            struct_field_orders.insert(
+                field_order_local_name, stored_fields)
+        }, none => {}
     }
-    if source.extern_values.contains(source_name) { extern_values.insert(local_name) }
+    if source.extern_values.contains(source_name) {
+        let extern_local_name = local_name
+        extern_values.insert(extern_local_name)
+    }
     match source.fn_mut_params.get(source_name) {
-        some(flags) => { fn_mut_params.insert(local_name, flags) }, none => {}
+        some(flags) => {
+            let fn_mut_local_name = local_name
+            let stored_flags = flags
+            fn_mut_params.insert(fn_mut_local_name, stored_flags)
+        }, none => {}
     }
 }
 
@@ -704,7 +1137,8 @@ fn export_impl_facts(
     for fact in impl_facts {
         match env.trait_reg.impl_methods.get(fact.target) {
             some(methods_map) => {
-                impl_methods.insert(fact.target, map_clone(methods_map))
+                let impl_target = fact.target
+                impl_methods.insert(impl_target, map_clone(methods_map))
             },
             none => {
                 // Registration and checking resolve the target through the
@@ -718,18 +1152,26 @@ fn export_impl_facts(
         }
         match env.trait_reg.method_origins.get(fact.target) {
             some(origins) => {
-                method_origins.insert(fact.target, map_clone(origins))
+                let origin_target = fact.target
+                method_origins.insert(origin_target, map_clone(origins))
             },
             none => {}
         }
         match env.trait_reg.mut_methods.get(fact.target) {
-            some(ms) => { mut_methods.insert(fact.target, ms) },
+            some(ms) => {
+                let mut_target = fact.target
+                let stored_mut_methods = ms
+                mut_methods.insert(mut_target, stored_mut_methods)
+            },
             none => {}
         }
         for mname in fact.method_names {
             let full_name = "${fact.target}_${mname}"
             match fn_mut_params_map.get(full_name) {
-                some(flags) => { fn_mut_params.insert(full_name, flags) },
+                some(flags) => {
+                    let stored_flags = flags
+                    fn_mut_params.insert(full_name, stored_flags)
+                },
                 none => {}
             }
         }
@@ -750,14 +1192,35 @@ fn export_impl_facts(
             }
             if is_pub_type {
                 let mut method_names: List<Str> = []
-                for m in fact.method_names { method_names.push(m) }
+                for m in fact.method_names {
+                    let exported_method_name = m
+                    method_names.push(exported_method_name)
+                }
                 match inherent_methods.get(fact.target) {
                     some(existing) => existing.extend(method_names),
-                    none => { inherent_methods.insert(fact.target, method_names) }
+                    none => {
+                        let inherent_target = fact.target
+                        inherent_methods.insert(inherent_target, method_names)
+                    }
                 }
             }
         }
     }
+}
+
+fn module_prefix_export_decl_firebreak(
+    module_prefix: Str, decl: Decl
+) -> Decl {
+    let current_module_prefix = module_prefix
+    let current_decl = decl
+    module_prefix_decl_name(current_module_prefix, current_decl)
+}
+
+fn append_exported_impl_firebreak(
+    mut trait_impls: List<ImplEntry>, impl_: ImplEntry
+) {
+    let current_impl = impl_
+    trait_impls.push(current_impl)
 }
 
 pub fn extract_exports(
@@ -790,7 +1253,8 @@ pub fn extract_exports(
     let mut mut_methods: Map<Str, Set<Str>> = map_new()
     let mut fn_mut_params: Map<Str, List<Bool>> = map_new()
     for decl in program.decls {
-        let canonical_decl = module_prefix_decl_name(module_prefix, decl)
+        let canonical_decl = module_prefix_export_decl_firebreak(
+            module_prefix, decl)
         extract_decl_export(canonical_decl, env, fn_mut_params_map, program,
             values, value_origins, exact_value_origins,
             exact_value_binding_kinds, value_binding_kinds,
@@ -807,7 +1271,11 @@ pub fn extract_exports(
     // checker's local registries, so the facade's metadata and DefIds agree.
     // This covers named, aliased, whole-module, and transitive uses.
     let mut module_map: Map<Str, ModuleExports> = map_new()
-    for mod_ in available_modules { module_map.insert(mod_.module_key, mod_) }
+    for mod_ in available_modules {
+        let stored_module_key = mod_.module_key
+        let stored_module = mod_
+        module_map.insert(stored_module_key, stored_module)
+    }
     for use_decl in program.uses {
         if use_decl.is_pub {
             let mod_key = use_decl.path.segments.join("::")
@@ -840,13 +1308,41 @@ pub fn extract_exports(
                     },
                     UseImport::Module => {
                         let mut names: Set<Str> = set_new()
-                        for entry in source.values.entries() { let (name, _) = entry; names.insert(name) }
-                        for entry in source.types.entries() { let (name, _) = entry; names.insert(name) }
-                        for entry in source.type_aliases.entries() { let (name, _) = entry; names.insert(name) }
-                        for entry in source.effects.entries() { let (name, _) = entry; names.insert(name) }
-                        for entry in source.effect_aliases.entries() { let (name, _) = entry; names.insert(name) }
-                        for entry in source.traits.entries() { let (name, _) = entry; names.insert(name) }
-                        for entry in source.sigs.entries() { let (name, _) = entry; names.insert(name) }
+                        for entry in source.values.entries() {
+                            let (name, _) = entry
+                            let exported_name = name
+                            names.insert(exported_name)
+                        }
+                        for entry in source.types.entries() {
+                            let (name, _) = entry
+                            let exported_name = name
+                            names.insert(exported_name)
+                        }
+                        for entry in source.type_aliases.entries() {
+                            let (name, _) = entry
+                            let exported_name = name
+                            names.insert(exported_name)
+                        }
+                        for entry in source.effects.entries() {
+                            let (name, _) = entry
+                            let exported_name = name
+                            names.insert(exported_name)
+                        }
+                        for entry in source.effect_aliases.entries() {
+                            let (name, _) = entry
+                            let exported_name = name
+                            names.insert(exported_name)
+                        }
+                        for entry in source.traits.entries() {
+                            let (name, _) = entry
+                            let exported_name = name
+                            names.insert(exported_name)
+                        }
+                        for entry in source.sigs.entries() {
+                            let (name, _) = entry
+                            let exported_name = name
+                            names.insert(exported_name)
+                        }
                         let mut sorted_names = names.to_list()
                         sorted_names.sort()
                         for name in sorted_names {
@@ -888,12 +1384,12 @@ pub fn extract_exports(
         for impl_ in impl_list {
             if exported_type_ids.contains(impl_.target_type_name) ||
                exported_trait_ids.contains(impl_.trait_name) {
-                trait_impls.push(impl_)
+                append_exported_impl_firebreak(trait_impls, impl_)
             }
         }
     }
 
-    ModuleExports {
+    freeze_module_exports_ownership(ModuleExports {
         module_key: module_key,
         module_prefix: module_prefix,
         values: values,
@@ -915,6 +1411,6 @@ pub fn extract_exports(
         mut_methods: mut_methods,
         fn_mut_params: fn_mut_params,
         ownership_metadata: env.types.ownership_metadata
-    }
+    })
 }
 

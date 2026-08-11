@@ -346,20 +346,29 @@ fn collect_inline_frame_headers(
                         "${parent_inline_prefix}::${name}"
                     }
                     let frame_index = frames.len()
-                    let owner = module_item_identity(root_owner, inline_prefix)
+                    let owner_root = root_owner
+                    let owner_prefix = inline_prefix
+                    let owner = module_item_identity(owner_root, owner_prefix)
                     let effective_public = parent_is_public && is_pub
+                    let frame_file_key = file_key
+                    let frame_root_owner = root_owner
+                    let frame_inline_prefix = inline_prefix
                     frames.push(ModuleFramePlan {
-                        file_key: file_key,
+                        file_key: frame_file_key,
                         frame_index: frame_index,
                         parent_frame_index: parent_frame_index,
                         decl_index: decl_index,
                         owner: owner,
-                        root_owner: root_owner,
-                        inline_prefix: inline_prefix,
+                        root_owner: frame_root_owner,
+                        inline_prefix: frame_inline_prefix,
                         is_public: effective_public
                     })
+                    let nested_file_key = file_key
+                    let nested_root_owner = root_owner
+                    let nested_inline_prefix = inline_prefix
                     collect_inline_frame_headers(
-                        file_key, root_owner, inline_prefix, frame_index,
+                        nested_file_key, nested_root_owner,
+                        nested_inline_prefix, frame_index,
                         effective_public, nested, frames)
                 },
                 _ => {}
@@ -399,17 +408,22 @@ fn append_namespace_seed(
         use_index: -1,
         item_index: decl_index
     }
+    let local_origin_site = origin_site
+    let local_exposed_name = exposed_name
+    let local_namespace = namespace
+    let local_payload = payload
+    let local_role = role
     seeds.push(NamespaceSeed {
         file_key: frame.file_key,
         frame_index: frame.frame_index,
         decl_index: decl_index,
-        origin_site: origin_site,
+        origin_site: local_origin_site,
         owner: frame.owner,
-        exposed_name: exposed_name,
-        namespace: namespace,
-        payload: payload,
+        exposed_name: local_exposed_name,
+        namespace: local_namespace,
+        payload: local_payload,
         is_public: effective_public,
-        role: role,
+        role: local_role,
         is_projection: false
     })
 
@@ -442,38 +456,62 @@ fn collect_decl_seed(
 ) {
     match decl {
         Decl::Fn { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Value,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Value,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::ExternFn { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Value,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Value,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::Const { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Value,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Value,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::Struct { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Struct,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Struct,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::ExternType { name, is_pub, .. } => {
             // Extern types intentionally retain their raw ABI spelling.
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Struct,
-                declaration_payload(frame, name, true), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Struct,
+                declaration_payload(frame, payload_name, true), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::Enum { name, variants, is_pub, .. } => {
-            let enum_payload = declaration_payload(frame, name, false)
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Enum,
-                enum_payload, is_pub, NamespaceSeedRole::DirectDecl, seeds)
+            let payload_name = name
+            let enum_payload = declaration_payload(frame, payload_name, false)
+            let enum_exposed_name = name
+            let enum_seed_payload = enum_payload
+            append_namespace_seed(
+                frame, decl_index, enum_exposed_name, NamespaceKind::Enum,
+                enum_seed_payload, is_pub, NamespaceSeedRole::DirectDecl,
+                seeds)
             let mut ctor_facts: List<NamespaceSeed> = []
             for variant in variants {
-                let ctor_payload = variant_ctor_name(enum_payload, variant.name)
+                let ctor_enum_payload = enum_payload
+                let ctor_variant_name = variant.name
+                let ctor_payload = variant_ctor_name(
+                    ctor_enum_payload, ctor_variant_name)
+                let fact_ctor_payload = ctor_payload
                 ctor_facts.push(NamespaceSeed {
                     file_key: frame.file_key,
                     frame_index: frame.frame_index,
@@ -487,51 +525,72 @@ fn collect_decl_seed(
                     owner: frame.owner,
                     exposed_name: variant.name,
                     namespace: NamespaceKind::Value,
-                    payload: ctor_payload,
+                    payload: fact_ctor_payload,
                     is_public: effective_frame_public(frame, is_pub),
                     role: NamespaceSeedRole::EnumLeaf,
                     is_projection: false
                 })
-                append_namespace_seed(frame, decl_index, variant.name,
-                    NamespaceKind::Value, ctor_payload, is_pub,
+                let leaf_name = variant.name
+                let leaf_ctor_payload = ctor_payload
+                append_namespace_seed(frame, decl_index, leaf_name,
+                    NamespaceKind::Value, leaf_ctor_payload, is_pub,
                     NamespaceSeedRole::EnumLeaf, seeds)
                 // Qualified enum-member lookup is an ordinary visible Value
                 // fact, not a consumer-side fallback from the Enum relation.
                 // Keeping it in the plan makes direct E::V collisions obey
                 // the same exact-frame Seed/import ledger as every other name.
+                let qualified_enum_name = name
+                let qualified_variant_name = variant.name
                 append_namespace_seed(
-                    frame, decl_index, "${name}::${variant.name}",
+                    frame, decl_index,
+                    "${qualified_enum_name}::${qualified_variant_name}",
                     NamespaceKind::Value, ctor_payload, is_pub,
                     NamespaceSeedRole::EnumQualifiedMember, seeds)
             }
-            match enum_variant_facts.get(enum_payload) {
+            let lookup_enum_payload = enum_payload
+            match enum_variant_facts.get(lookup_enum_payload) {
                 some(existing) => existing.extend(ctor_facts),
                 none => { enum_variant_facts.insert(enum_payload, ctor_facts) }
             }
         },
         Decl::TypeAlias { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::TypeAlias,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::TypeAlias,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::Effect { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Effect,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Effect,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::EffectAlias { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::EffectAlias,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::EffectAlias,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::Trait { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Trait,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Trait,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         Decl::Sig { name, is_pub, .. } => {
-            append_namespace_seed(frame, decl_index, name, NamespaceKind::Sig,
-                declaration_payload(frame, name, false), is_pub,
+            let exposed_name = name
+            let payload_name = name
+            append_namespace_seed(frame, decl_index, exposed_name,
+                NamespaceKind::Sig,
+                declaration_payload(frame, payload_name, false), is_pub,
                 NamespaceSeedRole::DirectDecl, seeds)
         },
         // Impl/Test/Delegate/AssocType do not introduce namespace seeds.
@@ -574,11 +633,12 @@ fn append_named_obligations(
                             some(alias) => alias,
                             none => item.name
                         }
+                        let obligation_source_owner = source_owner
                         imports.push(ImportObligation {
                             file_key: frame.file_key,
                             target_frame_index: frame.frame_index,
                             target_owner: frame.owner,
-                            source_owner: source_owner,
+                            source_owner: obligation_source_owner,
                             source_name: item.name,
                             local_name: local_name,
                             selection: ImportSelection::Named,
@@ -626,17 +686,19 @@ fn collect_root_use(
     // Every root UseDecl is retained, including a NamedItems declaration with
     // an empty item list.  Graph construction performs the only deduplication.
     let dep_key = module_key(segments)
+    let dependency_site = use_site
     physical_dependencies.push(PhysicalDependencyObligation {
         file_key: frame.file_key,
         module_key: dep_key,
         module_segments: list_clone(segments),
-        site: use_site
+        site: dependency_site
     })
 
     let source_owner = module_prefix(segments)
     match use_decl.imports {
         UseImport::NamedItems { .. } => {
-            append_named_obligations(frame, source_owner, use_index, use_decl, imports)
+            append_named_obligations(
+                frame, source_owner, use_index, use_decl, imports)
         },
         UseImport::Module => {
             imports.push(ImportObligation {
@@ -669,16 +731,22 @@ fn relative_inline_base(
     let mut index = 1
     if first == "super" {
         if inline_parts.len() == 0 {
+            let issue_site = site
+            let issue_root_owner = frame.root_owner
             issues.push(namespace_issue(
-                ImportIssueKind::RelativeOutOfScope, site, frame.root_owner,
+                ImportIssueKind::RelativeOutOfScope,
+                issue_site, issue_root_owner,
                 "super", "", NamespaceKind::Value))
             return none
         }
         inline_parts.pop()
         while index < segments.len() && segments.get(index).unwrap_or("") == "super" {
             if inline_parts.len() == 0 {
+                let issue_site = site
+                let issue_root_owner = frame.root_owner
                 issues.push(namespace_issue(
-                    ImportIssueKind::RelativeOutOfScope, site, frame.root_owner,
+                    ImportIssueKind::RelativeOutOfScope,
+                    issue_site, issue_root_owner,
                     "super", "", NamespaceKind::Value))
                 return none
             }
@@ -859,20 +927,26 @@ pub fn census_module_namespaces(
 ) -> ModuleNamespaceCensus {
     let file_key = module_key(file_segments)
     let root_owner = module_prefix(file_segments)
+    let root_frame_file_key = file_key
+    let root_frame_owner = root_owner
+    let root_frame_root_owner = root_owner
     let mut frames: List<ModuleFramePlan> = [ModuleFramePlan {
-        file_key: file_key,
+        file_key: root_frame_file_key,
         frame_index: 0,
         parent_frame_index: -1,
         decl_index: -1,
-        owner: root_owner,
-        root_owner: root_owner,
+        owner: root_frame_owner,
+        root_owner: root_frame_root_owner,
         inline_prefix: "",
         is_public: true
     }]
 
     // Pass one fixes every frame index before any seed or import is emitted.
+    let header_file_key = file_key
+    let header_root_owner = root_owner
     collect_inline_frame_headers(
-        file_key, root_owner, "", 0, true, program.decls, frames)
+        header_file_key, header_root_owner, "", 0, true,
+        program.decls, frames)
 
     let mut frame_site_indices: Map<Str, Int> = map_new()
     for frame in frames {
@@ -1320,7 +1394,8 @@ fn append_import_ledger_ambiguities(
     entries.sort_by(compare_by_first)
     for entry in entries {
         let (key, candidates) = entry
-        if !ambiguous_keys.contains(key) {
+        let lookup_key = key
+        if !ambiguous_keys.contains(lookup_key) {
             match candidates.get(0) {
                 some(first) => {
                     for index in 1..candidates.len() {
@@ -1328,10 +1403,14 @@ fn append_import_ledger_ambiguities(
                             some(candidate) => {
                                 if candidate.binding.payload !=
                                    first.binding.payload {
+                                    let ambiguity_key = key
+                                    let ambiguity_candidate = candidate.binding
+                                    let ambiguity_occurrence =
+                                        candidate.occurrence
                                     append_binding_ambiguity(
-                                        key, first.binding.payload,
-                                        candidate.binding,
-                                        candidate.occurrence,
+                                        ambiguity_key, first.binding.payload,
+                                        ambiguity_candidate,
+                                        ambiguity_occurrence,
                                         ambiguous_keys, issues)
                                     break
                                 }
@@ -1368,9 +1447,14 @@ fn add_namespace_fact(
     let key = namespace_binding_key(
         candidate.file_key, candidate.frame_index,
         candidate.exposed_name, candidate.namespace)
-    record_import_candidate(key, candidate, occurrence, import_ledger)
+    let ledger_key = key
+    let ledger_candidate = candidate
+    let ledger_occurrence = occurrence
+    record_import_candidate(
+        ledger_key, ledger_candidate, ledger_occurrence, import_ledger)
 
-    match binding_indices.get(key) {
+    let lookup_key = key
+    match binding_indices.get(lookup_key) {
         some(existing_index) => match (
             bindings.get(existing_index),
             winner_occurrences.get(existing_index),
@@ -1381,49 +1465,72 @@ fn add_namespace_fact(
                 some(existing), some(existing_occurrence),
                 some(publication_binding), some(publication_occurrence)
             ) => {
+                // Match arms are ordinary closures. Rebind their captured
+                // inputs once, then transport fresh aliases to each consuming
+                // helper or winner slot below.
+                let fact_key = key
+                let fact_candidate = candidate
+                let fact_occurrence = occurrence
                 let existing_is_seed =
                     provenance_is_seed(existing_occurrence.provenance)
                 let candidate_is_seed =
-                    provenance_is_seed(occurrence.provenance)
+                    provenance_is_seed(fact_occurrence.provenance)
+                let direct_candidate = fact_candidate
+                let direct_occurrence = fact_occurrence
                 let direct_shadow_pair = private_direct_enum_leaf_shadow(
-                    existing, existing_occurrence, candidate, occurrence)
+                    existing, existing_occurrence,
+                    direct_candidate, direct_occurrence)
+                let ordered_candidate = fact_candidate
+                let ordered_occurrence = fact_occurrence
                 let ordered_value_shadow_pair =
                     same_frame_ordered_value_shadow(
-                    existing, existing_occurrence, candidate, occurrence)
+                    existing, existing_occurrence,
+                    ordered_candidate, ordered_occurrence)
+                let compat_occurrence = fact_occurrence
                 let candidate_is_compat_enum_leaf =
-                    occurrence_is_compat_enum_leaf(occurrence)
+                    occurrence_is_compat_enum_leaf(compat_occurrence)
                 let candidate_ordered_value_is_later =
                     ordered_value_shadow_pair &&
-                    site_is_before(existing_occurrence.site, occurrence.site)
+                    site_is_before(
+                        existing_occurrence.site, fact_occurrence.site)
                 // Publication has its own winner.  Local may currently be a
                 // private DirectDecl between two public enum leaves, so its
                 // occurrence cannot determine public leaf source order.
+                let publication_binding_for_order = publication_binding
+                let publication_occurrence_for_order = publication_occurrence
                 let candidate_publication_value_is_later = match (
-                    publication_binding, publication_occurrence
+                    publication_binding_for_order,
+                    publication_occurrence_for_order
                 ) {
                     (some(current_publication),
-                     some(current_publication_occurrence)) =>
+                     some(current_publication_occurrence)) => {
+                        let publication_candidate = fact_candidate
+                        let publication_candidate_occurrence = fact_occurrence
                         same_frame_ordered_value_shadow(
                             current_publication,
                             current_publication_occurrence,
-                            candidate, occurrence) &&
+                            publication_candidate,
+                            publication_candidate_occurrence) &&
                         site_is_before(
                             current_publication_occurrence.site,
-                            occurrence.site),
+                            fact_occurrence.site)
+                    },
                     _ => false
                 }
                 let mut next_local = existing
                 let mut next_local_occurrence = existing_occurrence
                 let mut local_replaced = false
 
-                if existing.payload == candidate.payload {
+                if existing.payload == fact_candidate.payload {
                     if candidate_is_seed && !existing_is_seed {
                         if !preloading_seeds {
                             panic(
                                 "namespace invariant violated: Seed would replace an installed Import lane")
                         }
-                        next_local = candidate
-                        next_local_occurrence = occurrence
+                        let replacement_candidate = fact_candidate
+                        let replacement_occurrence = fact_occurrence
+                        next_local = replacement_candidate
+                        next_local_occurrence = replacement_occurrence
                         local_replaced = true
                     } else if candidate_ordered_value_is_later {
                         if !preloading_seeds &&
@@ -1434,21 +1541,25 @@ fn add_namespace_fact(
                         // The payload is canonical-identical, but later
                         // relation comparisons must still see the active
                         // source-order occurrence.
-                        next_local = candidate
-                        next_local_occurrence = occurrence
+                        let replacement_candidate = fact_candidate
+                        let replacement_occurrence = fact_occurrence
+                        next_local = replacement_candidate
+                        next_local_occurrence = replacement_occurrence
                         local_replaced = true
                     }
                 } else {
                     if direct_shadow_pair || ordered_value_shadow_pair {
-                        if seed_role_is_direct(occurrence.seed_role) ||
+                        if seed_role_is_direct(fact_occurrence.seed_role) ||
                            candidate_ordered_value_is_later {
                             if !preloading_seeds &&
                                !candidate_is_compat_enum_leaf {
                                 panic(
                                     "namespace invariant violated: consumed Local lane cannot be replaced")
                             }
-                            next_local = candidate
-                            next_local_occurrence = occurrence
+                            let replacement_candidate = fact_candidate
+                            let replacement_occurrence = fact_occurrence
+                            next_local = replacement_candidate
+                            next_local_occurrence = replacement_occurrence
                             local_replaced = true
                         }
                     } else {
@@ -1467,8 +1578,12 @@ fn add_namespace_fact(
                                     panic(
                                         "namespace invariant violated: distinct Seed arrived after preload")
                                 }
+                                let ambiguity_key = fact_key
+                                let ambiguity_candidate = fact_candidate
+                                let ambiguity_occurrence = fact_occurrence
                                 append_binding_ambiguity(
-                                    key, existing.payload, candidate, occurrence,
+                                    ambiguity_key, existing.payload,
+                                    ambiguity_candidate, ambiguity_occurrence,
                                     ambiguous_keys, issues)
                             },
                             (false, true) => {
@@ -1482,7 +1597,7 @@ fn add_namespace_fact(
                 let mut next_publication = publication_binding
                 let mut next_publication_occurrence = publication_occurrence
                 let mut publication_created = false
-                if candidate.is_public {
+                if fact_candidate.is_public {
                     if candidate_publication_value_is_later {
                         if !preloading_seeds &&
                            !candidate_is_compat_enum_leaf {
@@ -1494,8 +1609,8 @@ fn add_namespace_fact(
                             some(_) => false
                         }
                         next_publication = some(
-                            binding_with_public(candidate, true))
-                        next_publication_occurrence = some(occurrence)
+                            binding_with_public(fact_candidate, true))
+                        next_publication_occurrence = some(fact_occurrence)
                     } else {
                         match publication_binding {
                             none => {
@@ -1504,21 +1619,26 @@ fn add_namespace_fact(
                                 // DirectDecl/EnumLeaf split, or the sole public
                                 // contribution below a later private
                                 // compat/strong Local winner.
-                                if candidate.payload == next_local.payload ||
+                                if fact_candidate.payload == next_local.payload ||
                                    direct_shadow_pair ||
                                    ordered_value_shadow_pair {
                                     if candidate_is_seed && !preloading_seeds {
                                         panic(
                                             "namespace invariant violated: late Seed would create Publication lane")
                                     }
+                                    let published_candidate = fact_candidate
+                                    let published_occurrence = fact_occurrence
                                     next_publication = some(
-                                        binding_with_public(candidate, true))
-                                    next_publication_occurrence = some(occurrence)
+                                        binding_with_public(
+                                            published_candidate, true))
+                                    next_publication_occurrence =
+                                        some(published_occurrence)
                                     publication_created = true
                                 }
                             },
                             some(existing_publication) => {
-                                if existing_publication.payload != candidate.payload &&
+                                if existing_publication.payload !=
+                                       fact_candidate.payload &&
                                    candidate_is_seed && !preloading_seeds {
                                     panic(
                                         "namespace invariant violated: late distinct Seed reached Publication lane")
@@ -1562,36 +1682,48 @@ fn add_namespace_fact(
             _ => {}
         },
         none => {
-            if provenance_is_seed(occurrence.provenance) &&
+            let new_key = key
+            let new_candidate = candidate
+            let new_occurrence = occurrence
+            if provenance_is_seed(new_occurrence.provenance) &&
                !preloading_seeds {
                 panic(
                     "namespace invariant violated: new Seed arrived after preload")
             }
             let index = bindings.len()
+            let local_candidate = new_candidate
             bindings.push(binding_with_public(
-                candidate, candidate.is_public))
-            winner_occurrences.push(occurrence)
-            let publication_binding = if candidate.is_public {
-                some(binding_with_public(candidate, true))
+                local_candidate, new_candidate.is_public))
+            let local_occurrence = new_occurrence
+            winner_occurrences.push(local_occurrence)
+            let publication_binding = if new_candidate.is_public {
+                let public_candidate = new_candidate
+                some(binding_with_public(public_candidate, true))
             } else {
                 none
             }
-            let publication_occurrence = if candidate.is_public {
-                some(occurrence)
+            let publication_occurrence = if new_candidate.is_public {
+                let public_occurrence = new_occurrence
+                some(public_occurrence)
             } else {
                 none
             }
-            publication_bindings.push(publication_binding)
-            publication_occurrences.push(publication_occurrence)
-            binding_indices.insert(key, index)
+            let stored_publication_binding = publication_binding
+            let stored_publication_occurrence = publication_occurrence
+            publication_bindings.push(stored_publication_binding)
+            publication_occurrences.push(stored_publication_occurrence)
+            let binding_index_value = index
+            binding_indices.insert(new_key, binding_index_value)
             if !preloading_seeds {
+                let local_binding_index = index
                 queue.push(NamespaceQueueEvent {
-                    binding_index: index,
+                    binding_index: local_binding_index,
                     lane: NamespaceDeliveryLane::Local
                 })
-                if candidate.is_public {
+                if new_candidate.is_public {
+                    let publication_binding_index = index
                     queue.push(NamespaceQueueEvent {
-                        binding_index: index,
+                        binding_index: publication_binding_index,
                         lane: NamespaceDeliveryLane::Publication
                     })
                 }
@@ -1703,10 +1835,10 @@ fn register_value_structural_producer(
                     let had_public =
                         structural_slot_has_public_producer(slot)
                     let mut producers = list_clone(slot.producers)
-                    producers.push(producer)
+                    let producer_is_public = producer.binding.is_public
                     let has_public_seed_terminal =
                         slot.has_public_seed_terminal ||
-                        (producer.binding.is_public &&
+                        (producer_is_public &&
                          structural_producer_is_seed(producer))
                     let mut local_announced = slot.local_announced
                     let mut publication_announced =
@@ -1718,7 +1850,7 @@ fn register_value_structural_producer(
                             lane: NamespaceDeliveryLane::Local
                         })
                     }
-                    if announce && producer.binding.is_public &&
+                    if announce && producer_is_public &&
                        !had_public && !publication_announced {
                         publication_announced = true
                         announcements.push(ValueLaneAnnouncement {
@@ -1726,6 +1858,8 @@ fn register_value_structural_producer(
                             lane: NamespaceDeliveryLane::Publication
                         })
                     }
+                    let stored_producer = producer
+                    producers.push(stored_producer)
                     slots.set(slot_index, ValueStructuralSlot {
                         binding_template: slot.binding_template,
                         producers: producers,
@@ -1748,10 +1882,11 @@ fn register_value_structural_producer(
         none => {
             let slot_index = slots.len()
             let local_announced = announce
+            let producer_is_public = producer.binding.is_public
             let publication_announced =
-                announce && producer.binding.is_public
+                announce && producer_is_public
             let has_public_seed_terminal =
-                producer.binding.is_public &&
+                producer_is_public &&
                 structural_producer_is_seed(producer)
             slots.push(ValueStructuralSlot {
                 binding_template: ResolvedNamespaceBinding {
@@ -1771,16 +1906,19 @@ fn register_value_structural_producer(
                 local_winner_index: -1,
                 publication_winner_index: -1
             })
-            slot_indices.insert(key, slot_index)
+            let indexed_slot_index = slot_index
+            slot_indices.insert(key, indexed_slot_index)
             if local_announced {
+                let local_slot_index = slot_index
                 announcements.push(ValueLaneAnnouncement {
-                    slot_index: slot_index,
+                    slot_index: local_slot_index,
                     lane: NamespaceDeliveryLane::Local
                 })
             }
             if publication_announced {
+                let publication_slot_index = slot_index
                 announcements.push(ValueLaneAnnouncement {
-                    slot_index: slot_index,
+                    slot_index: publication_slot_index,
                     lane: NamespaceDeliveryLane::Publication
                 })
             }
@@ -2097,7 +2235,10 @@ fn reduce_value_lane(
     for candidate in contributions {
         if !public_only || candidate.binding.is_public {
             match winner {
-                none => { winner = some(candidate) },
+                none => {
+                    let initial_candidate = candidate
+                    winner = some(initial_candidate)
+                },
                 some(existing) => {
                     let existing_is_seed =
                         value_contribution_is_seed(existing)
@@ -2139,8 +2280,10 @@ fn reduce_value_lane(
                             (false, true) => { replace = true },
                             (true, true) => {
                                 if report_seed_collisions {
+                                    let ambiguity_key = key
                                     append_binding_ambiguity(
-                                        key, existing.binding.payload,
+                                        ambiguity_key,
+                                        existing.binding.payload,
                                         candidate.binding,
                                         candidate.occurrence,
                                         ambiguous_keys, issues)
@@ -2148,7 +2291,10 @@ fn reduce_value_lane(
                             }
                         }
                     }
-                    if replace { winner = some(candidate) }
+                    if replace {
+                        let replacement_candidate = candidate
+                        winner = some(replacement_candidate)
+                    }
                 }
             }
         }
@@ -2256,7 +2402,8 @@ fn deliver_namespace_fact(
                         resolved_obligations, issues) {
                         continue
                     }
-                    resolved_obligations.insert(obligation_index)
+                    let resolved_obligation_index = obligation_index
+                    resolved_obligations.insert(resolved_obligation_index)
                     let local_name = match obligation.selection {
                         ImportSelection::Named => obligation.local_name,
                         ImportSelection::Wildcard => fact.exposed_name
@@ -2297,7 +2444,7 @@ fn deliver_namespace_fact(
                                 match enum_variant_facts.get(fact.payload) {
                                     some(ctor_facts) => {
                                         for ctor in ctor_facts {
-                                            let relation_provenance =
+                                            let leaf_relation_provenance =
                                                 NamespaceFactProvenance::NamedEnumRelation {
                                                     source_owner:
                                                         obligation.source_owner,
@@ -2317,7 +2464,7 @@ fn deliver_namespace_fact(
                                                 },
                                                 occurrence: NamespaceFactOccurrence {
                                                     provenance:
-                                                        relation_provenance,
+                                                        leaf_relation_provenance,
                                                     site: obligation.site,
                                                     leaf_origin_site: some(
                                                         ctor.origin_site),
@@ -2337,6 +2484,13 @@ fn deliver_namespace_fact(
                                             // Value.  Public projection and
                                             // wildcard propagation then carry
                                             // both through the same worklist.
+                                            let qualified_relation_provenance =
+                                                NamespaceFactProvenance::NamedEnumRelation {
+                                                    source_owner:
+                                                        obligation.source_owner,
+                                                    obligation_index:
+                                                        obligation_index
+                                                }
                                             pending_named_enum_relation_facts.push(
                                                 PendingNamedEnumRelationFact {
                                                 binding: ResolvedNamespaceBinding {
@@ -2351,7 +2505,7 @@ fn deliver_namespace_fact(
                                                 },
                                                 occurrence: NamespaceFactOccurrence {
                                                     provenance:
-                                                        relation_provenance,
+                                                        qualified_relation_provenance,
                                                     site: obligation.site,
                                                     leaf_origin_site: some(
                                                         ctor.origin_site),
@@ -2502,7 +2656,9 @@ fn deliver_structural_value_imports(
                                 resolved_obligations, issues) {
                                 continue
                             }
-                            resolved_obligations.insert(obligation_index)
+                            let resolved_obligation_index = obligation_index
+                            resolved_obligations.insert(
+                                resolved_obligation_index)
                             let local_name =
                                 match obligation.selection {
                                     ImportSelection::Named =>
@@ -2510,7 +2666,12 @@ fn deliver_structural_value_imports(
                                     ImportSelection::Wildcard =>
                                         source.exposed_name
                                 }
+                            let stored_source_lane = source_lane
+                            let stored_obligation_index = obligation_index
                             let _ = register_value_structural_producer(
+                                // Every stored edge gets its own whole binding;
+                                // the loop-carried source values remain available
+                                // for the next obligation.
                                 ValueStructuralProducer {
                                     producer:
                                         structural_value_import_producer(
@@ -2544,8 +2705,9 @@ fn deliver_structural_value_imports(
                                         ValueStructuralProducerKind::ImportCopy,
                                     source_slot_index:
                                         source_slot_index,
-                                    source_lane: source_lane,
-                                    obligation_index: obligation_index
+                                    source_lane: stored_source_lane,
+                                    obligation_index:
+                                        stored_obligation_index
                                 },
                                 true, slots, slot_indices, announcements)
                         }
@@ -2833,9 +2995,12 @@ fn build_value_lane_nodes(
                         lane: NamespaceDeliveryLane::Local,
                         winner_index: slot.local_winner_index
                     })
-                    node_indices.insert(key, node_index)
-                    node_order.push(key)
-                    graph.insert(key, [])
+                    let indexed_key = key
+                    let ordered_key = key
+                    let graph_key = key
+                    node_indices.insert(indexed_key, node_index)
+                    node_order.push(ordered_key)
+                    graph.insert(graph_key, [])
                 }
                 if slot.publication_winner_index >= 0 {
                     let key = value_lane_node_key(
@@ -2848,9 +3013,12 @@ fn build_value_lane_nodes(
                         winner_index:
                             slot.publication_winner_index
                     })
-                    node_indices.insert(key, node_index)
-                    node_order.push(key)
-                    graph.insert(key, [])
+                    let indexed_key = key
+                    let ordered_key = key
+                    let graph_key = key
+                    node_indices.insert(indexed_key, node_index)
+                    node_order.push(ordered_key)
+                    graph.insert(graph_key, [])
                 }
             },
             none => {}
@@ -2937,19 +3105,24 @@ fn propagate_acyclic_value_lanes(
                                             }
                                             match solutions.get(source_index) {
                                                 some(some(source)) => {
+                                                    let materialized_source =
+                                                        source
                                                     solutions.set(
                                                         node_index,
                                                         materialize_structural_producer(
                                                             producer,
-                                                            some(source)))
+                                                            some(
+                                                                materialized_source)))
                                                     changed = true
                                                     any_progress = true
                                                 },
                                                 _ => {
                                                     if failed_nodes.contains(
                                                         source_index) {
+                                                        let failed_node_index =
+                                                            node_index
                                                         failed_nodes.insert(
-                                                            node_index)
+                                                            failed_node_index)
                                                         changed = true
                                                         any_progress = true
                                                     }
@@ -2982,7 +3155,8 @@ fn active_cycle_root_component(
     let mut current = start_node_index
     let mut visited: Set<Int> = set_new()
     while current >= 0 && !visited.contains(current) {
-        visited.insert(current)
+        let visited_node = current
+        visited.insert(visited_node)
         match nodes.get(current) {
             some(node) => {
                 let component = node_components.get(
@@ -3042,17 +3216,23 @@ fn resolve_active_cycle_component(
     for node_key in component {
         let node_index = node_indices.get(node_key).unwrap_or(-1)
         if node_index >= 0 {
-            component_node_indices.push(node_index)
+            let component_node_index = node_index
+            component_node_indices.push(component_node_index)
             match nodes.get(node_index) {
                 some(node) => match slots.get(node.slot_index) {
                     some(slot) => match slot.producers.get(
                         node.winner_index) {
                         some(producer) => match producer.kind {
                             ValueStructuralProducerKind::ImportCopy => {
+                                let solution_node_index = node_index
+                                let cycle_payload = payload
+                                let cycle_solution =
+                                    materialize_cycle_import_producer(
+                                        producer, cycle_payload)
+                                let stored_cycle_solution = cycle_solution
                                 solutions.set(
-                                    node_index,
-                                    some(materialize_cycle_import_producer(
-                                        producer, payload)))
+                                    solution_node_index,
+                                    some(stored_cycle_solution))
                                 import_anchor_count =
                                     import_anchor_count + 1
                             },
@@ -3085,10 +3265,12 @@ fn resolve_active_cycle_component(
                                         producer, node_indices)
                                 match solutions.get(source_index) {
                                     some(some(source)) => {
+                                        let materialized_source = source
                                         solutions.set(
                                             node_index,
                                             materialize_structural_producer(
-                                                producer, some(source)))
+                                                producer,
+                                                some(materialized_source)))
                                         changed = true
                                     },
                                     _ => {}
@@ -3117,11 +3299,21 @@ fn append_unique_graph_edge(
 ) {
     match graph.get(source) {
         some(edges) => {
-            if !edges.contains(target) { edges.push(target) }
+            if !edges.contains(target) {
+                let edge_target = target
+                edges.push(edge_target)
+            }
         },
-        none => { graph.insert(source, [target]) }
+        none => {
+            let graph_source = source
+            let initial_target = target
+            graph.insert(graph_source, [initial_target])
+        }
     }
-    if !graph.contains_key(target) { graph.insert(target, []) }
+    if !graph.contains_key(target) {
+        let target_node = target
+        graph.insert(target_node, [])
+    }
 }
 
 fn append_materialized_strong_ambiguity(
@@ -3196,7 +3388,8 @@ fn append_active_value_cycle_issue(
             some(component) => {
                 for node_key in component {
                     if !related_nodes.contains(node_key) {
-                        related_nodes.push(node_key)
+                        let related_node = node_key
+                        related_nodes.push(related_node)
                     }
                     let node_index =
                         node_indices.get(node_key).unwrap_or(-1)
@@ -3208,15 +3401,18 @@ fn append_active_value_cycle_issue(
                                     ValueStructuralProducerKind::ImportCopy => {
                                         match first_producer {
                                             none => {
+                                                let initial_producer = producer
                                                 first_producer =
-                                                    some(producer)
+                                                    some(initial_producer)
                                             },
                                             some(existing) => {
                                                 if site_is_before(
                                                     producer.occurrence.site,
                                                     existing.occurrence.site) {
+                                                    let earlier_producer =
+                                                        producer
                                                     first_producer =
-                                                        some(producer)
+                                                        some(earlier_producer)
                                                 }
                                             }
                                         }
@@ -3271,7 +3467,11 @@ fn solve_structural_value_lanes(
     let mut node_order: List<Str> = []
     build_value_lane_nodes(
         slots, nodes, node_indices, graph, node_order)
-    for _ in nodes { solutions.push(none) }
+    // Protocol for-in lowering represents the loop binder as an if-let
+    // pattern. Keep a real (intentionally unused) binder here so both the
+    // old bootstrap validator and the exact-metadata validator agree that
+    // the binding owns a DefId; bare `_` is a wildcard and owns no slot.
+    for _ignored_node in nodes { solutions.push(none) }
 
     let components = ordered_import_scc(graph, node_order)
     let mut node_components: Map<Str, Int> = map_new()
@@ -3279,16 +3479,20 @@ fn solve_structural_value_lanes(
     for component_index in 0..components.len() {
         match components.get(component_index) {
             some(component) => {
+                let cyclic_component_index = component_index
+                let mapped_component_index = component_index
                 let is_cycle = component.len() > 1 ||
                     (component.len() == 1 &&
                      graph_has_self_edge(
                          component.get(0).unwrap_or(""), graph))
                 if is_cycle {
-                    cyclic_components.insert(component_index)
+                    cyclic_components.insert(cyclic_component_index)
                 }
                 for node_key in component {
+                    let component_node_key = node_key
+                    let component_id = mapped_component_index
                     node_components.insert(
-                        node_key, component_index)
+                        component_node_key, component_id)
                 }
             },
             none => {}
@@ -3310,10 +3514,16 @@ fn solve_structural_value_lanes(
     for component_index in 0..components.len() {
         if cyclic_components.contains(component_index) {
             let key = "active-value-cycle|${component_index}"
-            component_keys.insert(component_index, key)
-            key_components.insert(key, component_index)
-            witness_graph.insert(key, [])
-            witness_order.push(key)
+            let component_key = key
+            let reverse_key = key
+            let graph_key = key
+            let ordered_key = key
+            let component_key_index = component_index
+            let reverse_component_index = component_index
+            component_keys.insert(component_key_index, component_key)
+            key_components.insert(reverse_key, reverse_component_index)
+            witness_graph.insert(graph_key, [])
+            witness_order.push(ordered_key)
         }
     }
     for component_index in 0..components.len() {
@@ -3379,9 +3589,12 @@ fn solve_structural_value_lanes(
                     let active_component =
                         key_components.get(component_key).unwrap_or(-1)
                     if active_component >= 0 {
-                        active_components.push(active_component)
+                        let grouped_component = active_component
+                        active_components.push(grouped_component)
+                        let mapped_component = active_component
+                        let mapped_group = group_index
                         active_component_group.insert(
-                            active_component, group_index)
+                            mapped_component, mapped_group)
                     }
                 }
             },
@@ -3414,8 +3627,11 @@ fn solve_structural_value_lanes(
                         }
                     },
                     none => {
+                        let dependency_source_group = source_group
+                        let dependency_target_group = target_group
                         group_dependencies.insert(
-                            source_group, [target_group])
+                            dependency_source_group,
+                            [dependency_target_group])
                     }
                 }
             }
@@ -3423,7 +3639,9 @@ fn solve_structural_value_lanes(
     }
 
     let mut group_status: List<Int> = []
-    for _ in group_active_components { group_status.push(0) }
+    for _ignored_component in group_active_components {
+        group_status.push(0)
+    }
     let mut remaining_groups = group_status.len()
     while remaining_groups > 0 {
         let mut round_progress = false
@@ -3472,8 +3690,10 @@ fn solve_structural_value_lanes(
                                                                         append_distinct_payload(
                                                                             witness.binding.payload,
                                                                             payloads)
+                                                                        let stored_witness =
+                                                                            witness
                                                                         witnesses.push(
-                                                                            witness)
+                                                                            stored_witness)
                                                                     },
                                                                     none => {}
                                                                 }
@@ -3500,15 +3720,20 @@ fn solve_structural_value_lanes(
                                                                     match solutions.get(
                                                                         source_index) {
                                                                         some(some(source)) => {
+                                                                            let materialized_source =
+                                                                                source
                                                                             match materialize_structural_producer(
                                                                                 producer,
-                                                                                some(source)) {
+                                                                                some(
+                                                                                    materialized_source)) {
                                                                                 some(witness) => {
                                                                                     append_distinct_payload(
                                                                                         witness.binding.payload,
                                                                                         payloads)
+                                                                                    let stored_witness =
+                                                                                        witness
                                                                                     witnesses.push(
-                                                                                        witness)
+                                                                                        stored_witness)
                                                                                 },
                                                                                 none => {}
                                                                             }
@@ -3624,8 +3849,10 @@ fn materialize_structural_value_plan(
                     }
                     match materialize_structural_producer(
                         producer, source) {
-                        some(contribution) =>
-                            contributions.push(contribution),
+                        some(contribution) => {
+                            let stored_contribution = contribution
+                            contributions.push(stored_contribution)
+                        },
                         none => {}
                     }
                 }
@@ -3722,8 +3949,9 @@ fn ordered_import_scc(
     let mut result: List<List<Str>> = []
     for node in node_order {
         if !indices.contains_key(node) {
+            let start_node = node
             import_scc_connect(
-                node, graph, index_counter, stack, on_stack,
+                start_node, graph, index_counter, stack, on_stack,
                 indices, lowlinks, result)
         }
     }
@@ -3742,27 +3970,36 @@ fn import_scc_connect(
 ) {
     let node_index = index_counter[0]
     index_counter.set(0, node_index + 1)
-    indices.insert(node, node_index)
-    lowlinks.insert(node, node_index)
-    stack.push(node)
-    on_stack.insert(node)
+    let indices_node = node
+    let indices_value = node_index
+    let lowlinks_node = node
+    let lowlinks_value = node_index
+    let stack_node = node
+    let on_stack_node = node
+    indices.insert(indices_node, indices_value)
+    lowlinks.insert(lowlinks_node, lowlinks_value)
+    stack.push(stack_node)
+    on_stack.insert(on_stack_node)
 
     let successors = graph.get(node).unwrap_or([])
     for successor in successors {
         if !indices.contains_key(successor) {
+            let recursive_successor = successor
             import_scc_connect(
-                successor, graph, index_counter, stack, on_stack,
+                recursive_successor, graph, index_counter, stack, on_stack,
                 indices, lowlinks, result)
             let node_low = lowlinks.get(node).unwrap_or(node_index)
             let successor_low = lowlinks.get(successor).unwrap_or(node_low)
             if successor_low < node_low {
-                lowlinks.insert(node, successor_low)
+                let lowlink_node = node
+                lowlinks.insert(lowlink_node, successor_low)
             }
         } else if on_stack.contains(successor) {
             let node_low = lowlinks.get(node).unwrap_or(node_index)
             let successor_index = indices.get(successor).unwrap_or(node_low)
             if successor_index < node_low {
-                lowlinks.insert(node, successor_index)
+                let lowlink_node = node
+                lowlinks.insert(lowlink_node, successor_index)
             }
         }
     }
@@ -3774,7 +4011,8 @@ fn import_scc_connect(
             match stack.pop() {
                 some(member) => {
                     on_stack.remove(member)
-                    component.push(member)
+                    let component_member = member
+                    component.push(component_member)
                     if member == node { complete = true }
                 },
                 none => { complete = true }
@@ -3813,9 +4051,12 @@ fn append_growth_graph_node(
     mut seen_nodes: Set<Str>
 ) {
     if !seen_nodes.contains(node) {
-        seen_nodes.insert(node)
-        node_order.push(node)
-        graph.insert(node, [])
+        let seen_node = node
+        let ordered_node = node
+        let graph_node = node
+        seen_nodes.insert(seen_node)
+        node_order.push(ordered_node)
+        graph.insert(graph_node, [])
     }
 }
 
@@ -3849,8 +4090,15 @@ fn build_namespace_growth_guard(
     let mut frames_by_owner: Map<Str, List<ModuleFramePlan>> = map_new()
     for frame in frames {
         match frames_by_owner.get(frame.owner) {
-            some(existing) => existing.push(frame),
-            none => { frames_by_owner.insert(frame.owner, [frame]) }
+            some(existing) => {
+                let stored_frame = frame
+                existing.push(stored_frame)
+            },
+            none => {
+                let owner = frame.owner
+                let stored_frame = frame
+                frames_by_owner.insert(owner, [stored_frame])
+            }
         }
     }
 
@@ -3874,13 +4122,16 @@ fn build_namespace_growth_guard(
                                     } else {
                                         NamespaceDeliveryLane::Publication
                                     }
+                                let local_edge_source_lane = source_lane
+                                let publication_edge_source_lane = source_lane
                                 let source_node = growth_lane_node(
                                     source_frame.file_key,
                                     source_frame.frame_index,
                                     source_lane)
+                                let local_source_node = source_node
                                 append_growth_schema_edge(
                                     NamespaceGrowthSchemaEdge {
-                                        source_node: source_node,
+                                        source_node: local_source_node,
                                         target_node: growth_lane_node(
                                             obligation.file_key,
                                             obligation.target_frame_index,
@@ -3890,15 +4141,17 @@ fn build_namespace_growth_guard(
                                             source_frame.file_key,
                                         source_frame_index:
                                             source_frame.frame_index,
-                                        source_lane: source_lane,
+                                        source_lane: local_edge_source_lane,
                                         is_prefix: false
                                     },
                                     graph, node_order, seen_nodes,
                                     schema_edges)
                                 if obligation.is_public {
+                                    let publication_source_node = source_node
                                     append_growth_schema_edge(
                                         NamespaceGrowthSchemaEdge {
-                                            source_node: source_node,
+                                            source_node:
+                                                publication_source_node,
                                             target_node: growth_lane_node(
                                                 obligation.file_key,
                                                 obligation.target_frame_index,
@@ -3909,7 +4162,8 @@ fn build_namespace_growth_guard(
                                                 source_frame.file_key,
                                             source_frame_index:
                                                 source_frame.frame_index,
-                                            source_lane: source_lane,
+                                            source_lane:
+                                                publication_edge_source_lane,
                                             is_prefix: false
                                         },
                                         graph, node_order, seen_nodes,
@@ -3932,9 +4186,10 @@ fn build_namespace_growth_guard(
                     let source_node = growth_lane_node(
                         frame.file_key, frame.frame_index,
                         NamespaceDeliveryLane::Publication)
+                    let local_source_node = source_node
                     append_growth_schema_edge(
                         NamespaceGrowthSchemaEdge {
-                            source_node: source_node,
+                            source_node: local_source_node,
                             target_node: growth_lane_node(
                                 root_frame.file_key, root_frame.frame_index,
                                 NamespaceDeliveryLane::Local),
@@ -3946,9 +4201,10 @@ fn build_namespace_growth_guard(
                             is_prefix: true
                         },
                         graph, node_order, seen_nodes, schema_edges)
+                    let publication_source_node = source_node
                     append_growth_schema_edge(
                         NamespaceGrowthSchemaEdge {
-                            source_node: source_node,
+                            source_node: publication_source_node,
                             target_node: growth_lane_node(
                                 root_frame.file_key, root_frame.frame_index,
                                 NamespaceDeliveryLane::Publication),
@@ -3973,14 +4229,22 @@ fn build_namespace_growth_guard(
     for component_index in 0..components.len() {
         match components.get(component_index) {
             some(component) => {
+                let cycle_component_index = component_index
+                let stored_component_index = component_index
+                let mapped_component_index = component_index
                 let is_cycle = component.len() > 1 ||
                     (component.len() == 1 &&
                      graph_has_self_edge(
                          component.get(0).unwrap_or(""), graph))
-                component_is_cycle.insert(component_index, is_cycle)
-                component_nodes.insert(component_index, component)
+                component_is_cycle.insert(cycle_component_index, is_cycle)
+                let stored_component = component
+                component_nodes.insert(
+                    stored_component_index, stored_component)
                 for node in component {
-                    node_component.insert(node, component_index)
+                    let component_node = node
+                    let node_component_index = mapped_component_index
+                    node_component.insert(
+                        component_node, node_component_index)
                 }
             },
             none => {}
@@ -4020,12 +4284,15 @@ fn build_namespace_growth_guard(
                 match dangerous_edges.get(key) {
                     some(existing) => {
                         if !existing.contains(source_component) {
-                            existing.push(source_component)
+                            let dangerous_component = source_component
+                            existing.push(dangerous_component)
                         }
                     },
                     none => {
+                        let dangerous_key = key
+                        let dangerous_component = source_component
                         dangerous_edges.insert(
-                            key, [source_component])
+                            dangerous_key, [dangerous_component])
                     }
                 }
                 match component_obligations.get(source_component) {
@@ -4035,8 +4302,10 @@ fn build_namespace_growth_guard(
                         }
                     },
                     none => {
+                        let obligation_component = source_component
                         component_obligations.insert(
-                            source_component, [edge.obligation_index])
+                            obligation_component,
+                            [edge.obligation_index])
                     }
                 }
                 match component_first_obligation.get(source_component) {
@@ -4047,16 +4316,18 @@ fn build_namespace_growth_guard(
                         (some(previous), some(candidate)) => {
                             if site_is_before(
                                 candidate.site, previous.site) {
+                                let first_component = source_component
                                 component_first_obligation.insert(
-                                    source_component,
+                                    first_component,
                                     edge.obligation_index)
                             }
                         },
                         _ => {}
                     },
                     none => {
+                        let first_component = source_component
                         component_first_obligation.insert(
-                            source_component, edge.obligation_index)
+                            first_component, edge.obligation_index)
                     }
                 }
             }
@@ -4089,11 +4360,14 @@ fn block_namespace_growth_delivery(
         some(components) => {
             for component_index in components {
                 if !blocked_components.contains(component_index) {
-                    blocked_components.insert(component_index)
+                    let blocked_component = component_index
+                    blocked_components.insert(blocked_component)
                     match guard.component_obligations.get(component_index) {
                         some(obligation_indices) => {
                             for related_index in obligation_indices {
-                                resolved_obligations.insert(related_index)
+                                let resolved_related_index = related_index
+                                resolved_obligations.insert(
+                                    resolved_related_index)
                             }
                         },
                         none => {}
@@ -4105,6 +4379,7 @@ fn block_namespace_growth_delivery(
                         (some(first_index), some(nodes)) => {
                             match imports.get(first_index) {
                                 some(first) => {
+                                    let related_nodes = nodes
                                     issues.push(ImportIssue {
                                         kind:
                                             ImportIssueKind::UnresolvedImportCycle,
@@ -4113,7 +4388,7 @@ fn block_namespace_growth_delivery(
                                         source_name: source.exposed_name,
                                         local_name: source.exposed_name,
                                         namespace: source.namespace,
-                                        related_owners: nodes
+                                        related_owners: related_nodes
                                     })
                                 },
                                 none => {}
@@ -4140,7 +4415,8 @@ fn append_unresolved_issues(
     let mut unresolved: List<Int> = []
     for obligation_index in 0..imports.len() {
         if !resolved_obligations.contains(obligation_index) {
-            unresolved.push(obligation_index)
+            let unresolved_index = obligation_index
+            unresolved.push(unresolved_index)
             match imports.get(obligation_index) {
                 some(obligation) => {
                     // A missing frame cannot participate in an import SCC.
@@ -4148,22 +4424,34 @@ fn append_unresolved_issues(
                         let target = unresolved_target_node(obligation)
                         let source = unresolved_source_node(obligation)
                         if !seen_nodes.contains(target) {
-                            seen_nodes.insert(target)
-                            node_order.push(target)
+                            let seen_target = target
+                            let ordered_target = target
+                            seen_nodes.insert(seen_target)
+                            node_order.push(ordered_target)
                         }
                         if !seen_nodes.contains(source) {
-                            seen_nodes.insert(source)
-                            node_order.push(source)
+                            let seen_source = source
+                            let ordered_source = source
+                            seen_nodes.insert(seen_source)
+                            node_order.push(ordered_source)
                         }
                         match graph.get(target) {
                             // Preserve one edge per obligation.  Tarjan may
                             // visit duplicate targets, but construction stays
                             // linear instead of scanning an adjacency list.
-                            some(edges) => edges.push(source),
-                            none => { graph.insert(target, [source]) }
+                            some(edges) => {
+                                let edge_source = source
+                                edges.push(edge_source)
+                            },
+                            none => {
+                                let graph_target = target
+                                let graph_source = source
+                                graph.insert(graph_target, [graph_source])
+                            }
                         }
                         if !graph.contains_key(source) {
-                            graph.insert(source, [])
+                            let source_node = source
+                            graph.insert(source_node, [])
                         }
                     }
                 },
@@ -4179,14 +4467,19 @@ fn append_unresolved_issues(
     for component_index in 0..raw_components.len() {
         match raw_components.get(component_index) {
             some(component) => {
+                let mapped_component_index = component_index
                 let is_cycle = component.len() > 1 ||
                     (component.len() == 1 &&
                      graph_has_self_edge(
                          component.get(0).unwrap_or(""), graph))
                 for node in component {
-                    node_component.insert(node, component_index)
+                    let component_node = node
+                    let node_component_index = mapped_component_index
+                    node_component.insert(
+                        component_node, node_component_index)
                 }
-                components.push(component)
+                let stored_component = component
+                components.push(stored_component)
                 component_is_cycle.push(is_cycle)
             },
             none => {}
@@ -4218,24 +4511,33 @@ fn append_unresolved_issues(
                         component_is_cycle.get(
                             target_component).unwrap_or(false)
                     if internal_cycle {
-                        cyclic_components.insert(target_component)
+                        let cyclic_component = target_component
+                        cyclic_components.insert(cyclic_component)
                         match component_first_obligation.get(target_component) {
                             some(previous_index) => {
                                 match imports.get(previous_index) {
                                     some(previous) => {
                                         if site_is_before(
                                             obligation.site, previous.site) {
+                                            let first_component =
+                                                target_component
+                                            let first_obligation_index =
+                                                obligation_index
                                             component_first_obligation.insert(
-                                                target_component,
-                                                obligation_index)
+                                                first_component,
+                                                first_obligation_index)
                                         }
                                     },
                                     none => {}
                                 }
                             },
                             none => {
+                                let first_component = target_component
+                                let first_obligation_index =
+                                    obligation_index
                                 component_first_obligation.insert(
-                                    target_component, obligation_index)
+                                    first_component,
+                                    first_obligation_index)
                             }
                         }
                     } else {
@@ -4260,6 +4562,7 @@ fn append_unresolved_issues(
                 (some(first_index), some(component)) => {
                     match imports.get(first_index) {
                         some(first) => {
+                            let related_component = component
                             issues.push(ImportIssue {
                                 kind: ImportIssueKind::UnresolvedImportCycle,
                                 site: first.site,
@@ -4267,7 +4570,7 @@ fn append_unresolved_issues(
                                 source_name: first.source_name,
                                 local_name: first.local_name,
                                 namespace: NamespaceKind::Value,
-                                related_owners: component
+                                related_owners: related_component
                             })
                         },
                         none => {}
@@ -4292,16 +4595,25 @@ pub fn resolve_namespace_plan(
 
     for census in censuses {
         for frame in census.frames {
-            frames.push(frame)
+            let listed_frame = frame
+            frames.push(listed_frame)
+            let indexed_frame = frame
             exact_frames.insert(
-                exact_frame_key(frame.file_key, frame.frame_index), frame)
-            source_owners.insert(frame.owner)
+                exact_frame_key(frame.file_key, frame.frame_index),
+                indexed_frame)
+            let source_owner = frame.owner
+            source_owners.insert(source_owner)
         }
         for entry in census.enum_variant_facts.entries() {
             let (enum_payload, ctor_facts) = entry
             match enum_variant_facts.get(enum_payload) {
                 some(existing) => existing.extend(ctor_facts),
-                none => { enum_variant_facts.insert(enum_payload, ctor_facts) }
+                none => {
+                    let stored_enum_payload = enum_payload
+                    let stored_ctor_facts = ctor_facts
+                    enum_variant_facts.insert(
+                        stored_enum_payload, stored_ctor_facts)
+                }
             }
         }
         imports.extend(census.imports)
@@ -4331,20 +4643,29 @@ pub fn resolve_namespace_plan(
         match imports.get(obligation_index) {
             some(obligation) => match obligation.selection {
                 ImportSelection::Named => {
+                    let named_subscription_obligation_index =
+                        obligation_index
                     append_subscription(
                         named_subscription_key(
                             obligation.source_owner, obligation.source_name),
-                        obligation_index, named_subscriptions)
+                        named_subscription_obligation_index,
+                        named_subscriptions)
                 },
                 ImportSelection::Wildcard => {
+                    let subscription_obligation_index = obligation_index
+                    let resolved_obligation_source_index = obligation_index
                     append_subscription(
                         wildcard_subscription_key(obligation.source_owner),
-                        obligation_index, wildcard_subscriptions)
+                        subscription_obligation_index,
+                        wildcard_subscriptions)
                     // Existence of the source frame resolves a wildcard even
                     // when it currently exposes no visible facts.  Keep the
                     // subscription so later queue deliveries still propagate.
                     if source_owners.contains(obligation.source_owner) {
-                        resolved_obligations.insert(obligation_index)
+                        let resolved_obligation_index =
+                            resolved_obligation_source_index
+                        resolved_obligations.insert(
+                            resolved_obligation_index)
                     }
                 }
             },
@@ -4588,9 +4909,11 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
     let project_root = path_dirname(abs_entry)
 
     let entry_basename = path_basename(abs_entry).replace(".ring", "")
+    let entry_id_basename = entry_basename
+    let entry_id_file_path = abs_entry
     let entry_id = ModuleId {
-        path_segments: [entry_basename],
-        file_path: abs_entry
+        path_segments: [entry_id_basename],
+        file_path: entry_id_file_path
     }
     let entry_key = module_key(entry_id.path_segments)
 
@@ -4599,11 +4922,14 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
     let mut asts_map: Map<Str, Program> = map_new()
     let mut censuses: List<ModuleNamespaceCensus> = []
 
-    modules.insert(entry_key, entry_id)
+    let module_entry_key = entry_key
+    modules.insert(module_entry_key, entry_id)
     let mut empty_deps: List<Str> = []
-    dependencies.insert(entry_key, empty_deps)
+    let dependency_entry_key = entry_key
+    dependencies.insert(dependency_entry_key, empty_deps)
 
-    let mut queue: List<Str> = [entry_key]
+    let queued_entry_key = entry_key
+    let mut queue: List<Str> = [queued_entry_key]
 
     while queue.len() > 0 {
         match queue.shift() {
@@ -4633,8 +4959,6 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
                         // successfully parsed physical module.
                         let census = census_module_namespaces(
                             current_mod.path_segments, ast)
-                        asts_map.insert(current_key, ast)
-                        censuses.push(census)
 
                         let mut deps: List<Str> = []
                         // The physical frontier is normalized by census.  Do
@@ -4653,14 +4977,20 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
                                                         physical.module_segments),
                                                     file_path: abs_resolved
                                                 }
-                                                modules.insert(dep_key, dep_id)
+                                                let module_dep_key = dep_key
+                                                modules.insert(
+                                                    module_dep_key, dep_id)
                                                 let mut empty: List<Str> = []
-                                                dependencies.insert(dep_key, empty)
-                                                queue.push(dep_key)
+                                                let dependency_dep_key = dep_key
+                                                dependencies.insert(
+                                                    dependency_dep_key, empty)
+                                                let queued_dep_key = dep_key
+                                                queue.push(queued_dep_key)
                                             },
                                             some(_) => {},
                                         }
-                                        deps.push(dep_key)
+                                        let listed_dep_key = dep_key
+                                        deps.push(listed_dep_key)
                                     },
                                     none => {
                                         let mod_path = physical.module_segments.join("::")
@@ -4683,7 +5013,15 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
                                 }
                             }
                         }
-                        dependencies.insert(current_key, deps)
+                        // Keep the AST/census live through dependency
+                        // diagnostics, then transfer each whole binding once.
+                        let ast_key = current_key
+                        let stored_ast = ast
+                        asts_map.insert(ast_key, stored_ast)
+                        let stored_census = census
+                        censuses.push(stored_census)
+                        let dependency_key = current_key
+                        dependencies.insert(dependency_key, deps)
                     },
                     none => {},
                 }
@@ -4743,7 +5081,8 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
     sorted_dependencies.sort_by(compare_by_first)
     for entry in sorted_dependencies {
         let (key, deps) = entry
-        dep_count.insert(key, deps.len())
+        let counted_key = key
+        dep_count.insert(counted_key, deps.len())
     }
 
     let mut topo_order: List<Str> = []
@@ -4753,21 +5092,30 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
     sorted_dep_count.sort_by(compare_by_first)
     for entry in sorted_dep_count {
         let (key, count) = entry
-        if count == 0 { ready.push(key) }
+        if count == 0 {
+            let ready_key = key
+            ready.push(ready_key)
+        }
     }
 
     while ready.len() > 0 {
         match ready.shift() {
             some(node) => {
-                topo_order.push(node)
+                let ordered_node = node
+                topo_order.push(ordered_node)
                 for entry in sorted_dependencies {
                     let (key, deps) = entry
                     if deps.contains(node) {
                         match dep_count.get(key) {
                             some(c) => {
                                 let new_count = c - 1
-                                dep_count.insert(key, new_count)
-                                if new_count == 0 { ready.push(key) }
+                                let counted_key = key
+                                let stored_count = new_count
+                                dep_count.insert(counted_key, stored_count)
+                                if new_count == 0 {
+                                    let ready_key = key
+                                    ready.push(ready_key)
+                                }
                             },
                             none => {},
                         }
@@ -4786,14 +5134,16 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
         for entry in sorted_modules {
             let (key, _) = entry
             if !topo_order.contains(key) {
-                cycle_nodes.push(key)
+                let cycle_node = key
+                cycle_nodes.push(cycle_node)
             }
         }
         // Build a human-readable cycle path by following dependencies
         let cycle_path = find_cycle_path(cycle_nodes, dependencies)
         let cycle_desc = cycle_path.join(" -> ")
+        let span_file = abs_entry
         let file_span = Span {
-            file: abs_entry,
+            file: span_file,
             start: Position { line: 1, column: 0, offset: 0 },
             end: Position { line: 1, column: 0, offset: 0 }
         }
@@ -4807,16 +5157,24 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
         let mut err_sink = new_collecting_sink()
         err_sink.report(diag)
         if error_format == "llm" {
-            eprintln(format_llm(err_sink.diagnostics(), abs_entry))
+            let diagnostic_file = abs_entry
+            eprintln(format_llm(
+                err_sink.diagnostics(), diagnostic_file))
         } else {
-            let entry_source = read_file(abs_entry)
+            let source_file = abs_entry
+            let entry_source = read_file(source_file)
             eprintln(format_human(err_sink.diagnostics(), entry_source))
         }
         return none
     }
 
+    let final_entry_basename = entry_basename
+    let final_entry_file = abs_entry
     some(ModuleGraph {
-        entry: ModuleId { path_segments: [entry_basename], file_path: abs_entry },
+        entry: ModuleId {
+            path_segments: [final_entry_basename],
+            file_path: final_entry_file
+        },
         modules: modules,
         dependencies: dependencies,
         topo_order: topo_order,
@@ -4834,10 +5192,13 @@ fn find_cycle_path(cycle_nodes: List<Str>, dependencies: Map<Str, List<Str>>) ->
     // Try each cycle node as a potential cycle start.
     // Follow a single path through cycle-member deps; if we return to start, that's the cycle.
     for start_node in cycle_nodes {
-        let mut path: List<Str> = [start_node]
-        let mut current = start_node
+        let path_start = start_node
+        let current_start = start_node
+        let mut path: List<Str> = [path_start]
+        let mut current = current_start
         let mut visited: Set<Str> = set_new()
-        visited.insert(current)
+        let initial_visited = current
+        visited.insert(initial_visited)
         let mut found_cycle = false
 
         while !found_cycle {
@@ -4848,15 +5209,19 @@ fn find_cycle_path(cycle_nodes: List<Str>, dependencies: Map<Str, List<Str>>) ->
             for dep in deps {
                 if cycle_set.contains(dep) {
                     if dep == start_node {
-                        path.push(dep)
+                        let closing_node = dep
+                        path.push(closing_node)
                         found_cycle = true
                         advanced = true
                         break
                     }
                     if !visited.contains(dep) {
-                        visited.insert(dep)
-                        path.push(dep)
-                        current = dep
+                        let visited_node = dep
+                        let path_node = dep
+                        let next_node = dep
+                        visited.insert(visited_node)
+                        path.push(path_node)
+                        current = next_node
                         advanced = true
                         break
                     }
@@ -4870,9 +5235,15 @@ fn find_cycle_path(cycle_nodes: List<Str>, dependencies: Map<Str, List<Str>>) ->
 
     // Fallback: just list the cycle nodes
     let mut fallback: List<Str> = []
-    for n in cycle_nodes { fallback.push(n) }
+    for n in cycle_nodes {
+        let fallback_node = n
+        fallback.push(fallback_node)
+    }
     match cycle_nodes.get(0) {
-        some(first) => fallback.push(first),
+        some(first) => {
+            let closing_node = first
+            fallback.push(closing_node)
+        },
         none => {},
     }
     fallback

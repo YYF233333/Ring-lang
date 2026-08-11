@@ -1,31 +1,36 @@
-use types::{Type, UNIT, nominal_display_name,
-    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, CALLABLE_SOURCE_BUILTIN,
-    callable_descriptors_equal}
-use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam, span_zero}
-use hir::{HDecl, HStmt, HExpr, HProgram, HMatchArm, HStructFieldInit, ModuleImplFact,
-    HStringInterpPart, HEffectHandler, ValueBindingKind,
+use types::{Type, EffectRow, OwnershipMetadata, UNIT, nominal_display_name,
+    types_equal_with_ownership,
+    CALLABLE_SOURCE_BUILTIN,
+    set_callable_result_role, set_returned_callable_result_role,
+    merge_callable_ownership_descriptor, merge_ownership_shape}
+use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam, Param,
+    TypeExpr, EffectExpr, Expr, span_zero}
+use hir::{HDecl, HParam, HProgram, ModuleImplFact, ValueBindingKind,
     CHECKER_ONLY_EXTERN_CALLABLES,
-    compare_by_first, is_user_drop_type, hexpr_type,
+    compare_by_first, hexpr_type,
     map_index_helper_source_name, map_index_helper_identity,
-    prelude_extern_identity,
-    is_nullary_variant_ctor_ident}
+    prelude_extern_identity}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, new_collecting_sink, make_diag}
-use env::{TypeEnv, TypeScheme, SigDef, ImplEntry, TraitDef, TraitMethodDef,
+use env::{TypeEnv, TypeScheme, SchemeBound, SigDef, ImplEntry,
+    TraitDef, TraitMethodDef,
     new_type_env, add_impl, find_impl, install_method_scheme,
-    new_local_callable_scheme, update_local_callable_scheme,
+    new_local_callable_scheme, new_local_callable_identity_scheme,
+    update_local_callable_scheme,
     impl_method_origin}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_module_identity, check_prelude_decl}
+use ownership::{solve_and_plan_ownership}
 use dict_lower::{lower_dicts}
 use andor_lower::{lower_andor}
 use infer_ctx::{InferCtx, type_error, record_value_origin, record_variant_ctor_origin,
     record_value_binding_kind, install_project_namespace_plan}
-use infer_register::{register_decl_public,
-    exact_prelude_extern_ownership, exact_prelude_extern_source}
-use exports::{ModuleExports, TypeDef}
+use infer_register::{register_prelude_decl_public,
+    exact_prelude_extern_ownership, exact_prelude_extern_source,
+    exact_prelude_extern_result_role}
+use exports::{ModuleExports, TypeDef, freeze_module_exports_ownership}
 use resolver::{ResolvedNamespacePlan, ModuleFramePlan, AstSite, ImportIssue,
     ImportIssueKind, NamespaceKind}
-use codes::{E0504, E0702, E0703, E0704, E0705, E0707, E0801}
+use codes::{E0504, E0702, E0703, E0704, E0705, E0707}
 use parser::{parse}
 use union_find::{UnionFind}
 use unify::{empty_subst}
@@ -51,6 +56,31 @@ pub struct CheckResult {
 const STD_FILES: List<Str> =
     ["io.ring", "iterator.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"]
 
+fn rebuild_prelude_fn_decl_firebreak(
+    name: Str, type_params: List<TypeParam>, params: List<Param>,
+    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr,
+    is_pub: Bool, is_abstract: Bool, span: Span
+) -> Decl {
+    let rebuilt_name = name
+    let rebuilt_type_params = type_params
+    let rebuilt_params = params
+    let rebuilt_return_type = return_type
+    let rebuilt_declared_effects = declared_effects
+    let rebuilt_body = body
+    let rebuilt_span = span
+    Decl::Fn {
+        name: rebuilt_name,
+        type_params: rebuilt_type_params,
+        params: rebuilt_params,
+        return_type: rebuilt_return_type,
+        declared_effects: rebuilt_declared_effects,
+        body: rebuilt_body,
+        is_pub: is_pub,
+        is_abstract: is_abstract,
+        span: rebuilt_span
+    }
+}
+
 fn canonicalize_prelude_decl(decl: Decl) -> Decl {
     match decl {
         Decl::Fn { name, type_params, params, return_type, declared_effects,
@@ -60,22 +90,23 @@ fn canonicalize_prelude_decl(decl: Decl) -> Decl {
                 // Ring source identifier can spell.  Keep the raw API as an
                 // environment alias below; the emitted definition is private
                 // so project-link candidate collection ignores it.
-                Decl::Fn {
-                    name: map_index_helper_identity(),
-                    type_params: type_params, params: params,
-                    return_type: return_type, declared_effects: declared_effects,
-                    body: body, is_pub: false, is_abstract: is_abstract, span: span
-                }
+                rebuild_prelude_fn_decl_firebreak(
+                    map_index_helper_identity(), type_params, params,
+                    return_type, declared_effects, body,
+                    false, is_abstract, span)
             } else {
-                Decl::Fn {
-                    name: name, type_params: type_params, params: params,
-                    return_type: return_type, declared_effects: declared_effects,
-                    body: body, is_pub: is_pub, is_abstract: is_abstract, span: span
-                }
+                rebuild_prelude_fn_decl_firebreak(
+                    name, type_params, params, return_type,
+                    declared_effects, body, is_pub, is_abstract, span)
             }
         },
         _ => decl
     }
+}
+
+fn std_dir_result_firebreak(dir: Str) -> Str? {
+    let found_dir = dir
+    some(found_dir)
 }
 
 fn find_std_dir() -> Str? {
@@ -84,9 +115,86 @@ fn find_std_dir() -> Str? {
         path_resolve("std")
     ]
     for dir in candidates {
-        if file_exists(dir) { return some(dir) }
+        if file_exists(dir) { return std_dir_result_firebreak(dir) }
     }
     none
+}
+
+fn canonicalize_loaded_prelude_decl_firebreak(decl: Decl) -> Decl {
+    let source_decl = decl
+    canonicalize_prelude_decl(source_decl)
+}
+
+fn rebind_prelude_extern_firebreak(
+    mut ctx: InferCtx, name: Str, scheme: TypeScheme
+) {
+    let rebound_name = name
+    ctx.env.rebind(rebound_name, scheme)
+}
+
+fn append_prelude_hdecl_firebreak(
+    mut prelude_hdecls: List<HDecl>, hdecl: HDecl
+) {
+    let appended_hdecl = hdecl
+    prelude_hdecls.push(appended_hdecl)
+}
+
+fn append_prelude_fn_method_firebreak(
+    mut methods: List<Decl>, method: Decl
+) {
+    let appended_method = method
+    methods.push(appended_method)
+}
+
+fn filtered_prelude_impl_decl_firebreak(
+    target_type: Str, type_params: List<TypeParam>, trait_name: Str?,
+    methods: List<Decl>, span: Span
+) -> Decl {
+    let filtered_target_type = target_type
+    let filtered_type_params = type_params
+    let filtered_trait_name = trait_name
+    let filtered_methods = methods
+    let filtered_span = span
+    Decl::Impl {
+        target_type: filtered_target_type,
+        type_params: filtered_type_params,
+        trait_name: filtered_trait_name,
+        methods: filtered_methods,
+        span: filtered_span
+    }
+}
+
+fn record_emitted_prelude_extern_firebreak(
+    mut emitted: Set<Int>, def_id: Int
+) {
+    let emitted_def_id = def_id
+    emitted.insert(emitted_def_id)
+}
+
+fn append_prelude_extern_hdecl_firebreak(
+    mut prelude_hdecls: List<HDecl>, name: Str, abi_name: Str,
+    def_id: Int?, type_params: List<TypeParam>, params: List<HParam>,
+    return_type: Type, effects: EffectRow, is_pub: Bool, span: Span
+) {
+    let emitted_name = name
+    let emitted_abi_name = abi_name
+    let emitted_def_id = def_id
+    let emitted_type_params = type_params
+    let emitted_params = params
+    let emitted_return_type = return_type
+    let emitted_effects = effects
+    let emitted_span = span
+    prelude_hdecls.push(HDecl::ExternFn {
+        name: emitted_name,
+        abi_name: emitted_abi_name,
+        def_id: emitted_def_id,
+        type_params: emitted_type_params,
+        params: emitted_params,
+        return_type: emitted_return_type,
+        effects: emitted_effects,
+        is_pub: is_pub,
+        span: emitted_span
+    })
 }
 
 fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
@@ -102,8 +210,10 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                     let prelude_sink = new_collecting_sink()
                     let ast = parse(source, file_path, prelude_sink)
                     for decl in ast.decls {
-                        let canonical_decl = canonicalize_prelude_decl(decl)
-                        register_decl_public(ctx, canonical_decl)
+                        let canonical_decl =
+                            canonicalize_loaded_prelude_decl_firebreak(decl)
+                        let registration_decl = canonical_decl
+                        register_prelude_decl_public(ctx, registration_decl)
                         all_prelude_decls.push(canonical_decl)
                     }
                 }
@@ -115,7 +225,8 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
             let map_get_identity = map_index_helper_identity()
             match ctx.env.lookup(map_get_identity) {
                 some(scheme) => {
-                    ctx.env.bind(map_get_name, scheme)
+                    let bound_map_get_name = map_get_name
+                    ctx.env.bind(bound_map_get_name, scheme)
                     record_value_origin(ctx, map_get_name, map_get_identity)
                 },
                 none => {}
@@ -134,9 +245,19 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                                 some(scheme) => {
                                     let updated = update_local_callable_scheme(
                                         ctx.env, scheme,
-                                        exact_prelude_extern_ownership(name, params),
-                                        source, none)
-                                    ctx.env.rebind(name, updated)
+                                        exact_prelude_extern_ownership(
+                                            ctx.env, name, params),
+                                        source)
+                                    let exact_def_id = match updated.def_id {
+                                        some(id) => id,
+                                        none => panic("unreachable: exact prelude extern has no DefId")
+                                    }
+                                    set_callable_result_role(
+                                        ctx.env.types.ownership_metadata,
+                                        exact_def_id,
+                                        exact_prelude_extern_result_role(name))
+                                    rebind_prelude_extern_firebreak(
+                                        ctx, name, updated)
                                 },
                                 none => panic("unreachable: prelude extern registration is missing")
                             }
@@ -150,26 +271,39 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
             // ExternFn declarations also become HDecl metadata: unlike impl
             // extern methods, their first-class values need an exact
             // declaration identity -> ABI leaf mapping in both backends.
+            // Multiple pure-Ring collection files declare the same slot bridge;
+            // phase 1 intentionally resolves those declarations to one final
+            // DefId, so emit that exact HIR binder only once.
+            let mut emitted_prelude_externs: Set<Int> = set_new()
             for decl in all_prelude_decls {
                 match decl {
                     Decl::Struct { .. } => {
                         let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
                         match result {
-                            some(hd) => { prelude_hdecls.push(hd) },
+                            some(hd) => {
+                                append_prelude_hdecl_firebreak(
+                                    prelude_hdecls, hd)
+                            },
                             none => {}
                         }
                     },
                     Decl::Enum { .. } => {
                         let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
                         match result {
-                            some(hd) => { prelude_hdecls.push(hd) },
+                            some(hd) => {
+                                append_prelude_hdecl_firebreak(
+                                    prelude_hdecls, hd)
+                            },
                             none => {}
                         }
                     },
                     Decl::Trait { .. } => {
                         let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
                         match result {
-                            some(hd) => { prelude_hdecls.push(hd) },
+                            some(hd) => {
+                                append_prelude_hdecl_firebreak(
+                                    prelude_hdecls, hd)
+                            },
                             none => {}
                         }
                     },
@@ -179,19 +313,25 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                         // because they're registered in impl_methods_map, not the main scope.
                         let mut fn_methods: List<Decl> = []
                         for m in methods {
-                            match m { Decl::Fn { .. } => { fn_methods.push(m) }, _ => {} }
+                            match m {
+                                Decl::Fn { .. } => {
+                                    append_prelude_fn_method_firebreak(
+                                        fn_methods, m)
+                                },
+                                _ => {}
+                            }
                         }
                         if fn_methods.len() > 0 {
-                            let filtered_decl = Decl::Impl {
-                                target_type: target_type,
-                                type_params: type_params,
-                                trait_name: trait_name,
-                                methods: fn_methods,
-                                span: span
-                            }
+                            let filtered_decl =
+                                filtered_prelude_impl_decl_firebreak(
+                                    target_type, type_params, trait_name,
+                                    fn_methods, span)
                             let result = some(check_prelude_decl(ctx, filtered_decl)) catch { _ => none }
                             match result {
-                                some(hd) => { prelude_hdecls.push(hd) },
+                                some(hd) => {
+                                    append_prelude_hdecl_firebreak(
+                                        prelude_hdecls, hd)
+                                },
                                 none => {}
                             }
                         }
@@ -199,7 +339,10 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                     Decl::Fn { .. } => {
                         let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
                         match result {
-                            some(hd) => { prelude_hdecls.push(hd) },
+                            some(hd) => {
+                                append_prelude_hdecl_firebreak(
+                                    prelude_hdecls, hd)
+                            },
                             none => {}
                         }
                     },
@@ -210,6 +353,18 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                                 name, abi_name, def_id, type_params, params,
                                 return_type, effects, is_pub, span
                             }) => {
+                                let emit = match def_id {
+                                    some(id) => {
+                                        if emitted_prelude_externs.contains(id) {
+                                            false
+                                        } else {
+                                            record_emitted_prelude_extern_firebreak(
+                                                emitted_prelude_externs, id)
+                                            true
+                                        }
+                                    },
+                                    none => true
+                                }
                                 // A small number of compiler-owned extern
                                 // bridges carry an unspellable exact origin on
                                 // their DefId. Preserve it in HDecl while
@@ -221,12 +376,12 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                                     },
                                     none => name
                                 }
-                                prelude_hdecls.push(HDecl::ExternFn {
-                                    name: exact_name, abi_name: abi_name,
-                                    def_id: def_id, type_params: type_params,
-                                    params: params, return_type: return_type,
-                                    effects: effects, is_pub: is_pub, span: span
-                                })
+                                if emit {
+                                    append_prelude_extern_hdecl_firebreak(
+                                        prelude_hdecls, exact_name, abi_name,
+                                        def_id, type_params, params,
+                                        return_type, effects, is_pub, span)
+                                }
                             },
                             some(_) => {},
                             none => {}
@@ -270,7 +425,6 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         fn_defaults: map_new(),
         fn_min_arity: map_new(),
         mod_unsafe_allowed: false,
-        drop_types: set_new(),
         project_namespace_file_key: none,
         project_namespace_root_frame: none,
         project_namespace_child_frames: map_new(),
@@ -290,6 +444,18 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
 // Collect ModuleImplFact entries from a module's own HIR (pre-prelude).
 // Non-public inline mods are skipped: their impls were never exported by the
 // AST-walking extractor either, so consumers cannot observe those methods.
+fn append_module_impl_method_name_firebreak(
+    mut method_names: List<Str>, name: Str
+) {
+    let current_name = name
+    method_names.push(current_name)
+}
+
+fn module_impl_target_result_firebreak(target_type: Str) -> Str {
+    let current_target = target_type
+    current_target
+}
+
 fn collect_module_impl_facts(
     decls: List<HDecl>, is_top_level: Bool, mut facts: List<ModuleImplFact>
 ) {
@@ -299,12 +465,14 @@ fn collect_module_impl_facts(
                 let mut method_names: List<Str> = []
                 for m in methods {
                     match m {
-                        HDecl::Fn { name, .. } => method_names.push(name),
+                        HDecl::Fn { name, .. } =>
+                            append_module_impl_method_name_firebreak(
+                                method_names, name),
                         _ => {}
                     }
                 }
                 facts.push(ModuleImplFact {
-                    target: target_type,
+                    target: module_impl_target_result_firebreak(target_type),
                     is_trait_impl: trait_name.is_some(),
                     method_names: method_names,
                     is_top_level: is_top_level
@@ -320,25 +488,47 @@ fn collect_module_impl_facts(
     }
 }
 
+fn checker_sink_result_firebreak(sink: CollectingSink) -> CollectingSink {
+    let current_sink = sink
+    current_sink
+}
+
+fn append_checked_program_decl_firebreak(
+    mut decls: List<HDecl>, decl: HDecl
+) {
+    let current_decl = decl
+    decls.push(current_decl)
+}
+
 pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
-    let mut ctx = new_infer_ctx(sink)
+    let mut ctx = new_infer_ctx(checker_sink_result_firebreak(sink))
     let prelude_hdecls = load_prelude(ctx)
     let hprogram = infer_check(ctx, program)
     let mut impl_facts: List<ModuleImplFact> = []
     collect_module_impl_facts(hprogram.decls, true, impl_facts)
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
-    for d in hprogram.decls { all_decls.push(d) }
+    for d in hprogram.decls {
+        append_checked_program_decl_firebreak(all_decls, d)
+    }
     // B-104 D7: lower `&&`/`||` to if-else (andor_lower), then B-104 D4:
     // first-class the dict evidence (static singleton set + local
     // constructions for dynamic wrapped dicts) — both before perceus/codegen.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types, ownership_metadata: hprogram.ownership_metadata }
-    // B-002p1: check for use-after-move on Drop types (before lowering)
-    if assembled.drop_types.len() > 0 {
-        check_drop_moves(assembled, ctx.sink)
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, ownership_metadata: hprogram.ownership_metadata }
+    // Do not let ownership fail-loud invariants replace an earlier frontend
+    // diagnostic.  The caller discards this program whenever the collecting
+    // sink contains an error, so preserving the assembled HIR is sufficient
+    // on that path.  Programs with no prior errors still pass through the
+    // complete ownership and dictionary-lowering pipeline.
+    let checked_program = if ctx.sink.has_errors() {
+        assembled
+    } else {
+        let ownership_planned = solve_and_plan_ownership(
+            ctx.env, lower_andor(assembled), ctx.sink)
+        lower_dicts(ownership_planned)
     }
     CheckResult {
-        program: lower_dicts(lower_andor(assembled)),
+        program: checked_program,
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
         value_origins: map_clone(ctx.use_aliases),
@@ -350,6 +540,26 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
 struct NamespaceFrameAst {
     uses: List<UseDecl>,
     decls: List<Decl>
+}
+
+fn namespace_decl_span_result_firebreak(span: Span) -> Span {
+    let exact_span = span
+    exact_span
+}
+
+fn namespace_frame_plan_result_firebreak(
+    frame: ModuleFramePlan
+) -> ModuleFramePlan? {
+    let exact_frame = frame
+    some(exact_frame)
+}
+
+fn namespace_frame_ast_result_firebreak(
+    uses: List<UseDecl>, decls: List<Decl>
+) -> NamespaceFrameAst {
+    let exact_uses = uses
+    let exact_decls = decls
+    NamespaceFrameAst { uses: exact_uses, decls: exact_decls }
 }
 
 fn namespace_kind_name(namespace: NamespaceKind) -> Str {
@@ -367,22 +577,22 @@ fn namespace_kind_name(namespace: NamespaceKind) -> Str {
 
 fn namespace_decl_span(decl: Decl) -> Span {
     match decl {
-        Decl::Fn { span, .. } => span,
-        Decl::Struct { span, .. } => span,
-        Decl::Enum { span, .. } => span,
-        Decl::Impl { span, .. } => span,
-        Decl::Effect { span, .. } => span,
-        Decl::Test { span, .. } => span,
-        Decl::Trait { span, .. } => span,
-        Decl::ExternFn { span, .. } => span,
-        Decl::ExternType { span, .. } => span,
-        Decl::TypeAlias { span, .. } => span,
-        Decl::Const { span, .. } => span,
-        Decl::ModBlock { span, .. } => span,
-        Decl::Sig { span, .. } => span,
-        Decl::EffectAlias { span, .. } => span,
-        Decl::Delegate { span, .. } => span,
-        Decl::AssocType { span, .. } => span
+        Decl::Fn { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Struct { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Enum { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Impl { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Effect { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Test { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Trait { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::ExternFn { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::ExternType { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::TypeAlias { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Const { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::ModBlock { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Sig { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::EffectAlias { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::Delegate { span, .. } => namespace_decl_span_result_firebreak(span),
+        Decl::AssocType { span, .. } => namespace_decl_span_result_firebreak(span)
     }
 }
 
@@ -391,7 +601,7 @@ fn find_namespace_frame(
 ) -> ModuleFramePlan? {
     for frame in plan.frames {
         if frame.file_key == file_key && frame.frame_index == frame_index {
-            return some(frame)
+            return namespace_frame_plan_result_firebreak(frame)
         }
     }
     none
@@ -417,7 +627,7 @@ fn find_namespace_frame_ast(
                 none => none,
                 some(parent) => match parent.decls.get(frame.decl_index) {
                     some(Decl::ModBlock { uses, decls, .. }) =>
-                        some(NamespaceFrameAst { uses: uses, decls: decls }),
+                        some(namespace_frame_ast_result_firebreak(uses, decls)),
                     _ => none
                 }
             }
@@ -545,7 +755,7 @@ pub fn check_module(
     namespace_plan: ResolvedNamespacePlan,
     module_exports: List<ModuleExports>, sink: CollectingSink
 ) -> CheckResult {
-    let mut ctx = new_infer_ctx(sink)
+    let mut ctx = new_infer_ctx(checker_sink_result_firebreak(sink))
     let prelude_hdecls = load_prelude(ctx)
     inject_module_exports(ctx, module_exports)
     let _ = install_project_namespace_plan(ctx, module_key, namespace_plan)
@@ -555,15 +765,23 @@ pub fn check_module(
     collect_module_impl_facts(hprogram.decls, true, impl_facts)
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
-    for d in hprogram.decls { all_decls.push(d) }
+    for d in hprogram.decls {
+        append_checked_program_decl_firebreak(all_decls, d)
+    }
     // B-104 D7 + D4: see check() above.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types, ownership_metadata: hprogram.ownership_metadata }
-    // B-002p1: check for use-after-move on Drop types (before lowering)
-    if assembled.drop_types.len() > 0 {
-        check_drop_moves(assembled, ctx.sink)
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, ownership_metadata: hprogram.ownership_metadata }
+    // As in check(), retain the original diagnostics as the authority.  A
+    // malformed module must not cross into ownership planning and panic before
+    // compile_phases can surface the diagnostic already present in the sink.
+    let checked_program = if ctx.sink.has_errors() {
+        assembled
+    } else {
+        let ownership_planned = solve_and_plan_ownership(
+            ctx.env, lower_andor(assembled), ctx.sink)
+        lower_dicts(ownership_planned)
     }
     CheckResult {
-        program: lower_dicts(lower_andor(assembled)),
+        program: checked_program,
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
         value_origins: map_clone(ctx.use_aliases),
@@ -581,24 +799,244 @@ fn report_hydrated_method_collision(
             detail: "same-origin re-exports dedupe, distinct origins collide"
     })
 }
-
-fn localize_imported_callable_scheme(
+fn localize_imported_value_scheme(
     mut ctx: InferCtx, exports: ModuleExports, scheme: TypeScheme
 ) -> TypeScheme {
-    let state = match scheme.def_id {
-        some(exported_def_id) =>
-            exports.ownership_metadata.callable_state_by_def_id.get(
-                exported_def_id),
-        none => none
+    let alias_scheme = TypeScheme { ..scheme, def_id: none }
+    let exported_def_id = match scheme.def_id {
+        some(def_id) => def_id,
+        none => match scheme.ty {
+            Type::FnType { .. } => panic(
+                "unreachable: imported callable value has no exact DefId"),
+            _ => return alias_scheme
+        }
     }
-    match state {
-        some(value) => new_local_callable_scheme(
-            ctx.env, TypeScheme { ..scheme, def_id: none },
-            value.source, value.inference_id),
-        none => new_local_callable_scheme(
-            ctx.env, TypeScheme { ..scheme, def_id: none },
-            CALLABLE_SOURCE_CONSERVATIVE_INTERFACE, none)
+    match exports.ownership_metadata.callable_by_def_id.get(
+            exported_def_id) {
+        some(ownership_term) => {
+            let source = match exports.ownership_metadata
+                    .callable_state_by_def_id.get(exported_def_id) {
+                some(state) => state.source,
+                none => panic(
+                    "unreachable: imported callable value has no ownership state")
+            }
+            let localized = new_local_callable_identity_scheme(
+                ctx.env, alias_scheme, ownership_term, source)
+            let local_def_id = match localized.def_id {
+                some(id) => id,
+                none => panic(
+                    "unreachable: localized imported callable has no DefId")
+            }
+            let direct_role = match exports.ownership_metadata
+                    .callable_result_role_by_def_id.get(exported_def_id) {
+                some(role) => role,
+                none => panic(
+                    "unreachable: imported callable has no direct result role")
+            }
+            let returned_role = match exports.ownership_metadata
+                    .returned_callable_result_role_by_def_id.get(
+                        exported_def_id) {
+                some(role) => role,
+                none => panic(
+                    "unreachable: imported callable has no returned result role")
+            }
+            let direct_role_local_def_id = local_def_id
+            let returned_role_local_def_id = local_def_id
+            set_callable_result_role(ctx.env.types.ownership_metadata,
+                direct_role_local_def_id, direct_role)
+            set_returned_callable_result_role(
+                ctx.env.types.ownership_metadata, returned_role_local_def_id,
+                returned_role)
+            localized
+        },
+        none => match scheme.ty {
+            Type::FnType { .. } => panic(
+                "unreachable: imported callable value has no ownership contract"),
+            _ => alias_scheme
+        }
     }
+}
+
+fn imported_int_lists_equal(a: List<Int>, b: List<Int>) -> Bool {
+    if a.len() != b.len() { return false }
+    let mut index = 0
+    while index < a.len() {
+        if a.get(index) != b.get(index) { return false }
+        index = index + 1
+    }
+    true
+}
+
+fn imported_scheme_bounds_equal(
+    metadata: OwnershipMetadata,
+    a: List<SchemeBound>, b: List<SchemeBound>
+) -> Bool {
+    if a.len() != b.len() { return false }
+    let mut index = 0
+    while index < a.len() {
+        match (a.get(index), b.get(index)) {
+            (some(left), some(right)) => {
+                if left.type_var != right.type_var ||
+                   left.trait_name != right.trait_name ||
+                   left.assoc_constraints.len() !=
+                       right.assoc_constraints.len() {
+                    return false
+                }
+                let mut assoc_index = 0
+                while assoc_index < left.assoc_constraints.len() {
+                    match (left.assoc_constraints.get(assoc_index),
+                           right.assoc_constraints.get(assoc_index)) {
+                        (some(lc), some(rc)) => {
+                            if lc.name != rc.name ||
+                               !types_equal_with_ownership(
+                                   metadata, lc.ty, rc.ty) {
+                                return false
+                            }
+                        },
+                        _ => return false
+                    }
+                    assoc_index = assoc_index + 1
+                }
+            },
+            _ => return false
+        }
+        index = index + 1
+    }
+    true
+}
+
+// Foreign DefIds are localized, so they are deliberately excluded. Every
+// other part of the frozen scheme is identity-bearing and must agree for two
+// facades that claim the same canonical origin.
+fn imported_schemes_equal(
+    local_metadata: OwnershipMetadata,
+    incoming_metadata: OwnershipMetadata,
+    a: TypeScheme, b: TypeScheme
+) -> Bool {
+    let roles_equal = match (a.def_id, b.def_id) {
+        (some(local_id), some(incoming_id)) => {
+            let incoming_is_callable = incoming_metadata.callable_by_def_id
+                .contains_key(incoming_id)
+            if incoming_is_callable {
+                local_metadata.callable_by_def_id.contains_key(local_id) &&
+                    local_metadata.callable_result_role_by_def_id.get(
+                        local_id) == incoming_metadata
+                        .callable_result_role_by_def_id.get(incoming_id) &&
+                    local_metadata.returned_callable_result_role_by_def_id.get(
+                        local_id) == incoming_metadata
+                        .returned_callable_result_role_by_def_id.get(
+                            incoming_id)
+            } else {
+                true
+            }
+        },
+        _ => true
+    }
+    types_equal_with_ownership(local_metadata, a.ty, b.ty) &&
+        imported_int_lists_equal(a.type_vars, b.type_vars) &&
+        imported_scheme_bounds_equal(local_metadata, a.bounds, b.bounds) &&
+        roles_equal
+}
+
+fn freeze_imported_module_exports_firebreak(
+    incoming: ModuleExports
+) -> ModuleExports {
+    let exact_exports = incoming
+    freeze_module_exports_ownership(exact_exports)
+}
+
+fn insert_localized_impl_method_scheme_firebreak(
+    mut methods: Map<Str, TypeScheme>,
+    method_name: Str, scheme: TypeScheme
+) {
+    let stored_method_name = method_name
+    let stored_scheme = scheme
+    methods.insert(stored_method_name, stored_scheme)
+}
+
+fn insert_localized_impl_target_methods_firebreak(
+    mut methods_by_target: Map<Str, Map<Str, TypeScheme>>,
+    target_type: Str, methods: Map<Str, TypeScheme>
+) {
+    let stored_target_type = target_type
+    let stored_methods = methods
+    methods_by_target.insert(stored_target_type, stored_methods)
+}
+
+fn append_imported_value_origin_firebreak(
+    mut origins: List<Str>, origin: Str
+) {
+    let exact_origin = origin
+    origins.push(exact_origin)
+}
+
+fn append_imported_ctor_origin_if_missing_firebreak(
+    mut origins: List<Str>, origin: Str
+) {
+    let compared_origin = origin
+    if !origins.contains(compared_origin) {
+        let stored_origin = origin
+        origins.push(stored_origin)
+    }
+}
+
+fn record_imported_binding_kind_firebreak(
+    mut ctx: InferCtx, name: Str, kind: ValueBindingKind
+) {
+    let exact_name = name
+    let exact_kind = kind
+    record_value_binding_kind(ctx, exact_name, exact_kind)
+}
+
+fn record_imported_ctor_origin_firebreak(
+    mut ctx: InferCtx, name: Str, origin: Str
+) {
+    let exact_name = name
+    let exact_origin = origin
+    record_variant_ctor_origin(ctx, exact_name, exact_origin)
+}
+
+fn store_imported_fn_mut_params_firebreak(
+    mut fn_mut_params: Map<Str, List<Bool>>,
+    fn_name: Str, flags: List<Bool>
+) {
+    let stored_fn_name = fn_name
+    let stored_flags = flags
+    fn_mut_params.insert(stored_fn_name, stored_flags)
+}
+
+fn insert_localized_sig_member_scheme_firebreak(
+    mut members: Map<Str, TypeScheme>,
+    member_name: Str, scheme: TypeScheme
+) {
+    let stored_member_name = member_name
+    let stored_scheme = scheme
+    members.insert(stored_member_name, stored_scheme)
+}
+
+fn insert_localized_trait_impl_method_scheme_firebreak(
+    mut methods: Map<Str, TypeScheme>,
+    method_name: Str, scheme: TypeScheme
+) {
+    let stored_method_name = method_name
+    let stored_scheme = scheme
+    methods.insert(stored_method_name, stored_scheme)
+}
+
+fn insert_imported_mut_method_name_firebreak(
+    mut methods: Set<Str>, method_name: Str
+) {
+    let stored_method_name = method_name
+    methods.insert(stored_method_name)
+}
+
+fn insert_imported_mut_method_set_firebreak(
+    mut registry: Map<Str, Set<Str>>,
+    type_name: Str, methods: Set<Str>
+) {
+    let stored_type_name = type_name
+    let stored_methods = methods
+    registry.insert(stored_type_name, stored_methods)
 }
 
 fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
@@ -609,26 +1047,30 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
     let mut hydrated_value_origins: Set<Str> = set_new()
     let mut hydrated_method_schemes: Map<Str, TypeScheme> = map_new()
     let mut hydrated_trait_methods: Map<Str, TraitMethodDef> = map_new()
+    let mut hydrated_trait_def_ids: Map<Str, Int> = map_new()
     let mut hydrated_sig_schemes: Map<Str, TypeScheme> = map_new()
-    for mod_ in exports {
+    for incoming in exports {
+        // Imported module interfaces must already be exact. Re-freezing here
+        // catches malformed/missing dynamic descriptors before any payload is
+        // merged into checker-local registries.
+        let mod_ = freeze_imported_module_exports_firebreak(incoming)
         // Ownership summaries do not participate in order-sensitive lookup;
         // avoid sorting an empty shadow map for every project module.
         for entry in mod_.ownership_metadata.ownership_shapes.entries() {
             let (type_identity, shape) = entry
-            ctx.env.types.ownership_metadata.ownership_shapes.insert(
-                type_identity, shape)
+            let imported_type_identity = type_identity
+            let imported_shape = shape
+            merge_ownership_shape(
+                ctx.env.types.ownership_metadata,
+                imported_type_identity, imported_shape)
         }
         for entry in mod_.ownership_metadata.callable_descriptors.entries() {
             let (ownership_id, descriptor) = entry
-            match ctx.env.types.ownership_metadata.callable_descriptors.get(
-                ownership_id) {
-                some(existing) => if !callable_descriptors_equal(
-                    existing, descriptor) {
-                    panic("unreachable: colliding callable ownership descriptor ID")
-                },
-                none => ctx.env.types.ownership_metadata.callable_descriptors.insert(
-                    ownership_id, descriptor)
-            }
+            let imported_ownership_id = ownership_id
+            let imported_descriptor = descriptor
+            merge_callable_ownership_descriptor(
+                ctx.env.types.ownership_metadata,
+                imported_ownership_id, imported_descriptor)
         }
         let mut localized_impl_methods: Map<Str, Map<Str, TypeScheme>> = map_new()
         let mut method_targets = mod_.impl_methods.entries()
@@ -648,25 +1090,25 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                                 method_origin_.origin, method_name)
                             let local_scheme = match hydrated_method_schemes.get(key) {
                                 some(existing) => {
-                                    match (existing.ty, scheme.ty) {
-                                        (Type::FnType { meta: a, .. },
-                                         Type::FnType { meta: b, .. }) => {
-                                            if a.ownership_id != b.ownership_id {
-                                                panic("unreachable: same-origin imported method ownership differs")
-                                            }
-                                        },
-                                        _ => panic("unreachable: imported method is not callable")
+                                    if !imported_schemes_equal(
+                                            ctx.env.types.ownership_metadata,
+                                            mod_.ownership_metadata,
+                                            existing, scheme) {
+                                        panic("unreachable: same-origin imported method scheme differs")
                                     }
                                     existing
                                 },
                                 none => {
-                                    let localized = localize_imported_callable_scheme(
+                                    let localized = localize_imported_value_scheme(
                                         ctx, mod_, scheme)
-                                    hydrated_method_schemes.insert(key, localized)
+                                    let stored_localized = localized
+                                    hydrated_method_schemes.insert(
+                                        key, stored_localized)
                                     localized
                                 }
                             }
-                            localized_methods.insert(method_name, local_scheme)
+                            insert_localized_impl_method_scheme_firebreak(
+                                localized_methods, method_name, local_scheme)
                         },
                         none => report_hydrated_method_collision(
                             ctx, target_type, method_name, span_zero())
@@ -675,7 +1117,8 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                         ctx, target_type, method_name, span_zero())
                 }
             }
-            localized_impl_methods.insert(target_type, localized_methods)
+            insert_localized_impl_target_methods_firebreak(
+                localized_impl_methods, target_type, localized_methods)
         }
         let mut sorted_values = mod_.values.entries()
         sorted_values.sort_by(compare_by_first)
@@ -685,14 +1128,16 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             let ctor_origin = mod_.variant_ctor_origins.get(lookup_name)
             let mut exact_origins: List<Str> = []
             match value_origin {
-                some(origin) => { exact_origins.push(origin) },
+                some(origin) => {
+                    append_imported_value_origin_firebreak(
+                        exact_origins, origin)
+                },
                 none => {}
             }
             match ctor_origin {
                 some(origin) => {
-                    if !exact_origins.contains(origin) {
-                        exact_origins.push(origin)
-                    }
+                    append_imported_ctor_origin_if_missing_firebreak(
+                        exact_origins, origin)
                 },
                 none => {}
             }
@@ -702,49 +1147,55 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                     // modules.  Reuse its first checker-local DefId, but fail
                     // loudly if a later facade publishes a different callable
                     // contract for that same origin.
-                    match (ctx.env.lookup(origin), scheme.ty) {
-                        (some(TypeScheme { ty: Type::FnType { meta: local_meta, .. }, .. }),
-                         Type::FnType { meta: exported_meta, .. }) => {
-                            if local_meta.ownership_id != exported_meta.ownership_id {
-                                panic("unreachable: same-origin imported callable ownership differs")
+                    match ctx.env.lookup(origin) {
+                        some(local) => {
+                            if !imported_schemes_equal(
+                                    ctx.env.types.ownership_metadata,
+                                    mod_.ownership_metadata,
+                                    local, scheme) {
+                                panic("unreachable: same-origin imported value scheme differs")
                             }
                         },
-                        (some(TypeScheme { ty: Type::FnType { .. }, .. }), _) |
-                        (some(TypeScheme { ty: _, .. }), Type::FnType { .. }) =>
-                            panic("unreachable: same-origin imported value kind differs"),
-                        (some(_), _) => {},
-                        (none, _) => panic(
+                        none => panic(
                             "unreachable: hydrated imported value is missing")
                     }
                 } else {
-                    let local_scheme = match scheme.ty {
-                        Type::FnType { .. } =>
-                            localize_imported_callable_scheme(ctx, mod_, scheme),
-                        _ => TypeScheme { ..scheme, def_id: none }
-                    }
-                    ctx.env.bind(origin, local_scheme)
+                    let local_scheme = localize_imported_value_scheme(
+                        ctx, mod_, scheme)
+                    let bound_origin = origin
+                    ctx.env.bind(bound_origin, local_scheme)
                     let ultimate = match value_origin {
                         some(value) => value,
                         none => origin
                     }
-                    record_value_origin(ctx, origin, ultimate)
+                    let value_origin_name = origin
+                    record_value_origin(ctx, value_origin_name, ultimate)
                     match mod_.value_binding_kinds.get(lookup_name) {
                         some(kind) => {
-                            record_value_binding_kind(ctx, origin, kind)
+                            let binding_kind_name = origin
+                            record_imported_binding_kind_firebreak(
+                                ctx, binding_kind_name, kind)
                         },
                         none => {}
                     }
                     match ctor_origin {
                         some(ctor) => {
-                            record_variant_ctor_origin(ctx, origin, ctor)
+                            let ctor_origin_name = origin
+                            record_imported_ctor_origin_firebreak(
+                                ctx, ctor_origin_name, ctor)
                         },
                         none => {}
                     }
                     match mod_.fn_mut_params.get(lookup_name) {
-                        some(flags) => { ctx.fn_mut_params.insert(origin, flags) },
+                        some(flags) => {
+                            let fn_mut_name = origin
+                            store_imported_fn_mut_params_firebreak(
+                                ctx.fn_mut_params, fn_mut_name, flags)
+                        },
                         none => {}
                     }
-                    hydrated_value_origins.insert(origin)
+                    let hydrated_origin = origin
+                    hydrated_value_origins.insert(hydrated_origin)
                 }
             }
         }
@@ -759,13 +1210,20 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                         // Named/wildcard imports install visible spellings via
                         // the project namespace frame; infer_decl snapshots
                         // their raw codegen identities before frame rollback.
-                        ctx.env.types.extern_structs.insert(sdef.name, sdef)
+                        let stored_extern_struct_def = sdef
+                        ctx.env.types.extern_structs.insert(
+                            stored_extern_struct_def.name,
+                            stored_extern_struct_def)
                     } else {
-                        ctx.env.types.structs.insert(sdef.name, sdef)
+                        let stored_struct_def = sdef
+                        ctx.env.types.structs.insert(
+                            stored_struct_def.name, stored_struct_def)
                     }
                 },
                 TypeDef::EnumDef_(edef) => {
-                    ctx.env.types.enums.insert(edef.name, edef)
+                    let stored_enum_def = edef
+                    ctx.env.types.enums.insert(
+                        stored_enum_def.name, stored_enum_def)
                 },
             }
         }
@@ -773,42 +1231,55 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
         sorted_type_aliases.sort_by(compare_by_first)
         for entry in sorted_type_aliases {
             let (_, adef) = entry
-            ctx.env.types.type_aliases.insert(adef.name, adef)
+            let stored_type_alias_def = adef
+            ctx.env.types.type_aliases.insert(
+                stored_type_alias_def.name, stored_type_alias_def)
         }
         let mut sorted_effects = mod_.effects.entries()
         sorted_effects.sort_by(compare_by_first)
         for entry in sorted_effects {
             let (name, effdef) = entry
-            ctx.env.types.effects.insert(effdef.name, effdef)
+            let stored_effect_def = effdef
+            ctx.env.types.effects.insert(
+                stored_effect_def.name, stored_effect_def)
         }
         let mut sorted_aliases = mod_.effect_aliases.entries()
         sorted_aliases.sort_by(compare_by_first)
         for entry in sorted_aliases {
             let (name, adef) = entry
-            ctx.env.types.effect_aliases.insert(adef.name, adef)
+            let stored_effect_alias_def = adef
+            ctx.env.types.effect_aliases.insert(
+                stored_effect_alias_def.name, stored_effect_alias_def)
         }
         let mut sorted_traits = mod_.traits.entries()
         sorted_traits.sort_by(compare_by_first)
         for entry in sorted_traits {
             let (_, tdef) = entry
+            let local_trait_def_id = match hydrated_trait_def_ids.get(tdef.name) {
+                some(existing) => existing,
+                none => {
+                    let fresh = ctx.env.fresh_def_id()
+                    let stored_trait_def_id = fresh
+                    hydrated_trait_def_ids.insert(
+                        tdef.name, stored_trait_def_id)
+                    let local_trait_def_id = fresh
+                    local_trait_def_id
+                }
+            }
             let mut local_methods: List<TraitMethodDef> = []
             for method in tdef.methods {
                 let key = "${tdef.name}::${method.name}"
                 let local_method = match hydrated_trait_methods.get(key) {
                     some(existing) => {
-                        match (existing.ty, method.ty) {
-                            (Type::FnType { meta: a, .. },
-                             Type::FnType { meta: b, .. }) => {
-                                if a.ownership_id != b.ownership_id {
-                                    panic("unreachable: same imported trait method ownership differs")
-                                }
-                            },
-                            _ => panic("unreachable: trait method is not callable")
+                        if !types_equal_with_ownership(
+                                ctx.env.types.ownership_metadata,
+                                existing.ty, method.ty) {
+                            panic("unreachable: same imported trait method type differs")
                         }
                         existing
                     },
                     none => {
-                        let scheme = localize_imported_callable_scheme(
+                        let scheme = localize_imported_value_scheme(
                             ctx, mod_, TypeScheme {
                                 ty: method.ty, type_vars: [], bounds: [],
                                 def_id: some(method.def_id)
@@ -820,14 +1291,15 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                         let localized = TraitMethodDef {
                             ..method, def_id: def_id, ty: scheme.ty
                         }
-                        hydrated_trait_methods.insert(key, localized)
+                        let stored_localized = localized
+                        hydrated_trait_methods.insert(key, stored_localized)
                         localized
                     }
                 }
                 local_methods.push(local_method)
             }
             ctx.env.trait_reg.traits.insert(tdef.name, TraitDef {
-                ..tdef, methods: local_methods
+                ..tdef, def_id: local_trait_def_id, methods: local_methods
             })
         }
         let mut sorted_sigs = mod_.sigs.entries()
@@ -843,15 +1315,25 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                 let (member_name, scheme) = member_entry
                 let key = "${sigdef.name}::${member_name}"
                 let local_scheme = match hydrated_sig_schemes.get(key) {
-                    some(existing) => existing,
+                    some(existing) => {
+                        if !imported_schemes_equal(
+                                ctx.env.types.ownership_metadata,
+                                mod_.ownership_metadata,
+                                existing, scheme) {
+                            panic("unreachable: same imported sig member scheme differs")
+                        }
+                        existing
+                    },
                     none => {
-                        let localized = localize_imported_callable_scheme(
+                        let localized = localize_imported_value_scheme(
                             ctx, mod_, scheme)
-                        hydrated_sig_schemes.insert(key, localized)
+                        let stored_localized = localized
+                        hydrated_sig_schemes.insert(key, stored_localized)
                         localized
                     }
                 }
-                local_members.insert(member_name, local_scheme)
+                insert_localized_sig_member_scheme_firebreak(
+                    local_members, member_name, local_scheme)
             }
             ctx.env.types.sigs.insert(sigdef.name, SigDef {
                 ..sigdef, members: local_members
@@ -866,25 +1348,24 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                 let key = impl_method_origin(impl_.origin, method_name)
                 let localized = match hydrated_method_schemes.get(key) {
                     some(existing) => {
-                        match (existing.ty, exported_scheme.ty) {
-                            (Type::FnType { meta: a, .. },
-                             Type::FnType { meta: b, .. }) => {
-                                if a.ownership_id != b.ownership_id {
-                                    panic("unreachable: same-origin imported impl method ownership differs")
-                                }
-                            }
-                            _ => panic("unreachable: imported impl method is not callable")
+                        if !imported_schemes_equal(
+                                ctx.env.types.ownership_metadata,
+                                mod_.ownership_metadata,
+                                existing, exported_scheme) {
+                            panic("unreachable: same-origin imported impl method scheme differs")
                         }
                         existing
                     },
                     none => {
-                        let scheme = localize_imported_callable_scheme(
+                        let scheme = localize_imported_value_scheme(
                             ctx, mod_, exported_scheme)
-                        hydrated_method_schemes.insert(key, scheme)
+                        let stored_scheme = scheme
+                        hydrated_method_schemes.insert(key, stored_scheme)
                         scheme
                     }
                 }
-                local_method_schemes.insert(method_name, localized)
+                insert_localized_trait_impl_method_scheme_firebreak(
+                    local_method_schemes, method_name, localized)
             }
             let local_impl = ImplEntry {
                 ..impl_, method_schemes: local_method_schemes
@@ -942,15 +1423,16 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             match ctx.env.trait_reg.mut_methods.get(type_name) {
                 some(existing) => {
                     for m in method_set.to_list() {
-                        existing.insert(m)
+                        insert_imported_mut_method_name_firebreak(existing, m)
                     }
                 },
                 none => {
                     let mut new_set: Set<Str> = set_new()
                     for m in method_set.to_list() {
-                        new_set.insert(m)
+                        insert_imported_mut_method_name_firebreak(new_set, m)
                     }
-                    ctx.env.trait_reg.mut_methods.insert(type_name, new_set)
+                    insert_imported_mut_method_set_firebreak(
+                        ctx.env.trait_reg.mut_methods, type_name, new_set)
                 },
             }
         }
@@ -959,247 +1441,8 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
         sorted_fmp.sort_by(compare_by_first)
         for entry in sorted_fmp {
             let (fn_name, flags) = entry
-            ctx.fn_mut_params.insert(fn_name, flags)
+            store_imported_fn_mut_params_firebreak(
+                ctx.fn_mut_params, fn_name, flags)
         }
-    }
-}
-
-// ============================================================
-// B-002p1: Move checker for Drop types
-// Walks HIR in program order to detect use-after-move.
-// Phase 1 simplification: no branch/loop analysis — any move
-// in any branch marks the variable as consumed for all
-// subsequent uses in the same function scope.
-// ============================================================
-
-fn check_drop_moves(program: HProgram, mut sink: CollectingSink) {
-    for decl in program.decls {
-        match decl {
-            HDecl::Fn { body, .. } => {
-                let mut consumed: Map<Str, Span> = map_new()
-                check_moves_expr(body, consumed, program.drop_types, sink)
-            },
-            HDecl::Impl { methods, .. } => {
-                for m in methods {
-                    match m {
-                        HDecl::Fn { body, .. } => {
-                            let mut consumed: Map<Str, Span> = map_new()
-                            check_moves_expr(body, consumed, program.drop_types, sink)
-                        },
-                        _ => {}
-                    }
-                }
-            },
-            _ => {}
-        }
-    }
-}
-
-fn check_consumed(name: Str, ty: Type, span: Span, consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
-    if is_user_drop_type(ty, drop_types) {
-        match consumed.get(name) {
-            some(_) => {
-                let _ = type_error(sink, E0801,
-                    "use of moved value: '${name}'",
-                    span, DiagnosticContext::OtherContext { detail: some("value was previously moved") })
-            },
-            none => {}
-        }
-    }
-}
-
-fn try_consume_ident(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>) {
-    // A fieldless variant is Ident-shaped but evaluates a fresh constructor on
-    // every occurrence. It is not a binding that can become moved.
-    if is_nullary_variant_ctor_ident(expr) { return }
-    match expr {
-        HExpr::Ident { name, ty, span, .. } => {
-            if is_user_drop_type(ty, drop_types) {
-                consumed.insert(name, span)
-            }
-        },
-        _ => {}
-    }
-}
-
-fn check_moves_expr(expr: HExpr, mut consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
-    match expr {
-        HExpr::Ident { name, ty, span, .. } => {
-            // Mirror try_consume_ident: repeated evaluation of a nullary ctor is
-            // repeated fresh construction, never use-after-move.
-            if is_nullary_variant_ctor_ident(expr) == false {
-                check_consumed(name, ty, span, consumed, drop_types, sink)
-            }
-        },
-        HExpr::Block { stmts, tail, .. } => {
-            for s in stmts {
-                check_moves_stmt(s, consumed, drop_types, sink)
-            }
-            match tail {
-                some(t) => check_moves_expr(t, consumed, drop_types, sink),
-                none => {}
-            }
-        },
-        HExpr::Call { callee, args, .. } => {
-            check_moves_expr(callee, consumed, drop_types, sink)
-            for arg in args {
-                check_moves_expr(arg, consumed, drop_types, sink)
-                // After using a Drop-type arg, consume it (move into callee)
-                try_consume_ident(arg, consumed, drop_types)
-            }
-        },
-        HExpr::FieldAccess { receiver, .. } => {
-            check_moves_expr(receiver, consumed, drop_types, sink)
-        },
-        HExpr::BinOp { left, right, .. } => {
-            check_moves_expr(left, consumed, drop_types, sink)
-            check_moves_expr(right, consumed, drop_types, sink)
-        },
-        HExpr::UnaryOp { operand, .. } => {
-            check_moves_expr(operand, consumed, drop_types, sink)
-        },
-        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
-            check_moves_expr(condition, consumed, drop_types, sink)
-            check_moves_expr(then_branch, consumed, drop_types, sink)
-            match else_branch {
-                some(eb) => check_moves_expr(eb, consumed, drop_types, sink),
-                none => {}
-            }
-        },
-        HExpr::MatchExpr { scrutinee, arms, .. } => {
-            check_moves_expr(scrutinee, consumed, drop_types, sink)
-            for arm in arms {
-                match arm.guard {
-                    some(g) => check_moves_expr(g, consumed, drop_types, sink),
-                    none => {}
-                }
-                check_moves_expr(arm.body, consumed, drop_types, sink)
-            }
-        },
-        HExpr::StructLit { fields, spread, .. } => {
-            for f in fields {
-                check_moves_expr(f.value, consumed, drop_types, sink)
-            }
-            match spread {
-                some(s) => check_moves_expr(s, consumed, drop_types, sink),
-                none => {}
-            }
-        },
-        HExpr::NamedVariantConstruct { fields, spread, .. } => {
-            for f in fields {
-                check_moves_expr(f.value, consumed, drop_types, sink)
-            }
-            match spread {
-                some(s) => check_moves_expr(s, consumed, drop_types, sink),
-                none => {}
-            }
-        },
-        HExpr::StringInterp { parts, .. } => {
-            for p in parts {
-                match p {
-                    HStringInterpPart::Expression(e) => check_moves_expr(e, consumed, drop_types, sink),
-                    HStringInterpPart::Literal(_) => {}
-                }
-            }
-        },
-        HExpr::TryCatch { body, arms, .. } => {
-            check_moves_expr(body, consumed, drop_types, sink)
-            for arm in arms {
-                check_moves_expr(arm.body, consumed, drop_types, sink)
-            }
-        },
-        HExpr::HandleExpr { body, handlers, .. } => {
-            check_moves_expr(body, consumed, drop_types, sink)
-            for h in handlers {
-                check_moves_expr(h.body, consumed, drop_types, sink)
-            }
-        },
-        HExpr::Lambda { body, .. } => {
-            check_moves_expr(body, consumed, drop_types, sink)
-        },
-        HExpr::EffectOp { args, .. } => {
-            for a in args { check_moves_expr(a, consumed, drop_types, sink) }
-        },
-        HExpr::RangeExpr { start, end, .. } => {
-            check_moves_expr(start, consumed, drop_types, sink)
-            check_moves_expr(end, consumed, drop_types, sink)
-        },
-        HExpr::ListLit { elements, .. } => {
-            for e in elements { check_moves_expr(e, consumed, drop_types, sink) }
-        },
-        HExpr::TupleLit { elements, .. } => {
-            for e in elements { check_moves_expr(e, consumed, drop_types, sink) }
-        },
-        HExpr::IndexExpr { receiver, index, .. } => {
-            check_moves_expr(receiver, consumed, drop_types, sink)
-            check_moves_expr(index, consumed, drop_types, sink)
-        },
-        HExpr::ReturnExpr { value, .. } => {
-            match value {
-                some(v) => check_moves_expr(v, consumed, drop_types, sink),
-                none => {}
-            }
-        },
-        HExpr::Clone { inner, .. } => {
-            check_moves_expr(inner, consumed, drop_types, sink)
-        },
-        HExpr::UnsafeBlock { body, .. } => {
-            check_moves_expr(body, consumed, drop_types, sink)
-        },
-        HExpr::DictConstruct { .. } => {},
-        // Literals — no sub-expressions
-        HExpr::IntLit { .. } => {},
-        HExpr::FloatLit { .. } => {},
-        HExpr::StrLit { .. } => {},
-        HExpr::BoolLit { .. } => {},
-    }
-}
-
-fn check_moves_stmt(stmt: HStmt, mut consumed: Map<Str, Span>, drop_types: Set<Str>, mut sink: CollectingSink) {
-    match stmt {
-        HStmt::Let { init, .. } => {
-            check_moves_expr(init, consumed, drop_types, sink)
-            // If init is a bare Ident of Drop type, consume the source
-            try_consume_ident(init, consumed, drop_types)
-        },
-        HStmt::Var { init, .. } => {
-            check_moves_expr(init, consumed, drop_types, sink)
-            try_consume_ident(init, consumed, drop_types)
-        },
-        HStmt::Assign { target, value, .. } => {
-            check_moves_expr(target, consumed, drop_types, sink)
-            check_moves_expr(value, consumed, drop_types, sink)
-        },
-        HStmt::ExprStmt { expr, .. } => {
-            check_moves_expr(expr, consumed, drop_types, sink)
-        },
-        HStmt::Return { value, .. } => {
-            match value {
-                some(v) => check_moves_expr(v, consumed, drop_types, sink),
-                none => {}
-            }
-        },
-        HStmt::While { condition, body, .. } => {
-            check_moves_expr(condition, consumed, drop_types, sink)
-            check_moves_expr(body, consumed, drop_types, sink)
-        },
-        HStmt::ForIn { iterable, body, .. } => {
-            check_moves_expr(iterable, consumed, drop_types, sink)
-            check_moves_expr(body, consumed, drop_types, sink)
-        },
-        HStmt::Break { .. } => {},
-        HStmt::Continue { .. } => {},
-        HStmt::LetDestructure { init, .. } => {
-            check_moves_expr(init, consumed, drop_types, sink)
-        },
-        HStmt::IfLet { expr, then_block, else_block, .. } => {
-            check_moves_expr(expr, consumed, drop_types, sink)
-            check_moves_expr(then_block, consumed, drop_types, sink)
-            match else_block {
-                some(eb) => check_moves_expr(eb, consumed, drop_types, sink),
-                none => {}
-            }
-        },
-        HStmt::Drop { .. } => {}
     }
 }

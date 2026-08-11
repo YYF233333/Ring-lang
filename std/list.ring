@@ -341,7 +341,9 @@ impl<T> Iterable for List<T> {
     type Item = T
     type Iter = ListIterator<T>
     fn iter(self) -> ListIterator<T> {
-        ListIterator { list: self, index: 0 }
+        // Iterable.iter borrows its receiver. The iterator therefore owns an
+        // independent List wrapper and backing-store references.
+        ListIterator { list: list_clone(self), index: 0 }
     }
 }
 

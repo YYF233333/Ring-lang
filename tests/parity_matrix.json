@@ -205,6 +205,14 @@
       "reason": "Perceus inserts Clone for escaping index and field projections."
     },
     {
+      "feature_id": "HExpr.Take",
+      "evidence": ["tests/cases/golden/ownership_spread_block_local.ring"],
+      "oracle": "c-native-golden",
+      "lane": ["golden-c"],
+      "status": "covered",
+      "reason": "The ownership planner emits exact whole-binding Take edges for outer-to-local-to-spread transfers, and the executable golden locks their balanced runtime behavior."
+    },
+    {
       "feature_id": "HExpr.ReturnExpr",
       "evidence": ["tests/cases/golden/match_return_expr.ring"],
       "oracle": "c-native-golden",
@@ -516,12 +524,36 @@
       "reason": "Symbol- and brace-anchored generated-C inspection proves raw handles are RC-excluded while paired owned controls retain exact dup/drop behavior."
     },
     {
+      "feature_id": "backend.closure_env_rc_mask_structural",
+      "evidence": ["tests/cases/structural/closure_env_rc_mask.ring"],
+      "oracle": "generated-c-closure-env-mask-structural",
+      "lane": ["c-structural"],
+      "status": "covered",
+      "reason": "Generated-C inspection proves ordinary and handler closure environments skip physical RC for Ptr, direct foreign handles, and List<foreign>; retain paired dup/mask ownership for Str, Int, and local evidence; and omit dead owner-bearing captures after Return or Never."
+    },
+    {
+      "feature_id": "backend.spread_source_sequence_structural",
+      "evidence": ["tests/cases/structural/spread_source_sequence.ring"],
+      "oracle": "generated-c-order+alloc-stats-balance",
+      "lane": ["c-structural"],
+      "status": "covered",
+      "reason": "Generated-C function bodies require Never/Return and exact Borrowed-return spread sources before destination allocation, forbid borrowed-result cleanup Drops, and a RING_ALLOC_STATS executable requires 256-loop struct/variant alloc/free balance."
+    },
+    {
       "feature_id": "backend.frontend_check_only",
       "evidence": ["tests/cases/error_occurs_check.ring"],
       "oracle": "diagnostic-substring",
       "lane": ["check"],
       "status": "covered",
       "reason": "The backend-independent check lane now reports the expected occurs-check diagnostic."
+    },
+    {
+      "feature_id": "backend.frontend_positive_ownership_or_projection",
+      "evidence": ["tests/cases/ownership_callable_or_pattern_projection_paths.ring"],
+      "oracle": "check-exit-zero",
+      "lane": ["check"],
+      "status": "covered",
+      "reason": "The exact positive check-only lane accepts reachable shared OR-pattern callable projections while a Never-valued guard does not contribute a dead Move projection."
     },
     {
       "feature_id": "backend.module_project",

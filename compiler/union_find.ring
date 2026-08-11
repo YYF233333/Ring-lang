@@ -19,6 +19,26 @@ pub fn new_union_find() -> UnionFind {
     }
 }
 
+// Unification is transactional: callers only receive this scratch copy after
+// every ordinary-type and callable-ownership preflight succeeds. Map fields
+// are reference values, so copying the UnionFind struct itself is insufficient.
+pub fn clone_union_find(uf: UnionFind) -> UnionFind {
+    UnionFind {
+        parent: map_clone(uf.parent),
+        rank: map_clone(uf.rank),
+        types: map_clone(uf.types)
+    }
+}
+
+// Preserve the historical observable API of unify(): successful calls commit
+// even when a legacy caller ignores the returned value. The public unifier
+// invokes this only after both ordinary and ownership preflights succeed.
+pub fn commit_union_find(mut target: UnionFind, source: UnionFind) {
+    target.parent = source.parent
+    target.rank = source.rank
+    target.types = source.types
+}
+
 // Find the root representative for a type variable id.
 // Performs path compression for amortized O(alpha(n)) performance.
 // Note: path compression mutates parent map (reference type) in-place.
@@ -27,9 +47,12 @@ pub fn uf_find(mut uf: UnionFind, id: Int) -> Int {
         none => id,
         some(p) => {
             if p == id { return id }
-            let root = uf_find(uf, p)
+            let parent_id = p
+            let root = uf_find(uf, parent_id)
             // Path compression: point directly to root
-            uf.parent.insert(id, root)
+            let compressed_id = id
+            let compressed_root = root
+            uf.parent.insert(compressed_id, compressed_root)
             root
         }
     }
@@ -38,7 +61,9 @@ pub fn uf_find(mut uf: UnionFind, id: Int) -> Int {
 // Bind a type variable to a type. Binds at the root representative.
 pub fn uf_bind(mut uf: UnionFind, id: Int, ty: Type) {
     let root = uf_find(uf, id)
-    uf.types.insert(root, ty)
+    let root_key = root
+    let stored_ty = ty
+    uf.types.insert(root_key, stored_ty)
 }
 
 // Look up the type bound to a type variable. Returns the type at the root representative.
@@ -55,11 +80,17 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
     let rank_a = match uf.rank.get(ra) { some(r) => r, none => 0 }
     let rank_b = match uf.rank.get(rb) { some(r) => r, none => 0 }
     if rank_a < rank_b {
-        uf.parent.insert(ra, rb)
+        let parent_ra = ra
+        let parent_rb = rb
+        uf.parent.insert(parent_ra, parent_rb)
         // Transfer type binding if only ra had one
         match uf.types.get(ra) {
             some(ty) => match uf.types.get(rb) {
-                none => { uf.types.insert(rb, ty) },
+                none => {
+                    let type_rb = rb
+                    let stored_ty = ty
+                    uf.types.insert(type_rb, stored_ty)
+                },
                 some(existing) => {
                     panic("unreachable: uf_union both nodes have type bindings")
                 }
@@ -67,11 +98,17 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
             none => {}
         }
     } else {
-        uf.parent.insert(rb, ra)
+        let parent_rb = rb
+        let parent_ra = ra
+        uf.parent.insert(parent_rb, parent_ra)
         // Transfer type binding if only rb had one
         match uf.types.get(rb) {
             some(ty) => match uf.types.get(ra) {
-                none => { uf.types.insert(ra, ty) },
+                none => {
+                    let type_ra = ra
+                    let stored_ty = ty
+                    uf.types.insert(type_ra, stored_ty)
+                },
                 some(existing) => {
                     panic("unreachable: uf_union both nodes have type bindings")
                 }
@@ -79,7 +116,8 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
             none => {}
         }
         if rank_a == rank_b {
-            uf.rank.insert(ra, rank_a + 1)
+            let rank_ra = ra
+            uf.rank.insert(rank_ra, rank_a + 1)
         }
     }
 }
@@ -88,5 +126,7 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
 // This performs find first, then inserts at the root.
 pub fn uf_insert(mut uf: UnionFind, id: Int, ty: Type) {
     let root = uf_find(uf, id)
-    uf.types.insert(root, ty)
+    let root_key = root
+    let stored_ty = ty
+    uf.types.insert(root_key, stored_ty)
 }

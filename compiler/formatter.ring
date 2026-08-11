@@ -75,8 +75,14 @@ fn format_hint(d: Diagnostic) -> Str {
                 none => ""
             }
         },
-        PatternError { detail } => detail,
-        TraitError { detail } => detail,
+        PatternError { detail } => {
+            let owned_detail = detail
+            owned_detail
+        },
+        TraitError { detail } => {
+            let owned_detail = detail
+            owned_detail
+        },
         OtherContext { .. } => ""
     }
 }

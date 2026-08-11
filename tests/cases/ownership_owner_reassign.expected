@@ -1,0 +1,10 @@
+drop:direct-old
+live:direct-new
+drop:direct-new
+live:direct-self
+drop:direct-self
+drop:transitive-old
+live:transitive-new
+drop:transitive-new
+live:transitive-self
+drop:transitive-self

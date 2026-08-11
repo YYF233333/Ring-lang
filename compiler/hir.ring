@@ -1,6 +1,8 @@
 use ast::{Span, Pattern, BinOp, UnaryOp, TypeParam}
 use types::{Type, EffectRow, StructField, EnumVariant, RecordField,
-    OwnershipMetadata, PARAM_OWNERSHIP_UNKNOWN}
+    OwnershipMetadata, PARAM_OWNERSHIP_UNKNOWN,
+    RETURN_OWNERSHIP_OWNED, RETURN_OWNERSHIP_BORROWED,
+    callable_return_ownership}
 
 pub use types::{BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
@@ -12,6 +14,35 @@ pub use builtin_methods::{CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
     SET_NON_HOF_METHODS, SET_HOF_METHODS,
     OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS,
     STRINGBUILDER_METHODS}
+
+// Checker DefIds are non-negative. Post-checker passes use disjoint negative
+// namespaces so every synthetic binder has a deterministic identity without
+// consulting source spellings or a backend-local name table. The ordinal is
+// the pass's deterministic program traversal index; ranges are deliberately
+// disjoint from dynamic callable descriptor IDs (-1..-2147483629).
+pub const SYNTHETIC_DICT_DEF_ID_BASE: Int = 0 - 3000000000
+pub const SYNTHETIC_ANF_DEF_ID_BASE: Int = 0 - 4000000000
+pub const SYNTHETIC_RC_DEF_ID_BASE: Int = 0 - 5000000000
+pub const SYNTHETIC_DEF_ID_NAMESPACE_SIZE: Int = 1000000000
+
+pub fn synthetic_def_id(base: Int, ordinal: Int) -> Int {
+    if ordinal <= 0 || ordinal >= SYNTHETIC_DEF_ID_NAMESPACE_SIZE {
+        panic("unreachable: synthetic DefId namespace exhausted")
+    }
+    base - ordinal
+}
+
+pub fn is_synthetic_anf_def_id(def_id: Int) -> Bool {
+    def_id < SYNTHETIC_ANF_DEF_ID_BASE &&
+        def_id > SYNTHETIC_ANF_DEF_ID_BASE -
+            SYNTHETIC_DEF_ID_NAMESPACE_SIZE
+}
+
+pub fn is_synthetic_rc_def_id(def_id: Int) -> Bool {
+    def_id < SYNTHETIC_RC_DEF_ID_BASE &&
+        def_id > SYNTHETIC_RC_DEF_ID_BASE -
+            SYNTHETIC_DEF_ID_NAMESPACE_SIZE
+}
 
 // Callable values installed directly by builtins.ring rather than parsed from
 // a Decl. Checker provenance and both native backends must consume this one
@@ -141,10 +172,15 @@ pub struct HParam {
     pub name: Str,
     pub ty: Type,
     pub def_id: Int?,
-    // Bit 0 is local binding mutability; the remaining bits are the independent
-    // caller/callee ownership mode. Packing keeps HParam at four fields.
+    // Bit 0 is local binding mutability, bits 1..2 are the independent
+    // caller/callee ownership mode, and bit 3 marks the checker-verified
+    // external owner passed to the authoritative Drop destructor.  The latter
+    // remains Move at the ABI edge but is borrowed inside the user body because
+    // the runtime glue alone owns and destroys the complete allocation.
     pub flags: Int
 }
+
+const HPARAM_EXTERNAL_DROP_OWNER: Int = 8
 
 pub fn hparam_flags(is_mutable: Bool, ownership: Int) -> Int {
     ownership * 2 + if is_mutable { 1 } else { 0 }
@@ -155,12 +191,29 @@ pub fn hparam_is_mutable(param: HParam) -> Bool {
 }
 
 pub fn hparam_ownership(param: HParam) -> Int {
-    let mode = param.flags / 2
+    let mode = (param.flags / 2) % 4
     if mode >= 0 && mode <= PARAM_OWNERSHIP_UNKNOWN {
         mode
     } else {
         PARAM_OWNERSHIP_UNKNOWN
     }
+}
+
+pub fn hparam_is_external_drop_owner(param: HParam) -> Bool {
+    (param.flags / HPARAM_EXTERNAL_DROP_OWNER) % 2 == 1
+}
+
+pub fn hparam_mark_external_drop_owner(param: HParam) -> HParam {
+    if hparam_is_external_drop_owner(param) { return param }
+    HParam { ..param, flags: param.flags + HPARAM_EXTERNAL_DROP_OWNER }
+}
+
+pub fn hparam_replace_ownership(param: HParam, ownership: Int) -> HParam {
+    let role = if hparam_is_external_drop_owner(param) {
+        HPARAM_EXTERNAL_DROP_OWNER
+    } else { 0 }
+    HParam { ..param,
+        flags: hparam_flags(hparam_is_mutable(param), ownership) + role }
 }
 
 // B-104 D4 (#151): dict evidence is FIRST-CLASS in HIR.  Three reference forms:
@@ -240,8 +293,29 @@ pub struct HStructFieldInit {
     pub value: HExpr
 }
 
+// Exact lexical identities introduced by a pattern. The AST Pattern remains
+// the source-shape description used by exhaustiveness and backend tests; this
+// parallel list is the authoritative binding transport for body Ident nodes.
+pub struct HPatternBinding {
+    pub name: Str,
+    pub def_id: Int,
+    pub ty: Type
+}
+
+// Exact outer lexical binding referenced from a nested callable body. The
+// caller supplies the candidate DefId set from its live lexical slot table;
+// therefore this transport never promotes a same-spelled local/module value
+// into a capture and never needs a backend name lookup.
+pub struct HFreeBinding {
+    pub name: Str,
+    pub def_id: Int,
+    pub ty: Type,
+    pub span: Span
+}
+
 pub struct HMatchArm {
     pub pattern: Pattern,
+    pub bindings: List<HPatternBinding>,
     pub guard: HExpr?,
     pub body: HExpr,
     pub span: Span
@@ -250,8 +324,12 @@ pub struct HMatchArm {
 pub struct HEffectHandler {
     pub effect_name: Str,
     pub op_name: Str,
+    // Authoritative builtin identity, resolved from EffectDef.built_in_kind.
+    // User-defined effects may intentionally reuse the public `fail.raise`
+    // spelling without acquiring the builtin abort/longjmp semantics.
+    pub is_abortive: Bool,
     pub params: List<HParam>,
-    pub resume_name: Str?,
+    pub resume_binding: HPatternBinding?,
     pub body: HExpr
 }
 
@@ -280,7 +358,14 @@ pub enum HExpr {
     Ident { name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<DictRef>?, ty: Type, effects: EffectRow, span: Span },
     BinOp { op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?, ty: Type, effects: EffectRow, span: Span },
     UnaryOp { op: UnaryOp, operand: HExpr, ty: Type, effects: EffectRow, span: Span },
-    Call { callee: HExpr, args: List<HExpr>, type_args: List<Type>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, ty: Type, effects: EffectRow, span: Span },
+    // Exact callable identity selected by inference. For a direct/lambda call
+    // this is the declaration DefId; for a function-value call it is the local
+    // callable slot DefId. Method and dictionary dispatch store the selected
+    // impl/trait-method DefId here rather than recovering it from spelling.
+    // A callable-valued result receives its own checker-minted static identity.
+    // This is distinct from `callee_def_id`: the returned closure's parameter
+    // contract is not the contract of the function that produced it.
+    Call { callee: HExpr, callee_def_id: Int?, callable_result_def_id: Int?, args: List<HExpr>, type_args: List<Type>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, ty: Type, effects: EffectRow, span: Span },
     FieldAccess { receiver: HExpr, field: Str, ty: Type, effects: EffectRow, span: Span },
     StructLit { name: Str, type_args: List<Type>, fields: List<HStructFieldInit>, spread: HExpr?, ty: Type, effects: EffectRow, span: Span },
     NamedVariantConstruct { enum_name: Str, variant_name: Str, fields: List<HStructFieldInit>, spread: HExpr?, ty: Type, effects: EffectRow, span: Span },
@@ -290,8 +375,10 @@ pub enum HExpr {
     StringInterp { parts: List<HStringInterpPart>, ty: Type, effects: EffectRow, span: Span },
     TryCatch { body: HExpr, arms: List<HMatchArm>, ty: Type, effects: EffectRow, span: Span },
     HandleExpr { body: HExpr, handlers: List<HEffectHandler>, ty: Type, effects: EffectRow, span: Span },
-    Lambda { params: List<HParam>, return_type: Type, body: HExpr, ty: Type, effects: EffectRow, span: Span },
-    EffectOp { effect_name: Str, op_name: Str, args: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
+    // Lambdas are callable solver nodes, not anonymous type-only values. The
+    // checker allocates this deterministic local DefId before body inference.
+    Lambda { def_id: Int, params: List<HParam>, return_type: Type, body: HExpr, ty: Type, effects: EffectRow, span: Span },
+    EffectOp { effect_name: Str, op_name: Str, is_abortive: Bool, args: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     RangeExpr { start: HExpr, end: HExpr, inclusive: Bool, ty: Type, effects: EffectRow, span: Span },
     ListLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     TupleLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
@@ -313,6 +400,11 @@ pub enum HExpr {
     // than aliasing the still-live source.  codegen lowers `Clone{inner}` to
     // eval inner -> ring_dup(result) -> result (ty/effects/span taken from inner).
     Clone { inner: HExpr, ty: Type, effects: EffectRow, span: Span },
+    // Exact full-binding ownership transfer. The checker emits Take only for a
+    // cleanup-visible local/parameter DefId; partial projections are rejected.
+    // Native lowering materialises the old slot value, clears that exact slot
+    // to null, then returns the materialised value to the consuming edge.
+    Take { name: Str, source_def_id: Int, ty: Type, effects: EffectRow, span: Span },
     ReturnExpr { value: HExpr?, ty: Type, effects: EffectRow, span: Span },
     UnsafeBlock { body: HExpr, ty: Type, effects: EffectRow, span: Span }
 }
@@ -339,10 +431,10 @@ pub enum HStmt {
     Break { span: Span },
     Continue { span: Span },
     LetDestructure { pattern: Pattern, bindings: List<HLetDestructureBinding>, init: HExpr, span: Span },
-    IfLet { pattern: Pattern, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
+    IfLet { pattern: Pattern, bindings: List<HPatternBinding>, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
 
     // Perceus RC: explicit reference counting op inserted by the RC pass.
-    Drop { name: Str, ty: Type, span: Span }
+    Drop { name: Str, def_id: Int, ty: Type, span: Span }
 }
 
 pub struct HStructField {
@@ -468,12 +560,365 @@ pub struct HProgram {
     // all modules.  perceus / codegen_c / verify_rc read this instead of
     // re-collecting per-module (which misses use-imported extern types).
     pub extern_type_names: Set<Str>,
-    // B-002p1: types with user `impl Drop` — perceus skips dup (move semantics),
-    // codegen calls user drop body in ring_drop_T, move checker prevents UAM.
-    pub drop_types: Set<Str>,
     // Shadow descriptors/DefId contracts/provenance and symbolic type shapes.
-    // drop_types remains until the final atomic ownership consumer cutover.
     pub ownership_metadata: OwnershipMetadata
+}
+
+// Every definition site represented in HIR must have one program-unique
+// identity. This boundary check makes source/synthetic collisions fail where
+// they are introduced instead of letting a later cleanup or backend silently
+// select a same-spelled slot. References (Ident/Assign/Take/Drop/Call) are not
+// registered here; they are consumers of these definition identities.
+pub fn validate_hir_binder_def_ids(program: HProgram) {
+    let mut seen: Set<Int> = set_new()
+    validate_hir_decls(program.decls, seen)
+}
+
+fn validate_hir_binder(mut seen: Set<Int>, def_id: Int, label: Str) {
+    if seen.contains(def_id) {
+        panic("HIR binder DefId collision ${def_id} at ${label}")
+    }
+    let recorded_def_id = def_id
+    seen.insert(recorded_def_id)
+}
+
+fn validate_hir_optional_binder(
+    mut seen: Set<Int>, def_id: Int?, label: Str
+) {
+    match def_id {
+        some(id) => validate_hir_binder(seen, id, label),
+        none => {},
+    }
+}
+
+fn validate_hir_synthetic_binder(name: Str, def_id: Int?) {
+    if name.starts_with("__ring_dictlocal_") ||
+       name.starts_with("__anf_") ||
+       name.starts_with("__rc_scope_") ||
+       name.starts_with("__ownership_take_") {
+        match def_id {
+            some(_) => {},
+            none => panic(
+                "HIR synthetic binder '${name}' has no exact DefId"),
+        }
+    }
+}
+
+fn validate_hir_params(
+    params: List<HParam>, mut seen: Set<Int>, label: Str
+) {
+    for param in params {
+        validate_hir_optional_binder(
+            seen, param.def_id, "${label} parameter '${param.name}'")
+    }
+}
+
+fn collect_hir_pattern_names(pattern: Pattern, mut names: Set<Str>) {
+    match pattern {
+        Pattern::Binding { name, .. } => {
+            // `_` is the parser's binding-shaped wildcard spelling. Inference
+            // intentionally allocates no DefId/HPatternBinding for it, so the
+            // HIR validator must not require exact metadata for that non-slot.
+            if name != "_" {
+                let owned_name = name
+                names.insert(owned_name)
+            }
+        },
+        Pattern::Constructor { fields, .. } => {
+            for field in fields { collect_hir_pattern_names(field, names) }
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            for field in fields {
+                collect_hir_pattern_names(field.pattern, names)
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for element in elements {
+                collect_hir_pattern_names(element, names)
+            }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            for alternative in patterns {
+                collect_hir_pattern_names(alternative, names)
+            }
+        },
+        Pattern::Wildcard { .. } | Pattern::Literal { .. } => {},
+    }
+}
+
+fn validate_hir_pattern_bindings(
+    pattern: Pattern, bindings: List<HPatternBinding>,
+    mut seen: Set<Int>, label: Str
+) {
+    let mut pattern_names: Set<Str> = set_new()
+    collect_hir_pattern_names(pattern, pattern_names)
+    let mut metadata_names: Set<Str> = set_new()
+    for binding in bindings {
+        if !pattern_names.contains(binding.name) {
+            panic("HIR ${label} metadata has non-pattern binding '${binding.name}'")
+        }
+        if metadata_names.contains(binding.name) {
+            panic("HIR ${label} repeats binding metadata for '${binding.name}'")
+        }
+        metadata_names.insert(binding.name)
+        validate_hir_binder(
+            seen, binding.def_id, "${label} binding '${binding.name}'")
+    }
+    for name in pattern_names {
+        if !metadata_names.contains(name) {
+            panic("HIR ${label} binding '${name}' has no exact metadata")
+        }
+    }
+}
+
+fn validate_hir_match_arm(
+    arm: HMatchArm, mut seen: Set<Int>, label: Str
+) {
+    validate_hir_pattern_bindings(
+        arm.pattern, arm.bindings, seen, label)
+    match arm.guard {
+        some(guard) => validate_hir_expr(guard, seen),
+        none => {},
+    }
+    validate_hir_expr(arm.body, seen)
+}
+
+fn validate_hir_handler(handler: HEffectHandler, mut seen: Set<Int>) {
+    let label = "handler '${handler.effect_name}.${handler.op_name}'"
+    validate_hir_params(handler.params, seen, label)
+    match handler.resume_binding {
+        some(binding) => validate_hir_binder(
+            seen, binding.def_id,
+            "${label} resume binding '${binding.name}'"),
+        none => {},
+    }
+    validate_hir_expr(handler.body, seen)
+}
+
+fn validate_hir_stmt(stmt: HStmt, mut seen: Set<Int>) {
+    match stmt {
+        HStmt::Let { name, def_id, init, .. } => {
+            validate_hir_synthetic_binder(name, def_id)
+            validate_hir_optional_binder(
+                seen, def_id, "let binding '${name}'")
+            validate_hir_expr(init, seen)
+        },
+        HStmt::Var { name, def_id, init, .. } => {
+            validate_hir_synthetic_binder(name, def_id)
+            validate_hir_optional_binder(
+                seen, def_id, "var binding '${name}'")
+            validate_hir_expr(init, seen)
+        },
+        HStmt::Assign { target, value, .. } => {
+            validate_hir_expr(target, seen)
+            validate_hir_expr(value, seen)
+        },
+        HStmt::ExprStmt { expr, .. } => validate_hir_expr(expr, seen),
+        HStmt::Return { value, .. } => match value {
+            some(expr) => validate_hir_expr(expr, seen),
+            none => {},
+        },
+        HStmt::While { condition, body, .. } => {
+            validate_hir_expr(condition, seen)
+            validate_hir_expr(body, seen)
+        },
+        HStmt::ForIn { binding, def_id, destructure,
+                       iterable, body, .. } => {
+            validate_hir_optional_binder(
+                seen, def_id, "for binding '${binding}'")
+            match destructure {
+                some(bindings) => {
+                    for binding_ in bindings {
+                        validate_hir_optional_binder(seen, binding_.def_id,
+                            "for destructure binding '${binding_.name}'")
+                    }
+                },
+                none => {},
+            }
+            validate_hir_expr(iterable, seen)
+            validate_hir_expr(body, seen)
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            for binding in bindings {
+                validate_hir_optional_binder(seen, binding.def_id,
+                    "let destructure binding '${binding.name}'")
+            }
+            validate_hir_expr(init, seen)
+        },
+        HStmt::IfLet { pattern, bindings, expr,
+                       then_block, else_block, .. } => {
+            validate_hir_expr(expr, seen)
+            validate_hir_pattern_bindings(
+                pattern, bindings, seen, "if-let pattern")
+            validate_hir_expr(then_block, seen)
+            match else_block {
+                some(block) => validate_hir_expr(block, seen),
+                none => {},
+            }
+        },
+        HStmt::Break { .. } | HStmt::Continue { .. } |
+        HStmt::Drop { .. } => {},
+    }
+}
+
+fn validate_hir_expr(expr: HExpr, mut seen: Set<Int>) {
+    match expr {
+        HExpr::BinOp { left, right, .. } => {
+            validate_hir_expr(left, seen)
+            validate_hir_expr(right, seen)
+        },
+        HExpr::UnaryOp { operand, .. } => validate_hir_expr(operand, seen),
+        HExpr::Call { callee, callable_result_def_id, args, .. } => {
+            match callable_result_def_id {
+                some(def_id) => validate_hir_binder(
+                    seen, def_id, "callable-valued call result"),
+                none => {}
+            }
+            validate_hir_expr(callee, seen)
+            for arg in args { validate_hir_expr(arg, seen) }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            validate_hir_expr(receiver, seen),
+        HExpr::StructLit { fields, spread, .. } => {
+            for field in fields { validate_hir_expr(field.value, seen) }
+            match spread {
+                some(value) => validate_hir_expr(value, seen),
+                none => {},
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields { validate_hir_expr(field.value, seen) }
+            match spread {
+                some(value) => validate_hir_expr(value, seen),
+                none => {},
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            validate_hir_expr(scrutinee, seen)
+            for arm in arms {
+                validate_hir_match_arm(arm, seen, "match arm")
+            }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts { validate_hir_stmt(stmt, seen) }
+            match tail {
+                some(value) => validate_hir_expr(value, seen),
+                none => {},
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            validate_hir_expr(condition, seen)
+            validate_hir_expr(then_branch, seen)
+            match else_branch {
+                some(branch) => validate_hir_expr(branch, seen),
+                none => {},
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(value) =>
+                        validate_hir_expr(value, seen),
+                    HStringInterpPart::Literal(_) => {},
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            validate_hir_expr(body, seen)
+            for arm in arms {
+                validate_hir_match_arm(arm, seen, "catch arm")
+            }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            validate_hir_expr(body, seen)
+            for handler in handlers { validate_hir_handler(handler, seen) }
+        },
+        HExpr::Lambda { def_id, params, body, .. } => {
+            validate_hir_binder(seen, def_id, "lambda")
+            validate_hir_params(params, seen, "lambda")
+            validate_hir_expr(body, seen)
+        },
+        HExpr::EffectOp { args, .. } => {
+            for arg in args { validate_hir_expr(arg, seen) }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            validate_hir_expr(start, seen)
+            validate_hir_expr(end, seen)
+        },
+        HExpr::ListLit { elements, .. } => {
+            for element in elements { validate_hir_expr(element, seen) }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements { validate_hir_expr(element, seen) }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            validate_hir_expr(receiver, seen)
+            validate_hir_expr(index, seen)
+        },
+        HExpr::Clone { inner, .. } => validate_hir_expr(inner, seen),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(returned) => validate_hir_expr(returned, seen),
+            none => {},
+        },
+        HExpr::UnsafeBlock { body, .. } => validate_hir_expr(body, seen),
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
+        HExpr::Ident { .. } | HExpr::DictConstruct { .. } |
+        HExpr::Take { .. } => {},
+    }
+}
+
+fn validate_hir_decls(decls: List<HDecl>, mut seen: Set<Int>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, def_id, params, body, .. } => {
+                validate_hir_optional_binder(
+                    seen, def_id, "function '${name}'")
+                validate_hir_params(params, seen, "function '${name}'")
+                validate_hir_expr(body, seen)
+            },
+            HDecl::Impl { methods, .. } =>
+                validate_hir_decls(methods, seen),
+            HDecl::Test { body, .. } => validate_hir_expr(body, seen),
+            HDecl::Effect { name, ops, .. } => {
+                for op in ops {
+                    let label = "effect operation '${name}.${op.name}'"
+                    validate_hir_params(op.params, seen, label)
+                    match op.default_body {
+                        some(body) => validate_hir_expr(body, seen),
+                        none => {},
+                    }
+                }
+            },
+            HDecl::Trait { name, methods, .. } => {
+                for method in methods {
+                    let label = "trait method '${name}.${method.name}'"
+                    validate_hir_binder(seen, method.def_id, label)
+                    validate_hir_params(method.params, seen, label)
+                    match method.body {
+                        some(body) => validate_hir_expr(body, seen),
+                        none => {},
+                    }
+                }
+            },
+            HDecl::ExternFn { name, def_id, params, .. } => {
+                validate_hir_optional_binder(
+                    seen, def_id, "extern function '${name}'")
+                validate_hir_params(
+                    params, seen, "extern function '${name}'")
+            },
+            HDecl::Const { name, def_id, init, .. } => {
+                validate_hir_optional_binder(
+                    seen, def_id, "const '${name}'")
+                validate_hir_expr(init, seen)
+            },
+            HDecl::ModBlock { decls: inner, .. } =>
+                validate_hir_decls(inner, seen),
+            HDecl::Struct { .. } | HDecl::Enum { .. } |
+            HDecl::ExternType { .. } | HDecl::TypeAlias { .. } |
+            HDecl::Sig { .. } => {},
+        }
+    }
 }
 
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case
@@ -538,6 +983,528 @@ pub fn is_materialized_fn_value(expr: HExpr) -> Bool {
             all
         },
         _ => false
+    }
+}
+
+// Whether evaluating an expression can reach a normal value-producing edge.
+// This is deliberately structural as well as type-aware: a Block can retain
+// its ordinary result type even when an earlier ReturnExpr/Never statement
+// makes its syntactic tail dead.  Move-edge validation in ownership, Perceus,
+// and verify_rc must all agree on exactly those reachable value paths.
+pub fn expr_has_reachable_value(expr: HExpr) -> Bool {
+    match hexpr_type(expr) {
+        Type::NeverType => return false,
+        _ => {}
+    }
+    match expr {
+        HExpr::BinOp { left, right, .. } =>
+            expr_has_reachable_value(left) &&
+            expr_has_reachable_value(right),
+        HExpr::UnaryOp { operand, .. } =>
+            expr_has_reachable_value(operand),
+        HExpr::Call { callee, args, .. } => {
+            if !expr_has_reachable_value(callee) { return false }
+            for arg in args {
+                if !expr_has_reachable_value(arg) { return false }
+            }
+            true
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            expr_has_reachable_value(receiver),
+        // Keep the two constructor forms separate for bootstrap: the old C
+        // backend does not reliably materialize binders shared by an
+        // OR-pattern before the arm body reads them.
+        HExpr::StructLit { fields, spread, .. } => {
+            for field in fields {
+                if !expr_has_reachable_value(field.value) { return false }
+            }
+            match spread {
+                some(source) => expr_has_reachable_value(source),
+                none => true
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields {
+                if !expr_has_reachable_value(field.value) { return false }
+            }
+            match spread {
+                some(source) => expr_has_reachable_value(source),
+                none => true
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            if !expr_has_reachable_value(scrutinee) { return false }
+            for arm in arms {
+                let guard_reaches = match arm.guard {
+                    some(guard) => expr_has_reachable_value(guard),
+                    none => true
+                }
+                if guard_reaches && expr_has_reachable_value(arm.body) {
+                    return true
+                }
+            }
+            false
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts {
+                if !stmt_reaches_next(stmt) { return false }
+            }
+            match tail {
+                some(value) => expr_has_reachable_value(value),
+                none => true
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            if !expr_has_reachable_value(condition) { return false }
+            if expr_has_reachable_value(then_branch) { return true }
+            match else_branch {
+                some(branch) => expr_has_reachable_value(branch),
+                none => true
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(value) =>
+                        if !expr_has_reachable_value(value) { return false },
+                    HStringInterpPart::Literal(_) => {}
+                }
+            }
+            true
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            if expr_has_reachable_value(body) { return true }
+            for arm in arms {
+                let guard_reaches = match arm.guard {
+                    some(guard) => expr_has_reachable_value(guard),
+                    none => true
+                }
+                if guard_reaches && expr_has_reachable_value(arm.body) {
+                    return true
+                }
+            }
+            false
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            if expr_has_reachable_value(body) { return true }
+            for handler in handlers {
+                if handler.is_abortive &&
+                   expr_has_reachable_value(handler.body) {
+                    return true
+                }
+            }
+            false
+        },
+        HExpr::EffectOp { args, .. } => {
+            for arg in args {
+                if !expr_has_reachable_value(arg) { return false }
+            }
+            true
+        },
+        HExpr::RangeExpr { start, end, .. } =>
+            expr_has_reachable_value(start) &&
+            expr_has_reachable_value(end),
+        HExpr::ListLit { elements, .. } => {
+            for element in elements {
+                if !expr_has_reachable_value(element) { return false }
+            }
+            true
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                if !expr_has_reachable_value(element) { return false }
+            }
+            true
+        },
+        HExpr::IndexExpr { receiver, index, .. } =>
+            expr_has_reachable_value(receiver) &&
+            expr_has_reachable_value(index),
+        HExpr::Clone { inner, .. } => expr_has_reachable_value(inner),
+        HExpr::ReturnExpr { .. } => false,
+        HExpr::UnsafeBlock { body, .. } => expr_has_reachable_value(body),
+        HExpr::Take { .. } | HExpr::Ident { .. } |
+        HExpr::DictConstruct { .. } | HExpr::Lambda { .. } |
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } => true
+    }
+}
+
+// Option::none is the other non-binding constructor Ident. Unlike ordinary
+// nullary variants it evaluates to the immortal runtime singleton, so it is
+// borrowed rather than fresh; either way ownership planning must never try to
+// invalidate its global constructor DefId as though it were a closure capture.
+pub fn is_option_none_ctor_ident(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Ident { resolved_name, ty, .. } => match resolved_name {
+            some(rn) => match ty {
+                Type::EnumType { name, .. } =>
+                    name == BUILTIN_OPTION &&
+                    rn == variant_ctor_name(BUILTIN_OPTION, "none"),
+                _ => false
+            },
+            none => false
+        },
+        _ => false
+    }
+}
+
+pub fn stmt_reaches_next(stmt: HStmt) -> Bool {
+    match stmt {
+        HStmt::Return { .. } | HStmt::Break { .. } |
+        HStmt::Continue { .. } => false,
+        HStmt::Let { init, .. } => expr_has_reachable_value(init),
+        HStmt::Var { init, .. } => expr_has_reachable_value(init),
+        HStmt::ExprStmt { expr: init, .. } =>
+            expr_has_reachable_value(init),
+        HStmt::LetDestructure { init, .. } =>
+            expr_has_reachable_value(init),
+        HStmt::Assign { target, value, .. } =>
+            expr_has_reachable_value(target) &&
+            expr_has_reachable_value(value),
+        HStmt::While { condition, .. } =>
+            expr_has_reachable_value(condition),
+        HStmt::ForIn { iterable, .. } =>
+            expr_has_reachable_value(iterable),
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            if !expr_has_reachable_value(expr) { return false }
+            if expr_has_reachable_value(then_block) { return true }
+            match else_block {
+                some(branch) => expr_has_reachable_value(branch),
+                // Pattern miss is a normal fallthrough path.
+                none => true
+            }
+        },
+        HStmt::Drop { .. } => true
+    }
+}
+
+// Detect a complete binding that reaches a Move edge without a Take.  The
+// post-RC verifier passes through_clone=true so an illicit Clone cannot hide
+// the missing Take; the planner and Perceus use false before Clone insertion.
+pub fn move_edge_has_reachable_bare_binding(
+    expr: HExpr, through_clone: Bool
+) -> Bool {
+    match hexpr_type(expr) {
+        Type::UnitType | Type::NeverType |
+        Type::EffectRowType { .. } | Type::ErrorType => return false,
+        _ => {}
+    }
+    if !expr_has_reachable_value(expr) { return false }
+    match expr {
+        HExpr::Take { .. } => false,
+        HExpr::Ident { .. } =>
+            !is_nullary_variant_ctor_ident(expr) &&
+            !is_option_none_ctor_ident(expr) &&
+            !is_materialized_fn_value(expr),
+        HExpr::Clone { inner, .. } =>
+            through_clone && move_edge_has_reachable_bare_binding(
+                inner, through_clone),
+        HExpr::Block { tail, .. } => match tail {
+            some(value) => move_edge_has_reachable_bare_binding(
+                value, through_clone),
+            none => false
+        },
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            if move_edge_has_reachable_bare_binding(
+                    then_branch, through_clone) {
+                return true
+            }
+            match else_branch {
+                some(value) => move_edge_has_reachable_bare_binding(
+                    value, through_clone),
+                none => false
+            }
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            for arm in arms {
+                let guard_reaches = match arm.guard {
+                    some(guard) => expr_has_reachable_value(guard),
+                    none => true
+                }
+                if guard_reaches && move_edge_has_reachable_bare_binding(
+                        arm.body, through_clone) {
+                    return true
+                }
+            }
+            false
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            if move_edge_has_reachable_bare_binding(body, through_clone) {
+                return true
+            }
+            for arm in arms {
+                let guard_reaches = match arm.guard {
+                    some(guard) => expr_has_reachable_value(guard),
+                    none => true
+                }
+                if guard_reaches && move_edge_has_reachable_bare_binding(
+                        arm.body, through_clone) {
+                    return true
+                }
+            }
+            false
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            if move_edge_has_reachable_bare_binding(body, through_clone) {
+                return true
+            }
+            for handler in handlers {
+                if handler.is_abortive &&
+                   move_edge_has_reachable_bare_binding(
+                       handler.body, through_clone) {
+                    return true
+                }
+            }
+            false
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            move_edge_has_reachable_bare_binding(body, through_clone),
+        _ => false
+    }
+}
+
+// Collect references to an exact candidate set of bindings through an entire
+// nested callable body. DefIds are program-unique, so a reference is free with
+// respect to this callable exactly when it names a candidate outer slot.
+// Nested lambdas are traversed deliberately: their construction occurs inside
+// this callable and their free values must first be available from this env.
+pub fn collect_exact_free_bindings(
+    expr: HExpr, candidates: Set<Int>
+) -> List<HFreeBinding> {
+    let mut seen: Set<Int> = set_new()
+    let mut result: List<HFreeBinding> = []
+    collect_exact_free_binding_expr(expr, candidates, seen, result)
+    result
+}
+
+fn push_exact_free_binding(
+    candidates: Set<Int>, mut seen: Set<Int>,
+    mut result: List<HFreeBinding>,
+    name: Str, def_id: Int, ty: Type, span: Span
+) {
+    if !candidates.contains(def_id) || seen.contains(def_id) { return }
+    let seen_def_id = def_id
+    seen.insert(seen_def_id)
+    let owned_name = name
+    let owned_def_id = def_id
+    let owned_ty = ty
+    let owned_span = span
+    result.push(HFreeBinding {
+        name: owned_name, def_id: owned_def_id,
+        ty: owned_ty, span: owned_span
+    })
+}
+
+fn collect_exact_free_binding_expr(
+    expr: HExpr, candidates: Set<Int>, mut seen: Set<Int>,
+    mut result: List<HFreeBinding>
+) {
+    match expr {
+        HExpr::Ident { name, def_id, ty, span, .. } => match def_id {
+            some(id) => push_exact_free_binding(
+                candidates, seen, result, name, id, ty, span),
+            none => {}
+        },
+        HExpr::Take { name, source_def_id, ty, span, .. } =>
+            push_exact_free_binding(
+                candidates, seen, result, name, source_def_id, ty, span),
+        HExpr::BinOp { left, right, .. } => {
+            collect_exact_free_binding_expr(left, candidates, seen, result)
+            collect_exact_free_binding_expr(right, candidates, seen, result)
+        },
+        HExpr::UnaryOp { operand, .. } =>
+            collect_exact_free_binding_expr(
+                operand, candidates, seen, result),
+        HExpr::Call { callee, args, .. } => {
+            collect_exact_free_binding_expr(callee, candidates, seen, result)
+            for arg in args {
+                collect_exact_free_binding_expr(
+                    arg, candidates, seen, result)
+            }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            collect_exact_free_binding_expr(
+                receiver, candidates, seen, result),
+        HExpr::StructLit { fields, spread, .. } => {
+            for field in fields {
+                collect_exact_free_binding_expr(
+                    field.value, candidates, seen, result)
+            }
+            match spread {
+                some(source) => collect_exact_free_binding_expr(
+                    source, candidates, seen, result),
+                none => {}
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields {
+                collect_exact_free_binding_expr(
+                    field.value, candidates, seen, result)
+            }
+            match spread {
+                some(source) => collect_exact_free_binding_expr(
+                    source, candidates, seen, result),
+                none => {}
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_exact_free_binding_expr(
+                scrutinee, candidates, seen, result)
+            for arm in arms {
+                match arm.guard {
+                    some(guard) => collect_exact_free_binding_expr(
+                        guard, candidates, seen, result),
+                    none => {}
+                }
+                collect_exact_free_binding_expr(
+                    arm.body, candidates, seen, result)
+            }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts {
+                collect_exact_free_binding_stmt(
+                    stmt, candidates, seen, result)
+                // The terminating statement itself may read captures (for
+                // example, its returned value), but later statements and the
+                // syntactic tail cannot contribute to the closure env.
+                if !stmt_reaches_next(stmt) { return }
+            }
+            match tail {
+                some(value) => collect_exact_free_binding_expr(
+                    value, candidates, seen, result),
+                none => {}
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            collect_exact_free_binding_expr(
+                condition, candidates, seen, result)
+            collect_exact_free_binding_expr(
+                then_branch, candidates, seen, result)
+            match else_branch {
+                some(branch) => collect_exact_free_binding_expr(
+                    branch, candidates, seen, result),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(value) =>
+                        collect_exact_free_binding_expr(
+                            value, candidates, seen, result),
+                    HStringInterpPart::Literal(_) => {}
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            collect_exact_free_binding_expr(body, candidates, seen, result)
+            for arm in arms {
+                match arm.guard {
+                    some(guard) => collect_exact_free_binding_expr(
+                        guard, candidates, seen, result),
+                    none => {}
+                }
+                collect_exact_free_binding_expr(
+                    arm.body, candidates, seen, result)
+            }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            collect_exact_free_binding_expr(body, candidates, seen, result)
+            for handler in handlers {
+                collect_exact_free_binding_expr(
+                    handler.body, candidates, seen, result)
+            }
+        },
+        HExpr::Lambda { body, .. } =>
+            collect_exact_free_binding_expr(body, candidates, seen, result),
+        HExpr::UnsafeBlock { body, .. } =>
+            collect_exact_free_binding_expr(body, candidates, seen, result),
+        HExpr::Clone { inner: body, .. } =>
+            collect_exact_free_binding_expr(body, candidates, seen, result),
+        HExpr::EffectOp { args, .. } => {
+            for arg in args {
+                collect_exact_free_binding_expr(
+                    arg, candidates, seen, result)
+            }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            collect_exact_free_binding_expr(start, candidates, seen, result)
+            collect_exact_free_binding_expr(end, candidates, seen, result)
+        },
+        HExpr::ListLit { elements, .. } => {
+            for element in elements {
+                collect_exact_free_binding_expr(
+                    element, candidates, seen, result)
+            }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                collect_exact_free_binding_expr(
+                    element, candidates, seen, result)
+            }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_exact_free_binding_expr(
+                receiver, candidates, seen, result)
+            collect_exact_free_binding_expr(index, candidates, seen, result)
+        },
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(returned) => collect_exact_free_binding_expr(
+                returned, candidates, seen, result),
+            none => {}
+        },
+        HExpr::DictConstruct { .. } | HExpr::IntLit { .. } |
+        HExpr::FloatLit { .. } | HExpr::StrLit { .. } |
+        HExpr::BoolLit { .. } => {}
+    }
+}
+
+fn collect_exact_free_binding_stmt(
+    stmt: HStmt, candidates: Set<Int>, mut seen: Set<Int>,
+    mut result: List<HFreeBinding>
+) {
+    match stmt {
+        HStmt::Let { init, .. } =>
+            collect_exact_free_binding_expr(init, candidates, seen, result),
+        HStmt::Var { init, .. } =>
+            collect_exact_free_binding_expr(init, candidates, seen, result),
+        HStmt::ExprStmt { expr: init, .. } =>
+            collect_exact_free_binding_expr(init, candidates, seen, result),
+        HStmt::LetDestructure { init, .. } =>
+            collect_exact_free_binding_expr(init, candidates, seen, result),
+        HStmt::Assign { target, value, .. } => {
+            collect_exact_free_binding_expr(target, candidates, seen, result)
+            collect_exact_free_binding_expr(value, candidates, seen, result)
+        },
+        HStmt::Return { value, .. } => match value {
+            some(returned) => collect_exact_free_binding_expr(
+                returned, candidates, seen, result),
+            none => {}
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_exact_free_binding_expr(
+                condition, candidates, seen, result)
+            collect_exact_free_binding_expr(body, candidates, seen, result)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_exact_free_binding_expr(
+                iterable, candidates, seen, result)
+            collect_exact_free_binding_expr(body, candidates, seen, result)
+        },
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            collect_exact_free_binding_expr(expr, candidates, seen, result)
+            collect_exact_free_binding_expr(
+                then_block, candidates, seen, result)
+            match else_block {
+                some(branch) => collect_exact_free_binding_expr(
+                    branch, candidates, seen, result),
+                none => {}
+            }
+        },
+        HStmt::Drop { name, def_id, ty, span } =>
+            push_exact_free_binding(
+                candidates, seen, result, name, def_id, ty, span),
+        HStmt::Break { .. } | HStmt::Continue { .. } => {}
     }
 }
 
@@ -624,8 +1591,12 @@ pub fn scan_trait_method_order(decls: List<HDecl>, mut trait_method_order: Map<S
                 for m in methods {
                     method_names.push(m.name)
                 }
-                trait_method_order.insert(name, method_names)
-                trait_supertraits.insert(name, supertraits)
+                let method_trait_name = name
+                let super_trait_name = name
+                let owned_supertraits = supertraits
+                trait_method_order.insert(method_trait_name, method_names)
+                trait_supertraits.insert(
+                    super_trait_name, owned_supertraits)
             },
             HDecl::ModBlock { decls: md, .. } => {
                 scan_trait_method_order(md, trait_method_order, trait_supertraits)
@@ -661,18 +1632,26 @@ pub fn collect_all_supertraits(trait_supertraits: Map<Str, List<Str>>, trait_nam
     let mut stack: List<Str> = []
     match trait_supertraits.get(trait_name) {
         some(supers) => {
-            for st in supers { stack.push(st) }
+            for st in supers {
+                let owned_super = st
+                stack.push(owned_super)
+            }
         },
         none => {},
     }
     while stack.len() > 0 {
         let current = stack.pop().unwrap()
         if visited.contains(current) { continue }
-        visited.insert(current)
-        result.push(current)
+        let visited_current = current
+        let result_current = current
+        visited.insert(visited_current)
+        result.push(result_current)
         match trait_supertraits.get(current) {
             some(parent_supers) => {
-                for ps in parent_supers { stack.push(ps) }
+                for ps in parent_supers {
+                    let owned_parent = ps
+                    stack.push(owned_parent)
+                }
             },
             none => {},
         }
@@ -687,99 +1666,287 @@ pub const OPTION_PAYLOAD_FIELD: Str = "_0"
 pub const RUNTIME_EFFECT_ABORT: Str = "__EffectAbort"
 pub const RUNTIME_MATCH_FAIL: Str = "__match_fail"
 
+// Exact identity available directly on a first-class callable expression.
+// A control-flow wrapper preserves identity only when every reachable value
+// path yields the SAME DefId; Never/return paths are neutral because they
+// produce no callable.  This helper never consults a source name or type, so a
+// mixed producer still has to be bound to a DefId-backed slot before an
+// ownership-sensitive call.
+pub fn hexpr_callable_def_id(expr: HExpr) -> Int? {
+    if !expr_has_reachable_value(expr) { return none }
+    match expr {
+        HExpr::Ident { def_id, .. } => {
+            let owned_def_id = def_id
+            owned_def_id
+        },
+        HExpr::Lambda { def_id, .. } => {
+            let owned_def_id = def_id
+            some(owned_def_id)
+        },
+        HExpr::Call { callable_result_def_id, .. } => {
+            let owned_result_id = callable_result_def_id
+            owned_result_id
+        },
+        HExpr::Block { tail, .. } => match tail {
+            some(value) => hexpr_callable_def_id(value),
+            none => none
+        },
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            let then_id = hexpr_callable_def_id(then_branch)
+            match else_branch {
+                some(branch) => {
+                    let else_id = hexpr_callable_def_id(branch)
+                    match (then_id, else_id) {
+                        (some(left), some(right)) =>
+                            if left == right {
+                                let owned_left = left
+                                some(owned_left)
+                            } else { none },
+                        (some(left), none) =>
+                            if !expr_has_reachable_value(branch) {
+                                let owned_left = left
+                                some(owned_left)
+                            } else { none },
+                        (none, some(right)) =>
+                            if !expr_has_reachable_value(then_branch) {
+                                let owned_right = right
+                                some(owned_right)
+                            } else { none },
+                        (none, none) => none
+                    }
+                },
+                none => none
+            }
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut result: Int? = none
+            for arm in arms {
+                let guard_reaches = match arm.guard {
+                    some(guard) => expr_has_reachable_value(guard),
+                    none => true
+                }
+                if guard_reaches && expr_has_reachable_value(arm.body) {
+                    match hexpr_callable_def_id(arm.body) {
+                        some(id) => match result {
+                            some(expected) => if expected != id { return none },
+                            none => {
+                                let owned_id = id
+                                result = some(owned_id)
+                            }
+                        },
+                        none => return none
+                    }
+                }
+            }
+            result
+        },
+        HExpr::Clone { inner, .. } => hexpr_callable_def_id(inner),
+        HExpr::UnsafeBlock { body, .. } => hexpr_callable_def_id(body),
+        _ => none
+    }
+}
+
+fn push_unique_callable_source(mut sources: List<Int>, def_id: Int) {
+    for existing in sources {
+        if existing == def_id { return }
+    }
+    let pushed_def_id = def_id
+    sources.push(pushed_def_id)
+}
+
+// Exact producer identities for a callable-valued expression. Unlike
+// hexpr_callable_def_id, this preserves a control-flow join whose reachable
+// values have different DefIds but the same frozen callable contract. Diverging
+// value paths are neutral. A reachable path without an exact identity poisons
+// the whole result; neither spelling nor FnType is an identity fallback.
+fn collect_hexpr_callable_source_def_ids(
+    expr: HExpr, mut sources: List<Int>
+) -> Bool {
+    if !expr_has_reachable_value(expr) { return true }
+    match expr {
+        HExpr::Ident { def_id, .. } => match def_id {
+            some(id) => {
+                push_unique_callable_source(sources, id)
+                true
+            },
+            none => false
+        },
+        HExpr::Lambda { def_id, .. } => {
+            push_unique_callable_source(sources, def_id)
+            true
+        },
+        HExpr::Call { callable_result_def_id, .. } =>
+            match callable_result_def_id {
+                some(id) => {
+                    push_unique_callable_source(sources, id)
+                    true
+                },
+                none => false
+            },
+        HExpr::Clone { inner, .. } =>
+            collect_hexpr_callable_source_def_ids(inner, sources),
+        HExpr::Block { tail, .. } => match tail {
+            some(value) =>
+                collect_hexpr_callable_source_def_ids(value, sources),
+            none => false
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            collect_hexpr_callable_source_def_ids(body, sources),
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            if !collect_hexpr_callable_source_def_ids(
+                    then_branch, sources) {
+                return false
+            }
+            match else_branch {
+                some(branch) =>
+                    collect_hexpr_callable_source_def_ids(branch, sources),
+                none => false
+            }
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut any = false
+            for arm in arms {
+                let guard_reaches = match arm.guard {
+                    some(guard) => expr_has_reachable_value(guard),
+                    none => true
+                }
+                if guard_reaches && expr_has_reachable_value(arm.body) {
+                    if !collect_hexpr_callable_source_def_ids(
+                            arm.body, sources) {
+                        return false
+                    }
+                    any = true
+                }
+            }
+            any
+        },
+        _ => false
+    }
+}
+
+pub fn hexpr_callable_source_def_ids(expr: HExpr) -> List<Int>? {
+    let mut sources: List<Int> = []
+    if !collect_hexpr_callable_source_def_ids(expr, sources) ||
+       sources.len() == 0 {
+        return none
+    }
+    some(sources)
+}
+
+// HExpr metadata accessors borrow the expression.  Pattern fields are
+// therefore borrowed projections; materialize an ordinary RC copy before
+// returning an owned metadata value across the callable ABI.
+fn copy_hexpr_type(value: Type) -> Type {
+    let copied = value
+    copied
+}
+
+fn copy_hexpr_effects(value: EffectRow) -> EffectRow {
+    let copied = value
+    copied
+}
+
+fn copy_hexpr_span(value: Span) -> Span {
+    let copied = value
+    copied
+}
+
 pub fn hexpr_type(e: HExpr) -> Type {
     match e {
-        HExpr::IntLit { ty, .. } => ty,
-        HExpr::FloatLit { ty, .. } => ty,
-        HExpr::StrLit { ty, .. } => ty,
-        HExpr::BoolLit { ty, .. } => ty,
-        HExpr::Ident { ty, .. } => ty,
-        HExpr::BinOp { ty, .. } => ty,
-        HExpr::UnaryOp { ty, .. } => ty,
-        HExpr::Call { ty, .. } => ty,
-        HExpr::FieldAccess { ty, .. } => ty,
-        HExpr::StructLit { ty, .. } => ty,
-        HExpr::NamedVariantConstruct { ty, .. } => ty,
-        HExpr::MatchExpr { ty, .. } => ty,
-        HExpr::Block { ty, .. } => ty,
-        HExpr::IfExpr { ty, .. } => ty,
-        HExpr::StringInterp { ty, .. } => ty,
-        HExpr::TryCatch { ty, .. } => ty,
-        HExpr::HandleExpr { ty, .. } => ty,
-        HExpr::Lambda { ty, .. } => ty,
-        HExpr::EffectOp { ty, .. } => ty,
-        HExpr::RangeExpr { ty, .. } => ty,
-        HExpr::ListLit { ty, .. } => ty,
-        HExpr::TupleLit { ty, .. } => ty,
-        HExpr::IndexExpr { ty, .. } => ty,
-        HExpr::DictConstruct { ty, .. } => ty,
-        HExpr::Clone { ty, .. } => ty,
-        HExpr::ReturnExpr { ty, .. } => ty,
-        HExpr::UnsafeBlock { ty, .. } => ty
+        HExpr::IntLit { ty, .. } => copy_hexpr_type(ty),
+        HExpr::FloatLit { ty, .. } => copy_hexpr_type(ty),
+        HExpr::StrLit { ty, .. } => copy_hexpr_type(ty),
+        HExpr::BoolLit { ty, .. } => copy_hexpr_type(ty),
+        HExpr::Ident { ty, .. } => copy_hexpr_type(ty),
+        HExpr::BinOp { ty, .. } => copy_hexpr_type(ty),
+        HExpr::UnaryOp { ty, .. } => copy_hexpr_type(ty),
+        HExpr::Call { ty, .. } => copy_hexpr_type(ty),
+        HExpr::FieldAccess { ty, .. } => copy_hexpr_type(ty),
+        HExpr::StructLit { ty, .. } => copy_hexpr_type(ty),
+        HExpr::NamedVariantConstruct { ty, .. } => copy_hexpr_type(ty),
+        HExpr::MatchExpr { ty, .. } => copy_hexpr_type(ty),
+        HExpr::Block { ty, .. } => copy_hexpr_type(ty),
+        HExpr::IfExpr { ty, .. } => copy_hexpr_type(ty),
+        HExpr::StringInterp { ty, .. } => copy_hexpr_type(ty),
+        HExpr::TryCatch { ty, .. } => copy_hexpr_type(ty),
+        HExpr::HandleExpr { ty, .. } => copy_hexpr_type(ty),
+        HExpr::Lambda { ty, .. } => copy_hexpr_type(ty),
+        HExpr::EffectOp { ty, .. } => copy_hexpr_type(ty),
+        HExpr::RangeExpr { ty, .. } => copy_hexpr_type(ty),
+        HExpr::ListLit { ty, .. } => copy_hexpr_type(ty),
+        HExpr::TupleLit { ty, .. } => copy_hexpr_type(ty),
+        HExpr::IndexExpr { ty, .. } => copy_hexpr_type(ty),
+        HExpr::DictConstruct { ty, .. } => copy_hexpr_type(ty),
+        HExpr::Clone { ty, .. } => copy_hexpr_type(ty),
+        HExpr::Take { ty, .. } => copy_hexpr_type(ty),
+        HExpr::ReturnExpr { ty, .. } => copy_hexpr_type(ty),
+        HExpr::UnsafeBlock { ty, .. } => copy_hexpr_type(ty)
     }
 }
 
 pub fn hexpr_effects(e: HExpr) -> EffectRow {
     match e {
-        HExpr::IntLit { effects, .. } => effects,
-        HExpr::FloatLit { effects, .. } => effects,
-        HExpr::StrLit { effects, .. } => effects,
-        HExpr::BoolLit { effects, .. } => effects,
-        HExpr::Ident { effects, .. } => effects,
-        HExpr::BinOp { effects, .. } => effects,
-        HExpr::UnaryOp { effects, .. } => effects,
-        HExpr::Call { effects, .. } => effects,
-        HExpr::FieldAccess { effects, .. } => effects,
-        HExpr::StructLit { effects, .. } => effects,
-        HExpr::NamedVariantConstruct { effects, .. } => effects,
-        HExpr::MatchExpr { effects, .. } => effects,
-        HExpr::Block { effects, .. } => effects,
-        HExpr::IfExpr { effects, .. } => effects,
-        HExpr::StringInterp { effects, .. } => effects,
-        HExpr::TryCatch { effects, .. } => effects,
-        HExpr::HandleExpr { effects, .. } => effects,
-        HExpr::Lambda { effects, .. } => effects,
-        HExpr::EffectOp { effects, .. } => effects,
-        HExpr::RangeExpr { effects, .. } => effects,
-        HExpr::ListLit { effects, .. } => effects,
-        HExpr::TupleLit { effects, .. } => effects,
-        HExpr::IndexExpr { effects, .. } => effects,
-        HExpr::DictConstruct { effects, .. } => effects,
-        HExpr::Clone { effects, .. } => effects,
-        HExpr::ReturnExpr { effects, .. } => effects,
-        HExpr::UnsafeBlock { effects, .. } => effects
+        HExpr::IntLit { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::FloatLit { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::StrLit { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::BoolLit { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::Ident { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::BinOp { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::UnaryOp { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::Call { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::FieldAccess { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::StructLit { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::NamedVariantConstruct { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::MatchExpr { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::Block { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::IfExpr { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::StringInterp { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::TryCatch { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::HandleExpr { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::Lambda { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::EffectOp { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::RangeExpr { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::ListLit { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::TupleLit { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::IndexExpr { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::DictConstruct { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::Clone { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::Take { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::ReturnExpr { effects, .. } => copy_hexpr_effects(effects),
+        HExpr::UnsafeBlock { effects, .. } => copy_hexpr_effects(effects)
     }
 }
 
 pub fn hexpr_span(e: HExpr) -> Span {
     match e {
-        HExpr::IntLit { span, .. } => span,
-        HExpr::FloatLit { span, .. } => span,
-        HExpr::StrLit { span, .. } => span,
-        HExpr::BoolLit { span, .. } => span,
-        HExpr::Ident { span, .. } => span,
-        HExpr::BinOp { span, .. } => span,
-        HExpr::UnaryOp { span, .. } => span,
-        HExpr::Call { span, .. } => span,
-        HExpr::FieldAccess { span, .. } => span,
-        HExpr::StructLit { span, .. } => span,
-        HExpr::NamedVariantConstruct { span, .. } => span,
-        HExpr::MatchExpr { span, .. } => span,
-        HExpr::Block { span, .. } => span,
-        HExpr::IfExpr { span, .. } => span,
-        HExpr::StringInterp { span, .. } => span,
-        HExpr::TryCatch { span, .. } => span,
-        HExpr::HandleExpr { span, .. } => span,
-        HExpr::Lambda { span, .. } => span,
-        HExpr::EffectOp { span, .. } => span,
-        HExpr::RangeExpr { span, .. } => span,
-        HExpr::ListLit { span, .. } => span,
-        HExpr::TupleLit { span, .. } => span,
-        HExpr::IndexExpr { span, .. } => span,
-        HExpr::DictConstruct { span, .. } => span,
-        HExpr::Clone { span, .. } => span,
-        HExpr::ReturnExpr { span, .. } => span,
-        HExpr::UnsafeBlock { span, .. } => span
+        HExpr::IntLit { span, .. } => copy_hexpr_span(span),
+        HExpr::FloatLit { span, .. } => copy_hexpr_span(span),
+        HExpr::StrLit { span, .. } => copy_hexpr_span(span),
+        HExpr::BoolLit { span, .. } => copy_hexpr_span(span),
+        HExpr::Ident { span, .. } => copy_hexpr_span(span),
+        HExpr::BinOp { span, .. } => copy_hexpr_span(span),
+        HExpr::UnaryOp { span, .. } => copy_hexpr_span(span),
+        HExpr::Call { span, .. } => copy_hexpr_span(span),
+        HExpr::FieldAccess { span, .. } => copy_hexpr_span(span),
+        HExpr::StructLit { span, .. } => copy_hexpr_span(span),
+        HExpr::NamedVariantConstruct { span, .. } => copy_hexpr_span(span),
+        HExpr::MatchExpr { span, .. } => copy_hexpr_span(span),
+        HExpr::Block { span, .. } => copy_hexpr_span(span),
+        HExpr::IfExpr { span, .. } => copy_hexpr_span(span),
+        HExpr::StringInterp { span, .. } => copy_hexpr_span(span),
+        HExpr::TryCatch { span, .. } => copy_hexpr_span(span),
+        HExpr::HandleExpr { span, .. } => copy_hexpr_span(span),
+        HExpr::Lambda { span, .. } => copy_hexpr_span(span),
+        HExpr::EffectOp { span, .. } => copy_hexpr_span(span),
+        HExpr::RangeExpr { span, .. } => copy_hexpr_span(span),
+        HExpr::ListLit { span, .. } => copy_hexpr_span(span),
+        HExpr::TupleLit { span, .. } => copy_hexpr_span(span),
+        HExpr::IndexExpr { span, .. } => copy_hexpr_span(span),
+        HExpr::DictConstruct { span, .. } => copy_hexpr_span(span),
+        HExpr::Clone { span, .. } => copy_hexpr_span(span),
+        HExpr::Take { span, .. } => copy_hexpr_span(span),
+        HExpr::ReturnExpr { span, .. } => copy_hexpr_span(span),
+        HExpr::UnsafeBlock { span, .. } => copy_hexpr_span(span)
     }
 }
 
@@ -825,7 +1992,10 @@ pub fn collect_extern_type_names(decls: List<HDecl>) -> Set<Str> {
 fn collect_extern_type_names_rec(decls: List<HDecl>, mut out: Set<Str>) {
     for d in decls {
         match d {
-            HDecl::ExternType { name, .. } => { out.insert(name) },
+            HDecl::ExternType { name, .. } => {
+                let owned_name = name
+                out.insert(owned_name)
+            },
             HDecl::ModBlock { decls: md, .. } => { collect_extern_type_names_rec(md, out) },
             _ => {},
         }
@@ -860,15 +2030,6 @@ pub fn is_rc_excluded_type(ty: Type, externs: Set<Str>) -> Bool {
     }
 }
 
-// B-002p1: check whether a type has user `impl Drop` (move semantics, no dup).
-pub fn is_user_drop_type(ty: Type, drop_types: Set<Str>) -> Bool {
-    match ty {
-        Type::StructType { name, .. } => drop_types.contains(name),
-        Type::EnumType { name, .. } => drop_types.contains(name),
-        _ => false
-    }
-}
-
 // A type whose values, when DEEP-DROPPED, would reach a foreign handle: the
 // extern type itself, or a container / Option / tuple / struct / enum that
 // transitively holds one (e.g. `List<LLVMTypeRef>` — drop_list ring_drops each
@@ -876,9 +2037,10 @@ pub fn is_user_drop_type(ty: Type, drop_types: Set<Str>) -> Bool {
 // drop_T would drop extern fields and `Map<Str, LLVMValueRef>` fields whose
 // runtime drop_map drops the foreign values).  Such values must never be
 // scope-end-dropped or materialised (leak instead — crash-free direction).
-// A SHALLOW ring_dup on a non-extern container of extern handles is safe (the
-// container itself has a real RC header), so Clone-on-escape stays allowed for
-// these (only the DIRECT extern type suppresses Clone — is_extern_handle_type).
+// Even though a shallow ring_dup could touch only a container's own header,
+// Clone would manufacture another owner whose eventual deep Drop reaches the
+// foreign payload. Therefore both Clone and Drop use the same fail-closed
+// physical eligibility predicate below.
 //
 // FnType is NOT recursed: a closure's captures are not described by its
 // signature, and drop_closure_env releases captures, not param/return values.
@@ -891,6 +2053,17 @@ pub fn type_contains_extern_handle(ty: Type, externs: Set<Str>) -> Bool {
         let mut visited: Set<Str> = set_new()
         type_contains_extern_rec(ty, externs, visited)
     }
+}
+
+// One physical RC authority shared by the RC pass and its verifier. Logical
+// ownership transfer is intentionally absent: Int/Ptr/extern values can still
+// be invalidated by an exact Move contract, while a List<extern> is likewise
+// logically movable but must never be Clone'd or Drop'ed deeply.
+pub fn type_is_physical_rc_eligible(
+    ty: Type, externs: Set<Str>
+) -> Bool {
+    !is_rc_excluded_type(ty, externs) &&
+    !type_contains_extern_handle(ty, externs)
 }
 
 fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) -> Bool {
@@ -960,19 +2133,27 @@ fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) 
 // classification table, function by function) remains in perceus.ring directly
 // above its former location — read it before touching membership here.
 
-// A method call whose result is a BORROW of (an inner reference of) its
-// receiver or an argument, returned WITHOUT a dup by the runtime — escaping it
-// needs a Clone, and scope-end-dropping its binding would free a reference
-// owned elsewhere.  Membership = the 4 Option projections (B-104 D1 rule ②
-// retired the 9 receiver-returning mutator names — their protection is the
-// type-level Unit exclusion).  Safety asymmetry: omitting a genuine borrow
-// returner CRASHES (UAF); mis-listing a fresh returner only leaks.
-pub fn is_borrow_returning_call(callee: HExpr) -> Bool {
-    match callee {
-        HExpr::FieldAccess { field, .. } =>
-            field == "unwrap" || field == "to_fail"
-            || field == "unwrap_or" || field == "unwrap_or_else",
-        _ => false,
+// Exact return ownership for a call edge. No source spelling or method leaf is
+// ownership authority: inference records the selected callable DefId and the
+// ownership solver publishes its canonical descriptor.
+pub fn call_returns_borrowed(
+    metadata: OwnershipMetadata, callee_def_id: Int?
+) -> Bool {
+    let def_id = match callee_def_id {
+        some(id) => id,
+        none => panic("unreachable: call return ownership has no exact callee DefId")
+    }
+    let ownership_id = match metadata.callable_by_def_id.get(def_id) {
+        some(id) => id,
+        none => panic("unreachable: exact callee DefId has no return ownership descriptor")
+    }
+    let result = callable_return_ownership(metadata, ownership_id)
+    if result == RETURN_OWNERSHIP_BORROWED {
+        true
+    } else if result == RETURN_OWNERSHIP_OWNED {
+        false
+    } else {
+        panic("unreachable: exact call return ownership is unknown")
     }
 }
 
@@ -992,13 +2173,16 @@ pub fn is_borrow_returning_call(callee: HExpr) -> Bool {
 //     appear here — B-104 D7: andor_lower rewrites them to IfExpr at checker
 //     end; their phi classifies via the If/Match recursion below.)
 //   * UnaryOp → `!x` boxes a fresh result.
-//   * Call, unless borrow-returning (unwrap family → borrow of the receiver's
-//     payload): a Ring fn returns OWNED (clone-all-escape Clone-wraps tail
+//   * Call, unless its exact callee DefId descriptor says Borrowed: a Ring fn
+//     returns OWNED (clone-all-escape Clone-wraps tail
 //     borrows) and scalar builtins are boxed fresh at the call site (`fold`
 //     included since the #150 empty-path dup — owned on every path).
 //   * BoolLit → a fresh box per evaluation (`while true`).
 //   * Clone → an owned dup by construction (a dropping cond-block's
 //     Clone-wrapped tail — rc_block_inner's tail-escape invariant).
+//   * Take → the exact source slot was cleared and its sole owned value was
+//     transferred to the condition.  This is the post-RC shape of an inner
+//     short-circuit branch whose value crosses its own scope-end drops.
 //   * Block → its value is its tail's value → recurse.
 //   * If/Match (B-104 D2) → TRUE iff EVERY branch tail is itself
 //     is_fresh_owned_bool_value (the W3a branch-value recursion, bottoming
@@ -1016,7 +2200,9 @@ pub fn is_borrow_returning_call(callee: HExpr) -> Bool {
 // BoolType requirement is a belt against audit #149 TypeVar-typed conditions
 // (an unannotated fn's over-generalised return — unknown ownership, possibly
 // the Unit ABI receiver-return accident).
-pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
+pub fn is_fresh_owned_bool_value(
+    metadata: OwnershipMetadata, expr: HExpr
+) -> Bool {
     let is_bool = match hexpr_type(expr) {
         Type::BoolType => true,
         _ => false,
@@ -1027,10 +2213,11 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
     match expr {
         HExpr::BinOp { .. } => true,
         HExpr::UnaryOp { .. } => true,
-        HExpr::Call { callee, .. } =>
-            is_borrow_returning_call(callee) == false,
+        HExpr::Call { callee_def_id, .. } =>
+            call_returns_borrowed(metadata, callee_def_id) == false,
         HExpr::BoolLit { .. } => true,
         HExpr::Clone { .. } => true,
+        HExpr::Take { .. } => true,
         // A Block's value is its tail's value.  POST-RC SHAPE: a block that
         // emits scope-end drops has its tail HOISTED by rc_block_inner into a
         // fresh `let __rc_scope_N = <escape-processed tail>` (so the drops run
@@ -1048,21 +2235,24 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
         HExpr::Block { stmts, tail, .. } => match tail {
             some(t) => match t {
                 HExpr::Ident { name, .. } => match block_local_init(stmts, name) {
-                    some(init) => is_fresh_owned_bool_value(init),
+                    some(init) => is_fresh_owned_bool_value(metadata, init),
                     none => false,
                 },
-                _ => is_fresh_owned_bool_value(t),
+                _ => is_fresh_owned_bool_value(metadata, t),
             },
             none => false,
         },
         HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
             none => false,
-            some(eb) => is_fresh_owned_bool_value(then_branch) && is_fresh_owned_bool_value(eb),
+            some(eb) => is_fresh_owned_bool_value(metadata, then_branch) &&
+                is_fresh_owned_bool_value(metadata, eb),
         },
         HExpr::MatchExpr { arms, .. } => {
             let mut all = arms.len() > 0
             for arm in arms {
-                if is_fresh_owned_bool_value(arm.body) == false { all = false }
+                if is_fresh_owned_bool_value(metadata, arm.body) == false {
+                    all = false
+                }
             }
             all
         },
@@ -1083,10 +2273,16 @@ fn block_local_init(stmts: List<HStmt>, name: Str) -> HExpr? {
     for s in stmts {
         match s {
             HStmt::Let { name: n, init, .. } => {
-                if n == name { found = some(init) }
+                if n == name {
+                    let owned_init = init
+                    found = some(owned_init)
+                }
             },
             HStmt::Var { name: n, init, .. } => {
-                if n == name { found = some(init) }
+                if n == name {
+                    let owned_init = init
+                    found = some(owned_init)
+                }
             },
             _ => {},
         }

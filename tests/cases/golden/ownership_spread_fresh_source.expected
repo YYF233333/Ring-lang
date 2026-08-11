@@ -1,0 +1,7 @@
+borrowed=borrowed-source:11
+borrowed_copy=borrowed-copy:11
+borrowed_phi=borrowed-phi:11|borrowed-source|borrowed-other
+fresh=call:21|ctor:31|block:41|if-then:52|match-first:55|nested:62
+all=replacement:71
+variant=variant:81
+once=1:once:91

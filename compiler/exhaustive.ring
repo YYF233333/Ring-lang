@@ -46,7 +46,11 @@ fn build_inst_map(type_param_vars: List<Int>, type_params: List<Type>) -> Map<In
     let mut i = 0
     while i < type_param_vars.len() && i < type_params.len() {
         match (type_param_vars.get(i), type_params.get(i)) {
-            (some(var_id), some(tp)) => { inst_map.insert(var_id, tp) },
+            (some(var_id), some(tp)) => {
+                let instantiated_var_id = var_id
+                let instantiated_type = tp
+                inst_map.insert(instantiated_var_id, instantiated_type)
+            },
             _ => {}
         }
         i = i + 1
@@ -92,30 +96,48 @@ fn instantiate_struct_fields(env: TypeEnv, name: Str, type_params: List<Type>) -
 }
 
 fn pat_at(list: List<Pattern>, i: Int) -> Pattern {
-    match list.get(i) { some(v) => v, none => panic("unreachable: pat_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: pat_at out of bounds")
+    }
 }
 
 fn type_at(list: List<Type>, i: Int) -> Type {
-    match list.get(i) { some(v) => v, none => panic("unreachable: type_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: type_at out of bounds")
+    }
 }
 
 fn str_at(list: List<Str>, i: Int) -> Str {
-    match list.get(i) { some(v) => v, none => panic("unreachable: str_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: str_at out of bounds")
+    }
 }
 
 fn row_at(list: List<List<Pattern>>, i: Int) -> List<Pattern> {
-    match list.get(i) { some(v) => v, none => panic("unreachable: row_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: row_at out of bounds")
+    }
 }
 
 fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
-    match list.get(i) { some(v) => v, none => panic("unreachable: ctor_at out of bounds") }
+    match list.get(i) {
+        some(v) => { let value = v; value },
+        none => panic("unreachable: ctor_at out of bounds")
+    }
 }
 
 // Check if a type recursively contains itself (used to decide expanding set).
 // Memoized via cache.tir to avoid redundant recursive walks.
 fn type_is_recursive(env: TypeEnv, ty: Type, key: Str, mut cache: ExhCache) -> Bool {
     match cache.tir.get(key) {
-        some(cached) => { return cached },
+        some(cached) => {
+            let cached_result = cached
+            return cached_result
+        },
         none => {}
     }
     let result = match ty {
@@ -123,19 +145,26 @@ fn type_is_recursive(env: TypeEnv, ty: Type, key: Str, mut cache: ExhCache) -> B
             let inst_variants = instantiate_enum_variants(env, name, type_params)
             // Use Map<Str, Bool> instead of Set<Str> for O(1) lookups
             let mut visited: Map<Str, Bool> = map_new()
-            visited.insert(key, true)
+            let visited_key = key
+            visited.insert(visited_key, true)
             let mut found = false
             for v in inst_variants {
                 for ft in v.fields {
-                    if type_contains_key(env, ft, key, visited) { found = true }
+                    let searched_key = key
+                    if type_contains_key(env, ft, searched_key, visited) {
+                        found = true
+                    }
                 }
             }
             found
         },
         _ => false,
     }
-    cache.tir.insert(key, result)
-    result
+    let cached_key = key
+    let cached_result = result
+    let returned_result = result
+    cache.tir.insert(cached_key, cached_result)
+    returned_result
 }
 
 // Use Map<Str, Bool> instead of Set<Str> for O(1) string lookups.
@@ -196,10 +225,14 @@ fn expand_or_patterns(patterns: List<Pattern>) -> List<Pattern> {
         match p {
             Pattern::OrPattern { patterns: sub_pats, .. } => {
                 for sp in sub_pats {
-                    result.push(sp)
+                    let expanded_pattern = sp
+                    result.push(expanded_pattern)
                 }
             },
-            _ => result.push(p),
+            _ => {
+                let expanded_pattern = p
+                result.push(expanded_pattern)
+            },
         }
     }
     result
@@ -236,7 +269,8 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                         Pattern::Constructor { name: pname, fields, .. } => {
                             if pname == v.name {
                                 covered.insert(v.name, true)
-                                sub_patterns_for_variant.push(fields)
+                                let positional_fields = fields
+                                sub_patterns_for_variant.push(positional_fields)
                             }
                         },
                         Pattern::NamedConstructor { name: pname, fields: nfields, .. } => {
@@ -264,7 +298,10 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                         for row in sub_patterns_for_variant {
                             let mut padded = list_clone(row)
                             while padded.len() < v.fields.len() {
-                                padded.push(wild)
+                                let padding = Pattern::Wildcard {
+                                    span: span_zero()
+                                }
+                                padded.push(padding)
                             }
                             normalized.push(padded)
                         }
@@ -285,7 +322,8 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
 
             for vn in variant_names {
                 if covered.contains_key(vn) == false {
-                    return some(vn)
+                    let missing_variant = vn
+                    return some(missing_variant)
                 }
             }
             none
@@ -337,14 +375,16 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                     Pattern::Constructor { name: pname, fields: cfields, .. } => {
                         if names_match_struct(pname, sname) {
                             covered = true
-                            sub_patterns.push(cfields)
+                            let positional_fields = cfields
+                            sub_patterns.push(positional_fields)
                         }
                     },
                     _ => {},
                 }
             }
             if covered == false {
-                return some(sname)
+                let missing_struct = sname
+                return some(missing_struct)
             }
             if inst_fields.len() > 0 {
                 let wild = Pattern::Wildcard { span: span_zero() }
@@ -352,7 +392,10 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                 for row in sub_patterns {
                     let mut padded = list_clone(row)
                     while padded.len() < inst_fields.len() {
-                        padded.push(wild)
+                        let padding = Pattern::Wildcard {
+                            span: span_zero()
+                        }
+                        padded.push(padding)
                     }
                     normalized.push(padded)
                 }
@@ -377,7 +420,8 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                 match p {
                     Pattern::TuplePattern { elements: pelems, .. } => {
                         if pelems.len() == elements.len() {
-                            matrix.push(pelems)
+                            let tuple_patterns = pelems
+                            matrix.push(tuple_patterns)
                         }
                     },
                     _ => {},
@@ -408,7 +452,10 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
 fn finite_type_ctors(env: TypeEnv, ty: Type, mut cache: ExhCache) -> List<Ctor>? {
     let cache_key = type_to_string(ty)
     match cache.ftc.get(cache_key) {
-        some(cached) => { return cached },
+        some(cached) => {
+            let cached_ctors = cached
+            return cached_ctors
+        },
         none => {}
     }
     let result = match ty {
@@ -437,7 +484,12 @@ fn finite_type_ctors(env: TypeEnv, ty: Type, mut cache: ExhCache) -> List<Ctor>?
                 field_names.push(f.name)
             }
             let mut r: List<Ctor> = []
-            r.push(Ctor { name: name, arity: inst_fields.len(), field_types: field_types, field_names: some(field_names), is_tuple: false })
+            let struct_name = name
+            r.push(Ctor {
+                name: struct_name, arity: inst_fields.len(),
+                field_types: field_types,
+                field_names: some(field_names), is_tuple: false
+            })
             some(r)
         },
         Type::UnitType => {
@@ -447,13 +499,22 @@ fn finite_type_ctors(env: TypeEnv, ty: Type, mut cache: ExhCache) -> List<Ctor>?
         },
         Type::TupleType { elements } => {
             let mut r: List<Ctor> = []
-            r.push(Ctor { name: "", arity: elements.len(), field_types: elements, field_names: none, is_tuple: true })
+            let tuple_arity = elements.len()
+            let tuple_elements = elements
+            r.push(Ctor {
+                name: "", arity: tuple_arity,
+                field_types: tuple_elements,
+                field_names: none, is_tuple: true
+            })
             some(r)
         },
         _ => none,
     }
-    cache.ftc.insert(cache_key, result)
-    result
+    let stored_cache_key = cache_key
+    let stored_result = result
+    let returned_result = result
+    cache.ftc.insert(stored_cache_key, stored_result)
+    returned_result
 }
 
 fn wild_pattern() -> Pattern {
@@ -464,7 +525,8 @@ fn named_pattern_to_positional(fields: List<NamedPatternField>, field_names: Lis
     let wild = wild_pattern()
     let mut result: List<Pattern> = []
     for i in 0..arity {
-        result.push(wild)
+        let padding = wild_pattern()
+        result.push(padding)
     }
     for f in fields {
         let idx = index_of(field_names, f.name)
@@ -495,7 +557,8 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
             let mut result: List<Pattern> = []
             let wild = wild_pattern()
             for i in 0..ctor.arity {
-                result.push(wild)
+                let padding = wild_pattern()
+                result.push(padding)
             }
             result.extend(rest)
             some(result)
@@ -504,7 +567,8 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
             let mut result: List<Pattern> = []
             let wild = wild_pattern()
             for i in 0..ctor.arity {
-                result.push(wild)
+                let padding = wild_pattern()
+                result.push(padding)
             }
             result.extend(rest)
             some(result)
@@ -527,7 +591,8 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
                 let mut sub = list_clone(fields)
                 let wild = wild_pattern()
                 while sub.len() < ctor.arity {
-                    sub.push(wild)
+                    let padding = wild_pattern()
+                    sub.push(padding)
                 }
                 sub.extend(rest)
                 some(sub)
@@ -567,11 +632,15 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
         Pattern::OrPattern { patterns: sub_pats, .. } => {
             // Try each sub-pattern; return the first that matches
             for sp in sub_pats {
-                let mut trial_row: List<Pattern> = [sp]
+                let trial_pattern = sp
+                let mut trial_row: List<Pattern> = [trial_pattern]
                 trial_row.extend(rest)
                 let result = specialize_row(trial_row, ctor)
                 match result {
-                    some(_) => { return result },
+                    some(specialized) => {
+                        let matched_result = specialized
+                        return some(matched_result)
+                    },
                     none => {},
                 }
             }
@@ -608,15 +677,22 @@ fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, 
         some(ctor_list) => {
             let mut new_expanding = map_clone(expanding)
             if type_key != "" {
-                if type_is_recursive(env, first_type, type_key, cache) {
-                    new_expanding.insert(type_key, true)
+                let recursive_check_key = type_key
+                let recursive_type_key = type_key
+                if type_is_recursive(
+                        env, first_type, recursive_check_key, cache) {
+                    new_expanding.insert(recursive_type_key, true)
                 }
             }
             for ctor in ctor_list {
                 let mut specialized: List<List<Pattern>> = []
                 for row in rows {
-                    match specialize_row(row, ctor) {
-                        some(s) => specialized.push(s),
+                    let specialized_ctor = ctor
+                    match specialize_row(row, specialized_ctor) {
+                        some(s) => {
+                            let specialized_row = s
+                            specialized.push(specialized_row)
+                        },
                         none => {},
                     }
                 }

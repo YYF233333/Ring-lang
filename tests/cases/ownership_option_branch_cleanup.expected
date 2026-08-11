@@ -1,0 +1,13 @@
+true
+drop 10
+false
+true
+drop 20
+false
+true
+true
+true
+drop 30
+drop 40
+true
+done

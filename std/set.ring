@@ -14,10 +14,11 @@ pub fn set_from<T: Hash + Eq>(items: List<T>) -> Set<T> {
     let mut result: Set<T> = set_new()
     let mut i = 0
     while i < items.len() {
-        match items.get(i) {
-            some(item) => result.insert(item),
-            none => {},
-        }
+        // Match payload bindings are projections and remain borrowed.  Read
+        // the occupied List slot directly so this complete local owns the
+        // duplicated element and may be transferred into the new Set.
+        let item = ring_slot_read(items.buf, i)
+        result.insert(item)
         i = i + 1
     }
     result
@@ -150,10 +151,8 @@ impl<T: Hash + Eq> Set {
         let items = other.to_list()
         let mut i = 0
         while i < items.len() {
-            match items.get(i) {
-                some(item) => result.insert(item),
-                none => {},
-            }
+            let item = ring_slot_read(items.buf, i)
+            result.insert(item)
             i = i + 1
         }
         result
@@ -167,7 +166,8 @@ impl<T: Hash + Eq> Set {
             match items.get(i) {
                 some(item) => {
                     if other.contains(item) {
-                        result.insert(item)
+                        let owned_item = ring_slot_read(items.buf, i)
+                        result.insert(owned_item)
                     }
                 },
                 none => {},
@@ -185,7 +185,8 @@ impl<T: Hash + Eq> Set {
             match items.get(i) {
                 some(item) => {
                     if other.contains(item) == false {
-                        result.insert(item)
+                        let owned_item = ring_slot_read(items.buf, i)
+                        result.insert(owned_item)
                     }
                 },
                 none => {},
@@ -205,10 +206,8 @@ impl<T: Hash + Eq> Set {
                     if pred(item) {
                         // The callback may consume its argument; read a fresh
                         // owned value before storing it in the result.
-                        match items.get(i) {
-                            some(kept) => result.insert(kept),
-                            none => {},
-                        }
+                        let kept = ring_slot_read(items.buf, i)
+                        result.insert(kept)
                     }
                 },
                 none => {},

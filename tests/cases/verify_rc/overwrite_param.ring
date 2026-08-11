@@ -2,11 +2,11 @@
 // owned by the caller.  The verifier must report the documented
 // x-overwrite-param class at the assignment.
 
-fn update(mut s: Str) -> Str {
+fn update(mut s: Str) {
     s = "updated"
-    s
+    print(s)
 }
 
 fn main() {
-    print(update("original"))
+    update("original")
 }
