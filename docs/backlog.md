@@ -17,13 +17,13 @@
 
 处理顺序按五道门组织：
 
-1. **Critical 正确性底线**：先修当前 critical audit #268、#269；执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。
-2. **工具链反馈吞吐 P0**：2026-08-03 用户明确将“critical 清零后的第一优先级”改为 check/验证速度。B-176 可在 critical 修复期间提前采集不改变行为的基线；critical 清零后立即执行 B-176 → B-180，先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作。性能专项不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
+1. **Critical 正确性底线 / 开发解阻门**：#268、#269 及执行中发现的新 critical 始终保持最高 correctness 严重度；先关闭会阻断当前 compiler 严格 `check/build`、可信 bootstrap 或可比测量的部分，建立精确的 developer-unblock checkpoint。其余不阻断开发回路的 critical 长尾可与 B-176/B-180 实现并行存在，但不得降级、关闭或从最终验收中豁免。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。
+2. **工具链反馈吞吐 P0**：2026-08-12 用户把 2026-08-03 的“critical 清零后立即优化”细化为：developer-unblock checkpoint 一旦成立，立即执行 B-176 → B-180，不再让不影响开发回路的 critical 长尾阻塞性能实现；若新 critical 会破坏该 checkpoint、测量有效性或当前优化所依赖的 ownership authority，则先修再继续。性能专项先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作；不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
 3. **其余正确性与语义/ABI 冻结**：随后处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257；再走 B-168 → B-169 → B-167 → B-152 → B-002 的 release critical path。B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。
 4. **发布产品面**：B-174 → B-175 得到可安装、可 `run/build/check/doctor` 的 Windows/Linux 候选包；B-181 建立生成程序的 runtime/内存/尺寸预算。随后 B-178 → B-016 补 formatter/LSP，B-177 → B-111 补版本化 agent contract 与可复现实验。
 5. **发布后能力**：先做 P1 correctness/ownership 与用户高频能力（B-110、B-172、B-173、B-149 等），再由 B-111 数据决定 refinement/async 的投入顺序。B-001/B-116→B-007 均在 RIIR/ABI 稳定后启动；GADT、dyn Trait、HKT/GAT、JIT、Debugger 等 P3 工作继续后置。
 
-性能仍让位于 critical correctness，但现在明确越过其余非 critical 队列：B-176/B-180 先解决开发反馈回路；B-181 再决定 #262/B-079 等生成程序优化。B-105 只有在 B-180 证明 unchanged-module 重复工作仍是主导成本时启动，B-041 不进入 preview 路线。
+性能仍让位于 critical correctness，但“让位”分成两道门：会破坏严格自举或测量真值的 critical 阻塞 B-176/B-180；其余 critical 长尾不阻塞实现，却继续阻塞 B-180 完成认定、合入验收与 release。B-176/B-180 先解决开发反馈回路；B-181 再决定 #262/B-079 等生成程序优化。B-105 只有在 B-180 证明 unchanged-module 重复工作仍是主导成本时启动，B-041 不进入 preview 路线。
 
 ---
 
@@ -446,9 +446,11 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 > **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
 
+> **2026-08-12 用户细化**：正式基线不再等待全部 critical 长尾清零，但必须等待 developer-unblock checkpoint：当前 compiler source 可严格 `check/build compiler/main.ring` 且无 panic/ICE；compiler/std/benchmark manifest 所需的聚焦 ownership/RC 矩阵稳定、fail loud；compiler source、tracked anchor、toolchain 与测量 manifest 精确钉住；至少有一次由该精确快照建立的 strict native bootstrap 或等价的 exact-generation 证据。checkpoint 之后可完成 B-176 并进入 B-180；后续 correctness 修复若改变 workload、通过集合或 phase 工作量，必须刷新同快照配对基线，禁止混用前后数字。
+
 当前测量完整性框架已合入；正在补齐 opt-in compiler phase timing，随后在 clean worktree 执行正式 cold/warm baseline、形成 top-3 构成与 B-180 逐项预算后收口。
 
-本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。critical 修复期间可以提前准备采样/只读 instrumentation；任何会改变 compiler/runner 行为的优化由 B-180 在 critical 清零后实施。
+本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。developer-unblock checkpoint 前可以准备采样/只读 instrumentation；checkpoint 成立后形成正式 baseline，并允许 B-180 开始改变 compiler/runner 行为。剩余 critical 不从 manifest 消失；若其修复改变测量工作量，baseline 与候选必须在修复后的同一语义快照上成对重测。
 
 **测量面 / 文件**：新增 `bench/check/`（或 planning 时核定的等价单一入口）、机器可读 manifest/result schema 与 `docs/performance-baseline.md`；检查 `tests/run_tests.py`、`compiler/scripts/build_native.ps1`，并在 `compiler/cli.ring`、`compiler/compiler_mod.ring`、checker/infer/Perceus/verify_rc 边界提供 opt-in phase timing。默认 CLI 输出与产物不得变化。
 
@@ -461,7 +463,9 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 ### B-180 `check` / runner 吞吐 2× 专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-183]
 
-**进入门**：#268、#269 已关闭；执行期间新增的 critical 也必须先关闭。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
+**进入门**：B-176 的 developer-unblock checkpoint 与正式同快照 baseline 已成立；不再要求 #268、#269 的非开发阻塞长尾预先全部关闭。执行期间若新增 critical 会破坏严格自举、baseline 可比性、当前优化触及的 ownership/RC authority 或生成结果正确性，立即回到 critical 修复；否则保留为显式尾项，不阻塞 runner/测量基础设施和已证明独立的热点优化。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
+
+**提前实施边界（2026-08-12）**：可先做内容寻址 compiler artifact cache、有界 jobs、隔离 out-dir、确定性汇总、clang/runner 调度、opt-in phase profile，以及由 profile 证明且不复制未稳定 ownership authority 的热点修复。凡优化会改变尚未关闭 critical 所依赖的 ownership/RC 语义、metadata transaction、bootstrap identity 或诊断真值，必须等该局部 invariant 关闭后再动；不得用缓存、并发或批处理掩盖 nondeterminism、panic、false-green 或原始失败。
 
 **实现范围 / 顺序**：
 
@@ -470,7 +474,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 3. 若进程启动/重复初始化主导，比较 bounded worker-process/batch-check 与普通进程池；任何复用方案必须以随机 case 顺序、重复运行和进程隔离对照证明无 global state 泄漏。daemon、常驻服务和新公共协议不作为首轮默认；
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
 
-**量化验收**：以 B-176 同机同 manifest 为基线，`compiler/main.ring check` median 与完整本地标准门 wall time 都降至基线的 **≤50%**；`check --verify-rc compiler/main.ring` 同样以 ≤50% 为目标，本项不得以只有 10–20% 改善宣告完成。tiny/大单文件/module check 的 p95 不得回退 >10%；串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。报告 cold/warm wall、CPU、peak aggregate/per-worker RSS；若为了 2× 需要 >25% peak aggregate RSS 增长，必须先给出内存上限、自适应 jobs 与低内存退化证据。完整 C/RC/ASan/self-host 门通过，任何原始失败都必须 fail loud。
+**量化验收**：以 B-176 同机同 manifest、同一语义快照的配对基线为准，`compiler/main.ring check` median 与完整本地标准门 wall time 都降至基线的 **≤50%**；`check --verify-rc compiler/main.ring` 同样以 ≤50% 为目标，本项不得以只有 10–20% 改善宣告完成。tiny/大单文件/module check 的 p95 不得回退 >10%；串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。报告 cold/warm wall、CPU、peak aggregate/per-worker RSS；若为了 2× 需要 >25% peak aggregate RSS 增长，必须先给出内存上限、自适应 jobs 与低内存退化证据。**B-180 只有在全部 critical（含暂缓长尾）关闭、完整 C/RC/ASan/self-host/double-bootstrap 门通过后才能标记完成或作为 release-accepted 结果合入；任何原始失败都必须 fail loud。**
 
 ### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-180] [before: B-168+B-174]
 

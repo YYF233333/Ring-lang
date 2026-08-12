@@ -107,6 +107,8 @@
 
 **Argument verdict（2026-08-06）**：采用 design §7.3 的 A′——symbolic ownership shape + callable mode fixed point + 临时 CFG 数据流 + 显式 HIR `Take`/源槽置空。永久 CFG/SSA ownership IR 暂不采用；direct-callee 白名单与大面积保守拒绝不能作为最终修复。实施必须删除 block 级 moved-name 抑制和调用名猜测；closure capture transfer、partial move 与 B-168 前跨 catch 的 outer-binding Take 先 fail loud。验收矩阵至少覆盖 direct/method/fn-value/HOF/trait/reexport、recursive SCC、互斥分支、零/N 次循环、break/continue/return、重新赋值、shadow、容器 ownership shape、borrow capture 重复调用、默认 checker/verifier 一致与 double bootstrap。
 
+**优先级裁决（2026-08-12，适用于 #268/#269）**：两项仍为 `[critical] [doing]`，finding、严重度与最终验收矩阵均不缩减。当前先关闭会阻断 strict `check/build compiler/main.ring`、可信 bootstrap 与 B-176 同快照测量的 development-blocking 部分（包括 impl effect-precheck transaction、project namespace callable alias provenance 及其精确 self-host checkpoint）；checkpoint 成立后，剩余不影响开发回路的长尾可在 B-176/B-180 实现期间显式暂缓。暂缓不等于关闭：任何触及当前优化 authority、破坏测量可比性或产生 panic/ICE/false-green 的 critical 立即回到前台，全部长尾仍阻塞 B-180 完成认定、完整门和 release。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

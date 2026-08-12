@@ -1639,7 +1639,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 - match/catch 按源码 arm 顺序，穷尽失败 fail loud；Drop、cleanup 与 evidence 生命周期在嵌套函数边界隔离，并由共享 RC/verifier 契约审计。
 - 编译器进程只生成文本并调用外部编译器，不恢复 LLVM-C 式进程内 FFI/IR builder 信道。
 
-**发布边界**：C-only 迁移、clean-clone 重复门与旧 worktree 收官已经完成。critical correctness 清零后，B-176/B-180 先恢复可接受的 check/验证反馈速度，再由 B-174/B-175 承担发布产品面；生成程序性能证据由 B-181 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
+**发布边界**：C-only 迁移、clean-clone 重复门与旧 worktree 收官已经完成。先关闭会阻断 strict self-host、可信 bootstrap 或可比测量的 critical core，建立精确 developer-unblock checkpoint；随后可启动 B-176/B-180，同时继续收口不阻断开发回路的 critical 长尾。该排序只提前性能实现，不提前完成认定：全部 critical 与完整 C/RC/ASan/self-host/double-bootstrap 门仍是 B-180 最终验收和 release 的硬门。之后由 B-174/B-175 承担发布产品面；生成程序性能证据由 B-181 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
 
 **未来 LLVM target 重启门**：只有代表性负载证明 C 不可表达的性能瓶颈、Ring 级调试信息刚需，或目标平台缺少成熟 C 工具链时才重新立项。届时 C 后端永久保留为 reference/stage-0，LLVM 只能是第二信道，并且只发文本 `.ll`，不得恢复进程内 LLVM-C FFI。
 
@@ -1731,7 +1731,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 
 > **用类型系统最大化前馈控制的覆盖面，用自动测试补全反馈控制，直到闭环足够紧密，人可以退出回路。**
 
-"critical correctness 优先于性能"的判断等价于：**先保证控制器不会给出错误裁决，再提升控制回路的采样频率。** 2026-08-03 用户进一步明确：critical 清零后，`check`、RC/self-verify 与完整门的反馈时延本身就是层 0 瓶颈，B-176/B-180 优先于其余非 critical feature/重构；这不是用速度交换覆盖率，而是让同一套控制器更频繁地运行。生成程序优化、JIT 与扩大优化边界仍排在语义/ownership 稳定和 B-181 证据之后。
+"critical correctness 优先于性能"的判断等价于：**先保证开发所依赖的控制器不会给出错误裁决，再提升控制回路的采样频率；最终验收前再证明整个控制器闭合。** 2026-08-12 用户把 2026-08-03 的全量串行顺序细化为两道门：strict self-host、可信 bootstrap 与同快照测量所需的 development-blocking critical core 先关闭；checkpoint 成立后，B-176/B-180 可与不影响开发回路的 critical 长尾并行推进，但后者仍阻塞 B-180 完成认定与 release。这不是用速度交换覆盖率，而是缩短修复剩余 correctness 的反馈回路。生成程序优化、JIT 与扩大优化边界仍排在语义/ownership 稳定和 B-181 证据之后。
 
 ---
 
@@ -1742,7 +1742,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 1. **开发反馈性能**：B-176 测 `ring check`、RC/self-verify、runner/clang 调度与 self-compile，B-180 以 2× wall-time 改善为退出门；可以优化编译器算法、缓存和有界并行，但不得减少测试覆盖或吞掉原始失败。
 2. **生成程序性能**：B-181 测 runtime、内存/分配和产物尺寸，再决定 Perceus reuse、dict 缓存等优化；仍以 backend-neutral HIR/Perceus → C11/clang 为主，见 §14.6。
 
-退役实现的性能分析只留 Git 历史。两类工作都记录 cold/warm、CPU/RSS、compiler/anchor/toolchain 指纹，禁止用并行 wall-time、编译器构建优化或 microbenchmark 混报产品 runtime 收益。
+开发反馈性能的提前实施限于不触碰尚未稳定语义真值的基础设施和已由 profile 证明的独立热点；任何相关 critical 关闭后若改变 workload、通过集合或 phase 工作量，B-176 baseline 与 B-180 candidate 必须在该新语义快照上成对刷新。退役实现的性能分析只留 Git 历史。两类工作都记录 cold/warm、CPU/RSS、compiler/anchor/toolchain 指纹，禁止用并行 wall-time、编译器构建优化或 microbenchmark 混报产品 runtime 收益。
 
 ## 13. 竞品与行业定位
 
@@ -1870,6 +1870,7 @@ HIR 契约 → Ring passes（RC/reuse、bounds、specialize、dead effect）
 | 2026-06-12 | B-111 优先级（D-7）：层 0 判据（公理④「LLM 写 Ring 优于 TS」）至今零测量、缺测量仪 | B-111 P2→P1，地位等价公理⑥的 B-089 锚点；只改优先级不动排程（B-104 里程碑照旧先行）。条目见 backlog B-111 | 规则 2（层 0 判据） | B-111 验收 |
 | 2026-06-15 | 字符串编码模型：code point API 与既有后端行为失真 | 选 A（UTF-8 字节串）：`len`=字节数 O(1)、`chars()`/`char_count()` 提供 code point API；否决 B（code point）理由=O(n) len + 需 ByteStr 补位违反⑧。§1.7 已修正，实现归 B-133 | ⑥⑦⑧（5/7 判据 A 胜出） | B-133 按 backlog 的 C/native、Unicode 与 FFI gate 验收 |
 | 2026-06-24 | 层 0 重构：④ 原名「无人回路 × 全场景」绑定 LLM 叙事——核心 claim 应比 agent 窗口更根本 | ④ 改名「不信任程序员 · 编译器是最终权威」；「无人回路 × 全场景」降为渐近表达；出发点从「agent 验证瓶颈」回溯到「程序员不可信是永恒事实」（C/Rust/Ring 三角定位）；LLM-first 降格为推论；核心赌注分两层 | 元决策 | — |
+| 2026-08-12 | critical 长尾持续阻塞工具链反馈优化，但降低 correctness 门会破坏编译器最终权威 | 把顺序拆为 development-unblock 与 final-acceptance 两道门：先关闭 strict self-host、可信 bootstrap、可比测量所需的 critical core；精确 checkpoint 后允许 B-176/B-180 实现与其余 critical 长尾并行；全部 critical 与完整门仍阻塞 B-180 完成认定和 release | 规则 2（层 0 工程排序；不修宪、不豁免安全） | 同语义快照配对 baseline；strict self-host checkpoint；完成前完整 C/RC/ASan/self-host/double-bootstrap 门 |
 
 ## 状态真值
 

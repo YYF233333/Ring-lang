@@ -107,7 +107,7 @@ Bidirectional + constraint solving + effect inference。写代码的体验接近
 
 ### 性能的地位（非公理，2026-06-12 D-6 拍板）
 
-没有任何公理承诺速度——这是显式决定，不是疏漏。性能是工程目标：与任何公理冲突时性能让步；但受 ⑥（确定性资源 = RC 无 GC headroom、FBIP 路径）与 ⑦（native、零强制 runtime）间接保护——按公理推导出的架构天然不慢。perf 项的优先级锚点 = 层 0 判据（开发回路的实际瓶颈），不独立成轴。2026-08-03 当前 check/验证时延已实际阻塞迭代，用户据此把 B-176/B-180 排在 critical 清零之后、其余非 critical 工作之前；这是阶段性工程排序，不允许降低公理、correctness 或测试覆盖门槛，也不等于提前启动生成程序/JIT 优化。
+没有任何公理承诺速度——这是显式决定，不是疏漏。性能是工程目标：与任何公理冲突时性能让步；但受 ⑥（确定性资源 = RC 无 GC headroom、FBIP 路径）与 ⑦（native、零强制 runtime）间接保护——按公理推导出的架构天然不慢。perf 项的优先级锚点 = 层 0 判据（开发回路的实际瓶颈），不独立成轴。2026-08-12 用户把 2026-08-03 的排序细化为两道门：先关闭会阻断 strict self-host、可信 bootstrap 与可比测量的 critical core；精确 developer-unblock checkpoint 成立后，B-176/B-180 可以和不影响开发回路的 critical 长尾并行推进。这只调整工程顺序，不降低公理、correctness 或测试覆盖门槛；剩余 critical 仍阻塞 B-180 完成认定与 release，也不等于提前启动生成程序/JIT 优化。
 
 ---
 
