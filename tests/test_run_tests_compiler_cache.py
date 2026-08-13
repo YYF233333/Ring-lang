@@ -728,6 +728,92 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                     cache_root, key, inputs, divergent,
                 )
 
+    def test_poison_rename_failure_uses_independent_durable_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            inputs, key, _ = self.publish(
+                cache_root, root / "winner", b"winner object\n",
+            )
+            divergent = root / "divergent.o"
+            divergent.write_bytes(b"divergent object\n")
+
+            with patch.object(
+                runner.os, "replace", side_effect=OSError("rename failure"),
+            ):
+                with self.assertRaisesRegex(
+                    runner.CompilerPreparationError,
+                    "divergent anchor objects",
+                ):
+                    runner._publish_cached_anchor(
+                        cache_root, key, inputs, divergent,
+                    )
+
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            poison = runner._cache_poison_path(cache_root, key)
+            self.assertTrue(receipt_path.is_file())
+            self.assertTrue(poison.is_file())
+            marker = json.loads(poison.read_text(encoding="utf-8"))
+            self.assertTrue(runner._is_cache_poison_record(marker, key))
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._lookup_cached_anchor(
+                    cache_root, key, inputs, root / "future.o",
+                )
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._publish_cached_anchor(
+                    cache_root, key, inputs, divergent,
+                )
+            runner._cleanup_compiler_cache_locked(cache_root)
+            self.assertFalse(receipt_path.exists())
+            self.assertTrue(poison.exists())
+
+    def test_all_external_poison_publication_failures_invalidate_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            inputs, key, _ = self.publish(
+                cache_root, root / "winner", b"winner object\n",
+            )
+            divergent = root / "divergent.o"
+            divergent.write_bytes(b"divergent object\n")
+
+            with (
+                patch.object(
+                    runner.os, "replace", side_effect=OSError("rename failure"),
+                ),
+                patch.object(
+                    runner, "_create_json_once",
+                    side_effect=OSError("create-once failure"),
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "create-once failure"):
+                    runner._publish_cached_anchor(
+                        cache_root, key, inputs, divergent,
+                    )
+
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            marker = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertTrue(runner._is_cache_poison_record(marker, key))
+            self.assertFalse(runner._cache_poison_path(cache_root, key).exists())
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._lookup_cached_anchor(
+                    cache_root, key, inputs, root / "future.o",
+                )
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._publish_cached_anchor(
+                    cache_root, key, inputs, divergent,
+                )
+            runner._cleanup_compiler_cache_locked(cache_root)
+            self.assertTrue(receipt_path.exists())
+
     def test_hardlink_publication_failure_is_loud_and_never_creates_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -60,6 +60,8 @@ COMPILER_ARTIFACT_CACHE = (
 COMPILER_CACHE_ENV = "RING_TEST_COMPILER_CACHE"
 COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-anchor-cache.v3"
 COMPILER_CACHE_VERSION = 3
+COMPILER_CACHE_POISON_SCHEMA = "ring.test-runner-compiler-anchor-poison.v1"
+COMPILER_CACHE_POISON_VERSION = 1
 COMPILER_CACHE_MAX_ENTRIES = 16
 COMPILER_CACHE_MAX_BYTES = 4 * 1024 * 1024 * 1024
 COMPILER_CACHE_STALE_SECONDS = 24 * 60 * 60
@@ -1370,10 +1372,20 @@ def _record_cache_conflict_locked(
 def _poison_cache_key_locked(
     cache_root: Path,
     key: str,
+    winner: _CachedAnchor,
+    candidate: _CachedAnchor,
 ) -> Path:
     poison_path = _cache_poison_path(cache_root, key)
     receipt_path, _ = _cache_paths(cache_root, key)
     poison_path.parent.mkdir(parents=True, exist_ok=True)
+    marker = {
+        "schema": COMPILER_CACHE_POISON_SCHEMA,
+        "version": COMPILER_CACHE_POISON_VERSION,
+        "key": key,
+        "reason": "same_key_divergent_anchor_objects",
+        "winner_sha256": winner.sha256,
+        "candidate_sha256": candidate.sha256,
+    }
     try:
         # The existing receipt is already durable and immutable.  Rename it as
         # the poison commit point before writing best-effort conflict details.
@@ -1381,19 +1393,68 @@ def _poison_cache_key_locked(
         # same-key divergence back into a normal cache miss.
         os.replace(receipt_path, poison_path)
     except OSError as exc:
-        raise CompilerPreparationError(
-            f"cannot durably poison divergent compiler cache key: {exc}"
-        ) from exc
+        try:
+            if _create_json_once(poison_path, marker) or poison_path.is_file():
+                return poison_path
+        except BaseException:
+            # Last independent persistence path: destroy the valid receipt in
+            # place and replace it with a poison record that lookup and cleanup
+            # both understand.  Opening with "w" truncates before any later
+            # write/fsync error, so it cannot remain a valid cache hit.
+            try:
+                with receipt_path.open("w", encoding="utf-8", newline="\n") as stream:
+                    json.dump(
+                        marker, stream, sort_keys=True,
+                        separators=(",", ":"), allow_nan=False,
+                    )
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                return receipt_path
+            except BaseException as fallback_exc:
+                raise CompilerPreparationError(
+                    "cannot durably poison divergent compiler cache key: "
+                    f"rename={exc}; fallback={fallback_exc}"
+                ) from fallback_exc
     return poison_path
+
+
+def _is_cache_poison_record(value: Any, key: str) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {
+            "schema", "version", "key", "reason",
+            "winner_sha256", "candidate_sha256",
+        }
+        and value.get("schema") == COMPILER_CACHE_POISON_SCHEMA
+        and value.get("version") == COMPILER_CACHE_POISON_VERSION
+        and value.get("key") == key
+        and value.get("reason") == "same_key_divergent_anchor_objects"
+        and isinstance(value.get("winner_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", value["winner_sha256"]) is not None
+        and isinstance(value.get("candidate_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", value["candidate_sha256"]) is not None
+        and value["winner_sha256"] != value["candidate_sha256"]
+    )
 
 
 def _reject_poisoned_cache_key_locked(cache_root: Path, key: str) -> None:
     poison_path = _cache_poison_path(cache_root, key)
-    if poison_path.exists():
+    receipt_path, _ = _cache_paths(cache_root, key)
+    poisoned_in_place = False
+    if receipt_path.is_file():
+        try:
+            poisoned_in_place = _is_cache_poison_record(
+                json.loads(receipt_path.read_text(encoding="utf-8")), key,
+            )
+        except (OSError, ValueError, TypeError):
+            pass
+    if poison_path.exists() or poisoned_in_place:
+        evidence_path = poison_path if poison_path.exists() else receipt_path
         raise CompilerPreparationError(
             "compiler anchor cache key is poisoned by a prior divergent build; "
             f"disable {COMPILER_CACHE_ENV} or purge the cache entry to recover: "
-            f"{poison_path}"
+            f"{evidence_path}"
         )
 
 
@@ -1446,6 +1507,20 @@ def _cleanup_compiler_cache_locked(
             artifact_size: Optional[int] = None
             try:
                 receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                if _is_cache_poison_record(receipt, key):
+                    last_used = (
+                        access_path.stat().st_mtime
+                        if access_path.is_file() else receipt_path.stat().st_mtime
+                    )
+                    entries.append({
+                        "key": key,
+                        "receipt": receipt_path,
+                        "access": access_path,
+                        "artifact": None,
+                        "size": 0,
+                        "last_used": last_used,
+                    })
+                    continue
                 if set(receipt) != {
                     "schema", "version", "key", "inputs", "artifact",
                     "artifact_sha256", "artifact_size", "artifact_mode",
@@ -1623,7 +1698,7 @@ def _publish_cached_anchor(
                 )
                 if not _same_cached_anchor(winner, candidate):
                     poison = _poison_cache_key_locked(
-                        cache_root, key,
+                        cache_root, key, winner, candidate,
                     )
                     evidence = _record_cache_conflict_locked(
                         cache_root, key, winner, candidate,
@@ -1672,7 +1747,7 @@ def _publish_cached_anchor(
                 )
                 if not _same_cached_anchor(winner, candidate):
                     poison = _poison_cache_key_locked(
-                        cache_root, key,
+                        cache_root, key, winner, candidate,
                     )
                     evidence = _record_cache_conflict_locked(
                         cache_root, key, winner, candidate,
