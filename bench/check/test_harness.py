@@ -1630,8 +1630,20 @@ class RunnerPhaseTimingTests(unittest.TestCase):
     def _e2e_rows(self) -> list[dict]:
         rows = [
             self._row(
+                0, suite=None, case="runner",
+                stage="compiler_anchor_dependency_scan", duration_ns=1,
+                executed=True, complete=True, outcome="success", exit_code=0,
+                command_category="clang",
+            ),
+            self._row(
                 1, suite=None, case="runner",
                 stage="compiler_anchor_compile", duration_ns=10,
+                executed=True, complete=True, outcome="success", exit_code=0,
+                command_category="clang",
+            ),
+            self._row(
+                0, suite=None, case="runner",
+                stage="compiler_anchor_dependency_scan", duration_ns=1,
                 executed=True, complete=True, outcome="success", exit_code=0,
                 command_category="clang",
             ),
@@ -1677,10 +1689,12 @@ class RunnerPhaseTimingTests(unittest.TestCase):
             ),
             self._row(
                 9, suite=None, case="runner", stage="runner_total",
-                duration_ns=113, executed=True, complete=True, outcome="success",
+                duration_ns=115, executed=True, complete=True, outcome="success",
                 exit_code=0, command_category=None,
             ),
         ]
+        for sequence, row in enumerate(rows, 1):
+            row["sequence"] = sequence
         return rows
 
     def _classify(self, rows: list[dict], *, wall_ns: int = 120) -> harness.PhaseValidation:
@@ -1705,8 +1719,8 @@ class RunnerPhaseTimingTests(unittest.TestCase):
             exit_code=None,
             command_category=None,
         )
-        rows[:3] = [cached]
-        rows[-1]["duration_ns"] = 57
+        rows[1] = cached
+        rows[-1]["duration_ns"] = 109
         for sequence, row in enumerate(rows, 1):
             row["sequence"] = sequence
         return rows
@@ -1764,14 +1778,14 @@ class RunnerPhaseTimingTests(unittest.TestCase):
         summary = harness._summarize_runner_phase_timing([record])
         assert summary is not None
         self.assertEqual(
-            summary["compiler_construction"]["duration_ns"]["median"], 4
+            summary["compiler_construction"]["duration_ns"]["median"], 56
         )
         self.assertEqual(summary["accounting"]["runner"]["balance_ns"]["median"], 0)
 
     def test_cached_compiler_setup_rejects_mixed_duplicate_or_wrong_order(self) -> None:
         mutations = {
-            "mixed": lambda rows: rows.insert(1, self._e2e_rows()[0]),
-            "duplicate": lambda rows: rows.insert(1, dict(rows[0])),
+            "mixed": lambda rows: rows.insert(2, self._e2e_rows()[1]),
+            "duplicate": lambda rows: rows.insert(2, dict(rows[1])),
             "wrong-order": lambda rows: rows.__setitem__(
                 slice(0, 2), [rows[1], rows[0]]
             ),
@@ -1798,7 +1812,7 @@ class RunnerPhaseTimingTests(unittest.TestCase):
             ("command_category", "clang"),
         ):
             rows = self._cached_compiler_rows()
-            rows[0][field] = value
+            rows[1][field] = value
             with self.subTest(field=field):
                 classified = self._classify(rows)
                 self.assertTrue(
@@ -1922,9 +1936,9 @@ class RunnerPhaseTimingTests(unittest.TestCase):
         summary = harness._summarize_runner_phase_timing([record])
         assert summary is not None
         self.assertEqual(summary["sample_count"], 1)
-        self.assertEqual(summary["compiler_construction"]["duration_ns"]["median"], 60)
-        self.assertEqual(summary["runner_total_ns"]["median"], 113)
-        self.assertEqual(summary["outside_runner_wall_ns"]["median"], 7)
+        self.assertEqual(summary["compiler_construction"]["duration_ns"]["median"], 62)
+        self.assertEqual(summary["runner_total_ns"]["median"], 115)
+        self.assertEqual(summary["outside_runner_wall_ns"]["median"], 5)
         self.assertEqual(
             summary["accounting"]["suites"]["e2e"]["balance_ns"]["median"],
             0,

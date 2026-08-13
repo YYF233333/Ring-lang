@@ -121,12 +121,21 @@ RUNNER_COMPILER_SUITES = frozenset(
     {"e2e", "golden", "rc", "self-compile", "structural"}
 )
 RUNNER_RUNTIME_SUITES = frozenset({"e2e", "golden"})
+RUNNER_COMPILER_CACHED_STAGE = "compiler_anchor_prepare"
 RUNNER_COMPILER_STAGES = (
+    "compiler_anchor_dependency_scan",
     "compiler_anchor_compile",
+    "compiler_anchor_dependency_scan",
     "compiler_runtime_compile",
     "compiler_link",
 )
-RUNNER_COMPILER_CACHED_STAGE = "compiler_prepare"
+RUNNER_COMPILER_CACHED_STAGES = (
+    "compiler_anchor_dependency_scan",
+    RUNNER_COMPILER_CACHED_STAGE,
+    "compiler_anchor_dependency_scan",
+    "compiler_runtime_compile",
+    "compiler_link",
+)
 RUNNER_CHILD_STAGE_CATEGORY = {
     "ring_build": "ring",
     "ring_check": "ring",
@@ -2255,7 +2264,7 @@ def _runner_expected_setup_topologies(
     if any(suite in RUNNER_COMPILER_SUITES for suite in suites):
         compiler_topologies = (
             RUNNER_COMPILER_STAGES,
-            (RUNNER_COMPILER_CACHED_STAGE,),
+            RUNNER_COMPILER_CACHED_STAGES,
         )
     if any(suite in RUNNER_RUNTIME_SUITES for suite in suites):
         suffix.append("runtime_prepare")

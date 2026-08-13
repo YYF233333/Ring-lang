@@ -100,11 +100,14 @@ Unknown fields (including a hypothetical thirteenth field), schemas, stage or
 field combinations, and path/sequence drift are hard errors. Missing or
 unreadable traces, incomplete rows, accounting mismatches, and a runner total
 that exceeds the enclosing Job wall time make the attempt ineligible.
-Compiler setup is exactly either the three ordered cache-miss stages
-`compiler_anchor_compile`, `compiler_runtime_compile`, `compiler_link`, or one
-runner-scoped `compiler_prepare` row with `outcome=cached`. Mixed, duplicated,
-or reordered setup is a hard error; either topology's duration remains part of
-runner-total accounting.
+Compiler setup is exactly one of two ordered topologies. A miss is
+`compiler_anchor_dependency_scan`, `compiler_anchor_compile`, a confirming
+`compiler_anchor_dependency_scan`, `compiler_runtime_compile`, then
+`compiler_link`. A hit replaces only `compiler_anchor_compile` with the
+runner-scoped `compiler_anchor_prepare` row (`outcome=cached`); both dependency
+scans and the fresh runtime compile/link remain real child processes. Mixed,
+duplicated, or reordered setup is a hard error; either topology's duration
+remains part of runner-total accounting.
 The runner orchestration residual and total must be one unique final pair;
 an earlier duplicate pair or single runner-scoped summary row is a hard error.
 
