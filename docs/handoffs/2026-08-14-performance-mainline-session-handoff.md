@@ -27,7 +27,11 @@
 - Raw focused evidence:
   `bench/check/results/b180-runner-cache-20260814/cold-miss-fixed/` and
   `bench/check/results/b180-runner-cache-20260814/warm-hit/`. Both pass
-  `bool_ops`; the warm trace is accepted by the strict bench classifier.
+  `bool_ops`; their pass outcomes and recorded wall times are retained only as
+  directional evidence. The warm trace was accepted by the collection-snapshot
+  classifier. The current exact-probe classifier intentionally rejects both
+  legacy traces because they lack the required probe rows; neither establishes
+  current exact-topology acceptance.
 
 ## Rejected candidates and retained failures
 
