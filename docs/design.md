@@ -1639,7 +1639,7 @@ GPU 操作建模为 effect（`gpu_mem` effect），编译器从 effect/type 信�
 - match/catch 按源码 arm 顺序，穷尽失败 fail loud；Drop、cleanup 与 evidence 生命周期在嵌套函数边界隔离，并由共享 RC/verifier 契约审计。
 - 编译器进程只生成文本并调用外部编译器，不恢复 LLVM-C 式进程内 FFI/IR builder 信道。
 
-**发布边界**：C-only 迁移、clean-clone 重复门与旧 worktree 收官已经完成。critical correctness 清零后，B-176/B-180 先恢复可接受的 check/验证反馈速度，再由 B-174/B-175 承担发布产品面；生成程序性能证据由 B-181 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
+**发布边界**：C-only 迁移、clean-clone 重复门与旧 worktree 收官已经完成。critical correctness 清零后，B-176/B-180 先恢复可接受的 check/验证反馈速度，再由 B-174/B-177/B-175 承担 CLI 闭环、版本化 agent contract 与 candidate 打包产品面；生成程序性能证据由 B-181 承担。未来第二后端只能消费同一 HIR/ABI 契约，不能恢复进程内 LLVM-C FFI 或成为唯一 bootstrap。
 
 **未来 LLVM target 重启门**：只有代表性负载证明 C 不可表达的性能瓶颈、Ring 级调试信息刚需，或目标平台缺少成熟 C 工具链时才重新立项。届时 C 后端永久保留为 reference/stage-0，LLVM 只能是第二信道，并且只发文本 `.ll`，不得恢复进程内 LLVM-C FFI。
 

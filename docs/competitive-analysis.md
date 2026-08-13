@@ -66,8 +66,8 @@
 1. **B-111 是立论门，不是营销附件。** TS7 已正式发布，Ring 必须用同协议、同模型、同预算的实验回答“effect 签名是否真的减少 token/轮数/运行时错误”。
 2. **B-001 应做 bounded refinement，不应复制 Verus。** 普通 Ring 代码继续依靠默认类型/effect/资源检查；refinement 先限定可判定片段、机器整数语义和运行时兜底，再谈通用 SMT。
 3. **形式化验证必须显式管理信任。** Verus 与 `moon prove` 都说明“证明成功”不等于“无假设”：solver、整数模型、axiom/external spec、编译器和 runtime 都属于保证边界。
-4. **C-only 只是发布地基，不是产品发布。** Zero 已把 install/query/check/test/run、稳定 identity 与版本匹配的 agent skills 做成 compiler 产品面，Koka/MoonBit/TS7 也都有可安装工具链。Ring 应先完成 B-174/B-175 的本地闭环与候选包，再以 B-177 提供只读、版本化的 semantic inspection/primer；保持源码 + Git 为真值，不追随 graph-native 存储重写。
-5. **“Agent PL”已经成为真实品类，不再只是 Ring 的内部定位词。** BAML 已把 `agent install`、`describe`/`grep`、standalone run、跨语言 bridge、内建 eval 与 agent 反馈回流放在同一产品面。Ring 不应跟随其 LLM-workflow VM/GC 路线，而应让 B-174/B-177/B-111 证明 inference-first native、显式 effect 与确定性资源契约在普通应用任务上的独立价值。
+4. **C-only 只是发布地基，不是产品发布。** Zero 与 BAML 都已把 install/run、版本匹配 skill 和 semantic inspection 做成同一 compiler 产品面，Koka/MoonBit/TS7 也都有可安装工具链。Ring 的 candidate 不应只是二进制压缩包：迁移与 release blockers 收口后，产品面调整为 B-174 → B-177 → B-175，让只读、版本化的 semantic inspection/skill/primer 随 candidate 一起被验证；保持源码 + Git 为真值，不追随 graph-native 存储重写。
+5. **“Agent PL”已经成为真实品类，不再只是 Ring 的内部定位词。** BAML 已把 `agent install`、`describe`/`grep`、standalone run、跨语言 bridge、内建 eval 与 agent 反馈回流放在同一产品面。Ring 不应跟随其 LLM-workflow VM/GC 路线，而应让 B-174/B-177/B-111 证明 inference-first native、显式 effect 与确定性资源契约在普通应用任务上的独立价值；B-111 保持 TypeScript 7 单一语言对照，另做有界的 Ring 工具面消融来区分“语言契约”与“skill/inspection”的贡献。
 
 ---
 
@@ -213,6 +213,12 @@ MoonBit 当前比 Ring 成熟得多：多后端、包管理、LSP、文档与专
 
 官网还宣称 compiler 快于 Go、semantic search 优于 ripgrep、pack 产物小于 Bun，以及 tracing 相对 OpenTelemetry 的数量级优势。本轮没有把这些营销数字核验为可独立重放的 benchmark，也没有确认 Agent Tries BAML 已提供稳定的跨语言对照协议与完整 raw manifest；因此它们当前只算**官方宣称/方法信号**，不能进入 Ring 的性能或 agent-efficiency 事实账本。
 
+#### 对 agent 真正有效的组合，以及尚未证明的边界
+
+BAML 最值得 Ring 响应的不是 TypeScript 风语法或“agent-first”标签，而是三层产品耦合：编译器同版本发布的 skill 和 semantic tools 降低 agent 的语义搜索成本；`run`/trace/eval 把“生成—执行—观察—修复”收进一个可重放回路；bridge 让新语言可以从既有应用中局部采用。单独复制一份 prompt 或一个 JSON 命令不会形成同等产品能力；版本锁定、权威语义来源、失配拒绝与 raw trace 才是可守护部分。
+
+同时，这一组合没有自动证明三件事：严格类型能减少 schema/API 形状错误，但不能保证 prompt 事实性、业务不变量或非确定 LLM 输出正确；VM/GC/async engine 与多宿主 bridge 把易用性换成了更广的 runtime TCB 和兼容矩阵；当前 canary/旧 v0 文档分裂、包生态与官方 benchmark 仍不足以支撑“已成熟或已领先”的结论。
+
 #### 与 Ring 的关键差异
 
 | 维度 | BAML | Ring |
@@ -225,7 +231,7 @@ MoonBit 当前比 Ring 成熟得多：多后端、包管理、LSP、文档与专
 
 结论：**威胁为高，但主要是产品、采用与叙事威胁，不是 effect/ownership/native 机制同构。** BAML 已使“专为 agent 的编程语言”成为有安装入口、runtime、工具链和反馈系统的公开品类；Ring 不能再把 LLM-first/agent-readable 本身当差异。可辩护边界应收窄到 inference-first native application language、显式 effect 与确定性资源语义，并由 B-111 量化。
 
-路线响应不新增独立 backlog：B-174/B-175 继续先交付 standalone preview；B-177 把 `describe`/`grep`/version-matched skill 当产品基准但仍只导出 checker/HIR 权威事实；B-111 保持用户已拍板的 TypeScript 7 单一对照，先完成可归因实验，再决定是否以独立扩展研究 BAML。不能为追赶其宿主 bridge、GC VM 或 workflow stdlib 扩大首个 preview 范围。
+路线响应不新增独立 backlog、不提升任务优先级，也不改动 critical → B-176/B-180 → B-183 → 语义/ABI 收口主干；只重排迁移后的 preview 产品面为 B-174 → B-177 → B-175。B-177 保持 P1，但作为 candidate 依赖，把 version-matched skill 和 `describe`/`grep` 类可发现性纳入发布包，且仍只导出 checker/HIR 权威事实；B-111 保持用户已拍板的 TypeScript 7 单一语言对照，在行为契约子集另做有界的 Ring 工具面消融，且不再排在 formatter/LSP 之后。不为追赶宿主 bridge、GC VM 或 workflow stdlib 扩大首个 preview 范围。
 
 ### 5.3 Zero：graph-native 已从叙事推进为完整 agent loop
 
@@ -236,7 +242,7 @@ MoonBit 当前比 Ring 成熟得多：多后端、包管理、LSP、文档与专
 - compiler 随版本提供 language/stdlib/agent/graph skills，减少外部 primer 漂移；
 - `World`/capability 与 graph model 仍不同于 Ring 的 inferred effect + 普通文件/Git 路线；项目继续明确标为 experimental，不应把产品面完整误写成 production safety。
 
-这使 Zero 的威胁从“agent-first 叙事”上升为“agent compiler 产品面”。Ring 不应复制 graph-native source-of-truth：这会牺牲现有 Git/文本生态并引入第二套存储模型。合理响应是 B-174/B-175 先交付可安装的 check/build/run/doctor，再由 B-177 从 checker/HIR 导出只读、版本化的 identity/signature/effect/import/unsafe contract，配套 source hash stale guard 与 bundled primer。是否需要 checked patch 必须由 B-111/真实 agent loop 证据另行立项，不能因竞品存在就预设。
+这使 Zero 的威胁从“agent-first 叙事”上升为“agent compiler 产品面”。Ring 不应复制 graph-native source-of-truth：这会牺牲现有 Git/文本生态并引入第二套存储模型。合理响应是 B-174 先交付可安装的 check/build/run/doctor，B-177 从 checker/HIR 导出只读、版本化的 identity/signature/effect/import/unsafe contract，配套 source hash stale guard、skill 与 bundled primer，再由 B-175 把它们一起纳入 candidate 重放。是否需要 checked patch 必须由 B-111/真实 agent loop 证据另行立项，不能因竞品存在就预设。
 
 ### 5.4 Mojo：资源与叙事强，主战场不同
 
@@ -477,12 +483,12 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 ## 11. 相关工作项
 
-- **B-174/B-175**：交付可安装、可运行、可诊断的 preview CLI 与 Windows/Linux candidate artifacts；BAML 的 wrapper/toolchain pin/run/bridge 说明版本匹配与渐进采用已成为竞争基线，但首个 Ring preview 不以多宿主 bridge 为前置。
+- **B-174/B-177/B-175**：按 CLI 闭环 → 版本化 agent contract → Windows/Linux candidate artifacts 交付可安装、可运行、可诊断的 preview；BAML 的 wrapper/toolchain pin/run/bridge 说明版本匹配与渐进采用已成为竞争基线，但首个 Ring preview 不以多宿主 bridge 为前置。
 - **B-176/B-180**：建立 `check`、RC/self-verify、runner/self-compile 的可复现 baseline，并以不减覆盖的 2× wall-time 改善恢复快速开发反馈。
 - **B-181**：单独建立生成程序 runtime、内存/分配与产物尺寸的 release baseline/budget。
-- **B-177**：导出版本化只读 semantic inspection contract 与 bundled primer，不改变源码/Git 真值模型；对照 BAML `agent install`、`describe`/`grep` 与 Zero query/inspect 的可发现性，但只消费 checker/HIR 权威事实。
+- **B-177**：导出版本化只读 semantic inspection contract、provider-neutral skill 与 bundled primer，不改变源码/Git 真值模型；对照 BAML `agent install`、`describe`/`grep` 与 Zero query/inspect 的可发现性，但只消费 checker/HIR 权威事实，并作为 B-175 candidate 门。
 - **B-168**：在 B-176/B-180 工具链吞吐专项后确定 C-native failure/control ABI 及其 Drop、TCB 与可移植性边界。
-- **B-111**：用固定模型、预算和公开 artifact 复现 Ring vs TypeScript 7 的 agent 开发对照；借鉴 BAML 的 run/finding/skill-variant/build-pin 回流形态，不把其未独立核验的结果当先验，也不在首轮擅自增加第三对照。
+- **B-111**：用固定模型、预算和公开 artifact 复现 Ring vs TypeScript 7 的 agent 开发对照；借鉴 BAML 的 run/finding/skill-variant/build-pin 回流形态，在 Ring 行为契约子集另做工具面消融，不把其未独立核验的结果当先验，也不在首轮擅自增加第三语言。
 - **B-001**：保持 refinement bounded、deterministic，并显式记录 solver、整数模型与 assumption 边界。
 
 ---

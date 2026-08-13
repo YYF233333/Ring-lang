@@ -1,6 +1,6 @@
 # Ring 产品主张与发布传播治理
 
-> 事实截止：2026-08-09。
+> 事实截止：2026-08-13。
 >
 > 本文件控制 Ring 可以向谁、在什么证据下、用什么边界表达产品主张。它不是实现 backlog，不改变 [`docs/backlog.md`](backlog.md) 的优先级；实现状态仍以 `CLAUDE.md`、活动看板、audit 与可重放测试为准。
 
@@ -40,7 +40,7 @@
 |---|---|---|---|---|---|
 | C-001 | C11-only 编译器能够自举，tracked C anchor 可达到固定点 | `internal-evidence`（snapshot） | `50a96a` clean clone 全量 1551 pass ×3、anchor hash 固定、远端 CI green；只覆盖该 snapshot | “Ring 编译器已经用 Ring 自举；C11 是当前唯一 codegen/bootstrap 路径。”提及强可复现性时附 snapshot | B-175 在 candidate artifact 上重放 clean build、fixed point 与 Windows/Linux matrix |
 | C-002 | Ring 当前实现 HM/trait、`io/fail/mut` effect 与确定性 RC/verifier 路径 | `internal-evidence`（有 blocker） | 代码、规范与测试存在；#260/#268/#269 证明当前仍有安全源码崩溃/ownership 逃逸 | 可以列出“已实现机制”；不得说“所有通过编译的程序都内存安全”或“Rust 级安全” | critical 清零；candidate 上做对应 C/RC/ABI/ASan 与独立审查 |
-| C-003 | 新用户可从发布包完成 install/doctor/check/run/build native exe | `hypothesis` | 当前 README 仍要求源码构建与手工链接；无 release artifact | 只能说“B-174/B-175 正在建设 preview 产品面” | B-174/B-175 验收 + 用户 release 决定 |
+| C-003 | 新用户可从发布包完成 install/doctor/check/run/build native exe | `hypothesis` | 当前 README 仍要求源码构建与手工链接；无 release artifact | 只能说“B-174/B-177/B-175 正在建设 preview 产品面” | B-174/B-177/B-175 验收 + 用户 release 决定 |
 | C-004 | 在同任务、同模型、同预算下，Ring 的行为契约降低相对 TypeScript 7 的 agent 总成本 | `hypothesis` | 尚无正式对照 run | 不得使用“LLM 更容易写对”“比 TS 更省 token”等比较级；可说这是 B-111 的可证伪研究问题 | B-111 预注册实验、raw traces 与可重放报告 |
 | C-005 | 在声明的低风险包络内，低成本模型只影响产出率，不降低 accepted patch 的正确性标准 | `hypothesis` | 当前强模型 review 有价值但昂贵；尚无 repository replay/calibration 证据 | 不得说“廉价模型通过 CI 就安全”或据此开放核心 TCB | B-182 历史缺陷/seeded mutation calibration、隐藏 oracle 与统计上界 |
 | C-006 | 当前 CI 绿色等价于“补丁一定正确” | `rejected` | 同一 `50a96a` snapshot 曾全量 ×3 与远端 CI green，#268/#269 后续仍给出 critical 反例 | 只能说“CI 是必要证据，不是无条件正确性证明” | 不恢复该无界主张；B-182 只能建立风险包络内的接受保证 |
@@ -55,7 +55,7 @@
 | 产品面 | 进入条件 | 可以做 | 不可以做 |
 |---|---|---|---|
 | 工程源码快照（当前） | 仓库公开 | 展示语言机制、自举进展、设计与已知限制 | 称为可安装产品；承诺支持 SLA；使用未证实比较级 |
-| 内部 release candidate | critical/release blockers 按看板关闭；B-174/B-175 candidate 门完成 | 重放安装、激活、跨平台与 provenance；准备用户决策包 | 对外发布、tag、广泛招募 |
+| 内部 release candidate | critical/release blockers 按看板关闭；B-174/B-177/B-175 candidate 门完成 | 重放安装、agent contract 激活、跨平台与 provenance；准备用户决策包 | 对外发布、tag、广泛招募 |
 | 封闭 developer preview | 用户批准 cohort 与数据边界；许可证/支持范围已定；candidate 可重放 | 邀请少量目标用户按 [`preview-feedback-protocol.md`](preview-feedback-protocol.md) 独立试用 | 把参与者数量当采用率；临场教学后仍记作“无人介入成功” |
 | 公开 developer preview | 用户作出 release 决定；artifact、checksum、已知限制、反馈入口齐全 | 宣传已发货事实与复现步骤；明确 experimental/preview 边界 | 在 B-111 前宣传相对 TS7 的 agent 优势；在 B-181 前宣传性能领先 |
 | 证据型 campaign / 机构材料 | 对应 claim 达到 `public-evidence`；原始协议与负向结果可取 | 围绕该 claim 的限定结论传播 | 把 B-111 外推到仓库安全委派；把 B-182 外推到 compiler/TCB 核心 |
@@ -82,7 +82,7 @@ GitHub description 的候选英文文案：
 
 1. **它现在能做什么**：只列 shipped 能力；给一个从 unpack 到 native exe 的最短路径。
 2. **它明确不能做什么**：列出 platform、语言特性、正确性与性能边界。
-3. **如何核对版本**：compiler version、commit/anchor、target、checksum 与 provenance manifest。
+3. **如何核对版本**：compiler version、commit/anchor、target、checksum、inspection schema/agent skill identity 与 provenance manifest。
 4. **如何反馈**：结构化 bug、agent-loop 与 feature request 入口；不承诺尚无资源承担的响应 SLA。
 5. **证据在哪里**：测试/benchmark/实验指向 raw manifest，而不是只给汇总图。
 
@@ -103,7 +103,7 @@ Ring 采用 `MIT OR Apache-2.0` 双许可，copyright holder 为 `Yufeng Ying`�
 Repository Steward 维护本账本；用户保留 release、公开 campaign 和保证边界决定。以下事件触发同步，而不是按日制造文档 churn：
 
 - critical escaped defect 或新 counterexample；
-- B-183/B-174/B-175/B-181/B-111/B-182 的状态改变；
+- B-183/B-174/B-177/B-175/B-181/B-111/B-182 的状态改变；
 - release candidate snapshot/anchor 改变；
 - 外部竞品事件满足 [`competitive-analysis.md`](competitive-analysis.md) §12 的提前复查门；
 - 对外文案引入新的比较级、安全保证或平台支持范围。

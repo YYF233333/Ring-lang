@@ -20,7 +20,7 @@
 1. **Critical 正确性底线**：先修当前 critical audit #268、#269；执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。
 2. **工具链反馈吞吐 P0**：2026-08-03 用户明确将“critical 清零后的第一优先级”改为 check/验证速度。B-176 可在 critical 修复期间提前采集不改变行为的基线；critical 清零后立即执行 B-176 → B-180，先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作。性能专项不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
 3. **其余正确性与语义/ABI 冻结**：随后处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257；再走 B-168 → B-169 → B-167 → B-152 → B-002 的 release critical path。B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。
-4. **发布产品面**：B-174 → B-175 得到可安装、可 `run/build/check/doctor` 的 Windows/Linux 候选包；B-181 建立生成程序的 runtime/内存/尺寸预算。随后 B-178 → B-016 补 formatter/LSP，B-177 → B-111 补版本化 agent contract 与可复现实验。
+4. **发布产品面**：B-174 → B-177 → B-175，让可 `run/build/check/doctor` 的 Windows/Linux candidate 同时携带版本匹配的 agent skill、primer 与 semantic inspection contract。candidate 后 B-111 与 B-181 分别建立 agent 总成本和生成程序 runtime/内存/尺寸证据；二者无硬依赖，默认同为 formatter/LSP 之前的证据 lane，随后再走 B-178 → B-016。
 5. **发布后能力**：先做 P1 correctness/ownership 与用户高频能力（B-110、B-172、B-173、B-149 等），再由 B-111 数据决定 refinement/async 的投入顺序。B-001/B-116→B-007 均在 RIIR/ABI 稳定后启动；GADT、dyn Trait、HKT/GAT、JIT、Debugger 等 P3 工作继续后置。
 
 性能仍让位于 critical correctness，但现在明确越过其余非 critical 队列：B-176/B-180 先解决开发反馈回路；B-181 再决定 #262/B-079 等生成程序优化。B-105 只有在 B-180 证明 unchanged-module 重复工作仍是主导成本时启动，B-041 不进入 preview 路线。
@@ -618,29 +618,29 @@ handle {
 
 **验收**：从任意目录对 hello、带参数 CLI、两层 module project 执行 check/build/run；路径含空格与非 ASCII；失败覆盖无 clang、坏源码、坏 link、缺 runtime；生成 exe 与直接 object+runtime 手工链接行为一致；完整 C/RC/self-compile/fixed-point 门通过。
 
-### B-175 可复现发布包与 Windows/Linux CI 矩阵 [infra] [P0] [L] [judgment] [queued] [after: B-174]
+### B-175 可复现发布包与 Windows/Linux CI 矩阵 [infra] [P0] [L] [judgment] [queued] [after: B-174+B-177]
 
 本项产出 **release candidate artifact**，不授权公开 release。首轮支持门为 Windows x64 + Linux x64；macOS 先做可重放 smoke/evidence，未通过同等门前不宣传支持。产品 compiler 仍使用 clang；Linux 额外用 gcc 编译生成 C 作为去相关信道。
 
 **范围 / 文件**：`.github/workflows/`、`compiler/scripts/`、release manifest/NOTICE、安装与卸载脚本、README/quickstart、artifact smoke tests。
 
-- D-002 已固定 `MIT OR Apache-2.0` 双许可与 `Yufeng Ying` holder；bundle 包含 compiler、版本匹配的 std/runtime 资产、两份官方 license、SPDX expression、NOTICE/provenance、quickstart 与 checksum，不依赖源码仓库结构；
-- clean checkout 从 tracked `dist-c/main.c` 构建，clean unpack 能运行 `ring doctor`、hello、多文件 project 与 self-compile fixed point；
+- D-002 已固定 `MIT OR Apache-2.0` 双许可与 `Yufeng Ying` holder；bundle 包含 compiler、版本匹配的 std/runtime 资产、agent skill/primer/public signatures/inspection schema、两份官方 license、SPDX expression、NOTICE/provenance、quickstart 与 checksum，不依赖源码仓库结构；
+- clean checkout 从 tracked `dist-c/main.c` 构建，clean unpack 能运行 `ring doctor`、hello、多文件 project 与 self-compile fixed point，并在干净 agent workspace 安装/复制 skill、读取 inspection contract；compiler/schema/skill 版本失配必须拒绝；
 - Windows/Linux 各跑 e2e/golden/RC/structural/parity/self-compile；Linux 同时验证 clang 与 gcc 的 C11 编译，平台差异限制在 runtime/driver 边界；
 - artifact 名、版本、target triple、toolchain requirements、SHA-256 与 provenance manifest 确定；同输入重建差异必须可解释；
 - 对 compiler/runtime/std/generated template 做 provenance inventory，贡献说明固定“提交即按同一双许可提供”；纯用户源码生成物不附加 Ring 许可，实际复制/链接的 runtime/std/template 仍由 manifest 明示相应 license/NOTICE。最终支持声明、tag 与 GitHub Release 仍属用户保留决定；完成许可 packaging 也不代用户发布。
 
 **发布阻断**：全部 critical finding 清零；当前排序列出的 silent wrong-code/heap/RC blockers 关闭；B-167/B-152/B-002/B-156/B-133 gate 完成；C-only 全量门和至少一轮 clean-clone CI 全绿；文档不得宣称 async/refinement/LSP 等未发货能力。
 
-### B-177 版本化 agent inspection contract + bundled primer [feature] [P1] [L] [judgment] [queued] [after: B-174] [before: B-111]
+### B-177 版本化 agent inspection contract + bundled skill/primer [feature] [P1] [L] [judgment] [queued] [after: B-174] [before: B-175+B-111]
 
-外部 agent-first 语言已把 query/check/test/run、稳定程序 identity 与版本匹配的语言 skills 作为 compiler 产品面。Ring 保持普通源码 + Git 为真值，不改成 graph-native 数据库；但必须让 agent 无需读完整实现即可取得可缓存、可校验的语义事实。
+外部 agent-first 语言已把 query/check/test/run、稳定程序 identity 与版本匹配的语言 skills 作为 compiler 产品面；BAML 进一步把 skill、`describe`/`grep`、run/eval/trace 与 pinned toolchain 联成一个 agent loop。Ring 保持普通源码 + Git 为真值，不改成 graph-native 数据库；但必须让 agent 无需读完整实现即可取得可缓存、可校验的语义事实。
 
-**用户面 / 文件**：在 CLI 增加 `ring inspect --format=json`（planning 时可在不制造第二套概念的前提下核定最终命名），并随 release bundle 提供版本匹配的 Ring primer 与 std public signatures。输出至少包含 schema/compiler/source hash、module/import edge、public symbol stable identity、推断 type/effect/trait bound、capability/unsafe discharge 与诊断关联 span。
+**用户面 / 文件**：在 CLI 增加 `ring inspect --format=json`（planning 时可在不制造第二套概念的前提下核定最终命名），并随 release bundle 提供版本匹配的 Ring primer、std public signatures 和 provider-neutral agent skill。Skill 须有确定的安装/复制入口，同时向人和 agent 提供可发现的语言/项目概览；输出至少包含 schema/compiler/source hash、module/import edge、public symbol stable identity、推断 type/effect/trait bound、capability/unsafe discharge 与诊断关联 span。
 
-**约束**：canonical ordering、schema version 与内容 hash 稳定；陈旧缓存/源码 hash 不匹配 fail closed；只暴露 checker/HIR 的权威事实，不在 CLI 重做解析/推断；v1 只读，不引入 compiler-managed patch/write 或第二份程序数据库。Primer token 单独计量，必须由当前 compiler/spec 自动校验，不允许版本漂移。
+**约束**：canonical ordering、schema version 与内容 hash 稳定；陈旧缓存/源码 hash 不匹配 fail closed；只暴露 checker/HIR 的权威事实，不在 CLI 重做解析/推断；v1 只读，不引入 compiler-managed patch/write 或第二份程序数据库。Skill 只能调用已记录的公开 CLI，必须声明 compiler/schema/skill identity，任一版本或 hash 失配均 fail closed。Primer/skill token 单独计量，必须由当前 compiler/spec 自动校验，不允许版本漂移。
 
-**验收**：单/多模块、re-export、泛型 trait/effect、unsafe 与错误程序的 JSON contract golden；相同输入字节稳定，语义变化改变 hash；primer + signatures 在固定 token budget 内覆盖 B-111 任务所需核心；B-111 harness 实际消费 bundle 中的版本化产物而非手工副本。
+**验收**：单/多模块、re-export、泛型 trait/effect、unsafe 与错误程序的 JSON contract golden；相同输入字节稳定，语义变化改变 hash；primer + signatures + skill 在固定 token budget 内覆盖 B-111 任务所需核心；从 clean bundle 向临时 agent workspace 安装/复制 skill 并完成概览、符号查找与契约查询；旧 skill/schema/compiler 组合的负向测试必须拒绝；B-175 smoke 与 B-111 harness 实际消费 bundle 中的版本化产物而非手工副本。
 
 ### B-178 `ring fmt` 与行为签名物化 [feature] [P1] [L] [judgment] [queued] [after: B-174]
 
@@ -679,14 +679,16 @@ source-map 支持 + 断点调试。
 4. **指标**：首次编译通过率 / 到绿轮数 / 隐藏测试运行时错误率 / 总 token（design.md §11.3 前四项）。
 5. 被测模型 Sonnet 级（平均 agentic 代表 + 便宜可多跑；顶级模型硬实力会掩盖语言差异）。放 `eval/`，手动触发，不进 CI（烧 token）。
 6. **行为契约子集**：任务集中预注册一组 signature-only/API-use 题；只提供模块签名，不提供实现，覆盖纯函数误用、`io`、`fail<E>`、`mut` 与资源生命周期。TS 题提供语义等价的 `.d.ts`/文档，不额外泄漏答案。该子集直接测量「签名信息密度」，不得事后挑题。
-7. **可复现协议**：锁定并记录模型名/版本、system prompt、temperature、上下文和输出预算、Ring/TS compiler commit/version、TS config、机器环境、每轮完整 prompt/diagnostic/patch、token 与 wall-clock。onboarding primer token 单独报告，不得藏入免费上下文。
+7. **可复现协议**：锁定并记录模型名/版本、system prompt、temperature、上下文和输出预算、Ring/TS compiler commit/version、B-177 skill/schema/primer/signature hash、TS config、机器环境、每轮完整 prompt/diagnostic/semantic-query/patch、token 与 wall-clock。onboarding primer/skill token 单独报告，不得藏入免费上下文。
 8. **分析纪律**：预先固定主指标、重试上限与失败分类；报告均值同时给出原始样本和离散程度。结果允许为 Ring 无优势或更差，禁止只发布胜例；版本/协议不一致的 run 标 invalid，不与正式结果合并。
+9. **Ring 工具面消融**：在至少 5 题的预注册行为契约子集上，使用同模型、同预算与同重复数，比较完整 B-177 bundle（skill + inspection + primer/signatures）与 primer/signatures-only。该消融只比较 Ring 产品面，不新增第三语言；其指标、题目和工具权限需预注册，结果与 Ring vs TS 主实验分开报告，不混池主指标。
 
 **验收标准**：
 - ≥15 题 × 2 语言 × 3 重复跑通，产出指标对比报告
 - Ring primer 成文且被 harness 实际使用
 - 失败案例归类（语法迁移 / 类型 / effect / std API），形成修缮清单回流 backlog
 - 至少 5 题属于预注册的行为契约子集；两语言输入信息量差异逐题可审计
+- 同一行为契约子集完成完整 B-177 bundle vs primer/signatures-only 消融，保留语义查询原始记录，允许 null/负向结果
 - 发布可重放 manifest 与逐轮原始记录；报告明确列出 null/负向结果、无效 run 和已知混杂因素
 
 ### B-182 证据携带补丁验收系统（低成本 agent 安全委派）[infra] [P1] [XL] [judgment] [queued] [after: B-111]

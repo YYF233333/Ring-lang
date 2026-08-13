@@ -7,7 +7,7 @@
 首轮 preview 只回答三个产品问题：
 
 1. 一个不熟悉 Ring 的用户和 coding agent，能否不读取仓库实现、不接受项目作者实时教学，从 candidate bundle 完成一个小型 native CLI？
-2. 失败时，用户能否凭 `doctor`、compiler diagnostic、primer 和 public signatures 自己回到正确路径？
+2. 失败时，用户能否凭 `doctor`、compiler diagnostic、版本匹配 skill/inspection、primer 和 public signatures 自己回到正确路径？
 3. 每个失败是否能形成可重放 evidence，并被路由到 compiler/test、diagnostic、primer/docs、packaging 或明确非目标？
 
 首轮不回答市场规模、长期留存、Ring 是否优于 TypeScript，也不证明所有通过 CI 的补丁正确。后三者分别需要独立分发数据、B-111 与 B-182。
@@ -21,7 +21,7 @@
 **参与者只获得**：
 
 - candidate archive、checksum 与安装说明；
-- bundle 自带的版本匹配 primer、std public signatures 和 quickstart；
+- bundle 自带的版本匹配 provider-neutral agent skill、inspection schema、primer、std public signatures 和 quickstart；
 - 任务说明、公开验收例和不可见 smoke oracle；
 - 结构化反馈入口。
 
@@ -33,15 +33,16 @@
 
 1. 验证 checksum，解压或安装；
 2. 在非仓库目录运行 `ring doctor`；
-3. 让 agent 只依据任务、primer 和 signatures 生成程序；
-4. 执行 `ring check`，把完整结构化 diagnostic 原样反馈给 agent；
-5. 重复修正直到编译通过或参与者放弃；
-6. 执行公开例与隐藏 smoke oracle；
-7. `ring run` 成功后生成 native executable；
-8. 从另一个工作目录运行 executable，确认不依赖源码 checkout；
-9. 填写退出问卷：成功、主动放弃、工具阻塞、任务理解错误或协议无效。
+3. 校验 compiler/schema/skill/primer/signatures identity，将 bundled skill 安装或复制到干净 agent workspace；任一失配立即标 invalid；
+4. 让 agent 只依据任务、bundled skill/primer/signatures 与候选包公开 CLI 生成程序，并保留语义查询记录；
+5. 执行 `ring check`，把完整结构化 diagnostic 原样反馈给 agent；
+6. 重复修正直到编译通过或参与者放弃；
+7. 执行公开例与隐藏 smoke oracle；
+8. `ring run` 成功后生成 native executable；
+9. 从另一个工作目录运行 executable，确认不依赖源码 checkout；
+10. 填写退出问卷：成功、主动放弃、工具阻塞、任务理解错误或协议无效。
 
-**主激活事件**：无项目作者介入，candidate bundle 从干净目录完成上述 1–8，隐藏 oracle 全绿且没有未声明 runtime surprise。
+**主激活事件**：无项目作者介入，candidate bundle 从干净目录完成上述 1–9，隐藏 oracle 全绿且没有未声明 runtime surprise。
 
 首轮内部 calibration 不预设一个凭直觉产生的“15 分钟成功”阈值：完整记录实际分布和放弃点，形成 baseline；在看过 calibration 结果后、外部 cohort 开始前，固定 time budget、最大修正轮数和成功阈值。阈值一旦预注册，不得为美化结果事后移动。
 
@@ -51,12 +52,12 @@
 
 | 类别 | 必填字段 |
 |---|---|
-| Candidate identity | archive SHA-256、Ring version、compiler commit、tracked anchor hash、target triple |
+| Candidate identity | archive SHA-256、Ring version、compiler commit、tracked anchor hash、target triple、inspection schema version、skill/primer/signatures hash |
 | Environment | OS/arch、shell、clang/gcc 版本、CPU/RAM、冷/热缓存声明 |
 | Participant | 经验分层、是否参与 Ring、是否事先看过任务；公开报告使用匿名 ID |
 | Agent | provider、精确 model/version、system prompt、temperature、上下文/输出预算、工具权限 |
 | Timeline | start、doctor、first generation、first check、first compile-green、first hidden-green、exe success、end |
-| Loop | 每轮 prompt、源码/patch、diagnostic、退出码、token、wall time、人工介入 |
+| Loop | 每轮 prompt、语义查询与返回、源码/patch、diagnostic、退出码、token、wall time、人工介入 |
 | Outcome | success/abandon/invalid、隐藏测试结果、runtime surprise、退出原因与首个阻塞阶段 |
 | Consent | 哪些 raw trace 可公开、必须删除/脱敏的字段、保留期限 |
 
@@ -74,6 +75,7 @@
 **诊断指标**：
 
 - 安装/发现工具链失败率；
+- skill/inspection 不可发现、版本失配、语义查询无法回到权威 checker/HIR 事实的次数；
 - 同一 diagnostic 重复出现但 patch 无进展的循环；
 - error format 缺失 span、expected/actual、修复动作或稳定 identity 的次数；
 - primer/signature 未覆盖的概念或 API；
@@ -87,8 +89,8 @@
 |---|---|---|
 | F0 escaped correctness | compile/check/CI 绿色后 wrong-code、crash、资源/ABI 违约或隐藏 oracle 失败 | 立即停止相关 claim/preview lane；最小复现；进入 critical/相称 audit，补永久 oracle |
 | F1 false rejection / dead end | 符合现行 spec 的程序被拒，或 compiler feedback 无法导向可接受程序 | 核对 spec；形成 bug/diagnostic regression，不用文档绕过真实 compiler 缺陷 |
-| F2 activation/toolchain | 安装、doctor、路径、链接、版本或 artifact discovery 阻塞 | 路由 B-174/B-175 产品面；保留 clean-environment replay |
-| F3 repair friction | diagnostic 正确但含糊、反复、缺少机器字段，显著增加轮数/token | 路由 diagnostic/inspection contract；以修正轮数变化验收 |
+| F2 activation/toolchain | 安装、doctor、路径、链接、版本或 artifact discovery 阻塞 | 路由 B-174/B-177/B-175 产品面；保留 clean-environment replay |
+| F3 repair friction | diagnostic 正确但含糊、反复、缺少机器字段，或 skill/inspection 不能减少语义搜索，显著增加轮数/token | 路由 B-177 diagnostic/inspection contract；以修正轮数变化验收 |
 | F4 primer/std/docs gap | compiler 行为正确，但 primer、签名或常用 std 缺口迫使猜测 | 先确认不是 F1；更新版本匹配材料或立有测量锚点的 std item |
 | F5 capability request | 当前明确不支持的新场景 | 记录频次与被阻塞任务；不因单票越过 correctness/release 主线 |
 
@@ -133,8 +135,8 @@ evidence envelope
 
 ### Agent loop friction
 
-- model/version、primer/signature 版本、工具权限；
-- 从第一个 prompt 到退出的轮次与 diagnostic；
+- model/version、skill/inspection/primer/signature identity、工具权限；
+- 从第一个 prompt 到退出的轮次、semantic query 与 diagnostic；
 - 首个卡点和是否人工介入；
 - token/wall 数据（provider 能提供时）；
 - 经脱敏的最小 trace。
@@ -159,7 +161,7 @@ Issue Form 不收集 secrets，不要求用户公开完整私人仓库。安全�
 ## 10. 与 B-111 / B-182 的隔离
 
 - preview activation 观察“产品能否被首次用起来”；B-111 比较 Ring 与 TypeScript 7 的 agent 总成本。二者任务、报告和结论不得混用。
-- preview 中发现的失败分类可以改进 compiler/primer，但 B-111 正式题目与主指标必须在 run 前预注册；改进前后的结果分开报告。
+- preview 中发现的失败分类可以改进 compiler/skill/inspection/primer，但 B-111 正式题目、主指标与 Ring 工具面消融必须在 run 前预注册；改进前后的结果分开报告。
 - B-182 的 repository patch acceptance 需要历史补丁、seeded mutation、权限隔离和风险分层；preview 用户代码成功不能替代这些证据。
 
 因此，preview traces 是产品反馈语料，不自动成为比较实验或安全证明。
