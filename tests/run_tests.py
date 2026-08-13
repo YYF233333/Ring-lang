@@ -53,11 +53,11 @@ DIST_C_DIR = REPO / "compiler" / "dist-c"
 DIST_C_MAIN = DIST_C_DIR / "main.c"
 THINLTO_CACHE = Path(tempfile.gettempdir()) / "ring-lang-thinlto-cache"
 COMPILER_ARTIFACT_CACHE = (
-    Path(tempfile.gettempdir()) / "ring-lang-compiler-anchor-cache-v2"
+    Path(tempfile.gettempdir()) / "ring-lang-compiler-anchor-cache-v3"
 )
 COMPILER_CACHE_ENV = "RING_TEST_COMPILER_CACHE"
-COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-anchor-cache.v2"
-COMPILER_CACHE_VERSION = 2
+COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-anchor-cache.v3"
+COMPILER_CACHE_VERSION = 3
 COMPILER_CACHE_MAX_ENTRIES = 16
 COMPILER_CACHE_MAX_BYTES = 4 * 1024 * 1024 * 1024
 COMPILER_CACHE_STALE_SECONDS = 24 * 60 * 60
@@ -737,15 +737,13 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
         runtime_frontend_flags = ()
 
     linker = _find_lld_linker(clang)
-    if linker is None:
-        return None
     controlled = False
     cache_supported = False
     target: Optional[str] = None
     driver_flags: Tuple[str, ...] = ()
     linker_pin_flags: Tuple[str, ...] = ()
     environment: Tuple[Tuple[str, str], ...] = ()
-    if sys.platform == "win32":
+    if sys.platform == "win32" and linker is not None:
         environment = _controlled_environment(
             clang, runtime_compiler, linker,
         )
@@ -766,7 +764,9 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
         clang=clang,
         runtime_compiler=runtime_compiler,
         runtime_frontend_flags=runtime_frontend_flags,
-        linker=linker,
+        # The ordinary path preserves clang's own -fuse-ld=lld discovery.
+        # Only the controlled Windows cache path requires an explicit linker.
+        linker=linker or "",
         exe_name="ring.exe" if sys.platform == "win32" else "ring",
         compile_flags=tuple(COMPILER_COMPILE_FLAGS),
         test_link_flags=tuple(CLANG_LINK_FLAGS),
@@ -924,8 +924,8 @@ def _scan_anchor_dependencies(
             "-MT", "ring-cache-probe", "-MF", str(depfile),
             str(anchor_snapshot),
         ]
-        result = subprocess.run(
-            command,
+        result = _run_subprocess(
+            "compiler_anchor_dependency_scan", command,
             check=True,
             capture_output=True,
             timeout=TIMEOUT_COMPILE,
@@ -1083,6 +1083,10 @@ def _compile_runtime_and_link(
 
 def _cache_paths(cache_root: Path, key: str) -> Tuple[Path, Path]:
     return cache_root / "receipts" / f"{key}.json", cache_root / "artifacts"
+
+
+def _cache_poison_path(cache_root: Path, key: str) -> Path:
+    return cache_root / "poisoned" / f"{key}.json"
 
 
 def _cache_thread_lock(path: Path) -> threading.RLock:
@@ -1287,6 +1291,55 @@ def _record_cache_conflict_locked(
     return evidence_path
 
 
+def _poison_cache_key_locked(
+    cache_root: Path,
+    key: str,
+    winner: _CachedAnchor,
+    candidate: _CachedAnchor,
+) -> Path:
+    poison_path = _cache_poison_path(cache_root, key)
+    marker = {
+        "schema": COMPILER_CACHE_SCHEMA,
+        "version": COMPILER_CACHE_VERSION,
+        "key": key,
+        "reason": "same_key_divergent_anchor_objects",
+        "winner": {
+            "sha256": winner.sha256,
+            "size": winner.size,
+            "mode": winner.mode,
+        },
+        "candidate": {
+            "sha256": candidate.sha256,
+            "size": candidate.size,
+            "mode": candidate.mode,
+        },
+    }
+    try:
+        created = _create_json_once(poison_path, marker)
+    except BaseException:
+        # If durable poisoning itself is unavailable, remove the receipt so a
+        # later process cannot silently consume the now-untrusted winner.
+        receipt_path, _ = _cache_paths(cache_root, key)
+        receipt_path.unlink(missing_ok=True)
+        (cache_root / "access" / key).unlink(missing_ok=True)
+        raise
+    if not created and not poison_path.is_file():
+        raise CompilerPreparationError(
+            f"compiler cache poison marker lost its immutable CAS: {poison_path}"
+        )
+    return poison_path
+
+
+def _reject_poisoned_cache_key_locked(cache_root: Path, key: str) -> None:
+    poison_path = _cache_poison_path(cache_root, key)
+    if poison_path.exists():
+        raise CompilerPreparationError(
+            "compiler anchor cache key is poisoned by a prior divergent build; "
+            f"disable {COMPILER_CACHE_ENV} or purge the cache entry to recover: "
+            f"{poison_path}"
+        )
+
+
 def _same_cached_anchor(left: _CachedAnchor, right: _CachedAnchor) -> bool:
     return (
         left.sha256 == right.sha256
@@ -1313,7 +1366,7 @@ def _cleanup_compiler_cache_locked(
     for path in cache_root.glob(".staging-*"):
         if path.stat().st_mtime < stale_before:
             _remove_path(path)
-    for directory_name in ("receipts", "artifacts"):
+    for directory_name in ("receipts", "artifacts", "poisoned"):
         directory = cache_root / directory_name
         if directory.is_dir():
             for path in directory.glob(".*.tmp"):
@@ -1326,25 +1379,56 @@ def _cleanup_compiler_cache_locked(
                 _remove_path(path)
 
     receipt_dir = cache_root / "receipts"
+    artifacts_dir = cache_root / "artifacts"
     entries: List[Dict[str, Any]] = []
     if receipt_dir.is_dir():
         for receipt_path in receipt_dir.glob("*.json"):
-            artifact_name: Optional[str] = None
-            artifact_size = 0
-            try:
-                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-                if isinstance(receipt.get("artifact"), str):
-                    artifact_name = receipt["artifact"]
-                if (
-                    isinstance(receipt.get("artifact_size"), int)
-                    and not isinstance(receipt["artifact_size"], bool)
-                    and receipt["artifact_size"] >= 0
-                ):
-                    artifact_size = receipt["artifact_size"]
-            except (OSError, ValueError, TypeError):
-                pass
             key = receipt_path.stem
             access_path = cache_root / "access" / key
+            artifact_name: Optional[str] = None
+            artifact_size: Optional[int] = None
+            try:
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                if set(receipt) != {
+                    "schema", "version", "key", "inputs", "artifact",
+                    "artifact_sha256", "artifact_size", "artifact_mode",
+                }:
+                    raise ValueError("unexpected compiler cache receipt fields")
+                artifact_hash = receipt["artifact_sha256"]
+                claimed_size = receipt["artifact_size"]
+                artifact_mode = receipt["artifact_mode"]
+                if (
+                    re.fullmatch(r"[0-9a-f]{64}", key) is None
+                    or receipt["schema"] != COMPILER_CACHE_SCHEMA
+                    or receipt["version"] != COMPILER_CACHE_VERSION
+                    or receipt["key"] != key
+                    or _compiler_cache_key(receipt["inputs"]) != key
+                    or not isinstance(artifact_hash, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", artifact_hash) is None
+                    or receipt["artifact"] != f"{artifact_hash}.o"
+                    or not isinstance(claimed_size, int)
+                    or isinstance(claimed_size, bool)
+                    or claimed_size < 0
+                    or not isinstance(artifact_mode, int)
+                    or isinstance(artifact_mode, bool)
+                    or artifact_mode < 0
+                ):
+                    raise ValueError("invalid compiler cache receipt identity")
+                artifact_name = receipt["artifact"]
+                artifact_path = artifacts_dir / artifact_name
+                artifact_stat = artifact_path.stat()
+                if (
+                    not stat.S_ISREG(artifact_stat.st_mode)
+                    or artifact_stat.st_size != claimed_size
+                    or stat.S_IMODE(artifact_stat.st_mode) != artifact_mode
+                ):
+                    raise ValueError("compiler cache artifact metadata mismatch")
+                # Capacity accounting trusts the filesystem, never receipt data.
+                artifact_size = artifact_stat.st_size
+            except (OSError, ValueError, TypeError, KeyError):
+                receipt_path.unlink(missing_ok=True)
+                access_path.unlink(missing_ok=True)
+                continue
             last_used = (
                 access_path.stat().st_mtime
                 if access_path.is_file() else receipt_path.stat().st_mtime
@@ -1386,7 +1470,6 @@ def _cleanup_compiler_cache_locked(
             entry["receipt"].unlink(missing_ok=True)
             entry["access"].unlink(missing_ok=True)
 
-    artifacts_dir = cache_root / "artifacts"
     referenced = set(kept_artifacts)
     if artifacts_dir.is_dir():
         for artifact in artifacts_dir.glob("*.o"):
@@ -1399,6 +1482,13 @@ def _cleanup_compiler_cache_locked(
         for access_path in access_dir.iterdir():
             if access_path.is_file() and access_path.name not in retained_keys:
                 access_path.unlink(missing_ok=True)
+
+    poison_dir = cache_root / "poisoned"
+    if poison_dir.is_dir():
+        retained_keys = {entry["key"] for entry in kept}
+        for poison_path in poison_dir.glob("*.json"):
+            if poison_path.stem not in retained_keys:
+                poison_path.unlink(missing_ok=True)
 
     _prune_cache_conflicts_locked(cache_root)
 
@@ -1444,6 +1534,7 @@ def _publish_cached_anchor(
     artifact_path = artifacts_dir / f"{candidate.sha256}.o"
     with _cache_global_lock(cache_root):
         with _cache_key_lock(cache_root, key):
+            _reject_poisoned_cache_key_locked(cache_root, key)
             winner = _validated_cached_anchor(cache_root, key, inputs)
             if receipt_path.exists():
                 if winner is None:
@@ -1454,12 +1545,15 @@ def _publish_cached_anchor(
                     cache_root, protected_keys=(key,),
                 )
                 if not _same_cached_anchor(winner, candidate):
+                    poison = _poison_cache_key_locked(
+                        cache_root, key, winner, candidate,
+                    )
                     evidence = _record_cache_conflict_locked(
                         cache_root, key, winner, candidate,
                     )
                     raise CompilerPreparationError(
                         "same compiler cache key produced divergent anchor objects; "
-                        f"evidence: {evidence}"
+                        f"poison: {poison}; evidence: {evidence}"
                     )
                 _touch_cache_access(cache_root, key)
                 return winner
@@ -1498,14 +1592,17 @@ def _publish_cached_anchor(
                 if winner is None:
                     raise CompilerPreparationError(
                         f"compiler cache receipt lost its immutable CAS: {receipt_path}"
-                    )
+                )
                 if not _same_cached_anchor(winner, candidate):
+                    poison = _poison_cache_key_locked(
+                        cache_root, key, winner, candidate,
+                    )
                     evidence = _record_cache_conflict_locked(
                         cache_root, key, winner, candidate,
                     )
                     raise CompilerPreparationError(
                         "same compiler cache key produced divergent anchor objects; "
-                        f"evidence: {evidence}"
+                        f"poison: {poison}; evidence: {evidence}"
                     )
                 _touch_cache_access(cache_root, key)
                 return winner
@@ -1539,6 +1636,7 @@ def _lookup_cached_anchor(
     receipt_path, _ = _cache_paths(cache_root, key)
     with _cache_global_lock(cache_root):
         with _cache_key_lock(cache_root, key):
+            _reject_poisoned_cache_key_locked(cache_root, key)
             cached = _validated_cached_anchor(cache_root, key, inputs)
             if receipt_path.exists() and cached is None:
                 raise CompilerPreparationError(
@@ -1572,9 +1670,6 @@ def _prepare_compiler(plan: _CompilerBuildPlan) -> str:
         else:
             cache_root = COMPILER_ARTIFACT_CACHE
             tracer = _PHASE_TRACER
-            prepare_started_ns = (
-                time.perf_counter_ns() if tracer is not None else None
-            )
             cache_root.mkdir(parents=True, exist_ok=True)
             staging_dir = Path(tempfile.mkdtemp(
                 prefix=".staging-lookup-", dir=str(cache_root),
@@ -1586,17 +1681,13 @@ def _prepare_compiler(plan: _CompilerBuildPlan) -> str:
                 )
                 key = _compiler_cache_key(inputs)
                 run_object = run_dir / "main.o"
+                prepare_started_ns = (
+                    time.perf_counter_ns() if tracer is not None else None
+                )
                 hit = _lookup_cached_anchor(
                     cache_root, key, inputs, run_object,
                 )
                 if hit:
-                    confirmed_inputs = _compiler_cache_inputs(
-                        plan, anchor_snapshot, staging_dir,
-                    )
-                    if confirmed_inputs != inputs:
-                        raise CompilerPreparationError(
-                            "compiler anchor cache inputs changed during lookup"
-                        )
                     if tracer is not None and prepare_started_ns is not None:
                         tracer.record_stage(
                             suite=None,
@@ -1608,6 +1699,13 @@ def _prepare_compiler(plan: _CompilerBuildPlan) -> str:
                             executed=False,
                             complete=True,
                             outcome="cached",
+                        )
+                    confirmed_inputs = _compiler_cache_inputs(
+                        plan, anchor_snapshot, staging_dir,
+                    )
+                    if confirmed_inputs != inputs:
+                        raise CompilerPreparationError(
+                            "compiler anchor cache inputs changed during lookup"
                         )
                 else:
                     staged_object = _compile_anchor(

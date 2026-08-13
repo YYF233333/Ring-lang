@@ -667,6 +667,28 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 evidence["candidate"]["sha256"], validated.sha256,
             )
             self.assertEqual(receipt_path.read_bytes(), receipt_before)
+            poison = runner._cache_poison_path(cache_root, key)
+            self.assertTrue(poison.is_file())
+            poison_record = json.loads(poison.read_text(encoding="utf-8"))
+            self.assertEqual(poison_record["key"], key)
+            self.assertEqual(
+                poison_record["winner"]["sha256"], validated.sha256,
+            )
+            destination = root / "future-hit.o"
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._lookup_cached_anchor(
+                    cache_root, key, inputs, destination,
+                )
+            self.assertFalse(destination.exists())
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._publish_cached_anchor(
+                    cache_root, key, inputs, objects[0],
+                )
+            self.assertEqual(receipt_path.read_bytes(), receipt_before)
 
     def test_hardlink_publication_failure_is_loud_and_never_creates_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -694,31 +716,26 @@ class CompilerAnchorCacheTests(unittest.TestCase):
 
     def test_cleanup_bounds_entries_bytes_conflicts_and_orphan_staging(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            cache_root = Path(temp_dir) / "cache"
+            root = Path(temp_dir)
+            cache_root = root / "cache"
             receipts = cache_root / "receipts"
             artifacts = cache_root / "artifacts"
             access = cache_root / "access"
             conflicts = cache_root / "conflicts" / "key"
-            for directory in (receipts, artifacts, access, conflicts):
-                directory.mkdir(parents=True, exist_ok=True)
-
             now = time.time()
-            for key, artifact, payload, used in (
-                ("old", "old.o", b"old", now - 20),
-                ("new", "new.o", b"newer", now - 10),
+            published = []
+            for tag, payload, used in (
+                ("old", b"old", now - 20),
+                ("new", b"newer", now - 10),
             ):
-                (artifacts / artifact).write_bytes(payload)
-                (receipts / f"{key}.json").write_text(
-                    json.dumps({
-                        "artifact": artifact,
-                        "artifact_size": len(payload),
-                    }),
-                    encoding="utf-8",
+                _, key, cached = self.publish(
+                    cache_root, root / f"staging-{tag}", payload, tag=tag,
                 )
+                published.append((tag, key, cached))
                 marker = access / key
-                marker.touch()
                 os.utime(marker, (used, used))
 
+            conflicts.mkdir(parents=True)
             (artifacts / "orphan.o").write_bytes(b"orphan")
             old_staging = cache_root / ".staging-old"
             new_staging = cache_root / ".staging-new"
@@ -740,17 +757,38 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                     cache_root, now=now,
                 )
 
-            self.assertFalse((receipts / "old.json").exists())
-            self.assertTrue((receipts / "new.json").exists())
-            self.assertFalse((artifacts / "old.o").exists())
-            self.assertTrue((artifacts / "new.o").exists())
+            old_tag, old_key, old_cached = published[0]
+            new_tag, new_key, new_cached = published[1]
+            self.assertFalse((receipts / f"{old_key}.json").exists())
+            self.assertTrue((receipts / f"{new_key}.json").exists())
+            self.assertFalse(old_cached.path.exists())
+            self.assertTrue(new_cached.path.exists())
             self.assertFalse((artifacts / "orphan.o").exists())
-            self.assertFalse((access / "old").exists())
-            self.assertTrue((access / "new").exists())
+            self.assertFalse((access / old_key).exists())
+            self.assertTrue((access / new_key).exists())
             self.assertFalse(old_staging.exists())
             self.assertTrue(new_staging.exists())
             self.assertEqual(len(list(conflicts.glob("*.json"))), 1)
             self.assertTrue((conflicts / "2.json").exists())
+
+    def test_cleanup_uses_actual_artifact_size_and_removes_malformed_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            _, key, cached = self.publish(
+                cache_root, root / "staging", b"x" * 100,
+            )
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["artifact_size"] = 0
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+            with patch.object(runner, "COMPILER_CACHE_MAX_BYTES", 1):
+                runner._cleanup_compiler_cache_locked(cache_root)
+
+            self.assertFalse(receipt_path.exists())
+            self.assertFalse(cached.path.exists())
+            self.assertFalse((cache_root / "access" / key).exists())
 
     def test_cache_hit_phase_order_and_exact_runner_scoped_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -758,13 +796,25 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             cache_root = root / "cache"
             trace_path = root / "trace.jsonl"
             plan = self.make_plan(root / "fixture")
-            inputs = self.simple_inputs()
 
             def cache_hit(_root, _key, _inputs, destination):
                 destination.write_bytes(b"cached anchor\n")
                 return True
 
             def successful_tool(command, **_kwargs):
+                if "-MF" in command:
+                    depfile = Path(command[command.index("-MF") + 1])
+                    anchor = Path(command[-1])
+                    header = plan.anchor_source.parent / "anchor_support.h"
+                    depfile.write_text(
+                        "ring-cache-probe: "
+                        f"{self.makefile_escape(anchor)} "
+                        f"{self.makefile_escape(header)}\n",
+                        encoding="utf-8",
+                    )
+                    return subprocess.CompletedProcess(
+                        command, 0, b"#define TEST_TARGET 1\n", b"",
+                    )
                 output = Path(command[command.index("-o") + 1])
                 output.write_bytes(b"stage output\n")
                 return subprocess.CompletedProcess(command, 0, b"", b"")
@@ -775,9 +825,6 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 patch.dict(
                     os.environ, {runner.COMPILER_CACHE_ENV: "1"}, clear=False,
                 ),
-                patch.object(
-                    runner, "_compiler_cache_inputs", return_value=inputs,
-                ) as cache_inputs,
                 patch.object(
                     runner, "_lookup_cached_anchor", side_effect=cache_hit,
                 ),
@@ -795,7 +842,6 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 tracer.close()
 
             self.assertTrue(executable.is_file())
-            self.assertEqual(cache_inputs.call_count, 2)
             records = [
                 json.loads(line)
                 for line in trace_path.read_text(encoding="utf-8").splitlines()
@@ -803,14 +849,16 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(
                 [record["stage"] for record in records],
                 [
+                    "compiler_anchor_dependency_scan",
                     "compiler_anchor_prepare",
+                    "compiler_anchor_dependency_scan",
                     "compiler_runtime_compile",
                     "compiler_link",
                     "orchestration_residual",
                     "runner_total",
                 ],
             )
-            cached = records[0]
+            cached = records[1]
             self.assertEqual(set(cached), runner.PHASE_TIMING_FIELDS)
             self.assertIsNone(cached["suite"])
             self.assertEqual(cached["case"], "runner")
@@ -819,7 +867,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(cached["outcome"], "cached")
             self.assertIsNone(cached["exit_code"])
             self.assertIsNone(cached["command_category"])
-            for child in records[1:3]:
+            for child in (records[0], records[2], records[3], records[4]):
                 self.assertTrue(child["executed"])
                 self.assertTrue(child["complete"])
                 self.assertEqual(child["outcome"], "success")
@@ -830,15 +878,27 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 records[-1]["duration_ns"],
             )
 
-    def test_cache_miss_keeps_exactly_three_compiler_subprocess_stages(self) -> None:
+    def test_cache_miss_records_dependency_scans_and_three_build_stages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             cache_root = root / "cache"
             trace_path = root / "trace.jsonl"
             plan = self.make_plan(root / "fixture")
-            inputs = self.simple_inputs()
 
             def successful_tool(command, **_kwargs):
+                if "-MF" in command:
+                    depfile = Path(command[command.index("-MF") + 1])
+                    anchor = Path(command[-1])
+                    header = plan.anchor_source.parent / "anchor_support.h"
+                    depfile.write_text(
+                        "ring-cache-probe: "
+                        f"{self.makefile_escape(anchor)} "
+                        f"{self.makefile_escape(header)}\n",
+                        encoding="utf-8",
+                    )
+                    return subprocess.CompletedProcess(
+                        command, 0, b"#define TEST_TARGET 1\n", b"",
+                    )
                 output = Path(command[command.index("-o") + 1])
                 output.write_bytes(
                     b"linked compiler\n"
@@ -853,9 +913,6 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 patch.dict(
                     os.environ, {runner.COMPILER_CACHE_ENV: "1"}, clear=False,
                 ),
-                patch.object(
-                    runner, "_compiler_cache_inputs", return_value=inputs,
-                ) as cache_inputs,
                 patch.object(
                     runner, "_lookup_cached_anchor", return_value=False,
                 ),
@@ -873,8 +930,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 tracer.close()
 
             self.assertTrue(executable.is_file())
-            self.assertEqual(cache_inputs.call_count, 2)
-            self.assertEqual(child_run.call_count, 3)
+            self.assertEqual(child_run.call_count, 5)
             records = [
                 json.loads(line)
                 for line in trace_path.read_text(encoding="utf-8").splitlines()
@@ -882,14 +938,16 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(
                 [record["stage"] for record in records],
                 [
+                    "compiler_anchor_dependency_scan",
                     "compiler_anchor_compile",
+                    "compiler_anchor_dependency_scan",
                     "compiler_runtime_compile",
                     "compiler_link",
                     "orchestration_residual",
                     "runner_total",
                 ],
             )
-            for child in records[:3]:
+            for child in records[:5]:
                 self.assertTrue(child["executed"])
                 self.assertTrue(child["complete"])
                 self.assertEqual(child["outcome"], "success")
@@ -1097,6 +1155,37 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(plan.linker_pin_flags, ())
             self.assertIsNone(plan.target)
             self.assertIsNone(runner._plan_environment(plan))
+
+    def test_missing_explicit_linker_preserves_original_uncached_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = self.make_plan(Path(temp_dir) / "fixture")
+            with (
+                patch.object(runner.sys, "platform", "win32"),
+                patch.object(runner, "DIST_C_MAIN", fixture.anchor_source),
+                patch.object(runner, "RUNTIME_CPP", fixture.runtime_source),
+                patch.object(
+                    runner, "find_clang", return_value=fixture.clang,
+                ),
+                patch.object(
+                    runner.shutil, "which",
+                    return_value=fixture.runtime_compiler,
+                ),
+                patch.object(
+                    runner, "_resolved_executable",
+                    side_effect=lambda executable: executable,
+                ),
+                patch.object(runner, "_find_lld_linker", return_value=None),
+                patch.object(runner, "_probe_controlled_target") as probe,
+            ):
+                plan = runner._compiler_build_plan()
+
+            self.assertIsNotNone(plan)
+            self.assertFalse(plan.controlled)
+            self.assertFalse(plan.cache_supported)
+            self.assertEqual(plan.linker, "")
+            self.assertEqual(plan.linker_pin_flags, ())
+            self.assertIsNone(runner._plan_environment(plan))
+            probe.assert_not_called()
 
     def test_build_failure_report_preserves_original_diagnostics(self) -> None:
         failure = subprocess.CalledProcessError(
