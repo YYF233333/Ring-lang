@@ -203,6 +203,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 tool.write_bytes(b"tool\n")
             source_environment = {
                 "SystemRoot": str(root / "windows"),
+                "SystemDrive": "Q:",
                 "PATH": str(root / "uncontrolled-path"),
                 "CPATH": str(root / "c-headers"),
                 "CPLUS_INCLUDE_PATH": str(root / "cxx-headers"),
@@ -217,6 +218,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 ))
 
             for name in (
+                "SystemDrive",
                 "CPATH",
                 "CPLUS_INCLUDE_PATH",
                 "LIBRARY_PATH",
@@ -1145,6 +1147,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                     runner, "_probe_controlled_target",
                     side_effect=[fixture.target, None],
                 ),
+                patch.object(runner, "_probe_controlled_headers") as headers,
             ):
                 plan = runner._compiler_build_plan()
 
@@ -1155,6 +1158,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(plan.linker_pin_flags, ())
             self.assertIsNone(plan.target)
             self.assertIsNone(runner._plan_environment(plan))
+            headers.assert_not_called()
 
     def test_missing_explicit_linker_preserves_original_uncached_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

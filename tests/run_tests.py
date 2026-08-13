@@ -576,6 +576,7 @@ class _CachedAnchor:
 
 _CONTROLLED_ENV_NAMES = (
     "SystemRoot",
+    "SystemDrive",
     "WINDIR",
     "TEMP",
     "TMP",
@@ -738,6 +739,39 @@ def _probe_controlled_target(
     return target
 
 
+def _probe_controlled_headers(
+    compiler: str,
+    environment: Tuple[Tuple[str, str], ...],
+    target: str,
+    *,
+    language: str,
+    headers: Tuple[str, ...],
+) -> bool:
+    source = "".join(f"#include <{header}>\n" for header in headers)
+    try:
+        subprocess.run(
+            [
+                compiler,
+                "--no-default-config",
+                f"--target={target}",
+                "-E",
+                "-x",
+                language,
+                "-",
+            ],
+            input=source,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(REPO),
+            env=dict(environment),
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return False
+    return True
+
+
 def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
     if not DIST_C_MAIN.is_file() or not RUNTIME_CPP.is_file():
         return None
@@ -773,7 +807,25 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
         )
         clang_target = _probe_controlled_target(clang, environment)
         runtime_target = _probe_controlled_target(runtime_compiler, environment)
-        if clang_target is not None and clang_target == runtime_target:
+        headers_supported = (
+            clang_target is not None
+            and clang_target == runtime_target
+            and _probe_controlled_headers(
+                clang,
+                environment,
+                clang_target,
+                language="c",
+                headers=("math.h", "stdint.h"),
+            )
+            and _probe_controlled_headers(
+                runtime_compiler,
+                environment,
+                clang_target,
+                language="c++",
+                headers=("vector", "string", "windows.h"),
+            )
+        )
+        if headers_supported:
             controlled = True
             cache_supported = True
             target = clang_target
