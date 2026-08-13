@@ -2432,6 +2432,47 @@ sys.exit(24)
                 limit_errors[0],
             )
 
+    def test_missing_active_process_zero_notification_is_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            real_read = windows_job._read_completion_port
+
+            def drop_active_zero(
+                port: int, timeout_ms: int
+            ) -> tuple[int, int] | None:
+                event = real_read(port, timeout_ms)
+                if (
+                    event is not None
+                    and event[0] == windows_job.JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO
+                ):
+                    return None
+                return event
+
+            with (
+                mock.patch.object(
+                    windows_job,
+                    "JOB_QUIESCENCE_NOTIFICATION_TIMEOUT_MS",
+                    20,
+                ),
+                mock.patch.object(
+                    windows_job,
+                    "_read_completion_port",
+                    side_effect=drop_active_zero,
+                ),
+                self.assertRaisesRegex(
+                    windows_job.JobMeasurementError,
+                    "ACTIVE_PROCESS_ZERO",
+                ),
+            ):
+                run_in_job(
+                    [sys.executable, "-c", "pass"],
+                    cwd=Path.cwd(),
+                    env=os.environ,
+                    stdout_path=root / "stdout.txt",
+                    stderr_path=root / "stderr.txt",
+                    timeout_seconds=5,
+                )
+
     def test_capped_preparation_entry_uses_the_fixed_job_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

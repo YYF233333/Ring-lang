@@ -36,6 +36,7 @@ STILL_ACTIVE = 259
 DEFAULT_JOB_MEMORY_LIMIT_BYTES = 12_884_901_888
 DEFAULT_ACTIVE_PROCESS_LIMIT = 5
 JOB_COMPLETION_KEY = 0xB176
+JOB_QUIESCENCE_NOTIFICATION_TIMEOUT_MS = 1_000
 SIZE_T_MAX = (1 << (ctypes.sizeof(ctypes.c_size_t) * 8)) - 1
 
 
@@ -300,32 +301,39 @@ def _new_completion_port(job: int) -> int:
     return int(handle)
 
 
+def _read_completion_port(
+    port: int, timeout_ms: int
+) -> tuple[int, int] | None:
+    message = wintypes.DWORD()
+    completion_key = ULONG_PTR()
+    completion_value = ctypes.c_void_p()
+    ctypes.set_last_error(0)
+    if not kernel32.GetQueuedCompletionStatus(
+        port,
+        ctypes.byref(message),
+        ctypes.byref(completion_key),
+        ctypes.byref(completion_value),
+        timeout_ms,
+    ):
+        error = ctypes.get_last_error()
+        if error == WAIT_TIMEOUT:
+            return None
+        raise _winerror("GetQueuedCompletionStatus failed")
+    if int(completion_key.value) != JOB_COMPLETION_KEY:
+        raise JobMeasurementError(
+            "Job completion port returned an unexpected completion key: "
+            f"{int(completion_key.value)}"
+        )
+    return int(message.value), int(completion_value.value or 0)
+
+
 def _drain_completion_port(port: int) -> list[tuple[int, int]]:
     events: list[tuple[int, int]] = []
     while True:
-        message = wintypes.DWORD()
-        completion_key = ULONG_PTR()
-        completion_value = ctypes.c_void_p()
-        ctypes.set_last_error(0)
-        if not kernel32.GetQueuedCompletionStatus(
-            port,
-            ctypes.byref(message),
-            ctypes.byref(completion_key),
-            ctypes.byref(completion_value),
-            0,
-        ):
-            error = ctypes.get_last_error()
-            if error == WAIT_TIMEOUT:
-                return events
-            raise _winerror("GetQueuedCompletionStatus failed")
-        if int(completion_key.value) != JOB_COMPLETION_KEY:
-            raise JobMeasurementError(
-                "Job completion port returned an unexpected completion key: "
-                f"{int(completion_key.value)}"
-            )
-        events.append(
-            (int(message.value), int(completion_value.value or 0))
-        )
+        event = _read_completion_port(port, 0)
+        if event is None:
+            return events
+        events.append(event)
 
 
 def current_process_handle_count() -> int:
@@ -513,6 +521,7 @@ def run_in_job(
     sampled_peak_tree_rss = 0
     rss_samples = 0
     pid = 0
+    saw_active_process_zero = False
 
     def release_handles() -> None:
         nonlocal completion_port, job, process_handle, thread_handle
@@ -533,9 +542,12 @@ def run_in_job(
             _close_handle(completion_port)
             completion_port = None
 
-    def drain_completion_events() -> None:
-        assert completion_port is not None
-        for message, completion_value in _drain_completion_port(completion_port):
+    def retain_completion_events(events: Sequence[tuple[int, int]]) -> None:
+        nonlocal saw_active_process_zero
+        for message, completion_value in events:
+            if message == JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO:
+                saw_active_process_zero = True
+                continue
             if message == JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT:
                 sampling_errors.add(
                     "active_process_limit_reached: "
@@ -543,6 +555,40 @@ def run_in_job(
                     f"completion_value={completion_value}, "
                     f"limit={active_process_limit}"
                 )
+
+    def drain_completion_events() -> None:
+        assert completion_port is not None
+        retain_completion_events(_drain_completion_port(completion_port))
+
+    def await_quiescence_notification() -> None:
+        assert completion_port is not None
+        deadline = (
+            time.perf_counter_ns()
+            + JOB_QUIESCENCE_NOTIFICATION_TIMEOUT_MS * 1_000_000
+        )
+        while not saw_active_process_zero:
+            remaining_ms = max(
+                1,
+                (deadline - time.perf_counter_ns() + 999_999) // 1_000_000,
+            )
+            event = _read_completion_port(
+                completion_port,
+                min(remaining_ms, JOB_QUIESCENCE_NOTIFICATION_TIMEOUT_MS),
+            )
+            if event is None:
+                raise JobMeasurementError(
+                    "Job accounting reached zero active processes without an "
+                    "ACTIVE_PROCESS_ZERO completion notification"
+                )
+            retain_completion_events([event])
+            if time.perf_counter_ns() >= deadline and not saw_active_process_zero:
+                raise JobMeasurementError(
+                    "Job completion notifications did not reach "
+                    "ACTIVE_PROCESS_ZERO within the bounded wait"
+                )
+        # ACTIVE_PROCESS_ZERO is the terminal process-tree notification.  Drain
+        # packets already ahead of the consumer before releasing either handle.
+        drain_completion_events()
 
     with (
         open(os.devnull, "rb", buffering=0) as stdin_file,
@@ -602,6 +648,10 @@ def run_in_job(
             _winapi.TerminateProcess(process_handle, 127)
             release_handles()
             raise error
+        # Establish the notification epoch for this suspended root.  This also
+        # discards any association-time packet before the process tree can run.
+        drain_completion_events()
+        saw_active_process_zero = False
 
         resumed = kernel32.ResumeThread(thread_handle)
         _close_handle(thread_handle)
@@ -657,9 +707,7 @@ def run_in_job(
                     == _winapi.WAIT_OBJECT_0
                 )
                 if root_done and accounting_now.ActiveProcesses == 0:
-                    # The Job is quiescent; retain every notification already
-                    # queued for the completed process tree before returning.
-                    drain_completion_events()
+                    await_quiescence_notification()
                     break
 
                 now_ns = time.perf_counter_ns()
