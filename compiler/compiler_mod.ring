@@ -7,7 +7,7 @@ use hir::{HProgram, HDecl, HParam, module_item_identity,
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use formatter::{format_human, format_llm}
 use env::{TypeEnv}
-use checker::{check_module}
+use checker::{check_module, parse_prelude_syntax}
 use codegen_c::{generate_c_project}
 use resolver::{ModuleGraph, ModuleId, module_key, module_prefix,
     build_module_graph}
@@ -277,6 +277,10 @@ fn compile_phases(entry_file: Str, error_format: Str, mut timing: PhaseTiming) -
             let mut module_asts: Map<Str, Program> = map_new()
             let mut module_hirs: Map<Str, HProgram> = map_new()
             let mut module_exports_map: Map<Str, ModuleExports> = map_new()
+            // The std prelude is immutable syntax for the duration of one
+            // project command.  Parse and canonicalize it once, then replay
+            // registration/checking into each module's fresh InferCtx.
+            let prelude_syntax = parse_prelude_syntax()
 
             // Use cached ASTs from resolver (already parsed during graph construction)
             for key in graph.topo_order {
@@ -322,7 +326,8 @@ fn compile_phases(entry_file: Str, error_format: Str, mut timing: PhaseTiming) -
                             let check_key = key
                             let result = check_module(
                                 check_ast, check_key, current_prefix,
-                                graph.namespace_plan, dep_exports, sink)
+                                graph.namespace_plan, dep_exports,
+                                prelude_syntax, sink)
                             if sink.has_errors() {
                                 let mod_file = match graph.modules.get(key) { some(m) => m.file_path, none => "" }
                                 if error_format == "llm" {

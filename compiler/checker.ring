@@ -60,6 +60,14 @@ pub struct CheckResult {
 const STD_FILES: List<Str> =
     ["io.ring", "iterator.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"]
 
+// Immutable, context-free syntax snapshot for one compiler invocation.  It
+// deliberately contains no InferCtx, TypeEnv, HIR, DefId, or ownership state:
+// every checked module must replay registration and checking against a fresh
+// context below.
+pub struct PreludeSyntax {
+    decls: List<Decl>
+}
+
 fn rebuild_prelude_fn_decl_firebreak(
     name: Str, type_params: List<TypeParam>, params: List<Param>,
     return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr,
@@ -127,6 +135,37 @@ fn find_std_dir() -> Str? {
 fn canonicalize_loaded_prelude_decl_firebreak(decl: Decl) -> Decl {
     let source_decl = decl
     canonicalize_prelude_decl(source_decl)
+}
+
+fn append_prelude_syntax_decl_firebreak(
+    mut decls: List<Decl>, decl: Decl
+) {
+    let snapshot_decl = decl
+    decls.push(snapshot_decl)
+}
+
+pub fn parse_prelude_syntax() -> PreludeSyntax? {
+    match find_std_dir() {
+        some(std_dir) => {
+            let mut decls: List<Decl> = []
+            for file in (STD_FILES) {
+                let file_path = path_join(std_dir, file)
+                if file_exists(file_path) {
+                    let source = read_file(file_path)
+                    let prelude_sink = new_collecting_sink()
+                    let ast = parse(source, file_path, prelude_sink)
+                    for decl in ast.decls {
+                        let canonical_decl =
+                            canonicalize_loaded_prelude_decl_firebreak(decl)
+                        append_prelude_syntax_decl_firebreak(
+                            decls, canonical_decl)
+                    }
+                }
+            }
+            some(PreludeSyntax { decls: decls })
+        },
+        none => none
+    }
 }
 
 fn rebind_prelude_extern_firebreak(
@@ -201,26 +240,18 @@ fn append_prelude_extern_hdecl_firebreak(
     })
 }
 
-fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
+fn load_prelude(
+    mut ctx: InferCtx, syntax: PreludeSyntax?
+) -> List<HDecl> {
     let mut prelude_hdecls: List<HDecl> = []
-    match find_std_dir() {
-        some(std_dir) => {
-            // Phase 1: collect and register all prelude declarations
-            let mut all_prelude_decls: List<Decl> = []
-            for file in (STD_FILES) {
-                let file_path = path_join(std_dir, file)
-                if file_exists(file_path) {
-                    let source = read_file(file_path)
-                    let prelude_sink = new_collecting_sink()
-                    let ast = parse(source, file_path, prelude_sink)
-                    for decl in ast.decls {
-                        let canonical_decl =
-                            canonicalize_loaded_prelude_decl_firebreak(decl)
-                        let registration_decl = canonical_decl
-                        register_prelude_decl_public(ctx, registration_decl)
-                        all_prelude_decls.push(canonical_decl)
-                    }
-                }
+    match syntax {
+        some(PreludeSyntax { decls: all_prelude_decls }) => {
+            // Phase 1: replay every canonical syntax declaration into this
+            // module's fresh InferCtx.  Only read/parse/canonicalization is
+            // shared.
+            for decl in all_prelude_decls {
+                let registration_decl = decl
+                register_prelude_decl_public(ctx, registration_decl)
             }
             // Install the source-level API spelling as an alias of the exact
             // canonical scheme/DefId. record_value_origin makes ordinary
@@ -404,7 +435,7 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                 }
             }
         },
-        none => {},
+        none => {}
     }
     prelude_hdecls
 }
@@ -535,7 +566,8 @@ fn append_checked_program_decl_firebreak(
 
 pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     let mut ctx = new_infer_ctx(checker_sink_result_firebreak(sink))
-    let prelude_hdecls = load_prelude(ctx)
+    let prelude_syntax = parse_prelude_syntax()
+    let prelude_hdecls = load_prelude(ctx, prelude_syntax)
     let hprogram = infer_check(ctx, program)
     let mut impl_facts: List<ModuleImplFact> = []
     collect_module_impl_facts(hprogram.decls, true, impl_facts)
@@ -791,10 +823,11 @@ fn report_namespace_plan_issues(
 pub fn check_module(
     program: Program, module_key: Str, module_prefix: Str,
     namespace_plan: ResolvedNamespacePlan,
-    module_exports: List<ModuleExports>, sink: CollectingSink
+    module_exports: List<ModuleExports>, prelude_syntax: PreludeSyntax?,
+    sink: CollectingSink
 ) -> CheckResult {
     let mut ctx = new_infer_ctx(checker_sink_result_firebreak(sink))
-    let prelude_hdecls = load_prelude(ctx)
+    let prelude_hdecls = load_prelude(ctx, prelude_syntax)
     inject_module_exports(ctx, module_exports)
     let _ = install_project_namespace_plan(ctx, module_key, namespace_plan)
     report_namespace_plan_issues(ctx, module_key, program, namespace_plan)
