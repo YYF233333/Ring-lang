@@ -631,33 +631,25 @@ class ManifestAndPolicyTests(unittest.TestCase):
         self.assertEqual(reason, "invocation_error: launch failed")
 
     def test_warmup_hard_resource_failure_is_not_masked(self) -> None:
-        errors = (
-            "job_memory_limit_reached: peak_job_commit=2, limit=1",
-            "active_process_limit_reached: completion_message=3, "
-            "completion_value=0, limit=5",
+        error = "job_memory_limit_reached: peak_job_commit=2, limit=1"
+        reason = harness.derive_invalid_reason(
+            policy="direct_short",
+            index=0,
+            invocation_error=None,
+            measurement={
+                "timed_out": False,
+                "measurement_errors": [error],
+            },
+            exit_code=0,
+            expected_exit_codes=[0],
+            runner_expected=False,
+            runner_summary=None,
+            artifacts=[],
+            phase_errors=[],
+            runtime_errors=[],
         )
-        for error in errors:
-            with self.subTest(error=error):
-                reason = harness.derive_invalid_reason(
-                    policy="direct_short",
-                    index=0,
-                    invocation_error=None,
-                    measurement={
-                        "timed_out": False,
-                        "measurement_errors": [error],
-                    },
-                    exit_code=0,
-                    expected_exit_codes=[0],
-                    runner_expected=False,
-                    runner_summary=None,
-                    artifacts=[],
-                    phase_errors=[],
-                    runtime_errors=[],
-                )
-                self.assertEqual(reason, f"measurement_errors: {error}")
-                self.assertFalse(
-                    harness._is_replaceable_measurement_invalid(reason)
-                )
+        self.assertEqual(reason, f"measurement_errors: {error}")
+        self.assertFalse(harness._is_replaceable_measurement_invalid(reason))
 
     def test_fatal_warmup_and_measured_attempt_stop_without_replacement(self) -> None:
         cases = (
@@ -667,12 +659,6 @@ class ManifestAndPolicyTests(unittest.TestCase):
                 "direct_short",
                 "measurement_errors: job_memory_limit_reached: "
                 "peak_job_commit=2, limit=1",
-            ),
-            (
-                "warmup active process cap",
-                "direct_short",
-                "measurement_errors: active_process_limit_reached: "
-                "completion_message=3, completion_value=0, limit=5",
             ),
             ("measured exit", "adaptive", "unexpected_exit: 1"),
             (
@@ -2421,109 +2407,6 @@ sys.exit(24)
                 "spawn-failed:4:",
                 (root / "stdout.txt").read_text(encoding="utf-8"),
             )
-            limit_errors = [
-                error
-                for error in result["measurement_errors"]
-                if error.startswith("active_process_limit_reached:")
-            ]
-            self.assertEqual(len(limit_errors), 1)
-            self.assertIn(
-                f"completion_message={windows_job.JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT}",
-                limit_errors[0],
-            )
-
-    def test_missing_active_process_zero_notification_is_fail_closed(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            real_read = windows_job._read_completion_port
-
-            def drop_active_zero(
-                port: int, timeout_ms: int
-            ) -> tuple[int, int] | None:
-                event = real_read(port, timeout_ms)
-                if (
-                    event is not None
-                    and event[0] == windows_job.JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO
-                ):
-                    return None
-                return event
-
-            with (
-                mock.patch.object(
-                    windows_job,
-                    "JOB_QUIESCENCE_NOTIFICATION_TIMEOUT_MS",
-                    20,
-                ),
-                mock.patch.object(
-                    windows_job,
-                    "_read_completion_port",
-                    side_effect=drop_active_zero,
-                ),
-                self.assertRaisesRegex(
-                    windows_job.JobMeasurementError,
-                    "ACTIVE_PROCESS_ZERO",
-                ),
-            ):
-                run_in_job(
-                    [sys.executable, "-c", "pass"],
-                    cwd=Path.cwd(),
-                    env=os.environ,
-                    stdout_path=root / "stdout.txt",
-                    stderr_path=root / "stderr.txt",
-                    timeout_seconds=5,
-                )
-
-    def test_completion_port_failure_before_resume_releases_handles(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            # Warm CPython's process-global CreateProcess synchronization state
-            # before requiring steady-state handle equality on the error path.
-            run_in_job(
-                [sys.executable, "-c", "pass"],
-                cwd=Path.cwd(),
-                env=os.environ,
-                stdout_path=root / "warmup-stdout.txt",
-                stderr_path=root / "warmup-stderr.txt",
-                timeout_seconds=5,
-            )
-            before = current_process_handle_count()
-            failure = windows_job.JobMeasurementError(
-                "fixture completion-port failure"
-            )
-            with (
-                mock.patch.object(
-                    windows_job,
-                    "_drain_completion_port",
-                    side_effect=failure,
-                ),
-                self.assertRaisesRegex(
-                    windows_job.JobMeasurementError,
-                    "fixture completion-port failure",
-                ),
-            ):
-                run_in_job(
-                    [sys.executable, "-c", "pass"],
-                    cwd=Path.cwd(),
-                    env=os.environ,
-                    stdout_path=root / "stdout.txt",
-                    stderr_path=root / "stderr.txt",
-                    timeout_seconds=5,
-                )
-            self.assertEqual(current_process_handle_count(), before)
-
-    def test_completion_port_poll_is_bounded_under_continuous_events(self) -> None:
-        with mock.patch.object(
-            windows_job,
-            "_read_completion_port",
-            return_value=(6, 1),
-        ) as read:
-            events = windows_job._drain_completion_port(1)
-        self.assertEqual(
-            len(events), windows_job.MAX_COMPLETION_EVENTS_PER_POLL
-        )
-        self.assertEqual(
-            read.call_count, windows_job.MAX_COMPLETION_EVENTS_PER_POLL
-        )
 
     def test_capped_preparation_entry_uses_the_fixed_job_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -2597,14 +2480,6 @@ sys.exit(24)
                     "exit_code": 1,
                     "measurement_errors": [
                         "job_memory_limit_reached: peak_job_commit=2, limit=1"
-                    ],
-                },
-                "active process cap": {
-                    "timed_out": False,
-                    "exit_code": 0,
-                    "measurement_errors": [
-                        "active_process_limit_reached: "
-                        "completion_message=3, completion_value=0, limit=5"
                     ],
                 },
             }

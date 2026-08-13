@@ -12,11 +12,17 @@ to a fresh kill-on-close Windows Job Object, then resumes its primary thread.
 Every Job has an exact 12 GiB aggregate commit limit and an active-process
 limit of five (including the root). Configuration is queried back exactly
 before use; a process whose `SIZE_T` cannot represent the commit limit fails
-preflight without starting work. Each execution Job is associated with an I/O
-completion port before its root is resumed, so an `ACTIVE_PROCESS_LIMIT`
-notification is retained as a hard measurement error even when the measured
-program catches the rejected spawn and exits successfully. No working-set or
-breakaway limit is used.
+preflight without starting work. Windows enforces the active-process limit in
+the Job: once five processes are active, associating another process fails and
+that process is terminated. A real self-test holds the root plus four children
+and proves that the sixth spawn is rejected. This is an enforcement boundary,
+not a measurement oracle: Job completion-port notifications are not treated as
+reliable evidence of every violation, and the harness does not synthesize an
+`active_process_limit_reached` error when the command catches a rejected spawn.
+In that case the command's exit status, required output/artifacts, and runner
+summary remain the correctness authority; a command that legitimately degrades
+and still satisfies those contracts may pass. No working-set or breakaway
+limit is used.
 The invocation record distinguishes exact lifetime counters from sampled
 memory:
 

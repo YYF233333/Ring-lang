@@ -180,7 +180,6 @@ ERROR_ALREADY_EXISTS = 183
 MEASUREMENT_LOCK_NAME = "Global\\RingLang-B176-formal-measurement-v1"
 HARD_RESOURCE_ERROR_PREFIXES = (
     "job_memory_limit_reached:",
-    "active_process_limit_reached:",
 )
 
 
@@ -334,7 +333,7 @@ def _run_capped_command(
     limit_errors = _hard_resource_measurement_errors(measurement)
     if limit_errors:
         raise HarnessError(
-            f"{label} exceeded its Job resource limit: {limit_errors[0]}{retained}"
+            f"{label} exceeded its Job memory limit: {limit_errors[0]}{retained}"
         )
     returncode = measurement["exit_code"]
     if not isinstance(returncode, int):
