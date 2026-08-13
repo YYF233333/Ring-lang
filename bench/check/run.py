@@ -17,11 +17,19 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
-from windows_job import JobMeasurementError, preflight_job_support, run_in_job
+from windows_job import (
+    DEFAULT_ACTIVE_PROCESS_LIMIT,
+    DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+    JobMeasurementError,
+    job_limit_identity,
+    preflight_job_support,
+    run_in_job,
+)
 
 
 BENCH_DIR = Path(__file__).resolve().parent
@@ -118,6 +126,7 @@ RUNNER_COMPILER_STAGES = (
     "compiler_runtime_compile",
     "compiler_link",
 )
+RUNNER_COMPILER_CACHED_STAGE = "compiler_prepare"
 RUNNER_CHILD_STAGE_CATEGORY = {
     "ring_build": "ring",
     "ring_check": "ring",
@@ -165,6 +174,8 @@ SAMPLE_ID_RE = re.compile(
     r"^(?P<case_id>[a-z][a-z0-9_]*)-(?P<index>[0-9]{3})-(?P<nonce>[0-9a-f]{8})$"
 )
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+ERROR_ALREADY_EXISTS = 183
+MEASUREMENT_LOCK_NAME = "Global\\RingLang-B176-formal-measurement-v1"
 
 
 class HarnessError(RuntimeError):
@@ -173,6 +184,141 @@ class HarnessError(RuntimeError):
 
 class DuplicateJsonKeyError(HarnessError):
     """A JSON object contained two spellings of the same exact key."""
+
+
+def _expected_job_preflight() -> dict[str, int]:
+    return job_limit_identity(
+        DEFAULT_JOB_MEMORY_LIMIT_BYTES, DEFAULT_ACTIVE_PROCESS_LIMIT
+    )
+
+
+def _validate_job_preflight(value: Any) -> dict[str, int]:
+    expected_limits = _expected_job_preflight()
+    expected_fields = {
+        *expected_limits,
+        "handle_count_before",
+        "handle_count_after",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise HarnessError("Job preflight identity is missing or malformed")
+    if {name: value[name] for name in expected_limits} != expected_limits:
+        raise HarnessError(
+            "Job preflight limits differ from the fixed formal resource boundary"
+        )
+    before = value["handle_count_before"]
+    after = value["handle_count_after"]
+    if (
+        isinstance(before, bool)
+        or not isinstance(before, int)
+        or isinstance(after, bool)
+        or not isinstance(after, int)
+        or before < 0
+        or after != before
+    ):
+        raise HarnessError("Job preflight handle-count evidence is invalid")
+    return expected_limits
+
+
+@contextmanager
+def measurement_machine_lock() -> Iterator[None]:
+    """Hold the fail-fast machine-wide lock for a mutating formal path."""
+
+    if os.name != "nt":
+        raise HarnessError("the B-176 measurement lock requires Windows")
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [
+        ctypes.c_void_p,
+        wintypes.BOOL,
+        wintypes.LPCWSTR,
+    ]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+    kernel32.ReleaseMutex.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    name = MEASUREMENT_LOCK_NAME
+    ctypes.set_last_error(0)
+    handle = kernel32.CreateMutexW(None, True, name)
+    if not handle:
+        raise HarnessError(
+            f"failed to create measurement lock {name!r}: "
+            f"{ctypes.WinError(ctypes.get_last_error())}"
+        )
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        raise HarnessError(
+            "another formal measurement or warm-cache preparation is already "
+            "active on this machine"
+        )
+
+    release_error: OSError | None = None
+    try:
+        yield
+    finally:
+        if not kernel32.ReleaseMutex(handle):
+            release_error = ctypes.WinError(ctypes.get_last_error())
+        kernel32.CloseHandle(handle)
+        if release_error is not None and sys.exc_info()[0] is None:
+            raise HarnessError(f"failed to release measurement lock: {release_error}")
+
+
+def _run_capped_command(
+    argv: Sequence[str],
+    *,
+    cwd: str | os.PathLike[str],
+    timeout_seconds: float,
+    label: str,
+    stdout_path: Path | None = None,
+    stderr_path: Path | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run an unmeasured preparation command under the formal Job limits."""
+
+    if (stdout_path is None) != (stderr_path is None):
+        raise ValueError("stdout_path and stderr_path must be provided together")
+    temporary: tempfile.TemporaryDirectory[str] | None = None
+    if stdout_path is None:
+        temporary = tempfile.TemporaryDirectory(prefix="ring-b176-capped-")
+        temporary_root = Path(temporary.name)
+        stdout_path = temporary_root / "stdout.txt"
+        stderr_path = temporary_root / "stderr.txt"
+    try:
+        try:
+            measurement = run_in_job(
+                argv,
+                cwd=cwd,
+                env=os.environ,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                timeout_seconds=timeout_seconds,
+                poll_ms=RSS_POLL_MS,
+                memory_limit_bytes=DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+                active_process_limit=DEFAULT_ACTIVE_PROCESS_LIMIT,
+            )
+        except (OSError, ValueError, JobMeasurementError) as exc:
+            raise HarnessError(f"{label} invocation failed: {exc}") from exc
+        stdout = stdout_path.read_bytes()
+        stderr = stderr_path.read_bytes()
+        if measurement["timed_out"]:
+            raise HarnessError(
+                f"{label} invocation timed out after {timeout_seconds} seconds"
+            )
+        limit_errors = [
+            error
+            for error in measurement["measurement_errors"]
+            if error.startswith("job_memory_limit_reached:")
+        ]
+        if limit_errors:
+            raise HarnessError(f"{label} exceeded its Job memory limit: {limit_errors[0]}")
+        returncode = measurement["exit_code"]
+        if not isinstance(returncode, int):
+            raise HarnessError(f"{label} invocation returned no exit code")
+        return subprocess.CompletedProcess(list(argv), returncode, stdout, stderr)
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
 
 
 def _strict_json_loads(text: str, source: str) -> Any:
@@ -1262,13 +1408,12 @@ def prepare_warm_cache_seed(
         raise HarnessError("warm-cache seed requires a clean tracked worktree")
     seed_tools = _seed_tool_records(tools)
     recipe = _warm_cache_seed_recipe(cache, tools)
-    try:
-        completed = subprocess.run(
-            recipe["argv"], cwd=recipe["cwd"], capture_output=True,
-            timeout=recipe["timeout_seconds"], check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise HarnessError(f"warm-cache seed invocation failed: {exc}") from exc
+    completed = _run_capped_command(
+        recipe["argv"],
+        cwd=recipe["cwd"],
+        timeout_seconds=recipe["timeout_seconds"],
+        label="warm-cache seed",
+    )
     if completed.returncode != 0:
         raise HarnessError(
             "warm-cache seed failed with exit "
@@ -1428,7 +1573,9 @@ def capture_environment(
     cache_state: str | None,
     warm_cache_seed: Mapping[str, Any] | None,
     warm_cache_receipt_path: Path | None,
+    job_preflight: Mapping[str, Any],
 ) -> dict[str, Any]:
+    _validate_job_preflight(job_preflight)
     source_sha = _git(REPO_ROOT, "rev-parse", "HEAD")
     dirty = bool(_git(REPO_ROOT, "status", "--porcelain", "--untracked-files=no"))
     anchor = REPO_ROOT / "compiler" / "dist-c" / "main.c"
@@ -1452,6 +1599,7 @@ def capture_environment(
         "manifest_sha": manifest_sha,
         "dist_c_sha256": _sha256_file(anchor),
         "runtime_sha256": _sha256_file(runtime),
+        "job_preflight": dict(job_preflight),
         "tools": tool_records,
         "flags": manifest["fingerprint_flags"],
         "cache_state": cache_state,
@@ -1535,15 +1683,14 @@ def prepare_runner_runtime(
         str(prepared_object),
         *flags,
     ]
-    completed = subprocess.run(
+    completed = _run_capped_command(
         command,
         cwd=REPO_ROOT,
-        capture_output=True,
-        timeout=120,
-        check=False,
+        timeout_seconds=120,
+        label="warm runner runtime preparation",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
     )
-    stdout_path.write_bytes(completed.stdout)
-    stderr_path.write_bytes(completed.stderr)
     if completed.returncode != 0 or not prepared_object.is_file():
         raise HarnessError(
             "warm runner runtime preparation failed; see "
@@ -2065,13 +2212,19 @@ def _classify_compiler_phase_rows(
     return PhaseValidation(tuple(hard), tuple(eligibility))
 
 
-def _runner_expected_setup_stages(suites: Sequence[str]) -> tuple[str, ...]:
-    stages: list[str] = []
+def _runner_expected_setup_topologies(
+    suites: Sequence[str],
+) -> tuple[tuple[str, ...], ...]:
+    suffix: list[str] = []
+    compiler_topologies: tuple[tuple[str, ...], ...] = ((),)
     if any(suite in RUNNER_COMPILER_SUITES for suite in suites):
-        stages.extend(RUNNER_COMPILER_STAGES)
+        compiler_topologies = (
+            RUNNER_COMPILER_STAGES,
+            (RUNNER_COMPILER_CACHED_STAGE,),
+        )
     if any(suite in RUNNER_RUNTIME_SUITES for suite in suites):
-        stages.append("runtime_prepare")
-    return tuple(stages)
+        suffix.append("runtime_prepare")
+    return tuple(topology + tuple(suffix) for topology in compiler_topologies)
 
 
 def _runner_subprocess_outcome_is_valid(row: Mapping[str, Any]) -> bool:
@@ -2150,6 +2303,7 @@ def _classify_runner_phase_rows(
     expected_suite_set = set(expected_suite_tuple)
     allowed_stages = {
         *RUNNER_COMPILER_STAGES,
+        RUNNER_COMPILER_CACHED_STAGE,
         "runtime_prepare",
         *RUNNER_CHILD_STAGE_CATEGORY,
         "orchestration_residual",
@@ -2212,7 +2366,11 @@ def _classify_runner_phase_rows(
             continue
         valid_rows.append(row)
 
-        is_setup = stage in {*RUNNER_COMPILER_STAGES, "runtime_prepare"}
+        is_setup = stage in {
+            *RUNNER_COMPILER_STAGES,
+            RUNNER_COMPILER_CACHED_STAGE,
+            "runtime_prepare",
+        }
         is_child = stage in RUNNER_CHILD_STAGE_CATEGORY
         is_suite_summary = stage in {"orchestration_residual", "suite_total"} and (
             isinstance(suite, str)
@@ -2225,7 +2383,16 @@ def _classify_runner_phase_rows(
         if is_setup:
             if suite is not None or case != "runner":
                 hard.append(f"{prefix} compiler construction must be runner-scoped")
-            if stage == "runtime_prepare" and category is None:
+            if stage == RUNNER_COMPILER_CACHED_STAGE:
+                if not (
+                    category is None
+                    and row["outcome"] == "cached"
+                    and row["executed"] is False
+                    and row["complete"] is True
+                    and row["exit_code"] is None
+                ):
+                    hard.append(f"{prefix} has an invalid cached-compiler combination")
+            elif stage == "runtime_prepare" and category is None:
                 if (
                     row["outcome"] == "cached"
                     and row["executed"] is False
@@ -2320,7 +2487,11 @@ def _classify_runner_phase_rows(
     if early_runner_summaries:
         hard.append("runner summary must be one unique terminal residual/total pair")
 
-    setup_stage_set = {*RUNNER_COMPILER_STAGES, "runtime_prepare"}
+    setup_stage_set = {
+        *RUNNER_COMPILER_STAGES,
+        RUNNER_COMPILER_CACHED_STAGE,
+        "runtime_prepare",
+    }
     setup_rows = [
         row
         for row in body
@@ -2334,18 +2505,25 @@ def _classify_runner_phase_rows(
             for row in body[first_suite:]
         ):
             hard.append("runner setup stages must precede every suite")
-    expected_setup = _runner_expected_setup_stages(expected_suite_tuple)
+    expected_setups = _runner_expected_setup_topologies(expected_suite_tuple)
     actual_setup = tuple(row["stage"] for row in setup_rows)
-    if actual_setup != expected_setup:
-        if actual_setup == expected_setup[: len(actual_setup)]:
+    if actual_setup not in expected_setups:
+        matching_prefixes = [
+            expected
+            for expected in expected_setups
+            if actual_setup == expected[: len(actual_setup)]
+        ]
+        if matching_prefixes:
             eligibility.append(
-                f"runner setup stages are incomplete: expected {list(expected_setup)}, "
+                "runner setup stages are incomplete: expected one of "
+                f"{[list(expected) for expected in expected_setups]}, "
                 f"got {list(actual_setup)}"
             )
         else:
             hard.append(
-                f"runner setup stage order/coverage mismatch: expected "
-                f"{list(expected_setup)}, got {list(actual_setup)}"
+                "runner setup stage order/coverage mismatch: expected one of "
+                f"{[list(expected) for expected in expected_setups]}, "
+                f"got {list(actual_setup)}"
             )
 
     actual_suite_order: list[str] = []
@@ -2813,6 +2991,10 @@ def derive_invalid_reason(
 
 
 def _is_replaceable_measurement_invalid(reason: Any) -> bool:
+    if isinstance(reason, str) and reason.startswith(
+        "measurement_errors: job_memory_limit_reached:"
+    ):
+        return False
     return (
         reason == "rss_incomplete"
         or isinstance(reason, str)
@@ -3017,6 +3199,7 @@ def validate_attempt_boundary(
     become an eligibility reason.
     """
 
+    _validate_job_preflight(environment.get("job_preflight"))
     validate_schema_definition(result_schema)
     validate_json(record, result_schema)
     run_root = run_dir.resolve()
@@ -3205,6 +3388,7 @@ def execute_invocation(
     tools: Mapping[str, str | None],
     thinlto_cache: Path,
 ) -> dict[str, Any]:
+    job_limits = _validate_job_preflight(environment.get("job_preflight"))
     sample_id = f"{lane['case_id']}-{index:03d}-{uuid.uuid4().hex[:8]}"
     sample_dir = run_dir / "samples" / lane["case_id"] / sample_id
     sample_dir.mkdir(parents=True, exist_ok=False)
@@ -3258,6 +3442,8 @@ def execute_invocation(
                 stderr_path=stderr_path,
                 timeout_seconds=float(lane["timeout_seconds"]),
                 poll_ms=RSS_POLL_MS,
+                memory_limit_bytes=job_limits["job_memory_limit_bytes"],
+                active_process_limit=job_limits["active_process_limit"],
             )
         except (OSError, ValueError, JobMeasurementError) as exc:
             measurement_error = str(exc)
@@ -3487,7 +3673,9 @@ def _summarize_runner_phase_timing(
             sum(
                 row["duration_ns"]
                 for row in rows
-                if row["suite"] is None and row["stage"] in RUNNER_COMPILER_STAGES
+                if row["suite"] is None
+                and row["stage"]
+                in {*RUNNER_COMPILER_STAGES, RUNNER_COMPILER_CACHED_STAGE}
             )
         )
         runner_residual, runner_total = _runner_terminal_pair(rows)
@@ -3523,7 +3711,12 @@ def _summarize_runner_phase_timing(
             row["duration_ns"]
             for row in rows
             if row["suite"] is None
-            and row["stage"] in {*RUNNER_COMPILER_STAGES, "runtime_prepare"}
+            and row["stage"]
+            in {
+                *RUNNER_COMPILER_STAGES,
+                RUNNER_COMPILER_CACHED_STAGE,
+                "runtime_prepare",
+            }
         )
         accounted = setup_sum + suite_total_sum + runner_residual["duration_ns"]
         total_ns = runner_total["duration_ns"]
@@ -3541,7 +3734,7 @@ def _summarize_runner_phase_timing(
         "sample_count": len(samples),
         "stage_category_suite": stage_category_suite,
         "compiler_construction": {
-            "stages": list(RUNNER_COMPILER_STAGES),
+            "stages": [*RUNNER_COMPILER_STAGES, RUNNER_COMPILER_CACHED_STAGE],
             "duration_ns": _metric_stats(compiler_construction),
         },
         "runner_total_ns": _metric_stats(runner_totals),
@@ -3810,8 +4003,31 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _operation_requires_lock(args: argparse.Namespace) -> bool:
+    return bool(
+        args.prepare_warm_cache
+        or args.probe
+        or not (args.list or args.preflight)
+    )
+
+
+def _formal_job_preflight() -> dict[str, int]:
+    evidence = preflight_job_support(
+        DEFAULT_JOB_MEMORY_LIMIT_BYTES, DEFAULT_ACTIVE_PROCESS_LIMIT
+    )
+    _validate_job_preflight(evidence)
+    return evidence
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if _operation_requires_lock(args):
+        with measurement_machine_lock():
+            return _main_parsed(args)
+    return _main_parsed(args)
+
+
+def _main_parsed(args: argparse.Namespace) -> int:
     manifest_path = args.manifest.resolve()
     schema_path = args.result_schema.resolve()
     manifest = _load_json(manifest_path)
@@ -3837,6 +4053,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise HarnessError(
                 "--prepare-warm-cache is a standalone operation"
             )
+        job_preflight = _formal_job_preflight()
         receipt = prepare_warm_cache_seed(
             manifest, tools, args.thinlto_cache.resolve()
         )
@@ -3846,6 +4063,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "status": "ok",
                     "warm_cache_receipt": str(receipt),
                     "sha256": _sha256_file(receipt),
+                    "job_preflight": job_preflight,
                 }
             )
         )
@@ -3882,7 +4100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         tools = formal_tools_from_seed(tools, seed_receipt)
 
-    job_preflight = preflight_job_support()
+    job_preflight = _formal_job_preflight()
     preflight_root = (args.output or BENCH_DIR / "results" / "preflight").resolve()
     preflight_lanes(selected, tools, preflight_root, args.thinlto_cache.resolve())
 
@@ -3932,10 +4150,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         state,
         seed_receipt,
         retained_receipt_path,
+        job_preflight,
     )
     if not args.probe and environment["git_dirty"]:
         raise HarnessError("formal measurements require a clean tracked worktree")
-    environment["job_preflight"] = job_preflight
     environment["runner_runtime"] = prepare_runner_runtime(
         manifest,
         selected,

@@ -19,6 +19,8 @@ from typing import Mapping, Sequence
 
 CREATE_SUSPENDED = 0x00000004
 CREATE_UNICODE_ENVIRONMENT = 0x00000400
+JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
+JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
 JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION = 8
@@ -27,6 +29,9 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_VM_READ = 0x0010
 ERROR_MORE_DATA = 234
 STILL_ACTIVE = 259
+DEFAULT_JOB_MEMORY_LIMIT_BYTES = 12_884_901_888
+DEFAULT_ACTIVE_PROCESS_LIMIT = 5
+SIZE_T_MAX = (1 << (ctypes.sizeof(ctypes.c_size_t) * 8)) - 1
 
 
 class JobMeasurementError(RuntimeError):
@@ -167,12 +172,61 @@ def _close_handle(handle: int | None) -> None:
         kernel32.CloseHandle(handle)
 
 
-def _new_job() -> int:
+def job_limit_identity(
+    memory_limit_bytes: int, active_process_limit: int
+) -> dict[str, int]:
+    if isinstance(memory_limit_bytes, bool) or not isinstance(memory_limit_bytes, int):
+        raise JobMeasurementError("Job memory limit must be an integer byte count")
+    if memory_limit_bytes <= 0:
+        raise JobMeasurementError("Job memory limit must be positive")
+    if memory_limit_bytes > SIZE_T_MAX:
+        raise JobMeasurementError(
+            f"Job memory limit {memory_limit_bytes} exceeds this process's "
+            f"{SIZE_T_MAX.bit_length()}-bit SIZE_T capacity"
+        )
+    if isinstance(active_process_limit, bool) or not isinstance(
+        active_process_limit, int
+    ):
+        raise JobMeasurementError("Job active-process limit must be an integer")
+    if not 1 <= active_process_limit <= 0xFFFFFFFF:
+        raise JobMeasurementError("Job active-process limit is outside DWORD range")
+    return {
+        "limit_flags": (
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | JOB_OBJECT_LIMIT_JOB_MEMORY
+            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+        ),
+        "job_memory_limit_bytes": memory_limit_bytes,
+        "active_process_limit": active_process_limit,
+    }
+
+
+def _limit_identity(
+    limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+) -> dict[str, int]:
+    return {
+        "limit_flags": int(limits.BasicLimitInformation.LimitFlags),
+        "job_memory_limit_bytes": int(limits.JobMemoryLimit),
+        "active_process_limit": int(
+            limits.BasicLimitInformation.ActiveProcessLimit
+        ),
+    }
+
+
+def _new_job(
+    memory_limit_bytes: int = DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+    active_process_limit: int = DEFAULT_ACTIVE_PROCESS_LIMIT,
+) -> int:
+    expected = job_limit_identity(memory_limit_bytes, active_process_limit)
     handle = kernel32.CreateJobObjectW(None, None)
     if not handle:
         raise _winerror("CreateJobObjectW failed")
     limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    limits.BasicLimitInformation.LimitFlags = expected["limit_flags"]
+    limits.BasicLimitInformation.ActiveProcessLimit = expected[
+        "active_process_limit"
+    ]
+    limits.JobMemoryLimit = expected["job_memory_limit_bytes"]
     if not kernel32.SetInformationJobObject(
         handle,
         JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -182,6 +236,17 @@ def _new_job() -> int:
         error = _winerror("SetInformationJobObject failed")
         _close_handle(handle)
         raise error
+    try:
+        actual = _limit_identity(_query_extended_limits(int(handle)))
+    except BaseException:
+        _close_handle(handle)
+        raise
+    if actual != expected:
+        _close_handle(handle)
+        raise JobMeasurementError(
+            "Job limit round-trip mismatch: "
+            f"expected={expected}, actual={actual}"
+        )
     return int(handle)
 
 
@@ -197,22 +262,27 @@ def current_process_handle_count() -> int:
     return int(count.value)
 
 
-def preflight_job_support() -> dict[str, int]:
+def preflight_job_support(
+    memory_limit_bytes: int = DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+    active_process_limit: int = DEFAULT_ACTIVE_PROCESS_LIMIT,
+) -> dict[str, int]:
     """Create/configure/query a fresh Job and prove preflight leaks no handle."""
 
     _require_windows()
+    expected = job_limit_identity(memory_limit_bytes, active_process_limit)
     before = current_process_handle_count()
-    job = _new_job()
+    job = _new_job(memory_limit_bytes, active_process_limit)
     try:
         accounting = _query_accounting(job)
         limits = _query_extended_limits(job)
         if accounting.BasicInfo.TotalProcesses != 0:
             raise JobMeasurementError("fresh preflight Job unexpectedly owns a process")
-        if not (
-            limits.BasicLimitInformation.LimitFlags
-            & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        ):
-            raise JobMeasurementError("fresh preflight Job lost kill-on-close configuration")
+        actual = _limit_identity(limits)
+        if actual != expected:
+            raise JobMeasurementError(
+                "fresh preflight Job limit identity drifted: "
+                f"expected={expected}, actual={actual}"
+            )
     finally:
         _close_handle(job)
     after = current_process_handle_count()
@@ -220,7 +290,11 @@ def preflight_job_support() -> dict[str, int]:
         raise JobMeasurementError(
             f"Job preflight leaked handles: before={before}, after={after}"
         )
-    return {"handle_count_before": before, "handle_count_after": after}
+    return {
+        **expected,
+        "handle_count_before": before,
+        "handle_count_after": after,
+    }
 
 
 def _query_struct(job: int, info_class: int, value: ctypes.Structure) -> None:
@@ -326,6 +400,8 @@ def run_in_job(
     stderr_path: str | os.PathLike[str],
     timeout_seconds: float,
     poll_ms: int = 10,
+    memory_limit_bytes: int = DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+    active_process_limit: int = DEFAULT_ACTIVE_PROCESS_LIMIT,
 ) -> dict[str, object]:
     """Run one command in a fresh Job Object and return raw measurements.
 
@@ -341,6 +417,7 @@ def run_in_job(
         raise ValueError("timeout_seconds must be positive")
     if poll_ms != 10:
         raise ValueError("B-176 requires a fixed 10 ms RSS poll interval")
+    job_limit_identity(memory_limit_bytes, active_process_limit)
 
     stdout_file_path = Path(stdout_path)
     stderr_file_path = Path(stderr_path)
@@ -393,7 +470,7 @@ def run_in_job(
         startup.lpAttributeList = {"handle_list": std_handles}
         command_line = subprocess.list2cmdline(list(argv))
         child_env = dict(os.environ if env is None else env)
-        job = _new_job()
+        job = _new_job(memory_limit_bytes, active_process_limit)
 
         try:
             hp, ht, pid, _tid = _winapi.CreateProcess(
@@ -523,6 +600,12 @@ def run_in_job(
         wall_ns = end_ns - start_ns
         covered_ns = _coverage_ns(sample_intervals, start_ns, end_ns)
         coverage_ratio = min(1.0, covered_ns / wall_ns) if wall_ns else 0.0
+        peak_job_commit = int(extended.PeakJobMemoryUsed)
+        if peak_job_commit >= memory_limit_bytes:
+            sampling_errors.add(
+                "job_memory_limit_reached: "
+                f"peak_job_commit={peak_job_commit}, limit={memory_limit_bytes}"
+            )
         rss_complete = (
             observed_processes >= total_processes
             and coverage_ratio >= 0.95
@@ -539,7 +622,7 @@ def run_in_job(
             ),
             "sampled_peak_tree_rss_bytes": sampled_peak_tree_rss,
             "max_worker_peak_rss_bytes": max(worker_peaks) if worker_peaks else None,
-            "peak_job_commit_bytes": int(extended.PeakJobMemoryUsed),
+            "peak_job_commit_bytes": peak_job_commit,
             "rss_poll_ms": poll_ms,
             "rss_samples_observed": rss_samples,
             "rss_covered_ns": covered_ns,

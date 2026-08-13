@@ -9,6 +9,10 @@ does not itself contain a formal baseline.
 
 `windows_job.py` creates each root process with `CREATE_SUSPENDED`, assigns it
 to a fresh kill-on-close Windows Job Object, then resumes its primary thread.
+Every Job has an exact 12 GiB aggregate commit limit and an active-process
+limit of five (including the root). Configuration is queried back exactly
+before use; a process whose `SIZE_T` cannot represent the commit limit fails
+preflight without starting work. No working-set or breakaway limit is used.
 The invocation record distinguishes exact lifetime counters from sampled
 memory:
 
@@ -24,9 +28,14 @@ memory:
   process was missed, coverage fell below 95%, or sampling produced an error.
 
 Preflight creates, configures, and queries a genuinely fresh Job Object, checks
-the kill-on-close flag, and proves that closing it restores the current-process
-handle count. Self-tests also assert that one invocation creates exactly one
-Job and does not grow the steady-state handle count.
+all three limit flags and both values, and proves that closing it restores the
+current-process handle count. Self-tests also assert that one invocation
+creates exactly one Job and does not grow the steady-state handle count.
+
+Formal runs, `--prepare-warm-cache`, and `--probe` share one versioned,
+machine-wide fail-fast mutex across worktrees. A second executing instance is
+rejected immediately. `--list` and a pure `--preflight` do not hold the mutex;
+normal and exceptional exits release it through the kernel handle lifetime.
 
 stdout and stderr are never merged. Each is retained with its own path, byte
 count, and SHA-256. Runner summaries, declared artifacts, and opt-in JSONL phase
@@ -75,6 +84,11 @@ Unknown fields (including a hypothetical thirteenth field), schemas, stage or
 field combinations, and path/sequence drift are hard errors. Missing or
 unreadable traces, incomplete rows, accounting mismatches, and a runner total
 that exceeds the enclosing Job wall time make the attempt ineligible.
+Compiler setup is exactly either the three ordered cache-miss stages
+`compiler_anchor_compile`, `compiler_runtime_compile`, `compiler_link`, or one
+runner-scoped `compiler_prepare` row with `outcome=cached`. Mixed, duplicated,
+or reordered setup is a hard error; either topology's duration remains part of
+runner-total accounting.
 The runner orchestration residual and total must be one unique final pair;
 an earlier duplicate pair or single runner-scoped summary row is a hard error.
 

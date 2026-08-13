@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -633,6 +634,11 @@ class ManifestAndPolicyTests(unittest.TestCase):
         cases = (
             ("direct_short", "invocation_error: launch failed"),
             ("adaptive", "unexpected_exit: 1"),
+            (
+                "adaptive",
+                "measurement_errors: job_memory_limit_reached: "
+                "peak_job_commit=2, limit=1",
+            ),
         )
         for policy, reason in cases:
             with self.subTest(policy=policy):
@@ -919,6 +925,11 @@ class AttemptBoundaryTests(unittest.TestCase):
             "run_id": "fixture-run",
             "source_sha": "b" * 40,
             "manifest_sha": "c" * 64,
+            "job_preflight": {
+                **harness._expected_job_preflight(),
+                "handle_count_before": 1,
+                "handle_count_after": 1,
+            },
             "tools": {
                 "ring": {"path": compiler, "sha256": "a" * 64}
             },
@@ -1652,6 +1663,26 @@ class RunnerPhaseTimingTests(unittest.TestCase):
             wall_ns=wall_ns,
         )
 
+    def _cached_compiler_rows(self) -> list[dict]:
+        rows = self._e2e_rows()
+        cached = self._row(
+            1,
+            suite=None,
+            case="runner",
+            stage=harness.RUNNER_COMPILER_CACHED_STAGE,
+            duration_ns=4,
+            executed=False,
+            complete=True,
+            outcome="cached",
+            exit_code=None,
+            command_category=None,
+        )
+        rows[:3] = [cached]
+        rows[-1]["duration_ns"] = 57
+        for sequence, row in enumerate(rows, 1):
+            row["sequence"] = sequence
+        return rows
+
     def _insert_early_runner_summary(self, *, pair: bool) -> list[dict]:
         rows = self._e2e_rows()
         early = [
@@ -1684,6 +1715,70 @@ class RunnerPhaseTimingTests(unittest.TestCase):
         classified = self._classify(self._e2e_rows())
         self.assertEqual(classified.hard_errors, ())
         self.assertEqual(classified.eligibility_errors, ())
+
+        cached_rows = self._cached_compiler_rows()
+        classified = self._classify(cached_rows)
+        self.assertEqual(classified.hard_errors, ())
+        self.assertEqual(classified.eligibility_errors, ())
+        record = {
+            "included": True,
+            "wall_ns": 120,
+            "phase_traces": [
+                {
+                    "path": "runner.jsonl",
+                    "line": index,
+                    "value": row,
+                    "read_error": None,
+                }
+                for index, row in enumerate(cached_rows, 1)
+            ],
+        }
+        summary = harness._summarize_runner_phase_timing([record])
+        assert summary is not None
+        self.assertEqual(
+            summary["compiler_construction"]["duration_ns"]["median"], 4
+        )
+        self.assertEqual(summary["accounting"]["runner"]["balance_ns"]["median"], 0)
+
+    def test_cached_compiler_setup_rejects_mixed_duplicate_or_wrong_order(self) -> None:
+        mutations = {
+            "mixed": lambda rows: rows.insert(1, self._e2e_rows()[0]),
+            "duplicate": lambda rows: rows.insert(1, dict(rows[0])),
+            "wrong-order": lambda rows: rows.__setitem__(
+                slice(0, 2), [rows[1], rows[0]]
+            ),
+        }
+        for name, mutate in mutations.items():
+            rows = self._cached_compiler_rows()
+            mutate(rows)
+            for sequence, row in enumerate(rows, 1):
+                row["sequence"] = sequence
+            with self.subTest(name=name):
+                classified = self._classify(rows)
+                self.assertTrue(
+                    any(
+                        "setup stage order/coverage" in error
+                        for error in classified.hard_errors
+                    )
+                )
+
+        for field, value in (
+            ("outcome", "success"),
+            ("executed", True),
+            ("complete", False),
+            ("exit_code", 0),
+            ("command_category", "clang"),
+        ):
+            rows = self._cached_compiler_rows()
+            rows[0][field] = value
+            with self.subTest(field=field):
+                classified = self._classify(rows)
+                self.assertTrue(
+                    any(
+                        "invalid cached-compiler" in error
+                        for error in classified.hard_errors
+                    )
+                )
 
     def test_unknown_schema_or_extra_thirteenth_field_is_hard(self) -> None:
         for name, mutate in (
@@ -2153,6 +2248,20 @@ class WindowsJobTests(unittest.TestCase):
     def test_preflight_and_invocations_do_not_leak_job_handles(self) -> None:
         evidence = preflight_job_support()
         self.assertEqual(evidence["handle_count_before"], evidence["handle_count_after"])
+        self.assertEqual(
+            evidence["limit_flags"],
+            windows_job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | windows_job.JOB_OBJECT_LIMIT_JOB_MEMORY
+            | windows_job.JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+        )
+        self.assertEqual(
+            evidence["job_memory_limit_bytes"],
+            windows_job.DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+        )
+        self.assertEqual(
+            evidence["active_process_limit"],
+            windows_job.DEFAULT_ACTIVE_PROCESS_LIMIT,
+        )
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             # CPython initializes two process-global synchronization handles on
@@ -2182,6 +2291,287 @@ class WindowsJobTests(unittest.TestCase):
             self.assertEqual(new_job.call_count, 1)
             self.assertIsNone(result["max_worker_peak_rss_bytes"])
             self.assertEqual(current_process_handle_count(), before)
+
+    def test_size_t_capacity_failure_is_fail_closed(self) -> None:
+        with (
+            mock.patch.object(windows_job, "SIZE_T_MAX", (1 << 32) - 1),
+            self.assertRaisesRegex(
+                windows_job.JobMeasurementError, "32-bit SIZE_T capacity"
+            ),
+        ):
+            preflight_job_support()
+
+    def test_job_memory_limit_rejects_allocation_and_retains_statistics(self) -> None:
+        memory_limit = 64 * 1024 * 1024
+        child_code = (
+            "import sys; "
+            "\ntry: bytearray(256 * 1024 * 1024)"
+            "\nexcept MemoryError: "
+            "print('job-memory-rejected', file=sys.stderr); sys.exit(23)"
+            "\nelse: print('unexpected-allocation'); sys.exit(24)"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            result = run_in_job(
+                [sys.executable, "-c", child_code],
+                cwd=Path.cwd(),
+                env=os.environ,
+                stdout_path=root / "stdout.txt",
+                stderr_path=root / "stderr.txt",
+                timeout_seconds=5,
+                memory_limit_bytes=memory_limit,
+            )
+            self.assertEqual(result["exit_code"], 23)
+            self.assertGreaterEqual(result["peak_job_commit_bytes"], memory_limit)
+            self.assertEqual(result["process_count"]["total"], 1)
+            self.assertTrue(
+                any(
+                    error.startswith("job_memory_limit_reached:")
+                    for error in result["measurement_errors"]
+                )
+            )
+            self.assertIn(
+                "job-memory-rejected",
+                (root / "stderr.txt").read_text(encoding="utf-8"),
+            )
+
+    def test_active_process_limit_rejects_the_n_plus_one_spawn(self) -> None:
+        child_code = """
+import subprocess
+import sys
+import time
+
+children = []
+for index in range(5):
+    try:
+        children.append(
+            subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+        )
+    except OSError as exc:
+        print(f"spawn-failed:{index}:{exc.winerror}")
+        for child in children:
+            child.kill()
+        for child in children:
+            child.wait()
+        sys.exit(23)
+for child in children:
+    child.kill()
+for child in children:
+    child.wait()
+sys.exit(24)
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            result = run_in_job(
+                [sys.executable, "-c", child_code],
+                cwd=Path.cwd(),
+                env=os.environ,
+                stdout_path=root / "stdout.txt",
+                stderr_path=root / "stderr.txt",
+                timeout_seconds=5,
+            )
+            self.assertEqual(result["exit_code"], 23)
+            self.assertEqual(
+                result["process_count"]["total"],
+                windows_job.DEFAULT_ACTIVE_PROCESS_LIMIT,
+            )
+            self.assertIn(
+                "spawn-failed:4:",
+                (root / "stdout.txt").read_text(encoding="utf-8"),
+            )
+
+    def test_capped_preparation_entry_uses_the_fixed_job_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            stdout = root / "stdout.txt"
+            stderr = root / "stderr.txt"
+
+            def fake_job(*args: object, **kwargs: object) -> dict[str, object]:
+                Path(kwargs["stdout_path"]).write_bytes(b"out")
+                Path(kwargs["stderr_path"]).write_bytes(b"err")
+                return {
+                    "timed_out": False,
+                    "exit_code": 0,
+                    "measurement_errors": [],
+                }
+
+            with mock.patch.object(
+                harness, "run_in_job", side_effect=fake_job
+            ) as capped:
+                completed = harness._run_capped_command(
+                    [sys.executable, "-c", "pass"],
+                    cwd=root,
+                    timeout_seconds=5,
+                    label="fixture",
+                    stdout_path=stdout,
+                    stderr_path=stderr,
+                )
+            self.assertEqual(completed.stdout, b"out")
+            self.assertEqual(completed.stderr, b"err")
+            self.assertEqual(
+                capped.call_args.kwargs["memory_limit_bytes"],
+                windows_job.DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+            )
+            self.assertEqual(
+                capped.call_args.kwargs["active_process_limit"],
+                windows_job.DEFAULT_ACTIVE_PROCESS_LIMIT,
+            )
+
+    def test_environment_rejects_job_limit_identity_drift(self) -> None:
+        evidence = {
+            **harness._expected_job_preflight(),
+            "handle_count_before": 1,
+            "handle_count_after": 1,
+        }
+        for field, value in (
+            ("job_memory_limit_bytes", 1),
+            ("active_process_limit", 4),
+            ("limit_flags", windows_job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE),
+        ):
+            drifted = dict(evidence)
+            drifted[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(
+                harness.HarnessError, "limits differ"
+            ):
+                harness._validate_job_preflight(drifted)
+
+    def test_seed_and_runner_runtime_preparation_use_capped_entry(self) -> None:
+        manifest = {
+            "fingerprint_flags": {
+                "compiler": [],
+                "runtime": [],
+                "runner_runtime": ["-O2"],
+                "link": [],
+            }
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cache = root / "ring-lang-thinlto-cache"
+            source_identity = {"git_dirty": False, "identity": "fixture"}
+            recipe = {
+                "argv": [sys.executable, "-c", "pass"],
+                "cwd": str(root),
+                "timeout_seconds": 5,
+            }
+            with (
+                mock.patch.object(
+                    harness, "_warm_cache_source_identity",
+                    return_value=source_identity,
+                ),
+                mock.patch.object(
+                    harness, "_seed_tool_records", return_value={"fixture": True}
+                ),
+                mock.patch.object(
+                    harness, "_warm_cache_seed_recipe", return_value=recipe
+                ),
+                mock.patch.object(
+                    harness, "_run_capped_command",
+                    return_value=subprocess.CompletedProcess(
+                        recipe["argv"], 0, b"seed-out", b"seed-err"
+                    ),
+                ) as capped_seed,
+                mock.patch.object(
+                    harness, "_cache_inventory", return_value={"files": 1}
+                ),
+                mock.patch.object(
+                    harness, "_warm_cache_build_output", return_value={}
+                ),
+                mock.patch.object(harness, "_validate_warm_cache_receipt_shape"),
+            ):
+                harness.prepare_warm_cache_seed(manifest, {}, cache)
+            capped_seed.assert_called_once()
+            self.assertEqual(capped_seed.call_args.kwargs["label"], "warm-cache seed")
+
+            repo = root / "repo"
+            repo.mkdir()
+            (repo / "ring_runtime.cpp").write_text("runtime", encoding="utf-8")
+            run_dir = root / "run"
+
+            def prepare_object(
+                argv: list[str], **kwargs: object
+            ) -> subprocess.CompletedProcess[bytes]:
+                Path(argv[argv.index("-o") + 1]).write_bytes(b"object")
+                Path(kwargs["stdout_path"]).write_bytes(b"compile-out")
+                Path(kwargs["stderr_path"]).write_bytes(b"")
+                return subprocess.CompletedProcess(argv, 0, b"compile-out", b"")
+
+            with (
+                mock.patch.object(harness, "REPO_ROOT", repo),
+                mock.patch.object(
+                    harness, "_run_capped_command", side_effect=prepare_object
+                ) as capped_runtime,
+            ):
+                setup = harness.prepare_runner_runtime(
+                    manifest,
+                    [{"isolate_runner_runtime": True}],
+                    "warm",
+                    {"clangxx": "clang++.exe"},
+                    run_dir,
+                )
+            capped_runtime.assert_called_once()
+            self.assertEqual(
+                capped_runtime.call_args.kwargs["label"],
+                "warm runner runtime preparation",
+            )
+            self.assertTrue(setup["prepared"]["exists"])
+
+    def test_machine_lock_is_cross_worktree_fail_fast_and_released(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as first,
+            tempfile.TemporaryDirectory() as second,
+        ):
+            first_repo = Path(first)
+            second_repo = Path(second)
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(first_repo)
+                with harness.measurement_machine_lock():
+                    started = time.perf_counter()
+                    completed = subprocess.run(
+                        [
+                            sys.executable,
+                            str((harness.BENCH_DIR / "run.py").resolve()),
+                            "--case",
+                            "tiny_hello_check_cold",
+                        ],
+                        cwd=second_repo,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=5,
+                        check=False,
+                    )
+                    elapsed = time.perf_counter() - started
+                    self.assertEqual(completed.returncode, 2)
+                    self.assertIn("already active on this machine", completed.stderr)
+                    self.assertLess(elapsed, 2)
+                with harness.measurement_machine_lock():
+                    pass
+
+                with self.assertRaisesRegex(RuntimeError, "fixture exception"):
+                    with harness.measurement_machine_lock():
+                        raise RuntimeError("fixture exception")
+                with harness.measurement_machine_lock():
+                    pass
+            finally:
+                os.chdir(original_cwd)
+
+    def test_only_executing_cli_modes_require_the_machine_lock(self) -> None:
+        cases = {
+            ("--case", "tiny_hello_check_cold"): True,
+            ("--prepare-warm-cache",): True,
+            ("--probe",): True,
+            ("--list",): False,
+            ("--preflight",): False,
+            ("--preflight", "--case", "tiny_hello_check_cold"): False,
+        }
+        for argv, expected in cases.items():
+            with self.subTest(argv=argv):
+                self.assertIs(
+                    harness._operation_requires_lock(harness.parse_args(list(argv))),
+                    expected,
+                )
 
     def test_process_tree_metrics_and_separate_streams(self) -> None:
         preflight_job_support()

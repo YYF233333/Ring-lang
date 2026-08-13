@@ -523,6 +523,11 @@ class StrictCombineTests(unittest.TestCase):
             "manifest_sha": manifest_sha,
             "dist_c_sha256": "b" * 64,
             "runtime_sha256": "c" * 64,
+            "job_preflight": {
+                **harness._expected_job_preflight(),
+                "handle_count_before": 1,
+                "handle_count_after": 1,
+            },
             "tools": {
                 "ring": {
                     "path": self._seed_receipt(root, source_sha, manifest)[
