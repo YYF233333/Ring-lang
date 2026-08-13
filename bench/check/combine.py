@@ -46,7 +46,10 @@ def _load_samples(path: Path, schema: Mapping[str, Any]) -> list[dict[str, Any]]
 
 
 def _fingerprint(
-    environment: Mapping[str, Any], manifest_path: Path, schema_path: Path
+    environment: Mapping[str, Any],
+    manifest_path: Path,
+    schema_path: Path,
+    job_limits: Mapping[str, int],
 ) -> dict[str, Any]:
     os_record = environment.get("os")
     cpu = environment.get("cpu")
@@ -105,6 +108,7 @@ def _fingerprint(
         "result_schema_sha256": harness._sha256_file(schema_path),
         "dist_c_sha256": environment.get("dist_c_sha256"),
         "runtime_sha256": environment.get("runtime_sha256"),
+        "job_limits": dict(job_limits),
         "warm_cache_seed": (
             warm_seed.get("identity") if isinstance(warm_seed, dict) else None
         ),
@@ -210,10 +214,15 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
     expanded_lanes = {lane["case_id"]: lane for lane in harness.expand_lanes(manifest)}
     if environment.get("schema") != harness.ENVIRONMENT_SCHEMA:
         raise harness.HarnessError(f"environment schema mismatch: {run_dir}")
+    job_limits = harness._validate_job_preflight(
+        environment.get("job_preflight")
+    )
     if environment.get("flags") != manifest["fingerprint_flags"]:
         raise harness.HarnessError(f"environment flags differ from manifest: {run_dir}")
     harness.validate_retained_warm_cache_seed(environment, run_dir)
-    fingerprint = _fingerprint(environment, manifest_path, schema_path)
+    fingerprint = _fingerprint(
+        environment, manifest_path, schema_path, job_limits
+    )
     if environment.get("git_dirty") is not False:
         raise harness.HarnessError(f"formal run was not captured from a clean worktree: {run_dir}")
     if summary.get("schema") != harness.SUMMARY_SCHEMA or summary.get("complete") is not True:

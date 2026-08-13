@@ -625,6 +625,81 @@ class StrictCombineTests(unittest.TestCase):
                 len((output / "combined-samples.jsonl").read_text().splitlines()), 6
             )
             self.assertTrue((output / "combined-summary.json").is_file())
+            self.assertEqual(
+                summary["identity"]["job_limits"],
+                harness._expected_job_preflight(),
+            )
+
+    def test_environment_v3_is_bidirectionally_incompatible_with_v2(self) -> None:
+        legacy_schema = "ring.check-benchmark.environment.v2"
+        self.assertEqual(
+            harness.ENVIRONMENT_SCHEMA,
+            "ring.check-benchmark.environment.v3",
+        )
+        # Both combiner generations use exact equality.  Pin both directions
+        # without retaining a second implementation of the old combiner.
+        def exact_accepts(expected: str, actual: dict) -> bool:
+            return actual.get("schema") == expected
+
+        self.assertFalse(
+            exact_accepts(harness.ENVIRONMENT_SCHEMA, {"schema": legacy_schema})
+        )
+        self.assertFalse(
+            exact_accepts(legacy_schema, {"schema": harness.ENVIRONMENT_SCHEMA})
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            environment_path = cold / "environment.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["schema"] = legacy_schema
+            harness._json_dump(environment_path, environment)
+            with self.assertRaisesRegex(
+                harness.HarnessError, "environment schema mismatch"
+            ):
+                combine.combine_runs([cold], root / "combined")
+
+    def test_environment_v3_requires_exact_job_preflight(self) -> None:
+        mutations = {
+            "missing": lambda environment: environment.pop("job_preflight"),
+            "limit drift": lambda environment: environment["job_preflight"].update(
+                {"active_process_limit": 4}
+            ),
+            "handle mismatch": lambda environment: environment[
+                "job_preflight"
+            ].update({"handle_count_after": 2}),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                cold = self._write_run(root, state="cold", run_id="cold-run")
+                environment_path = cold / "environment.json"
+                environment = json.loads(
+                    environment_path.read_text(encoding="utf-8")
+                )
+                mutate(environment)
+                harness._json_dump(environment_path, environment)
+                expected = {
+                    "missing": "missing or malformed",
+                    "limit drift": "limits differ",
+                    "handle mismatch": "handle-count evidence",
+                }[name]
+                with self.assertRaisesRegex(harness.HarnessError, expected):
+                    combine.combine_runs([cold], root / "combined")
+
+    def test_job_preflight_handle_counts_are_per_run_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cold = self._write_run(root, state="cold", run_id="cold-run")
+            warm = self._write_run(root, state="warm", run_id="warm-run")
+            environment_path = warm / "environment.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["job_preflight"]["handle_count_before"] = 7
+            environment["job_preflight"]["handle_count_after"] = 7
+            harness._json_dump(environment_path, environment)
+            summary = combine.combine_runs([cold, warm], root / "combined")
+            self.assertTrue(summary["complete"])
 
     def test_combines_and_replays_runner_phase_summaries_per_lane(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

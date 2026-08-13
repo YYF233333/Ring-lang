@@ -35,6 +35,12 @@ Preflight creates, configures, and queries a genuinely fresh Job Object, checks
 all three limit flags and both values, and proves that closing it restores the
 current-process handle count. Self-tests also assert that one invocation
 creates exactly one Job and does not grow the steady-state handle count.
+Environment contract v3 makes this Job-preflight evidence mandatory. The
+combiner validates each run's before/after handle equality, then fingerprints
+only the fixed limit flags, 12 GiB cap, and five-process cap; handle counts need
+not match across otherwise identical runs. Exact schema matching makes v2 and
+v3 artifacts mutually incompatible instead of allowing an older combiner to
+ignore the new limit identity.
 
 Formal runs, `--prepare-warm-cache`, and `--probe` share one versioned,
 machine-wide fail-fast mutex across worktrees. A second executing instance is
@@ -303,8 +309,8 @@ Every fresh result directory contains:
 - `environment.json` — commit and dirty state, manifest hash, tracked
   `dist-c`/runtime hashes, Python/clang/clang++ paths, versions and executable
   hashes, flags, OS, CPU, total memory, logical cores, power status/plan, and
-  exact warm-seed receipt/cache inventory, plus runner-runtime preparation
-  state and hashes;
+  exact v3 Job-preflight identity and warm-seed receipt/cache inventory, plus
+  runner-runtime preparation state and hashes;
 - `warm-cache-seed-receipt.json` — retained strict seed identity used by both
   cold and warm formal batches;
 - `samples.jsonl` — one schema-validated row per invocation;
