@@ -1,14 +1,14 @@
 # Ring-lang 竞品与行业定位
 
-> 最后更新：2026-08-08
+> 最后更新：2026-08-13
 >
-> 事实截止：2026-08-03（版本、活跃度与 stars 均为时点数据）
+> 基线事实截止：2026-08-03；BAML 专项事实截止：2026-08-13（版本、活跃度与 stars 均为时点数据）
 >
 > 用途：产品定位、路线图取舍、B-001 Refinement Types 与 B-111 LLM eval harness 的证据输入
 
 ## 口径与证据纪律
 
-本文比较直接与相邻语言、主流替代工具链、形式化验证/AI proof 生态，以及 Ring 当前已实现能力。所有时效结论受顶部“事实截止”日期约束：
+本文比较直接与相邻语言、主流替代工具链、形式化验证/AI proof 生态，以及 Ring 当前已实现能力。除明确标注的 BAML 专项复核外，时效结论受顶部基线事实截止日期约束：
 
 - 时效事实只采用项目官网、官方 GitHub、官方 release notes、论文或会议页面；
 - 明确区分「已发货 / 实验性 / 宣称 / 计划」，不把 roadmap 当产品能力；
@@ -22,7 +22,7 @@
 
 ### 1.1 Ring 仍有差异化，但不能再表述为「无直接竞品」
 
-截至 2026-08-03，尚未发现一个项目**同时交付**以下组合：
+截至 2026-08-03 基线复查，并纳入 2026-08-13 的 BAML 专项复核后，尚未发现一个项目**同时交付**以下组合：
 
 - 面向应用开发、接近脚本语言的低标注表面；
 - HM 类型推断与 application-facing effect inference；
@@ -36,6 +36,7 @@
 - **Unison**：abilities（代数效果）+ 内容寻址代码库 + 语义化编辑/agent 工具；
 - **MoonBit**：ML 风格应用语言 + 完整工具链 + native + 实验性形式化验证；
 - **Zero**：graph-native 程序数据库 + agent checked edits；
+- **BAML**：typed agent/workflow language + standalone VM + 跨宿主 bridge + agent skill/semantic tools/eval 回流；
 - **Verus**：Rust 上的规范、proof/exec 分层、权限模型、SMT 验证与 AI proof 生态；
 - **TypeScript 7 / Python / Rust**：凭生态、训练语料和工具链形成极强的「已经够好」替代。
 
@@ -53,18 +54,20 @@
 | **高** | MoonBit | 最接近的应用语言产品、团队与工具链、`moon prove` | 工程威胁上调，effect 机制仍不同 |
 | **高** | Python + Astral/Codex | agent 生态与低摩擦「够用」路径 | 语言保证弱，但采用阻力最低 |
 | **高** | Zero | graph-native 程序库、checked edits 与完整 agent CLI/skills | 机制路线不同，但产品面竞争直接 |
+| **高** | BAML | 直接占据“programming language for agents”、agent-first toolchain、跨语言渐进采用与公开反馈回流 | 新语言通道仍为 canary，但产品与叙事竞争已经正面成立 |
 | **中高** | Rust + Verus | 安全基线、证明能力、训练数据、系统生态 | Ring 的安全/验证措辞必须分层且可证 |
 | **中** | Flix / Koka / Effekt / Unison | effect 与语义工具机制先例 | 市场替代低，技术与叙事纠偏价值高 |
 | **中** | Mojo | 大厂资源、AI compute、agent skills | 资源/叙事强，应用语言定位重叠有限 |
 | **中** | Rue | 一人 + agent 的编译器工程速度与纪律 | 非直接产品竞品，是执行力基准 |
 | **低** | Mog | 小规范、嵌入式 capability 模型 | 活跃度低，保留为规格压缩启发 |
 
-### 1.3 四个最重要的路线图含义
+### 1.3 五个最重要的路线图含义
 
 1. **B-111 是立论门，不是营销附件。** TS7 已正式发布，Ring 必须用同协议、同模型、同预算的实验回答“effect 签名是否真的减少 token/轮数/运行时错误”。
 2. **B-001 应做 bounded refinement，不应复制 Verus。** 普通 Ring 代码继续依靠默认类型/effect/资源检查；refinement 先限定可判定片段、机器整数语义和运行时兜底，再谈通用 SMT。
 3. **形式化验证必须显式管理信任。** Verus 与 `moon prove` 都说明“证明成功”不等于“无假设”：solver、整数模型、axiom/external spec、编译器和 runtime 都属于保证边界。
 4. **C-only 只是发布地基，不是产品发布。** Zero 已把 install/query/check/test/run、稳定 identity 与版本匹配的 agent skills 做成 compiler 产品面，Koka/MoonBit/TS7 也都有可安装工具链。Ring 应先完成 B-174/B-175 的本地闭环与候选包，再以 B-177 提供只读、版本化的 semantic inspection/primer；保持源码 + Git 为真值，不追随 graph-native 存储重写。
+5. **“Agent PL”已经成为真实品类，不再只是 Ring 的内部定位词。** BAML 已把 `agent install`、`describe`/`grep`、standalone run、跨语言 bridge、内建 eval 与 agent 反馈回流放在同一产品面。Ring 不应跟随其 LLM-workflow VM/GC 路线，而应让 B-174/B-177/B-111 证明 inference-first native、显式 effect 与确定性资源契约在普通应用任务上的独立价值。
 
 ---
 
@@ -95,7 +98,7 @@ stars 和发布频率只辅助判断后两项，不直接证明产品质量。
 
 ## 3. 全景矩阵
 
-| 项目 | 2026-08-03 状态 | 已发货核心 | Agent 路线 | 保证层 | 对 Ring 的关系 |
+| 项目 | 时点状态 | 已发货核心 | Agent 路线 | 保证层 | 对 Ring 的关系 |
 |---|---|---|---|---|---|
 | **Ring** | 自举；2026-08-03 完成 C-only codegen/bootstrap 与 tracked `dist-c` 固定点；发布产品面/RIIR/Drop Phase 2 待收口 | HM + trait、`io/fail/mut`、tail-resumptive/abort handler、Perceus RC、C11 native | 结构化诊断已有；inspection/primer 与 B-111 待交付 | G1（部分 ownership/runtime 保证仍在收口） | 被比较对象 |
 | **TypeScript 7** | 2026-07-08 正式发布 | Go native 编译器、LSP、`strict` 默认、并行检查 | 海量训练数据 + 编辑器/agent 生态 | G1 的结构类型子集 | 最大主流替代 |
@@ -103,6 +106,7 @@ stars 和发布频率只辅助判断后两项，不直接证明产品质量。
 | **Rust** | 成熟系统生态 | ownership/borrow、trait、unsafe 隔离、native | 高训练覆盖 + LSP/agent 工具 | 强 G1 | 安全基线与底层替代 |
 | **MoonBit** | v0.10.4；1.0 目标 Q3 2026 | ML 风类型、Wasm/JS/C/native、LSP、包管理、Pilot | 专用 coding agent 与工具链 | G1；`moon prove` 为实验性 G3 | 最接近产品竞品 |
 | **Zero** | experimental；官方 main 已明确 graph-native，semantic graph 是程序数据库、`.0` 是 projection | checked graph/patch、query/inspect/check/test/run、显式 capability | agent 直接操作图并消费版本匹配 skills | G0–G1 | 最直接 agent 产品面竞品 |
+| **BAML** | 2026-08-13：默认 `canary`；新 BAML Language 0.16.0，legacy BAML v0 为 0.225.0 | TypeScript 风类型/泛型/lambda、typed errors、bytecode VM/GC、green-thread workflow、standalone run、跨宿主 bridge、内建 tests/evals | `baml agent install`、`describe`/`grep`、版本化 toolchain、Agent Tries BAML 反馈面 | G0–G1（类型/错误；非确定性 ownership） | 直接 agent-language 产品/叙事竞品；运行与资源路线不同 |
 | **Mojo** | 1.0 Beta 2；Modular 主仓约 26.6k stars | Pythonic syntax、linear types、compile-time reflection、AI compute | 官方 agent skills | G1 | 资源/叙事强，定位偏 AI compute |
 | **Koka** | v3.2.3；活跃研究语言 | effect inference/handlers、evidence passing、Perceus、C backend | 非主要目标 | G1 | Ring 最接近理论与实现来源 |
 | **Flix** | v0.75.1；活跃 | effect polymorphism、subeffecting/exclusion、handlers、purity-driven optimization | 官方已直接研究 LLM 对新语言的影响 | G1 | 直接机制近邻 |
@@ -195,7 +199,35 @@ MoonBit 当前比 Ring 成熟得多：多后端、包管理、LSP、文档与专
 
 结论：**工程与采用威胁高，effect 机制不是同一路线，验证叙事已正面相遇。**
 
-### 5.2 Zero：graph-native 已从叙事推进为完整 agent loop
+### 5.2 BAML：已经正面占据“programming language for agents”
+
+2026-08-13 专项复核确认，BAML 已不再只把自己描述成 prompt/structured-output DSL。官方默认分支、仓库 description 与新官网统一使用 **“the programming language for agents”**；新 BAML Language 通道已发布 0.16.0，原 0.225.0 系列被明确标为 legacy BAML v0。两条产品面仍处于迁移期：旧文档首页继续把 BAML 定义为 structured-output DSL，而新官网与 canary 工具链已经展示更广的 standalone agent/workflow language。
+
+#### 已交付或可由官方产物核验的产品面
+
+- TypeScript 风表面包含 union、generic、lambda 与 pattern matching；类型在 runtime 保留，公开设计排除 `any` 和 unchecked cast，并以 typed error/`throws` 进入函数类型；
+- Rust 实现的 compiler、bytecode VM、GC 与 async engine 支撑 standalone `baml run`、green-thread/colorless workflow、取消和并发；这不是 Ring 的 C11 AOT + Perceus deterministic RC 路线；
+- wrapper/toolchain 可安装、固定 project-local 版本并跨 macOS/Linux/Windows 运行；Python、TypeScript、Go、Rust、Java、C#、C++、Kotlin、Swift 等宿主通过生成 bridge 渐进采用；
+- `baml agent install` 提供版本匹配的 agent skill，`baml describe` / `baml grep` 面向 agent 暴露语言与项目事实；IDE/LSP、内建 tests/evals、标准库和本地 tracing 已形成连续产品面；
+- “Agent Tries BAML” 公开了 run、agent、finding、skill arena 与 pinned build 的反馈结构，明确把 agent 真实写程序、发现问题、修复并在新 build 复验作为语言迭代输入。
+
+官网还宣称 compiler 快于 Go、semantic search 优于 ripgrep、pack 产物小于 Bun，以及 tracing 相对 OpenTelemetry 的数量级优势。本轮没有把这些营销数字核验为可独立重放的 benchmark，也没有确认 Agent Tries BAML 已提供稳定的跨语言对照协议与完整 raw manifest；因此它们当前只算**官方宣称/方法信号**，不能进入 Ring 的性能或 agent-efficiency 事实账本。
+
+#### 与 Ring 的关键差异
+
+| 维度 | BAML | Ring |
+|---|---|---|
+| 首要 workload | LLM function、agent/workflow、eval 与宿主应用嵌入 | 普通 native CLI/应用；agent 是重要作者/消费者而非唯一运行对象 |
+| 执行与资源 | bytecode VM + tracing GC + async engine；多宿主 bridge | C11 AOT + Perceus RC；确定性资源与显式 failure/effect 是语言公理 |
+| 类型/行为契约 | 严格 runtime-preserved types、typed errors，强调无 `any`/unchecked casts | HM/trait + inferred `io/fail/mut` + handler + ownership/resource contract |
+| Agent 产品面 | skill、`describe`/`grep`、eval、公开 agent feedback loop 已可见 | 结构化诊断已有；B-174/B-177/B-111 仍待形成可安装、可测量闭环 |
+| 采用路径 | standalone + 多语言渐进 bridge，降低替换成本 | 目标是独立 native application language；首个 preview 不以 FFI bridge 生态为前置 |
+
+结论：**威胁为高，但主要是产品、采用与叙事威胁，不是 effect/ownership/native 机制同构。** BAML 已使“专为 agent 的编程语言”成为有安装入口、runtime、工具链和反馈系统的公开品类；Ring 不能再把 LLM-first/agent-readable 本身当差异。可辩护边界应收窄到 inference-first native application language、显式 effect 与确定性资源语义，并由 B-111 量化。
+
+路线响应不新增独立 backlog：B-174/B-175 继续先交付 standalone preview；B-177 把 `describe`/`grep`/version-matched skill 当产品基准但仍只导出 checker/HIR 权威事实；B-111 保持用户已拍板的 TypeScript 7 单一对照，先完成可归因实验，再决定是否以独立扩展研究 BAML。不能为追赶其宿主 bridge、GC VM 或 workflow stdlib 扩大首个 preview 范围。
+
+### 5.3 Zero：graph-native 已从叙事推进为完整 agent loop
 
 2026-08-03 复核官方 main 后，Zero 的定位比 7 月 28 日记录更激进：semantic graph 明确成为 program database，`.0` 文本是 human-readable projection，而不是普通 authoring 真值；checked graph 是 compiler input。其公开 loop 已包括：
 
@@ -206,7 +238,7 @@ MoonBit 当前比 Ring 成熟得多：多后端、包管理、LSP、文档与专
 
 这使 Zero 的威胁从“agent-first 叙事”上升为“agent compiler 产品面”。Ring 不应复制 graph-native source-of-truth：这会牺牲现有 Git/文本生态并引入第二套存储模型。合理响应是 B-174/B-175 先交付可安装的 check/build/run/doctor，再由 B-177 从 checker/HIR 导出只读、版本化的 identity/signature/effect/import/unsafe contract，配套 source hash stale guard 与 bundled primer。是否需要 checked patch 必须由 B-111/真实 agent loop 证据另行立项，不能因竞品存在就预设。
 
-### 5.3 Mojo：资源与叙事强，主战场不同
+### 5.4 Mojo：资源与叙事强，主战场不同
 
 Mojo 最新稳定通道为 1.0 Beta 2，Modular 主仓约 26.6k stars。已发货/公开方向包括：
 
@@ -445,12 +477,12 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 ## 11. 相关工作项
 
-- **B-174/B-175**：交付可安装、可运行、可诊断的 preview CLI 与 Windows/Linux candidate artifacts。
+- **B-174/B-175**：交付可安装、可运行、可诊断的 preview CLI 与 Windows/Linux candidate artifacts；BAML 的 wrapper/toolchain pin/run/bridge 说明版本匹配与渐进采用已成为竞争基线，但首个 Ring preview 不以多宿主 bridge 为前置。
 - **B-176/B-180**：建立 `check`、RC/self-verify、runner/self-compile 的可复现 baseline，并以不减覆盖的 2× wall-time 改善恢复快速开发反馈。
 - **B-181**：单独建立生成程序 runtime、内存/分配与产物尺寸的 release baseline/budget。
-- **B-177**：导出版本化只读 semantic inspection contract 与 bundled primer，不改变源码/Git 真值模型。
+- **B-177**：导出版本化只读 semantic inspection contract 与 bundled primer，不改变源码/Git 真值模型；对照 BAML `agent install`、`describe`/`grep` 与 Zero query/inspect 的可发现性，但只消费 checker/HIR 权威事实。
 - **B-168**：在 B-176/B-180 工具链吞吐专项后确定 C-native failure/control ABI 及其 Drop、TCB 与可移植性边界。
-- **B-111**：用固定模型、预算和公开 artifact 复现 Ring vs TypeScript 7 的 agent 开发对照。
+- **B-111**：用固定模型、预算和公开 artifact 复现 Ring vs TypeScript 7 的 agent 开发对照；借鉴 BAML 的 run/finding/skill-variant/build-pin 回流形态，不把其未独立核验的结果当先验，也不在首轮擅自增加第三对照。
 - **B-001**：保持 refinement bounded、deterministic，并显式记录 solver、整数模型与 assumption 边界。
 
 ---
@@ -473,6 +505,7 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 - MoonBit 1.0/RC 发布，或 `moon prove` 去掉 experimental；
 - Zero 发稳定 release、公开采用数据，或 graph-native 工作流发生重大改变；
+- BAML 新 language channel 离开 canary/达到 1.0，旧 v0 文档与新语言产品面完成收口，或 Agent Tries BAML 发布可独立重放的协议、raw traces 与跨语言结论；
 - TypeScript 7.1 恢复 programmatic API，主流 framework 完成迁移；
 - Verus/AI proof 出现公开生产级采用或显著降低 proof/implementation ratio；
 - Flix/Effekt/Unison 发布直接面向 coding agent 的 effect benchmark；
@@ -495,6 +528,7 @@ Pel、Quasar、Dana、Darklang 的 agent 化方向主要是 workflow/orchestrati
 
 - MoonBit：[v0.10.4 release](https://www.moonbitlang.com/updates/2026/07/13/moonbit-0-10-4-release)、[v0.10.0 release](https://www.moonbitlang.com/updates/2026/06/08/moonbit-0-10-0-release)、[Formal Verification](https://docs.moonbitlang.com/en/latest/language/verification.html)
 - Zero：[vercel-labs/zerolang](https://github.com/vercel-labs/zerolang)、[releases](https://github.com/vercel-labs/zerolang/releases)
+- BAML：[BoundaryML/baml](https://github.com/BoundaryML/baml)、[BAML Language 0.16.0](https://github.com/BoundaryML/baml/releases/tag/baml-language-0.16.0)、[new language overview](https://boundaryml.com/)、[quickstart](https://boundaryml.com/quickstart)、[changelog](https://boundaryml.com/changelog)、[Agent Tries BAML](https://boundaryml.com/atb)
 - Mojo：[Mojo releases](https://mojolang.org/releases/)、[Modular 26.4 / Mojo Beta 2](https://www.modular.com/blog/modular-26-4-sota-moe-serving-model-bringup-via-agent-skills-mojo-beta-2-and-more)
 - Rue：[rue-lang.dev](https://rue-lang.dev/)、[rue-language/rue](https://github.com/rue-language/rue)
 - Mog：[moglang.org](https://moglang.org/)、[voltropy/mog](https://github.com/voltropy/mog)
