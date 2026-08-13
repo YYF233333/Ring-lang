@@ -446,24 +446,28 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 > **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
 
+> **2026-08-13 用户目标裁决**：本性能主线的直接驱动是开发常用命令慢于 agent 产出节奏，目标是缩短完整开发反馈回路，而不是追逐某个 pass、某个阶段或某个百分比。精确百分比、逐阶段 KPI 与完整性能报告都不是交付物或完成门；测量只保留到足以定位整体等待、证明没有明显回退并指导下一刀的程度。正确性、覆盖、原始失败、可重放身份与资源上限不因此降低。
+
+> **2026-08-13 投机执行授权**：profile 只需达到 Steward 能判断下一处候选的粒度，不要求整理为面向用户的精细报告。允许先提出有界性能猜测，在独立 worktree 实现并用代表性开发命令做前后对照；只有整体等待真实下降、正确性与覆盖不退化的候选才合并。无收益候选不得进入主线。实现、短测量与 review 可并行补位，资源密集测量仍按内存/并发上限串行，不能冻结 root 的其他推进。
+
 > **2026-08-12 用户细化**：正式基线不再等待全部 critical 长尾清零，但必须等待 developer-unblock checkpoint：当前 compiler source 可严格 `check/build compiler/main.ring` 且无 panic/ICE；compiler/std/benchmark manifest 所需的聚焦 ownership/RC 矩阵稳定、fail loud；compiler source、tracked anchor、toolchain 与测量 manifest 精确钉住；至少有一次由该精确快照建立的 strict native bootstrap 或等价的 exact-generation 证据。checkpoint 之后可完成 B-176 并进入 B-180；后续 correctness 修复若改变 workload、通过集合或 phase 工作量，必须刷新同快照配对基线，禁止混用前后数字。
 
 > **2026-08-13 developer-unblock checkpoint：ACHIEVED。** 用户验收并关闭 `ownership-reachable-dispatch` item：final A7 对 current source 完成 clean C generation 与 O3+ThinLTO native link，tracked `compiler/dist-c/main.c` 与该 generation byte-identical（SHA256 `D7BB015B32EF8F4A438093509C794C82B60C13548808B0A1093AEFEAB0DF7F2E`），focused ownership/default/const-reexport/transaction/effect-mapping 正负矩阵无新增 ICE/panic。A7→A8 byte fixed point 与 final full-suite 明确保留为 B-180 完成认定/release 门，不再阻塞 B-176 baseline 或性能实现；不得把本 checkpoint 写成完整 release acceptance。
 
-当前测量完整性框架已合入，developer-unblock checkpoint 已成立；下一独立 session 在本提交快照上执行正式 cold/warm baseline、形成 top-3 构成与 B-180 逐项预算后收口。
+当前测量完整性框架已合入，developer-unblock checkpoint 已成立；下一独立 session 在本提交快照上只选择代表真实开发等待的最小命令集，记录足以识别主要瓶颈的 cold/warm 原始样本后收口，不把既有完整 lane 矩阵本身当成必须消费的工作量。
 
 本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。developer-unblock checkpoint 前可以准备采样/只读 instrumentation；checkpoint 成立后形成正式 baseline，并允许 B-180 开始改变 compiler/runner 行为。剩余 critical 不从 manifest 消失；若其修复改变测量工作量，baseline 与候选必须在修复后的同一语义快照上成对重测。
 
-**测量面 / 文件**：新增 `bench/check/`（或 planning 时核定的等价单一入口）、机器可读 manifest/result schema 与 `docs/performance-baseline.md`；检查 `tests/run_tests.py`、`compiler/scripts/build_native.ps1`，并在 `compiler/cli.ring`、`compiler/compiler_mod.ring`、checker/infer/Perceus/verify_rc 边界提供 opt-in phase timing。默认 CLI 输出与产物不得变化。
+**测量面 / 文件**：复用 `bench/check/` 的单一入口与原始结果格式，新增简短的 `docs/performance-baseline.md` 重放索引（身份、代表命令、原始样本路径与选路结论即可）；检查 `tests/run_tests.py`、`compiler/scripts/build_native.ps1` 与已有 opt-in phase timing。默认 CLI 输出与产物不得变化，不为生成精细报告继续扩张 telemetry/schema。
 
-1. direct feedback：tiny、代表性大单文件、两层/宽 module project、`compiler/main.ring` 的普通 `check`、`--verify-rc` 与失败诊断；
-2. runner feedback：tracked compiler C compile/link、单个 filtered case、e2e/golden/RC/structural/self-compile 与完整本地门分别计时；拆分 `ring.exe`、clang compile、link、run 与 Python orchestration；
-3. 资源与调用：wall/CPU time、peak RSS、进程数、每类 case 数、cache cold/warm 与工具链指纹；不得把并行 wall-time 收益混报成 CPU-time 收益；
-4. 短 lane 至少 5 次，预计 ≥5min 的长 lane 至少 3 次；保留全部原始样本，报告 median、离散度和 invalid 原因，不挑最好值。
+1. direct feedback：`compiler/main.ring` 的普通 `check`、`--verify-rc`，以及一个能显露启动/固定开销的短 `check` 对照；
+2. runner feedback：一个日常 focused case/suite 与一次完整本地标准门；只有 profile 指向 compiler construction、clang/link 或 Python orchestration 时才继续细分；
+3. 资源与调用：保留 wall/CPU、peak RSS、进程数、cold/warm、toolchain/source/anchor/manifest 指纹与原始 stdout/stderr；不得把并行 wall-time 收益混报成 CPU-time 收益；
+4. 短命令保留少量重复以排除偶然噪声；长命令每个 cache 状态一次即可作为方向证据，不声称精密分布。所有 invalid/失败样本原样保留，不挑最好值、不自动重试。
 
-**验收**：形成可在 clean worktree 重放的 baseline、top-3 wall-time 构成与 B-180 的逐项收益预算；至少区分“compiler 内部算法”“每进程初始化/重复 parse-check”“runner/clang 调度”三类成本。测量入口自身开销可量化且关闭时近零；本项以一个 bounded measurement wave 收口，不扩张成通用 telemetry 框架。
+**验收**：形成可在 clean worktree 重放的最小 baseline、主要等待构成与 B-180 第一刀的证据；能区分“compiler 内部算法”“每进程初始化/重复 parse-check”“runner/clang 调度”即可，不要求逐项百分比预算或成品化报告。测量入口关闭时近零；本项以一个 bounded measurement wave 收口。
 
-### B-180 `check` / runner 吞吐 2× 专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-183]
+### B-180 开发反馈回路吞吐专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-183]
 
 **进入门**：B-176 的 developer-unblock checkpoint 与正式同快照 baseline 已成立；不再要求 #268、#269 的非开发阻塞长尾预先全部关闭。执行期间若新增 critical 会破坏严格自举、baseline 可比性、当前优化触及的 ownership/RC authority 或生成结果正确性，立即回到 critical 修复；否则保留为显式尾项，不阻塞 runner/测量基础设施和已证明独立的热点优化。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
 
@@ -471,12 +475,12 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 **实现范围 / 顺序**：
 
-1. `tests/run_tests.py` 与 `compiler/scripts/`：compiler artifact 使用由 `dist-c`/runtime/flags/toolchain 全指纹控制的内容寻址缓存，但每轮仍在隔离目录执行，禁止信任裸 root `ring.exe`；增加有界 `--jobs`、per-case 独立 out-dir、确定性汇总与 fail-fast 可选显示，原始失败永不自动重试或吞掉；
-2. `compiler/cli.ring`、`compiler/compiler_mod.ring` 与 B-176 排名前列的 checker/infer/Perceus/verify_rc 模块：先用 phase profile 修 top hotspot，再做 memoization、减少重复 canonicalization/clone/sort 或更正数据结构；不得凭猜测横扫编译器；
+1. 先按 B-176 的真实端到端等待选择第一刀；若 compiler construction、runner/clang 调度占主导，再改 `tests/run_tests.py` 与 `compiler/scripts/`：compiler artifact 使用由 `dist-c`/runtime/flags/toolchain 全指纹控制的内容寻址缓存，但每轮仍在隔离目录执行，禁止信任裸 root `ring.exe`；增加有界 `--jobs`、per-case 独立 out-dir、确定性汇总与 fail-fast 可选显示，原始失败永不自动重试或吞掉；
+2. 若 compiler 内部可能占主导，可在独立 worktree 先实现一个有边界、可回滚的热点猜测，再用 phase profile 与端到端命令决定去留；真实候选可做 memoization、减少重复 canonicalization/clone/sort 或更正数据结构。禁止没有明确假设、文件边界和淘汰门的无界横扫；
 3. 若进程启动/重复初始化主导，比较 bounded worker-process/batch-check 与普通进程池；任何复用方案必须以随机 case 顺序、重复运行和进程隔离对照证明无 global state 泄漏。daemon、常驻服务和新公共协议不作为首轮默认；
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
 
-**量化验收**：以 B-176 同机同 manifest、同一语义快照的配对基线为准，`compiler/main.ring check` median 与完整本地标准门 wall time 都降至基线的 **≤50%**；`check --verify-rc compiler/main.ring` 同样以 ≤50% 为目标，本项不得以只有 10–20% 改善宣告完成。tiny/大单文件/module check 的 p95 不得回退 >10%；串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。报告 cold/warm wall、CPU、peak aggregate/per-worker RSS；若为了 2× 需要 >25% peak aggregate RSS 增长，必须先给出内存上限、自适应 jobs 与低内存退化证据。**B-180 只有在全部 critical（含暂缓长尾）关闭、完整 C/RC/ASan/self-host/double-bootstrap 门通过后才能标记完成或作为 release-accepted 结果合入；任何原始失败都必须 fail loud。**
+**整体验收**：以 B-176 同机、同代表命令集的配对原始样本为证据，常用 edit→check→focused validation 与提交前完整门的端到端等待应持续缩短到不再拖住 agent 开发节奏；不设置单一百分比、单阶段配额或“每个部分都要优化”的门槛。短文件、模块与失败诊断不得出现明显体感回退；串行 oracle 与任何并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。保留 cold/warm wall、CPU、peak aggregate/per-worker RSS 与明确内存/并发上限；任何用更多并发换 wall time 的方案都必须有低内存退化路径。**B-180 只有在全部 critical（含暂缓长尾）关闭、完整 C/RC/ASan/self-host/double-bootstrap 门通过后才能标记完成或作为 release-accepted 结果合入；任何原始失败都必须 fail loud。**
 
 ### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-180] [before: B-168+B-174]
 
