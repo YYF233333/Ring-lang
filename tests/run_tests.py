@@ -1294,39 +1294,20 @@ def _record_cache_conflict_locked(
 def _poison_cache_key_locked(
     cache_root: Path,
     key: str,
-    winner: _CachedAnchor,
-    candidate: _CachedAnchor,
 ) -> Path:
     poison_path = _cache_poison_path(cache_root, key)
-    marker = {
-        "schema": COMPILER_CACHE_SCHEMA,
-        "version": COMPILER_CACHE_VERSION,
-        "key": key,
-        "reason": "same_key_divergent_anchor_objects",
-        "winner": {
-            "sha256": winner.sha256,
-            "size": winner.size,
-            "mode": winner.mode,
-        },
-        "candidate": {
-            "sha256": candidate.sha256,
-            "size": candidate.size,
-            "mode": candidate.mode,
-        },
-    }
+    receipt_path, _ = _cache_paths(cache_root, key)
+    poison_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        created = _create_json_once(poison_path, marker)
-    except BaseException:
-        # If durable poisoning itself is unavailable, remove the receipt so a
-        # later process cannot silently consume the now-untrusted winner.
-        receipt_path, _ = _cache_paths(cache_root, key)
-        receipt_path.unlink(missing_ok=True)
-        (cache_root / "access" / key).unlink(missing_ok=True)
-        raise
-    if not created and not poison_path.is_file():
+        # The existing receipt is already durable and immutable.  Rename it as
+        # the poison commit point before writing best-effort conflict details.
+        # Thus a later diagnostic fsync/hard-link failure cannot turn a proven
+        # same-key divergence back into a normal cache miss.
+        os.replace(receipt_path, poison_path)
+    except OSError as exc:
         raise CompilerPreparationError(
-            f"compiler cache poison marker lost its immutable CAS: {poison_path}"
-        )
+            f"cannot durably poison divergent compiler cache key: {exc}"
+        ) from exc
     return poison_path
 
 
@@ -1441,6 +1422,33 @@ def _cleanup_compiler_cache_locked(
                 "size": artifact_size,
                 "last_used": last_used,
             })
+    poison_dir = cache_root / "poisoned"
+    if poison_dir.is_dir():
+        for poison_path in poison_dir.glob("*.json"):
+            key = poison_path.stem
+            if re.fullmatch(r"[0-9a-f]{64}", key) is None:
+                poison_path.unlink(missing_ok=True)
+                continue
+            # A poison tombstone dominates any receipt left by an interrupted
+            # older implementation.  It is a zero-artifact cache entry with
+            # the same LRU/count lifecycle as ordinary receipts.
+            for entry in tuple(entries):
+                if entry["key"] == key:
+                    entry["receipt"].unlink(missing_ok=True)
+                    entries.remove(entry)
+            access_path = cache_root / "access" / key
+            last_used = (
+                access_path.stat().st_mtime
+                if access_path.is_file() else poison_path.stat().st_mtime
+            )
+            entries.append({
+                "key": key,
+                "receipt": poison_path,
+                "access": access_path,
+                "artifact": None,
+                "size": 0,
+                "last_used": last_used,
+            })
     protected = set(protected_keys)
     entries.sort(
         key=lambda entry: (
@@ -1482,13 +1490,6 @@ def _cleanup_compiler_cache_locked(
         for access_path in access_dir.iterdir():
             if access_path.is_file() and access_path.name not in retained_keys:
                 access_path.unlink(missing_ok=True)
-
-    poison_dir = cache_root / "poisoned"
-    if poison_dir.is_dir():
-        retained_keys = {entry["key"] for entry in kept}
-        for poison_path in poison_dir.glob("*.json"):
-            if poison_path.stem not in retained_keys:
-                poison_path.unlink(missing_ok=True)
 
     _prune_cache_conflicts_locked(cache_root)
 
@@ -1546,7 +1547,7 @@ def _publish_cached_anchor(
                 )
                 if not _same_cached_anchor(winner, candidate):
                     poison = _poison_cache_key_locked(
-                        cache_root, key, winner, candidate,
+                        cache_root, key,
                     )
                     evidence = _record_cache_conflict_locked(
                         cache_root, key, winner, candidate,
@@ -1595,7 +1596,7 @@ def _publish_cached_anchor(
                 )
                 if not _same_cached_anchor(winner, candidate):
                     poison = _poison_cache_key_locked(
-                        cache_root, key, winner, candidate,
+                        cache_root, key,
                     )
                     evidence = _record_cache_conflict_locked(
                         cache_root, key, winner, candidate,

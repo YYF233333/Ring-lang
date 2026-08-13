@@ -648,31 +648,24 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(len(winners), 1)
             self.assertEqual(len(failures), 1)
             self.assertIn("divergent anchor objects", str(failures[0]))
-            validated = runner._validated_cached_anchor(
-                cache_root, key, inputs,
-            )
-            self.assertIsNotNone(validated)
-            self.assertTrue(runner._same_cached_anchor(
-                validated, winners[0],
-            ))
             receipt_path, _ = runner._cache_paths(cache_root, key)
-            receipt_before = receipt_path.read_bytes()
+            self.assertFalse(receipt_path.exists())
             conflicts = list(
                 (cache_root / "conflicts" / key).glob("*.json")
             )
             self.assertEqual(len(conflicts), 1)
             evidence = json.loads(conflicts[0].read_text(encoding="utf-8"))
-            self.assertEqual(evidence["winner"]["sha256"], validated.sha256)
+            self.assertEqual(evidence["winner"]["sha256"], winners[0].sha256)
             self.assertNotEqual(
-                evidence["candidate"]["sha256"], validated.sha256,
+                evidence["candidate"]["sha256"], winners[0].sha256,
             )
-            self.assertEqual(receipt_path.read_bytes(), receipt_before)
             poison = runner._cache_poison_path(cache_root, key)
             self.assertTrue(poison.is_file())
+            poison_before = poison.read_bytes()
             poison_record = json.loads(poison.read_text(encoding="utf-8"))
             self.assertEqual(poison_record["key"], key)
             self.assertEqual(
-                poison_record["winner"]["sha256"], validated.sha256,
+                poison_record["artifact_sha256"], winners[0].sha256,
             )
             destination = root / "future-hit.o"
             with self.assertRaisesRegex(
@@ -688,7 +681,50 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 runner._publish_cached_anchor(
                     cache_root, key, inputs, objects[0],
                 )
-            self.assertEqual(receipt_path.read_bytes(), receipt_before)
+            self.assertEqual(poison.read_bytes(), poison_before)
+            self.assertFalse(receipt_path.exists())
+
+    def test_conflict_evidence_failure_cannot_forget_durable_poison(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            inputs, key, winner = self.publish(
+                cache_root, root / "winner", b"winner object\n",
+            )
+            divergent = root / "divergent.o"
+            divergent.write_bytes(b"divergent object\n")
+
+            with patch.object(
+                runner, "_record_cache_conflict_locked",
+                side_effect=OSError("conflict evidence fsync failure"),
+            ):
+                with self.assertRaisesRegex(
+                    OSError, "conflict evidence fsync failure",
+                ):
+                    runner._publish_cached_anchor(
+                        cache_root, key, inputs, divergent,
+                    )
+
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            poison = runner._cache_poison_path(cache_root, key)
+            self.assertFalse(receipt_path.exists())
+            self.assertTrue(poison.is_file())
+            poisoned_receipt = json.loads(poison.read_text(encoding="utf-8"))
+            self.assertEqual(
+                poisoned_receipt["artifact_sha256"], winner.sha256,
+            )
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._lookup_cached_anchor(
+                    cache_root, key, inputs, root / "future.o",
+                )
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._publish_cached_anchor(
+                    cache_root, key, inputs, divergent,
+                )
 
     def test_hardlink_publication_failure_is_loud_and_never_creates_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -789,6 +825,41 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertFalse(receipt_path.exists())
             self.assertFalse(cached.path.exists())
             self.assertFalse((cache_root / "access" / key).exists())
+
+    def test_poison_tombstone_participates_in_entry_lru_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            poisoned_inputs, poisoned_key, _ = self.publish(
+                cache_root, root / "poison-winner", b"winner\n", tag="poison",
+            )
+            divergent = root / "divergent.o"
+            divergent.write_bytes(b"divergent\n")
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "divergent anchor objects",
+            ):
+                runner._publish_cached_anchor(
+                    cache_root, poisoned_key, poisoned_inputs, divergent,
+                )
+            _, new_key, new_cached = self.publish(
+                cache_root, root / "new", b"new\n", tag="new",
+            )
+            now = time.time()
+            old_access = cache_root / "access" / poisoned_key
+            new_access = cache_root / "access" / new_key
+            os.utime(old_access, (now - 20, now - 20))
+            os.utime(new_access, (now - 10, now - 10))
+
+            with patch.object(runner, "COMPILER_CACHE_MAX_ENTRIES", 1):
+                runner._cleanup_compiler_cache_locked(cache_root, now=now)
+
+            self.assertFalse(
+                runner._cache_poison_path(cache_root, poisoned_key).exists()
+            )
+            self.assertFalse(old_access.exists())
+            new_receipt, _ = runner._cache_paths(cache_root, new_key)
+            self.assertTrue(new_receipt.exists())
+            self.assertTrue(new_cached.path.exists())
 
     def test_cache_hit_phase_order_and_exact_runner_scoped_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
