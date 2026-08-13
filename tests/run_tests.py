@@ -28,10 +28,12 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import symtable
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,11 +55,15 @@ DIST_C_DIR = REPO / "compiler" / "dist-c"
 DIST_C_MAIN = DIST_C_DIR / "main.c"
 THINLTO_CACHE = Path(tempfile.gettempdir()) / "ring-lang-thinlto-cache"
 COMPILER_ARTIFACT_CACHE = (
-    Path(tempfile.gettempdir()) / "ring-lang-compiler-artifacts-v1"
+    Path(tempfile.gettempdir()) / "ring-lang-compiler-anchor-cache-v2"
 )
 COMPILER_CACHE_ENV = "RING_TEST_COMPILER_CACHE"
-COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-cache.v1"
-COMPILER_CACHE_VERSION = 1
+COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-anchor-cache.v2"
+COMPILER_CACHE_VERSION = 2
+COMPILER_CACHE_MAX_ENTRIES = 16
+COMPILER_CACHE_MAX_BYTES = 4 * 1024 * 1024 * 1024
+COMPILER_CACHE_STALE_SECONDS = 24 * 60 * 60
+COMPILER_CACHE_MAX_CONFLICTS = 32
 PARITY_MATRIX = REPO / "tests" / "parity_matrix.json"
 STRUCTURAL_DIR = CASES_DIR / "structural"
 CODEGEN_C_SOURCE = REPO / "compiler" / "codegen_c.ring"
@@ -548,10 +554,55 @@ class _CompilerBuildPlan:
     compile_flags: Tuple[str, ...]
     test_link_flags: Tuple[str, ...]
     compiler_link_flags: Tuple[str, ...]
+    controlled: bool
+    cache_supported: bool
+    target: Optional[str]
+    driver_flags: Tuple[str, ...]
+    linker_pin_flags: Tuple[str, ...]
+    environment: Tuple[Tuple[str, str], ...]
 
 
 class CompilerPreparationError(RuntimeError):
     """The tracked compiler could not be prepared without weakening trust."""
+
+
+@dataclass(frozen=True)
+class _CachedAnchor:
+    path: Path
+    sha256: str
+    size: int
+    mode: int
+
+
+_CONTROLLED_ENV_NAMES = (
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "INCLUDE",
+    "LIB",
+    "LIBPATH",
+    "CPATH",
+    "C_INCLUDE_PATH",
+    "CPLUS_INCLUDE_PATH",
+    "OBJC_INCLUDE_PATH",
+    "LIBRARY_PATH",
+    "COMPILER_PATH",
+    "GCC_EXEC_PREFIX",
+    "SDKROOT",
+    "MACOSX_DEPLOYMENT_TARGET",
+    "VCINSTALLDIR",
+    "VCToolsInstallDir",
+    "VCToolsVersion",
+    "VSINSTALLDIR",
+    "VisualStudioVersion",
+    "WindowsSdkDir",
+    "WindowsSDKVersion",
+    "UniversalCRTSdkDir",
+    "UCRTVersion",
+)
+_CACHE_THREAD_LOCKS: Dict[str, threading.RLock] = {}
+_CACHE_THREAD_LOCKS_GUARD = threading.Lock()
 
 
 def _sha256_file(path: Path) -> str:
@@ -563,6 +614,28 @@ def _sha256_file(path: Path) -> str:
                 break
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _stable_file_identity(path: Path, *, include_mode: bool = False) -> Dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    before = resolved.stat()
+    if not stat.S_ISREG(before.st_mode):
+        raise CompilerPreparationError(f"cache input is not a regular file: {resolved}")
+    digest = _sha256_file(resolved)
+    after = resolved.stat()
+    if (
+        before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+    ):
+        raise CompilerPreparationError(f"cache input changed while hashing: {resolved}")
+    record: Dict[str, Any] = {
+        "path": os.path.normcase(str(resolved)),
+        "size": after.st_size,
+        "sha256": digest,
+    }
+    if include_mode:
+        record["mode"] = stat.S_IMODE(after.st_mode)
+    return record
 
 
 def _resolved_executable(executable: str) -> Optional[str]:
@@ -601,6 +674,70 @@ def _find_lld_linker(clang: str) -> Optional[str]:
     return None
 
 
+def _environment_value(name: str) -> Optional[str]:
+    folded = name.casefold()
+    for key, value in os.environ.items():
+        if key.casefold() == folded:
+            return value
+    return None
+
+
+def _controlled_environment(*tools: str) -> Tuple[Tuple[str, str], ...]:
+    environment: Dict[str, str] = {}
+    for name in _CONTROLLED_ENV_NAMES:
+        value = _environment_value(name)
+        if value is not None:
+            environment[name] = value
+
+    path_dirs: List[str] = []
+    for tool in tools:
+        directory = str(Path(tool).resolve(strict=True).parent)
+        if os.path.normcase(directory) not in {
+            os.path.normcase(existing) for existing in path_dirs
+        }:
+            path_dirs.append(directory)
+    system_root = environment.get("SystemRoot") or environment.get("WINDIR")
+    if system_root:
+        system32 = str(Path(system_root) / "System32")
+        if os.path.normcase(system32) not in {
+            os.path.normcase(existing) for existing in path_dirs
+        }:
+            path_dirs.append(system32)
+    environment["PATH"] = os.pathsep.join(path_dirs)
+    environment["LC_ALL"] = "C"
+    environment["LANG"] = "C"
+    environment["SOURCE_DATE_EPOCH"] = "0"
+    return tuple(sorted(environment.items(), key=lambda item: item[0].casefold()))
+
+
+def _plan_environment(plan: _CompilerBuildPlan) -> Optional[Dict[str, str]]:
+    if not plan.controlled:
+        return None
+    return dict(plan.environment)
+
+
+def _probe_controlled_target(
+    compiler: str,
+    environment: Tuple[Tuple[str, str], ...],
+) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            [compiler, "--no-default-config", "-dumpmachine"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(REPO),
+            env=dict(environment),
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return None
+    target = result.stdout.strip()
+    if not target or re.fullmatch(r"[A-Za-z0-9_.+-]+", target) is None:
+        return None
+    return target
+
+
 def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
     if not DIST_C_MAIN.is_file() or not RUNTIME_CPP.is_file():
         return None
@@ -626,6 +763,27 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
     linker = _find_lld_linker(clang)
     if linker is None:
         return None
+    controlled = False
+    cache_supported = False
+    target: Optional[str] = None
+    driver_flags: Tuple[str, ...] = ()
+    linker_pin_flags: Tuple[str, ...] = ()
+    environment: Tuple[Tuple[str, str], ...] = ()
+    if sys.platform == "win32":
+        environment = _controlled_environment(
+            clang, runtime_compiler, linker,
+        )
+        clang_target = _probe_controlled_target(clang, environment)
+        runtime_target = _probe_controlled_target(runtime_compiler, environment)
+        if clang_target is not None and clang_target == runtime_target:
+            controlled = True
+            cache_supported = True
+            target = clang_target
+            driver_flags = (
+                "--no-default-config",
+                f"--target={target}",
+            )
+            linker_pin_flags = (f"-B{Path(linker).resolve().parent}",)
     return _CompilerBuildPlan(
         anchor_source=DIST_C_MAIN,
         runtime_source=RUNTIME_CPP,
@@ -637,69 +795,225 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
         compile_flags=tuple(COMPILER_COMPILE_FLAGS),
         test_link_flags=tuple(CLANG_LINK_FLAGS),
         compiler_link_flags=tuple(COMPILER_LINK_FLAGS),
+        controlled=controlled,
+        cache_supported=cache_supported,
+        target=target,
+        driver_flags=driver_flags,
+        linker_pin_flags=linker_pin_flags,
+        environment=environment,
     )
 
 
 def _tool_identity(executable: str) -> Dict[str, Any]:
-    path = Path(executable).resolve(strict=True)
-    stat = path.stat()
+    return _stable_file_identity(Path(executable))
+
+
+def _anchor_driver_arguments(
+    plan: _CompilerBuildPlan,
+    anchor_source: Path,
+) -> List[str]:
+    arguments = [
+        *plan.driver_flags,
+        "-std=c11",
+        *plan.compile_flags,
+    ]
+    if plan.controlled:
+        tracked_anchor_dir = plan.anchor_source.parent.resolve()
+        arguments.extend([
+            "-iquote", str(tracked_anchor_dir),
+            f"-ffile-prefix-map={anchor_source.parent}={tracked_anchor_dir}",
+        ])
+    return arguments
+
+
+def _compiler_commands(
+    plan: _CompilerBuildPlan,
+    build_dir: Path,
+    anchor_source: Path,
+) -> Tuple[List[str], List[str], List[str], Path, Path]:
+    object_path = build_dir / "main.o"
+    runtime_object_path = build_dir / "runtime.o"
+    exe_path = build_dir / plan.exe_name
+    anchor_cmd = [
+        plan.clang,
+        *_anchor_driver_arguments(plan, anchor_source),
+        "-c", str(anchor_source), "-o", str(object_path),
+    ]
+    runtime_cmd = [
+        plan.runtime_compiler,
+        *plan.driver_flags,
+        *plan.runtime_frontend_flags,
+        "-std=c++17", *plan.compile_flags,
+        "-D_CRT_SECURE_NO_WARNINGS", "-c", str(plan.runtime_source),
+        "-o", str(runtime_object_path),
+    ]
+    link_cmd = [
+        plan.clang,
+        *plan.driver_flags,
+        *plan.linker_pin_flags,
+        str(object_path), str(runtime_object_path), "-o", str(exe_path),
+        *plan.test_link_flags, *plan.compiler_link_flags,
+    ]
+    return anchor_cmd, runtime_cmd, link_cmd, exe_path, object_path
+
+
+def _canonical_compiler_recipes(plan: _CompilerBuildPlan) -> Dict[str, List[str]]:
+    tracked_anchor_dir = str(plan.anchor_source.parent.resolve())
+    anchor_prefix_map = (
+        f"-ffile-prefix-map=$anchor_snapshot_dir={tracked_anchor_dir}"
+    )
+    anchor_arguments: List[str] = [
+        "$clang", *plan.driver_flags, "-std=c11", *plan.compile_flags,
+    ]
+    if plan.controlled:
+        anchor_arguments.extend([
+            "-iquote", tracked_anchor_dir,
+            anchor_prefix_map,
+        ])
     return {
-        "path": os.path.normcase(str(path)),
-        "size": stat.st_size,
-        "sha256": _sha256_file(path),
+        "anchor_dependency_scan": [
+            *anchor_arguments,
+            "-E", "-dM", "-MD",
+            "-MT", "ring-cache-probe", "-MF", "$depfile",
+            "$tracked_anchor_snapshot",
+        ],
+        "anchor_compile": [
+            *anchor_arguments,
+            "-c", "$tracked_anchor_snapshot", "-o", "$anchor_object",
+        ],
+        "runtime_compile": [
+            "$runtime_compiler", *plan.driver_flags,
+            *plan.runtime_frontend_flags,
+            "-std=c++17", *plan.compile_flags,
+            "-D_CRT_SECURE_NO_WARNINGS", "-c", "$runtime",
+            "-o", "$runtime_object",
+        ],
+        "link": [
+            "$clang", *plan.driver_flags, *plan.linker_pin_flags,
+            "$anchor_object", "$runtime_object", "-o", "$compiler_executable",
+            *plan.test_link_flags, *plan.compiler_link_flags,
+        ],
     }
 
 
-def _linker_selection_flags(
-    test_link_flags: Sequence[str],
-) -> Tuple[str, ...]:
-    return tuple(
-        flag for flag in test_link_flags
-        if flag == "-fuse-ld=lld" or flag.startswith("-B")
+def _parse_make_dependencies(text: str) -> List[str]:
+    flattened = re.sub(r"\\\r?\n", " ", text)
+    prefix = "ring-cache-probe:"
+    if not flattened.startswith(prefix):
+        raise CompilerPreparationError(
+            "compiler dependency output has an unexpected target"
+        )
+    body = flattened[len(prefix):]
+    tokens: List[str] = []
+    current: List[str] = []
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char.isspace():
+            if current:
+                tokens.append("".join(current).replace("$$", "$"))
+                current = []
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(body):
+            following = body[index + 1]
+            if following.isspace() or following == "#":
+                current.append(following)
+                index += 2
+                continue
+        current.append(char)
+        index += 1
+    if current:
+        tokens.append("".join(current).replace("$$", "$"))
+    if not tokens:
+        raise CompilerPreparationError("compiler dependency closure is empty")
+    return tokens
+
+
+def _scan_anchor_dependencies(
+    plan: _CompilerBuildPlan,
+    anchor_snapshot: Path,
+    probe_dir: Path,
+) -> Tuple[Tuple[Dict[str, Any], ...], str]:
+    descriptor, depfile_name = tempfile.mkstemp(
+        prefix="anchor-", suffix=".d", dir=str(probe_dir),
     )
+    os.close(descriptor)
+    depfile = Path(depfile_name)
+    try:
+        command = [
+            plan.clang,
+            *_anchor_driver_arguments(plan, anchor_snapshot),
+            "-E", "-dM", "-MD",
+            "-MT", "ring-cache-probe", "-MF", str(depfile),
+            str(anchor_snapshot),
+        ]
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            timeout=TIMEOUT_COMPILE,
+            cwd=str(REPO),
+            env=_plan_environment(plan),
+        )
+        try:
+            dependency_text = depfile.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise CompilerPreparationError(
+                f"cannot read compiler dependency closure: {exc}"
+            ) from exc
+    finally:
+        depfile.unlink(missing_ok=True)
+
+    snapshot_resolved = anchor_snapshot.resolve(strict=True)
+    dependencies: Dict[str, Dict[str, Any]] = {}
+    for token in _parse_make_dependencies(dependency_text):
+        candidate = Path(token)
+        if not candidate.is_absolute():
+            candidate = REPO / candidate
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise CompilerPreparationError(
+                f"compiler dependency cannot be resolved: {token!r}"
+            ) from exc
+        if resolved == snapshot_resolved:
+            continue
+        record = _stable_file_identity(resolved)
+        dependencies[record["path"]] = record
+    closure = tuple(dependencies[path] for path in sorted(dependencies))
+    preprocessor_state = hashlib.sha256(result.stdout).hexdigest()
+    return closure, preprocessor_state
 
 
-def _compiler_cache_inputs(plan: _CompilerBuildPlan) -> Dict[str, Any]:
-    anchor_stat = plan.anchor_source.stat()
-    runtime_stat = plan.runtime_source.stat()
+def _compiler_cache_inputs(
+    plan: _CompilerBuildPlan,
+    anchor_snapshot: Path,
+    probe_dir: Path,
+) -> Dict[str, Any]:
+    if not plan.cache_supported or not plan.controlled:
+        raise CompilerPreparationError(
+            "compiler anchor cache requires a controlled Windows recipe"
+        )
+    dependencies, preprocessor_state = _scan_anchor_dependencies(
+        plan, anchor_snapshot, probe_dir,
+    )
+    anchor_identity = _stable_file_identity(anchor_snapshot)
+    anchor_identity["path"] = "$tracked_c_anchor"
     return {
         "schema": COMPILER_CACHE_SCHEMA,
         "version": COMPILER_CACHE_VERSION,
-        "sources": {
-            "tracked_c_anchor": {
-                "sha256": _sha256_file(plan.anchor_source),
-                "size": anchor_stat.st_size,
-            },
-            "runtime": {
-                "sha256": _sha256_file(plan.runtime_source),
-                "size": runtime_stat.st_size,
-            },
-        },
-        "commands": {
-            "anchor_compile": [
-                "$clang", "-std=c11", *plan.compile_flags,
-                "-c", "$tracked_c_anchor", "-o", "$anchor_object",
-            ],
-            "runtime_compile": [
-                "$runtime_compiler", *plan.runtime_frontend_flags,
-                "-std=c++17", *plan.compile_flags,
-                "-D_CRT_SECURE_NO_WARNINGS", "-c", "$runtime",
-                "-o", "$runtime_object",
-            ],
-            "link": [
-                "$clang", "$anchor_object", "$runtime_object",
-                "-o", "$compiler_executable",
-                *plan.test_link_flags, *plan.compiler_link_flags,
-            ],
-            "linker_selection_flags": list(_linker_selection_flags(
-                plan.test_link_flags,
-            )),
-        },
+        "anchor": anchor_identity,
+        "dependency_closure": list(dependencies),
+        "preprocessor_state_sha256": preprocessor_state,
+        "recipes": _canonical_compiler_recipes(plan),
         "tools": {
             "clang": _tool_identity(plan.clang),
             "runtime_compiler": _tool_identity(plan.runtime_compiler),
             "linker": _tool_identity(plan.linker),
         },
+        "target": plan.target,
+        "working_directory": os.path.normcase(str(REPO.resolve())),
         "platform": {
             "sys_platform": sys.platform,
             "os_name": os.name,
@@ -707,14 +1021,7 @@ def _compiler_cache_inputs(plan: _CompilerBuildPlan) -> Dict[str, Any]:
             "release": platform.release(),
             "machine": platform.machine(),
         },
-        "toolchain_environment": {
-            name: os.environ.get(name)
-            for name in (
-                "LIB", "LIBPATH", "INCLUDE", "SDKROOT",
-                "MACOSX_DEPLOYMENT_TARGET",
-            )
-        },
-        "executable_name": plan.exe_name,
+        "environment": dict(plan.environment),
     }
 
 
@@ -730,93 +1037,66 @@ def _compiler_cache_enabled() -> bool:
     return value.strip().casefold() not in {"0", "false", "no", "off"}
 
 
-def _compiler_commands(
+def _stage_anchor_snapshot(
     plan: _CompilerBuildPlan,
-    build_dir: Path,
-) -> Tuple[List[str], List[str], List[str], Path]:
-    object_path = build_dir / "main.o"
-    runtime_object_path = build_dir / "runtime.o"
-    exe_path = build_dir / plan.exe_name
-    anchor_cmd = [
-        plan.clang, "-std=c11", *plan.compile_flags,
-        "-c", str(plan.anchor_source), "-o", str(object_path),
-    ]
-    runtime_cmd = [
-        plan.runtime_compiler, *plan.runtime_frontend_flags,
-        "-std=c++17", *plan.compile_flags,
-        "-D_CRT_SECURE_NO_WARNINGS", "-c", str(plan.runtime_source),
-        "-o", str(runtime_object_path),
-    ]
-    link_cmd = [
-        plan.clang, str(object_path), str(runtime_object_path),
-        "-o", str(exe_path),
-        *plan.test_link_flags, *plan.compiler_link_flags,
-    ]
-    return anchor_cmd, runtime_cmd, link_cmd, exe_path
-
-
-def _staged_compiler_build_plan(
-    plan: _CompilerBuildPlan,
-    inputs: Dict[str, Any],
     staging_dir: Path,
-) -> _CompilerBuildPlan:
+) -> Path:
     source_dir = staging_dir / "inputs"
     source_dir.mkdir()
     staged_anchor = source_dir / "main.c"
-    staged_runtime = source_dir / "ring_runtime.cpp"
+    before = _stable_file_identity(plan.anchor_source)
     shutil.copy2(plan.anchor_source, staged_anchor)
-    shutil.copy2(plan.runtime_source, staged_runtime)
-
-    expected_sources = inputs["sources"]
-    for label, staged_source in (
-        ("tracked_c_anchor", staged_anchor),
-        ("runtime", staged_runtime),
-    ):
-        expected = expected_sources[label]
-        if (
-            staged_source.stat().st_size != expected["size"]
-            or _sha256_file(staged_source) != expected["sha256"]
-        ):
+    staged = _stable_file_identity(staged_anchor)
+    after = _stable_file_identity(plan.anchor_source)
+    for field in ("size", "sha256"):
+        if before[field] != staged[field] or before[field] != after[field]:
             raise CompilerPreparationError(
-                f"{label} changed while preparing the compiler cache key"
+                "tracked C anchor changed while taking the cache snapshot"
             )
-
-    return _CompilerBuildPlan(
-        anchor_source=staged_anchor,
-        runtime_source=staged_runtime,
-        clang=plan.clang,
-        runtime_compiler=plan.runtime_compiler,
-        runtime_frontend_flags=plan.runtime_frontend_flags,
-        linker=plan.linker,
-        exe_name=plan.exe_name,
-        compile_flags=plan.compile_flags,
-        test_link_flags=plan.test_link_flags,
-        compiler_link_flags=plan.compiler_link_flags,
-    )
+    return staged_anchor
 
 
-def _build_compiler_in_directory(
+def _compile_anchor(
     plan: _CompilerBuildPlan,
     build_dir: Path,
+    anchor_source: Path,
 ) -> Path:
-    anchor_cmd, runtime_cmd, link_cmd, exe_path = _compiler_commands(
-        plan, build_dir,
+    anchor_cmd, _, _, _, object_path = _compiler_commands(
+        plan, build_dir, anchor_source,
     )
     THINLTO_CACHE.mkdir(parents=True, exist_ok=True)
     _run_subprocess(
         "compiler_anchor_compile", anchor_cmd,
         check=True, capture_output=True, timeout=TIMEOUT_SELFCOMPILE,
-        cwd=str(REPO),
+        cwd=str(REPO), env=_plan_environment(plan),
+    )
+    if not object_path.is_file():
+        raise CompilerPreparationError(
+            "anchor compilation succeeded without producing main.o"
+        )
+    return object_path
+
+
+def _compile_runtime_and_link(
+    plan: _CompilerBuildPlan,
+    build_dir: Path,
+    anchor_source: Path,
+) -> Path:
+    _, runtime_cmd, link_cmd, exe_path, _ = _compiler_commands(
+        plan, build_dir, anchor_source,
     )
     _run_subprocess(
         "compiler_runtime_compile", runtime_cmd,
         check=True, capture_output=True, timeout=TIMEOUT_COMPILE,
-        cwd=str(REPO),
+        cwd=str(REPO), env=_plan_environment(plan),
     )
+    # A cache hit skips _compile_anchor(), which normally creates this shared
+    # LLD ThinLTO cache directory before the fresh link.
+    THINLTO_CACHE.mkdir(parents=True, exist_ok=True)
     _run_subprocess(
         "compiler_link", link_cmd,
         check=True, capture_output=True, timeout=TIMEOUT_COMPILER_LINK,
-        cwd=str(REPO),
+        cwd=str(REPO), env=_plan_environment(plan),
     )
     if not exe_path.is_file():
         raise CompilerPreparationError(
@@ -829,18 +1109,86 @@ def _cache_paths(cache_root: Path, key: str) -> Tuple[Path, Path]:
     return cache_root / "receipts" / f"{key}.json", cache_root / "artifacts"
 
 
-def _validated_cached_compiler(
+def _cache_thread_lock(path: Path) -> threading.RLock:
+    key = os.path.normcase(str(path.resolve()))
+    with _CACHE_THREAD_LOCKS_GUARD:
+        lock = _CACHE_THREAD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _CACHE_THREAD_LOCKS[key] = lock
+        return lock
+
+
+class _CacheFileLock:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._stream: Any = None
+        self._thread_lock = _cache_thread_lock(path)
+
+    def __enter__(self) -> "_CacheFileLock":
+        self._thread_lock.acquire()
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._stream = self.path.open("a+b")
+            self._stream.seek(0, os.SEEK_END)
+            if self._stream.tell() == 0:
+                self._stream.write(b"\0")
+                self._stream.flush()
+            self._stream.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(self._stream.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._stream.fileno(), fcntl.LOCK_EX)
+            return self
+        except BaseException:
+            if self._stream is not None:
+                self._stream.close()
+                self._stream = None
+            self._thread_lock.release()
+            raise
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self._stream.seek(0)
+                msvcrt.locking(self._stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._stream.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._stream.close()
+            self._stream = None
+            self._thread_lock.release()
+
+
+def _cache_global_lock(cache_root: Path) -> _CacheFileLock:
+    return _CacheFileLock(cache_root / "locks" / "global.lock")
+
+
+def _cache_key_lock(cache_root: Path, key: str) -> _CacheFileLock:
+    # A fixed stripe preserves same-key exclusion without allowing an
+    # unbounded lock-file/thread-lock registry as cache keys turn over.
+    return _CacheFileLock(cache_root / "locks" / "keys" / f"{key[:2]}.lock")
+
+
+def _artifact_mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def _validated_cached_anchor(
     cache_root: Path,
     key: str,
     inputs: Dict[str, Any],
-    exe_name: str,
-) -> Optional[Path]:
+) -> Optional[_CachedAnchor]:
     receipt_path, artifacts_dir = _cache_paths(cache_root, key)
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if set(receipt) != {
             "schema", "version", "key", "inputs", "artifact",
-            "artifact_sha256", "artifact_size",
+            "artifact_sha256", "artifact_size", "artifact_mode",
         }:
             return None
         if (
@@ -853,16 +1201,19 @@ def _validated_cached_compiler(
             return None
         artifact_hash = receipt["artifact_sha256"]
         artifact_size = receipt["artifact_size"]
+        artifact_mode = receipt["artifact_mode"]
         if (
             not isinstance(artifact_hash, str)
             or re.fullmatch(r"[0-9a-f]{64}", artifact_hash) is None
             or not isinstance(artifact_size, int)
             or isinstance(artifact_size, bool)
             or artifact_size < 0
+            or not isinstance(artifact_mode, int)
+            or isinstance(artifact_mode, bool)
+            or artifact_mode < 0
         ):
             return None
-        suffix = Path(exe_name).suffix or ".bin"
-        artifact_name = f"{artifact_hash}{suffix}"
+        artifact_name = f"{artifact_hash}.o"
         if receipt["artifact"] != artifact_name:
             return None
         artifact_path = artifacts_dir / artifact_name
@@ -870,189 +1221,443 @@ def _validated_cached_compiler(
             return None
         if _sha256_file(artifact_path) != artifact_hash:
             return None
-        return artifact_path
+        if _artifact_mode(artifact_path) != artifact_mode:
+            return None
+        return _CachedAnchor(
+            artifact_path, artifact_hash, artifact_size, artifact_mode,
+        )
     except (OSError, ValueError, TypeError, KeyError):
         return None
 
 
-def _write_cache_receipt(
-    receipt_path: Path,
-    receipt: Dict[str, Any],
-) -> None:
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+def _write_json_temp(parent: Path, prefix: str, value: Dict[str, Any]) -> Path:
+    parent.mkdir(parents=True, exist_ok=True)
     descriptor, temp_name = tempfile.mkstemp(
-        prefix=f".{receipt_path.stem}-", suffix=".tmp",
-        dir=str(receipt_path.parent),
+        prefix=prefix, suffix=".tmp", dir=str(parent),
     )
     temp_path = Path(temp_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
             json.dump(
-                receipt, stream, sort_keys=True,
+                value, stream, sort_keys=True,
                 separators=(",", ":"), allow_nan=False,
             )
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temp_path, receipt_path)
-    finally:
-        try:
-            temp_path.unlink()
-        except FileNotFoundError:
-            pass
+        return temp_path
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
-def _publish_cache_artifact(
-    staged_executable: Path,
-    artifact_path: Path,
-) -> None:
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(
-        prefix=f".{artifact_path.stem}-", suffix=".tmp",
-        dir=str(artifact_path.parent),
-    )
-    os.close(descriptor)
-    temp_path = Path(temp_name)
+def _hardlink_once(source: Path, destination: Path) -> bool:
+    destination.parent.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copy2(staged_executable, temp_path)
-        try:
-            os.link(temp_path, artifact_path)
-        except FileExistsError:
-            pass
-        finally:
-            temp_path.unlink(missing_ok=True)
+        os.link(source, destination)
+        return True
+    except FileExistsError:
+        return False
+    except OSError as exc:
+        raise CompilerPreparationError(
+            f"compiler cache requires atomic hard-link publication: {exc}"
+        ) from exc
+
+
+def _create_json_once(path: Path, value: Dict[str, Any]) -> bool:
+    temp_path = _write_json_temp(path.parent, f".{path.stem}-", value)
+    try:
+        return _hardlink_once(temp_path, path)
     finally:
         temp_path.unlink(missing_ok=True)
 
 
-def _publish_cached_compiler(
+def _touch_cache_access(cache_root: Path, key: str) -> None:
+    access = cache_root / "access" / key
+    access.parent.mkdir(parents=True, exist_ok=True)
+    access.touch(exist_ok=True)
+
+
+def _record_cache_conflict_locked(
     cache_root: Path,
     key: str,
-    inputs: Dict[str, Any],
-    exe_name: str,
-    staged_executable: Path,
+    winner: _CachedAnchor,
+    candidate: _CachedAnchor,
 ) -> Path:
-    receipt_path, artifacts_dir = _cache_paths(cache_root, key)
-    artifact_hash = _sha256_file(staged_executable)
-    artifact_size = staged_executable.stat().st_size
-    suffix = Path(exe_name).suffix or ".bin"
-    artifact_name = f"{artifact_hash}{suffix}"
-    artifact_path = artifacts_dir / artifact_name
-
-    existing_is_valid = False
-    try:
-        existing_is_valid = (
-            artifact_path.stat().st_size == artifact_size
-            and _sha256_file(artifact_path) == artifact_hash
-        )
-    except OSError:
-        pass
-    if not existing_is_valid:
-        _publish_cache_artifact(staged_executable, artifact_path)
-    if (
-        artifact_path.stat().st_size != artifact_size
-        or _sha256_file(artifact_path) != artifact_hash
-    ):
-        raise CompilerPreparationError(
-            "published compiler artifact failed hash validation"
-        )
-
-    receipt = {
+    evidence_dir = cache_root / "conflicts" / key
+    evidence_path = evidence_dir / (
+        f"{time.time_ns()}-{os.getpid()}-{threading.get_ident()}.json"
+    )
+    evidence = {
         "schema": COMPILER_CACHE_SCHEMA,
         "version": COMPILER_CACHE_VERSION,
         "key": key,
-        "inputs": inputs,
-        "artifact": artifact_name,
-        "artifact_sha256": artifact_hash,
-        "artifact_size": artifact_size,
+        "winner": {
+            "sha256": winner.sha256,
+            "size": winner.size,
+            "mode": winner.mode,
+        },
+        "candidate": {
+            "sha256": candidate.sha256,
+            "size": candidate.size,
+            "mode": candidate.mode,
+        },
     }
-    _write_cache_receipt(receipt_path, receipt)
-    validated = _validated_cached_compiler(
-        cache_root, key, inputs, exe_name,
-    )
-    if validated is None:
+    if not _create_json_once(evidence_path, evidence):
         raise CompilerPreparationError(
-            "published compiler cache receipt failed validation"
+            f"compiler cache conflict evidence already exists: {evidence_path}"
         )
-    return validated
+    _prune_cache_conflicts_locked(cache_root)
+    return evidence_path
 
 
-def _copy_compiler_for_run(artifact: Path, exe_name: str) -> str:
+def _same_cached_anchor(left: _CachedAnchor, right: _CachedAnchor) -> bool:
+    return (
+        left.sha256 == right.sha256
+        and left.size == right.size
+        and left.mode == right.mode
+    )
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _cleanup_compiler_cache_locked(
+    cache_root: Path,
+    *,
+    now: Optional[float] = None,
+    protected_keys: Tuple[str, ...] = (),
+) -> None:
+    current_time = time.time() if now is None else now
+    stale_before = current_time - COMPILER_CACHE_STALE_SECONDS
+    for path in cache_root.glob(".staging-*"):
+        if path.stat().st_mtime < stale_before:
+            _remove_path(path)
+    for directory_name in ("receipts", "artifacts"):
+        directory = cache_root / directory_name
+        if directory.is_dir():
+            for path in directory.glob(".*.tmp"):
+                if path.stat().st_mtime < stale_before:
+                    _remove_path(path)
+    conflict_root = cache_root / "conflicts"
+    if conflict_root.is_dir():
+        for path in conflict_root.glob("*/.*.tmp"):
+            if path.stat().st_mtime < stale_before:
+                _remove_path(path)
+
+    receipt_dir = cache_root / "receipts"
+    entries: List[Dict[str, Any]] = []
+    if receipt_dir.is_dir():
+        for receipt_path in receipt_dir.glob("*.json"):
+            artifact_name: Optional[str] = None
+            artifact_size = 0
+            try:
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                if isinstance(receipt.get("artifact"), str):
+                    artifact_name = receipt["artifact"]
+                if (
+                    isinstance(receipt.get("artifact_size"), int)
+                    and not isinstance(receipt["artifact_size"], bool)
+                    and receipt["artifact_size"] >= 0
+                ):
+                    artifact_size = receipt["artifact_size"]
+            except (OSError, ValueError, TypeError):
+                pass
+            key = receipt_path.stem
+            access_path = cache_root / "access" / key
+            last_used = (
+                access_path.stat().st_mtime
+                if access_path.is_file() else receipt_path.stat().st_mtime
+            )
+            entries.append({
+                "key": key,
+                "receipt": receipt_path,
+                "access": access_path,
+                "artifact": artifact_name,
+                "size": artifact_size,
+                "last_used": last_used,
+            })
+    protected = set(protected_keys)
+    entries.sort(
+        key=lambda entry: (
+            entry["key"] in protected,
+            entry["last_used"],
+        ),
+        reverse=True,
+    )
+    kept: List[Dict[str, Any]] = []
+    kept_artifacts: Dict[str, int] = {}
+    total_bytes = 0
+    for entry in entries:
+        artifact_name = entry["artifact"]
+        extra_bytes = 0
+        if artifact_name is not None and artifact_name not in kept_artifacts:
+            extra_bytes = entry["size"]
+        retain = entry["key"] in protected or (
+            len(kept) < COMPILER_CACHE_MAX_ENTRIES
+            and total_bytes + extra_bytes <= COMPILER_CACHE_MAX_BYTES
+        )
+        if retain:
+            kept.append(entry)
+            if artifact_name is not None and artifact_name not in kept_artifacts:
+                kept_artifacts[artifact_name] = entry["size"]
+                total_bytes += extra_bytes
+        else:
+            entry["receipt"].unlink(missing_ok=True)
+            entry["access"].unlink(missing_ok=True)
+
+    artifacts_dir = cache_root / "artifacts"
+    referenced = set(kept_artifacts)
+    if artifacts_dir.is_dir():
+        for artifact in artifacts_dir.glob("*.o"):
+            if artifact.name not in referenced:
+                artifact.unlink(missing_ok=True)
+
+    access_dir = cache_root / "access"
+    if access_dir.is_dir():
+        retained_keys = {entry["key"] for entry in kept}
+        for access_path in access_dir.iterdir():
+            if access_path.is_file() and access_path.name not in retained_keys:
+                access_path.unlink(missing_ok=True)
+
+    _prune_cache_conflicts_locked(cache_root)
+
+
+def _prune_cache_conflicts_locked(cache_root: Path) -> None:
+    conflict_root = cache_root / "conflicts"
+    if not conflict_root.is_dir():
+        return
+    conflicts = sorted(
+        conflict_root.glob("*/*.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for conflict in conflicts[COMPILER_CACHE_MAX_CONFLICTS:]:
+        conflict.unlink(missing_ok=True)
+    for directory in conflict_root.iterdir():
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+
+
+def _candidate_anchor(path: Path) -> _CachedAnchor:
+    identity = _stable_file_identity(path, include_mode=True)
+    return _CachedAnchor(
+        path=path,
+        sha256=identity["sha256"],
+        size=identity["size"],
+        mode=identity["mode"],
+    )
+
+
+def _publish_cached_anchor(
+    cache_root: Path,
+    key: str,
+    inputs: Dict[str, Any],
+    staged_object: Path,
+) -> _CachedAnchor:
+    candidate = _candidate_anchor(staged_object)
+    if candidate.size > COMPILER_CACHE_MAX_BYTES:
+        raise CompilerPreparationError(
+            "compiler anchor object exceeds the persistent cache byte limit"
+        )
+    receipt_path, artifacts_dir = _cache_paths(cache_root, key)
+    artifact_path = artifacts_dir / f"{candidate.sha256}.o"
+    with _cache_global_lock(cache_root):
+        with _cache_key_lock(cache_root, key):
+            winner = _validated_cached_anchor(cache_root, key, inputs)
+            if receipt_path.exists():
+                if winner is None:
+                    raise CompilerPreparationError(
+                        f"compiler cache entry failed validation: {receipt_path}"
+                    )
+                _cleanup_compiler_cache_locked(
+                    cache_root, protected_keys=(key,),
+                )
+                if not _same_cached_anchor(winner, candidate):
+                    evidence = _record_cache_conflict_locked(
+                        cache_root, key, winner, candidate,
+                    )
+                    raise CompilerPreparationError(
+                        "same compiler cache key produced divergent anchor objects; "
+                        f"evidence: {evidence}"
+                    )
+                _touch_cache_access(cache_root, key)
+                return winner
+
+            _cleanup_compiler_cache_locked(cache_root)
+
+            try:
+                # Windows rejects fsync on a read-only CRT descriptor even
+                # though no bytes are written here.  Open read/write solely to
+                # make the durability barrier portable before publication.
+                with staged_object.open("r+b") as stream:
+                    os.fsync(stream.fileno())
+            except OSError as exc:
+                raise CompilerPreparationError(
+                    f"cannot flush staged compiler anchor object: {exc}"
+                ) from exc
+            if not artifact_path.exists():
+                _hardlink_once(staged_object, artifact_path)
+            published = _candidate_anchor(artifact_path)
+            if not _same_cached_anchor(published, candidate):
+                raise CompilerPreparationError(
+                    "content-addressed compiler anchor artifact is inconsistent"
+                )
+            receipt = {
+                "schema": COMPILER_CACHE_SCHEMA,
+                "version": COMPILER_CACHE_VERSION,
+                "key": key,
+                "inputs": inputs,
+                "artifact": artifact_path.name,
+                "artifact_sha256": candidate.sha256,
+                "artifact_size": candidate.size,
+                "artifact_mode": candidate.mode,
+            }
+            if not _create_json_once(receipt_path, receipt):
+                winner = _validated_cached_anchor(cache_root, key, inputs)
+                if winner is None:
+                    raise CompilerPreparationError(
+                        f"compiler cache receipt lost its immutable CAS: {receipt_path}"
+                    )
+                if not _same_cached_anchor(winner, candidate):
+                    evidence = _record_cache_conflict_locked(
+                        cache_root, key, winner, candidate,
+                    )
+                    raise CompilerPreparationError(
+                        "same compiler cache key produced divergent anchor objects; "
+                        f"evidence: {evidence}"
+                    )
+                _touch_cache_access(cache_root, key)
+                return winner
+            winner = _validated_cached_anchor(cache_root, key, inputs)
+            if winner is None:
+                raise CompilerPreparationError(
+                    "published compiler anchor cache entry failed validation"
+                )
+            _touch_cache_access(cache_root, key)
+            _cleanup_compiler_cache_locked(
+                cache_root, protected_keys=(key,),
+            )
+            return winner
+
+
+def _copy_cached_anchor(source: _CachedAnchor, destination: Path) -> None:
+    shutil.copy2(source.path, destination)
+    copied = _candidate_anchor(destination)
+    if not _same_cached_anchor(source, copied):
+        raise CompilerPreparationError(
+            "fresh compiler anchor copy failed receipt validation"
+        )
+
+
+def _lookup_cached_anchor(
+    cache_root: Path,
+    key: str,
+    inputs: Dict[str, Any],
+    destination: Path,
+) -> bool:
+    receipt_path, _ = _cache_paths(cache_root, key)
+    with _cache_global_lock(cache_root):
+        with _cache_key_lock(cache_root, key):
+            cached = _validated_cached_anchor(cache_root, key, inputs)
+            if receipt_path.exists() and cached is None:
+                raise CompilerPreparationError(
+                    f"compiler cache entry failed validation: {receipt_path}"
+                )
+            if cached is None:
+                _cleanup_compiler_cache_locked(cache_root)
+                return False
+            _cleanup_compiler_cache_locked(
+                cache_root, protected_keys=(key,),
+            )
+            _copy_cached_anchor(cached, destination)
+            _touch_cache_access(cache_root, key)
+            return True
+
+
+def _prepare_compiler(plan: _CompilerBuildPlan) -> str:
     run_dir = Path(tempfile.mkdtemp(prefix="ring_build_"))
-    exe_path = run_dir / exe_name
     try:
-        expected_hash = artifact.stem
-        if re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
-            raise CompilerPreparationError(
-                "compiler cache artifact name is not content-addressed"
+        if not plan.controlled:
+            _compile_anchor(plan, run_dir, plan.anchor_source)
+            executable = _compile_runtime_and_link(
+                plan, run_dir, plan.anchor_source,
             )
-        shutil.copy2(artifact, exe_path)
-        if _sha256_file(exe_path) != expected_hash:
-            raise CompilerPreparationError(
-                "fresh compiler copy failed hash validation"
+        elif not plan.cache_supported or not _compiler_cache_enabled():
+            anchor_snapshot = _stage_anchor_snapshot(plan, run_dir)
+            _compile_anchor(plan, run_dir, anchor_snapshot)
+            executable = _compile_runtime_and_link(
+                plan, run_dir, anchor_snapshot,
             )
+        else:
+            cache_root = COMPILER_ARTIFACT_CACHE
+            tracer = _PHASE_TRACER
+            prepare_started_ns = (
+                time.perf_counter_ns() if tracer is not None else None
+            )
+            cache_root.mkdir(parents=True, exist_ok=True)
+            staging_dir = Path(tempfile.mkdtemp(
+                prefix=".staging-lookup-", dir=str(cache_root),
+            ))
+            try:
+                anchor_snapshot = _stage_anchor_snapshot(plan, staging_dir)
+                inputs = _compiler_cache_inputs(
+                    plan, anchor_snapshot, staging_dir,
+                )
+                key = _compiler_cache_key(inputs)
+                run_object = run_dir / "main.o"
+                hit = _lookup_cached_anchor(
+                    cache_root, key, inputs, run_object,
+                )
+                if hit:
+                    confirmed_inputs = _compiler_cache_inputs(
+                        plan, anchor_snapshot, staging_dir,
+                    )
+                    if confirmed_inputs != inputs:
+                        raise CompilerPreparationError(
+                            "compiler anchor cache inputs changed during lookup"
+                        )
+                    if tracer is not None and prepare_started_ns is not None:
+                        tracer.record_stage(
+                            suite=None,
+                            case="runner",
+                            stage="compiler_anchor_prepare",
+                            duration_ns=(
+                                time.perf_counter_ns() - prepare_started_ns
+                            ),
+                            executed=False,
+                            complete=True,
+                            outcome="cached",
+                        )
+                else:
+                    staged_object = _compile_anchor(
+                        plan, staging_dir, anchor_snapshot,
+                    )
+                    confirmed_inputs = _compiler_cache_inputs(
+                        plan, anchor_snapshot, staging_dir,
+                    )
+                    if confirmed_inputs != inputs:
+                        raise CompilerPreparationError(
+                            "compiler anchor cache inputs changed during construction"
+                        )
+                    cached = _publish_cached_anchor(
+                        cache_root, key, inputs, staged_object,
+                    )
+                    _copy_cached_anchor(cached, run_object)
+                executable = _compile_runtime_and_link(
+                    plan, run_dir, anchor_snapshot,
+                )
+            finally:
+                shutil.rmtree(staging_dir, ignore_errors=True)
     except BaseException:
         shutil.rmtree(run_dir, ignore_errors=True)
         raise
     atexit.register(shutil.rmtree, str(run_dir), True)
-    return str(exe_path)
-
-
-def _prepare_compiler(plan: _CompilerBuildPlan) -> str:
-    tracer = _PHASE_TRACER
-    prepare_started_ns = (
-        time.perf_counter_ns() if tracer is not None else None
-    )
-    if not _compiler_cache_enabled():
-        run_dir = Path(tempfile.mkdtemp(prefix="ring_build_"))
-        try:
-            executable = _build_compiler_in_directory(plan, run_dir)
-        except BaseException:
-            shutil.rmtree(run_dir, ignore_errors=True)
-            raise
-        atexit.register(shutil.rmtree, str(run_dir), True)
-        return str(executable)
-
-    cache_root = COMPILER_ARTIFACT_CACHE
-    inputs = _compiler_cache_inputs(plan)
-    key = _compiler_cache_key(inputs)
-    cached_receipt_path, _ = _cache_paths(cache_root, key)
-    cached = _validated_cached_compiler(
-        cache_root, key, inputs, plan.exe_name,
-    )
-    if cached is not None:
-        copied = _copy_compiler_for_run(cached, plan.exe_name)
-        if tracer is not None and prepare_started_ns is not None:
-            tracer.record_stage(
-                suite=None, case="runner", stage="compiler_prepare",
-                duration_ns=time.perf_counter_ns() - prepare_started_ns,
-                executed=False, complete=True, outcome="cached",
-            )
-        return copied
-    if cached_receipt_path.exists():
-        raise CompilerPreparationError(
-            f"compiler cache entry failed validation: {cached_receipt_path}"
-        )
-
-    cache_root.mkdir(parents=True, exist_ok=True)
-    staging_dir = Path(tempfile.mkdtemp(
-        prefix=f".staging-{key[:12]}-", dir=str(cache_root),
-    ))
-    try:
-        staged_plan = _staged_compiler_build_plan(plan, inputs, staging_dir)
-        staged_executable = _build_compiler_in_directory(
-            staged_plan, staging_dir,
-        )
-        if _compiler_cache_inputs(plan) != inputs:
-            raise CompilerPreparationError(
-                "compiler cache inputs changed during construction"
-            )
-        artifact = _publish_cached_compiler(
-            cache_root, key, inputs, plan.exe_name, staged_executable,
-        )
-    finally:
-        shutil.rmtree(staging_dir, ignore_errors=True)
-    return _copy_compiler_for_run(artifact, plan.exe_name)
+    return str(executable)
 
 
 def find_ring_exe() -> Optional[str]:
