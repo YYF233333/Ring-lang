@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -811,6 +812,61 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 )
             runner._cleanup_compiler_cache_locked(cache_root)
             self.assertTrue(receipt_path.exists())
+
+    def test_mode_only_divergence_survives_double_fault_and_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            payload = b"identical object bytes\n"
+            inputs, key, winner = self.publish(
+                cache_root, root / "winner", payload,
+            )
+            divergent = root / "divergent.o"
+            divergent.write_bytes(payload)
+            os.chmod(divergent, winner.mode ^ stat.S_IWUSR)
+            candidate = runner._candidate_anchor(divergent)
+            self.assertEqual(candidate.sha256, winner.sha256)
+            self.assertEqual(candidate.size, winner.size)
+            self.assertNotEqual(candidate.mode, winner.mode)
+            self.assertFalse(runner._same_cached_anchor(winner, candidate))
+
+            with (
+                patch.object(
+                    runner.os, "replace", side_effect=OSError("rename failure"),
+                ),
+                patch.object(
+                    runner, "_create_json_once",
+                    side_effect=OSError("create-once failure"),
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "create-once failure"):
+                    runner._publish_cached_anchor(
+                        cache_root, key, inputs, divergent,
+                    )
+
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            marker = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertTrue(runner._is_cache_poison_record(marker, key))
+            self.assertEqual(
+                marker["winner"]["sha256"], marker["candidate"]["sha256"],
+            )
+            self.assertNotEqual(
+                marker["winner"]["mode"], marker["candidate"]["mode"],
+            )
+            runner._cleanup_compiler_cache_locked(cache_root)
+            self.assertTrue(receipt_path.exists())
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._lookup_cached_anchor(
+                    cache_root, key, inputs, root / "future.o",
+                )
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError, "prior divergent build",
+            ):
+                runner._publish_cached_anchor(
+                    cache_root, key, inputs, divergent,
+                )
 
     def test_hardlink_publication_failure_is_loud_and_never_creates_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1307,8 +1307,16 @@ def _poison_cache_key_locked(
         "version": COMPILER_CACHE_POISON_VERSION,
         "key": key,
         "reason": "same_key_divergent_anchor_objects",
-        "winner_sha256": winner.sha256,
-        "candidate_sha256": candidate.sha256,
+        "winner": {
+            "sha256": winner.sha256,
+            "size": winner.size,
+            "mode": winner.mode,
+        },
+        "candidate": {
+            "sha256": candidate.sha256,
+            "size": candidate.size,
+            "mode": candidate.mode,
+        },
     }
     try:
         # The existing receipt is already durable and immutable.  Rename it as
@@ -1348,17 +1356,30 @@ def _is_cache_poison_record(value: Any, key: str) -> bool:
         isinstance(value, dict)
         and set(value) == {
             "schema", "version", "key", "reason",
-            "winner_sha256", "candidate_sha256",
+            "winner", "candidate",
         }
         and value.get("schema") == COMPILER_CACHE_POISON_SCHEMA
         and value.get("version") == COMPILER_CACHE_POISON_VERSION
         and value.get("key") == key
         and value.get("reason") == "same_key_divergent_anchor_objects"
-        and isinstance(value.get("winner_sha256"), str)
-        and re.fullmatch(r"[0-9a-f]{64}", value["winner_sha256"]) is not None
-        and isinstance(value.get("candidate_sha256"), str)
-        and re.fullmatch(r"[0-9a-f]{64}", value["candidate_sha256"]) is not None
-        and value["winner_sha256"] != value["candidate_sha256"]
+        and _is_cache_poison_identity(value.get("winner"))
+        and _is_cache_poison_identity(value.get("candidate"))
+        and value["winner"] != value["candidate"]
+    )
+
+
+def _is_cache_poison_identity(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"sha256", "size", "mode"}
+        and isinstance(value.get("sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is not None
+        and isinstance(value.get("size"), int)
+        and not isinstance(value["size"], bool)
+        and value["size"] >= 0
+        and isinstance(value.get("mode"), int)
+        and not isinstance(value["mode"], bool)
+        and value["mode"] >= 0
     )
 
 
