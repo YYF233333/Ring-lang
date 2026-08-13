@@ -25,6 +25,7 @@ import atexit
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -51,6 +52,12 @@ RUNTIME_O = REPO / "ring_runtime.o"
 DIST_C_DIR = REPO / "compiler" / "dist-c"
 DIST_C_MAIN = DIST_C_DIR / "main.c"
 THINLTO_CACHE = Path(tempfile.gettempdir()) / "ring-lang-thinlto-cache"
+COMPILER_ARTIFACT_CACHE = (
+    Path(tempfile.gettempdir()) / "ring-lang-compiler-artifacts-v1"
+)
+COMPILER_CACHE_ENV = "RING_TEST_COMPILER_CACHE"
+COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-cache.v1"
+COMPILER_CACHE_VERSION = 1
 PARITY_MATRIX = REPO / "tests" / "parity_matrix.json"
 STRUCTURAL_DIR = CASES_DIR / "structural"
 CODEGEN_C_SOURCE = REPO / "compiler" / "codegen_c.ring"
@@ -529,79 +536,566 @@ def find_clang() -> Optional[str]:
     return shutil.which("clang")
 
 
-def find_ring_exe() -> Optional[str]:
-    """Build the compiler executable from the tracked dist-c source anchor."""
+@dataclass(frozen=True)
+class _CompilerBuildPlan:
+    anchor_source: Path
+    runtime_source: Path
+    clang: str
+    runtime_compiler: str
+    runtime_frontend_flags: Tuple[str, ...]
+    linker: str
+    exe_name: str
+    compile_flags: Tuple[str, ...]
+    test_link_flags: Tuple[str, ...]
+    compiler_link_flags: Tuple[str, ...]
 
-    exe_name = "ring.exe" if sys.platform == "win32" else "ring"
-    if not DIST_C_MAIN.is_file():
+
+class CompilerPreparationError(RuntimeError):
+    """The tracked compiler could not be prepared without weakening trust."""
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resolved_executable(executable: str) -> Optional[str]:
+    candidate = shutil.which(executable)
+    if candidate is None:
+        path = Path(executable)
+        if not path.is_file():
+            return None
+        candidate = str(path)
+    try:
+        return str(Path(candidate).resolve(strict=True))
+    except OSError:
         return None
 
-    clang = find_clang()
+
+def _find_lld_linker(clang: str) -> Optional[str]:
+    if sys.platform == "win32":
+        names = ("lld-link.exe", "lld-link")
+    elif sys.platform == "darwin":
+        names = ("ld64.lld", "ld.lld", "lld")
+    else:
+        names = ("ld.lld", "lld")
+
+    try:
+        clang_dir = Path(clang).resolve(strict=True).parent
+    except OSError:
+        clang_dir = Path(clang).parent
+    for name in names:
+        sibling = clang_dir / name
+        if sibling.is_file():
+            return str(sibling.resolve())
+    for name in names:
+        resolved = _resolved_executable(name)
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
+    if not DIST_C_MAIN.is_file() or not RUNTIME_CPP.is_file():
+        return None
+    clang_discovered = find_clang()
+    if clang_discovered is None:
+        return None
+    clang = _resolved_executable(clang_discovered)
     if clang is None:
         return None
 
-    # Compile and link in a temp directory, so test discovery never trusts a
-    # stale root ring.exe or a compiler from PATH.
-    tmpdir = tempfile.mkdtemp(prefix="ring_build_")
-    atexit.register(shutil.rmtree, tmpdir, True)
-    object_path = os.path.join(tmpdir, "main.o")
-    runtime_object_path = os.path.join(tmpdir, "runtime.o")
-    exe_path = os.path.join(tmpdir, exe_name)
+    cpp_discovered = shutil.which("clang++")
+    cpp_compiler = (
+        _resolved_executable(cpp_discovered)
+        if cpp_discovered is not None else None
+    )
+    if cpp_compiler is None:
+        runtime_compiler = clang
+        runtime_frontend_flags = ("-x", "c++")
+    else:
+        runtime_compiler = cpp_compiler
+        runtime_frontend_flags = ()
 
-    try:
-        THINLTO_CACHE.mkdir(parents=True, exist_ok=True)
-        _run_subprocess(
-            "compiler_anchor_compile",
-            [
-                clang, "-std=c11", *COMPILER_COMPILE_FLAGS,
-                "-c", str(DIST_C_MAIN),
-                "-o", object_path,
+    linker = _find_lld_linker(clang)
+    if linker is None:
+        return None
+    return _CompilerBuildPlan(
+        anchor_source=DIST_C_MAIN,
+        runtime_source=RUNTIME_CPP,
+        clang=clang,
+        runtime_compiler=runtime_compiler,
+        runtime_frontend_flags=runtime_frontend_flags,
+        linker=linker,
+        exe_name="ring.exe" if sys.platform == "win32" else "ring",
+        compile_flags=tuple(COMPILER_COMPILE_FLAGS),
+        test_link_flags=tuple(CLANG_LINK_FLAGS),
+        compiler_link_flags=tuple(COMPILER_LINK_FLAGS),
+    )
+
+
+def _tool_identity(executable: str) -> Dict[str, Any]:
+    path = Path(executable).resolve(strict=True)
+    stat = path.stat()
+    return {
+        "path": os.path.normcase(str(path)),
+        "size": stat.st_size,
+        "sha256": _sha256_file(path),
+    }
+
+
+def _linker_selection_flags(
+    test_link_flags: Sequence[str],
+) -> Tuple[str, ...]:
+    return tuple(
+        flag for flag in test_link_flags
+        if flag == "-fuse-ld=lld" or flag.startswith("-B")
+    )
+
+
+def _compiler_cache_inputs(plan: _CompilerBuildPlan) -> Dict[str, Any]:
+    anchor_stat = plan.anchor_source.stat()
+    runtime_stat = plan.runtime_source.stat()
+    return {
+        "schema": COMPILER_CACHE_SCHEMA,
+        "version": COMPILER_CACHE_VERSION,
+        "sources": {
+            "tracked_c_anchor": {
+                "sha256": _sha256_file(plan.anchor_source),
+                "size": anchor_stat.st_size,
+            },
+            "runtime": {
+                "sha256": _sha256_file(plan.runtime_source),
+                "size": runtime_stat.st_size,
+            },
+        },
+        "commands": {
+            "anchor_compile": [
+                "$clang", "-std=c11", *plan.compile_flags,
+                "-c", "$tracked_c_anchor", "-o", "$anchor_object",
             ],
-            check=True,
-            capture_output=True,
-            timeout=TIMEOUT_SELFCOMPILE,
-            cwd=str(REPO),
+            "runtime_compile": [
+                "$runtime_compiler", *plan.runtime_frontend_flags,
+                "-std=c++17", *plan.compile_flags,
+                "-D_CRT_SECURE_NO_WARNINGS", "-c", "$runtime",
+                "-o", "$runtime_object",
+            ],
+            "link": [
+                "$clang", "$anchor_object", "$runtime_object",
+                "-o", "$compiler_executable",
+                *plan.test_link_flags, *plan.compiler_link_flags,
+            ],
+            "linker_selection_flags": list(_linker_selection_flags(
+                plan.test_link_flags,
+            )),
+        },
+        "tools": {
+            "clang": _tool_identity(plan.clang),
+            "runtime_compiler": _tool_identity(plan.runtime_compiler),
+            "linker": _tool_identity(plan.linker),
+        },
+        "platform": {
+            "sys_platform": sys.platform,
+            "os_name": os.name,
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+        },
+        "toolchain_environment": {
+            name: os.environ.get(name)
+            for name in (
+                "LIB", "LIBPATH", "INCLUDE", "SDKROOT",
+                "MACOSX_DEPLOYMENT_TARGET",
+            )
+        },
+        "executable_name": plan.exe_name,
+    }
+
+
+def _compiler_cache_key(inputs: Dict[str, Any]) -> str:
+    encoded = json.dumps(
+        inputs, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _compiler_cache_enabled() -> bool:
+    value = os.environ.get(COMPILER_CACHE_ENV, "1")
+    return value.strip().casefold() not in {"0", "false", "no", "off"}
+
+
+def _compiler_commands(
+    plan: _CompilerBuildPlan,
+    build_dir: Path,
+) -> Tuple[List[str], List[str], List[str], Path]:
+    object_path = build_dir / "main.o"
+    runtime_object_path = build_dir / "runtime.o"
+    exe_path = build_dir / plan.exe_name
+    anchor_cmd = [
+        plan.clang, "-std=c11", *plan.compile_flags,
+        "-c", str(plan.anchor_source), "-o", str(object_path),
+    ]
+    runtime_cmd = [
+        plan.runtime_compiler, *plan.runtime_frontend_flags,
+        "-std=c++17", *plan.compile_flags,
+        "-D_CRT_SECURE_NO_WARNINGS", "-c", str(plan.runtime_source),
+        "-o", str(runtime_object_path),
+    ]
+    link_cmd = [
+        plan.clang, str(object_path), str(runtime_object_path),
+        "-o", str(exe_path),
+        *plan.test_link_flags, *plan.compiler_link_flags,
+    ]
+    return anchor_cmd, runtime_cmd, link_cmd, exe_path
+
+
+def _staged_compiler_build_plan(
+    plan: _CompilerBuildPlan,
+    inputs: Dict[str, Any],
+    staging_dir: Path,
+) -> _CompilerBuildPlan:
+    source_dir = staging_dir / "inputs"
+    source_dir.mkdir()
+    staged_anchor = source_dir / "main.c"
+    staged_runtime = source_dir / "ring_runtime.cpp"
+    shutil.copy2(plan.anchor_source, staged_anchor)
+    shutil.copy2(plan.runtime_source, staged_runtime)
+
+    expected_sources = inputs["sources"]
+    for label, staged_source in (
+        ("tracked_c_anchor", staged_anchor),
+        ("runtime", staged_runtime),
+    ):
+        expected = expected_sources[label]
+        if (
+            staged_source.stat().st_size != expected["size"]
+            or _sha256_file(staged_source) != expected["sha256"]
+        ):
+            raise CompilerPreparationError(
+                f"{label} changed while preparing the compiler cache key"
+            )
+
+    return _CompilerBuildPlan(
+        anchor_source=staged_anchor,
+        runtime_source=staged_runtime,
+        clang=plan.clang,
+        runtime_compiler=plan.runtime_compiler,
+        runtime_frontend_flags=plan.runtime_frontend_flags,
+        linker=plan.linker,
+        exe_name=plan.exe_name,
+        compile_flags=plan.compile_flags,
+        test_link_flags=plan.test_link_flags,
+        compiler_link_flags=plan.compiler_link_flags,
+    )
+
+
+def _build_compiler_in_directory(
+    plan: _CompilerBuildPlan,
+    build_dir: Path,
+) -> Path:
+    anchor_cmd, runtime_cmd, link_cmd, exe_path = _compiler_commands(
+        plan, build_dir,
+    )
+    THINLTO_CACHE.mkdir(parents=True, exist_ok=True)
+    _run_subprocess(
+        "compiler_anchor_compile", anchor_cmd,
+        check=True, capture_output=True, timeout=TIMEOUT_SELFCOMPILE,
+        cwd=str(REPO),
+    )
+    _run_subprocess(
+        "compiler_runtime_compile", runtime_cmd,
+        check=True, capture_output=True, timeout=TIMEOUT_COMPILE,
+        cwd=str(REPO),
+    )
+    _run_subprocess(
+        "compiler_link", link_cmd,
+        check=True, capture_output=True, timeout=TIMEOUT_COMPILER_LINK,
+        cwd=str(REPO),
+    )
+    if not exe_path.is_file():
+        raise CompilerPreparationError(
+            "compiler link succeeded without producing the executable"
         )
-        cpp_compiler = shutil.which("clang++")
-        if cpp_compiler:
-            runtime_cmd = [
-                cpp_compiler, "-std=c++17", *COMPILER_COMPILE_FLAGS,
-                "-D_CRT_SECURE_NO_WARNINGS", "-c", str(RUNTIME_CPP),
-                "-o", runtime_object_path,
-            ]
-        else:
-            runtime_cmd = [
-                clang, "-x", "c++", "-std=c++17", *COMPILER_COMPILE_FLAGS,
-                "-D_CRT_SECURE_NO_WARNINGS", "-c", str(RUNTIME_CPP),
-                "-o", runtime_object_path,
-            ]
-        _run_subprocess(
-            "compiler_runtime_compile",
-            runtime_cmd,
-            check=True,
-            capture_output=True,
-            timeout=TIMEOUT_COMPILE,
-            cwd=str(REPO),
-        )
-        link_cmd = [
-            clang, object_path, runtime_object_path, "-o", exe_path,
-            *CLANG_LINK_FLAGS, *COMPILER_LINK_FLAGS,
-        ]
-        _run_subprocess(
-            "compiler_link",
-            link_cmd, check=True, capture_output=True,
-            timeout=TIMEOUT_COMPILER_LINK,
-            cwd=str(REPO),
-        )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    return exe_path
+
+
+def _cache_paths(cache_root: Path, key: str) -> Tuple[Path, Path]:
+    return cache_root / "receipts" / f"{key}.json", cache_root / "artifacts"
+
+
+def _validated_cached_compiler(
+    cache_root: Path,
+    key: str,
+    inputs: Dict[str, Any],
+    exe_name: str,
+) -> Optional[Path]:
+    receipt_path, artifacts_dir = _cache_paths(cache_root, key)
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if set(receipt) != {
+            "schema", "version", "key", "inputs", "artifact",
+            "artifact_sha256", "artifact_size",
+        }:
+            return None
+        if (
+            receipt["schema"] != COMPILER_CACHE_SCHEMA
+            or receipt["version"] != COMPILER_CACHE_VERSION
+            or receipt["key"] != key
+            or receipt["inputs"] != inputs
+            or _compiler_cache_key(receipt["inputs"]) != key
+        ):
+            return None
+        artifact_hash = receipt["artifact_sha256"]
+        artifact_size = receipt["artifact_size"]
+        if (
+            not isinstance(artifact_hash, str)
+            or re.fullmatch(r"[0-9a-f]{64}", artifact_hash) is None
+            or not isinstance(artifact_size, int)
+            or isinstance(artifact_size, bool)
+            or artifact_size < 0
+        ):
+            return None
+        suffix = Path(exe_name).suffix or ".bin"
+        artifact_name = f"{artifact_hash}{suffix}"
+        if receipt["artifact"] != artifact_name:
+            return None
+        artifact_path = artifacts_dir / artifact_name
+        if artifact_path.stat().st_size != artifact_size:
+            return None
+        if _sha256_file(artifact_path) != artifact_hash:
+            return None
+        return artifact_path
+    except (OSError, ValueError, TypeError, KeyError):
         return None
 
-    if os.path.isfile(exe_path):
-        return exe_path
 
-    shutil.rmtree(tmpdir, ignore_errors=True)
-    return None
+def _write_cache_receipt(
+    receipt_path: Path,
+    receipt: Dict[str, Any],
+) -> None:
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{receipt_path.stem}-", suffix=".tmp",
+        dir=str(receipt_path.parent),
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(
+                receipt, stream, sort_keys=True,
+                separators=(",", ":"), allow_nan=False,
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, receipt_path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _publish_cache_artifact(
+    staged_executable: Path,
+    artifact_path: Path,
+) -> None:
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{artifact_path.stem}-", suffix=".tmp",
+        dir=str(artifact_path.parent),
+    )
+    os.close(descriptor)
+    temp_path = Path(temp_name)
+    try:
+        shutil.copy2(staged_executable, temp_path)
+        try:
+            os.link(temp_path, artifact_path)
+        except FileExistsError:
+            pass
+        finally:
+            temp_path.unlink(missing_ok=True)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _publish_cached_compiler(
+    cache_root: Path,
+    key: str,
+    inputs: Dict[str, Any],
+    exe_name: str,
+    staged_executable: Path,
+) -> Path:
+    receipt_path, artifacts_dir = _cache_paths(cache_root, key)
+    artifact_hash = _sha256_file(staged_executable)
+    artifact_size = staged_executable.stat().st_size
+    suffix = Path(exe_name).suffix or ".bin"
+    artifact_name = f"{artifact_hash}{suffix}"
+    artifact_path = artifacts_dir / artifact_name
+
+    existing_is_valid = False
+    try:
+        existing_is_valid = (
+            artifact_path.stat().st_size == artifact_size
+            and _sha256_file(artifact_path) == artifact_hash
+        )
+    except OSError:
+        pass
+    if not existing_is_valid:
+        _publish_cache_artifact(staged_executable, artifact_path)
+    if (
+        artifact_path.stat().st_size != artifact_size
+        or _sha256_file(artifact_path) != artifact_hash
+    ):
+        raise CompilerPreparationError(
+            "published compiler artifact failed hash validation"
+        )
+
+    receipt = {
+        "schema": COMPILER_CACHE_SCHEMA,
+        "version": COMPILER_CACHE_VERSION,
+        "key": key,
+        "inputs": inputs,
+        "artifact": artifact_name,
+        "artifact_sha256": artifact_hash,
+        "artifact_size": artifact_size,
+    }
+    _write_cache_receipt(receipt_path, receipt)
+    validated = _validated_cached_compiler(
+        cache_root, key, inputs, exe_name,
+    )
+    if validated is None:
+        raise CompilerPreparationError(
+            "published compiler cache receipt failed validation"
+        )
+    return validated
+
+
+def _copy_compiler_for_run(artifact: Path, exe_name: str) -> str:
+    run_dir = Path(tempfile.mkdtemp(prefix="ring_build_"))
+    exe_path = run_dir / exe_name
+    try:
+        expected_hash = artifact.stem
+        if re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+            raise CompilerPreparationError(
+                "compiler cache artifact name is not content-addressed"
+            )
+        shutil.copy2(artifact, exe_path)
+        if _sha256_file(exe_path) != expected_hash:
+            raise CompilerPreparationError(
+                "fresh compiler copy failed hash validation"
+            )
+    except BaseException:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        raise
+    atexit.register(shutil.rmtree, str(run_dir), True)
+    return str(exe_path)
+
+
+def _prepare_compiler(plan: _CompilerBuildPlan) -> str:
+    tracer = _PHASE_TRACER
+    prepare_started_ns = (
+        time.perf_counter_ns() if tracer is not None else None
+    )
+    if not _compiler_cache_enabled():
+        run_dir = Path(tempfile.mkdtemp(prefix="ring_build_"))
+        try:
+            executable = _build_compiler_in_directory(plan, run_dir)
+        except BaseException:
+            shutil.rmtree(run_dir, ignore_errors=True)
+            raise
+        atexit.register(shutil.rmtree, str(run_dir), True)
+        return str(executable)
+
+    cache_root = COMPILER_ARTIFACT_CACHE
+    inputs = _compiler_cache_inputs(plan)
+    key = _compiler_cache_key(inputs)
+    cached_receipt_path, _ = _cache_paths(cache_root, key)
+    cached = _validated_cached_compiler(
+        cache_root, key, inputs, plan.exe_name,
+    )
+    if cached is not None:
+        copied = _copy_compiler_for_run(cached, plan.exe_name)
+        if tracer is not None and prepare_started_ns is not None:
+            tracer.record_stage(
+                suite=None, case="runner", stage="compiler_prepare",
+                duration_ns=time.perf_counter_ns() - prepare_started_ns,
+                executed=False, complete=True, outcome="cached",
+            )
+        return copied
+    if cached_receipt_path.exists():
+        raise CompilerPreparationError(
+            f"compiler cache entry failed validation: {cached_receipt_path}"
+        )
+
+    cache_root.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(tempfile.mkdtemp(
+        prefix=f".staging-{key[:12]}-", dir=str(cache_root),
+    ))
+    try:
+        staged_plan = _staged_compiler_build_plan(plan, inputs, staging_dir)
+        staged_executable = _build_compiler_in_directory(
+            staged_plan, staging_dir,
+        )
+        if _compiler_cache_inputs(plan) != inputs:
+            raise CompilerPreparationError(
+                "compiler cache inputs changed during construction"
+            )
+        artifact = _publish_cached_compiler(
+            cache_root, key, inputs, plan.exe_name, staged_executable,
+        )
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    return _copy_compiler_for_run(artifact, plan.exe_name)
+
+
+def find_ring_exe() -> Optional[str]:
+    """Prepare the compiler from the tracked C anchor in a fresh run dir."""
+    plan = _compiler_build_plan()
+    if plan is None:
+        return None
+    return _prepare_compiler(plan)
+
+
+def _subprocess_output_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return "" if value is None else str(value)
+
+
+def _report_compiler_preparation_failure(exc: BaseException) -> None:
+    print("ERROR: failed to build ring.exe from tracked inputs.", file=sys.stderr)
+    if isinstance(exc, subprocess.CalledProcessError):
+        command = exc.cmd
+        if isinstance(command, (list, tuple)):
+            command_text = subprocess.list2cmdline([str(arg) for arg in command])
+        else:
+            command_text = str(command)
+        print(
+            f"  command exited {exc.returncode}: {command_text}",
+            file=sys.stderr,
+        )
+        for label, value in (("stdout", exc.stdout), ("stderr", exc.stderr)):
+            output = _subprocess_output_text(value).rstrip()
+            if output:
+                print(f"  {label}:", file=sys.stderr)
+                print(output, file=sys.stderr)
+        return
+    if isinstance(exc, subprocess.TimeoutExpired):
+        print(f"  command timed out after {exc.timeout}s: {exc.cmd}", file=sys.stderr)
+        for label, value in (("stdout", exc.stdout), ("stderr", exc.stderr)):
+            output = _subprocess_output_text(value).rstrip()
+            if output:
+                print(f"  {label}:", file=sys.stderr)
+                print(output, file=sys.stderr)
+        return
+    print(f"  {exc}", file=sys.stderr)
 
 
 def ensure_runtime(clang: str) -> bool:
@@ -10850,7 +11344,16 @@ def _run_selected(args: argparse.Namespace) -> int:
     )
     needs_clang = needs_ring
     clang_path = find_clang() if needs_clang else None
-    ring_exe = find_ring_exe() if needs_ring else None
+    try:
+        ring_exe = find_ring_exe() if needs_ring else None
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        CompilerPreparationError,
+        OSError,
+    ) as exc:
+        _report_compiler_preparation_failure(exc)
+        return 1
 
     if needs_ring and ring_exe is None:
         print("ERROR: ring.exe not found.", file=sys.stderr)
