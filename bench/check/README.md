@@ -12,7 +12,11 @@ to a fresh kill-on-close Windows Job Object, then resumes its primary thread.
 Every Job has an exact 12 GiB aggregate commit limit and an active-process
 limit of five (including the root). Configuration is queried back exactly
 before use; a process whose `SIZE_T` cannot represent the commit limit fails
-preflight without starting work. No working-set or breakaway limit is used.
+preflight without starting work. Each execution Job is associated with an I/O
+completion port before its root is resumed, so an `ACTIVE_PROCESS_LIMIT`
+notification is retained as a hard measurement error even when the measured
+program catches the rejected spawn and exits successfully. No working-set or
+breakaway limit is used.
 The invocation record distinguishes exact lifetime counters from sampled
 memory:
 

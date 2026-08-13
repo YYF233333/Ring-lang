@@ -23,14 +23,19 @@ JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
 JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
+JOB_OBJECT_ASSOCIATE_COMPLETION_PORT_INFORMATION = 7
 JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION = 8
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT = 3
+JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO = 4
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_VM_READ = 0x0010
 ERROR_MORE_DATA = 234
+WAIT_TIMEOUT = 258
 STILL_ACTIVE = 259
 DEFAULT_JOB_MEMORY_LIMIT_BYTES = 12_884_901_888
 DEFAULT_ACTIVE_PROCESS_LIMIT = 5
+JOB_COMPLETION_KEY = 0xB176
 SIZE_T_MAX = (1 << (ctypes.sizeof(ctypes.c_size_t) * 8)) - 1
 
 
@@ -97,6 +102,12 @@ if os.name == "nt":
             ("PeakJobMemoryUsed", SIZE_T),
         ]
 
+    class JOBOBJECT_ASSOCIATE_COMPLETION_PORT(ctypes.Structure):
+        _fields_ = [
+            ("CompletionKey", ctypes.c_void_p),
+            ("CompletionPort", wintypes.HANDLE),
+        ]
+
     class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
         _fields_ = [
             ("cb", wintypes.DWORD),
@@ -117,6 +128,21 @@ if os.name == "nt":
 
     kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateIoCompletionPort.argtypes = [
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        ULONG_PTR,
+        wintypes.DWORD,
+    ]
+    kernel32.CreateIoCompletionPort.restype = wintypes.HANDLE
+    kernel32.GetQueuedCompletionStatus.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(ULONG_PTR),
+        ctypes.POINTER(ctypes.c_void_p),
+        wintypes.DWORD,
+    ]
+    kernel32.GetQueuedCompletionStatus.restype = wintypes.BOOL
     kernel32.SetInformationJobObject.argtypes = [
         wintypes.HANDLE,
         ctypes.c_int,
@@ -248,6 +274,58 @@ def _new_job(
             f"expected={expected}, actual={actual}"
         )
     return int(handle)
+
+
+def _new_completion_port(job: int) -> int:
+    invalid_handle_value = ctypes.c_void_p(-1).value
+    handle = kernel32.CreateIoCompletionPort(
+        invalid_handle_value, None, 0, 1
+    )
+    if not handle:
+        raise _winerror("CreateIoCompletionPort failed")
+    association = JOBOBJECT_ASSOCIATE_COMPLETION_PORT()
+    association.CompletionKey = JOB_COMPLETION_KEY
+    association.CompletionPort = handle
+    if not kernel32.SetInformationJobObject(
+        job,
+        JOB_OBJECT_ASSOCIATE_COMPLETION_PORT_INFORMATION,
+        ctypes.byref(association),
+        ctypes.sizeof(association),
+    ):
+        error = _winerror(
+            "SetInformationJobObject(completion port) failed"
+        )
+        _close_handle(int(handle))
+        raise error
+    return int(handle)
+
+
+def _drain_completion_port(port: int) -> list[tuple[int, int]]:
+    events: list[tuple[int, int]] = []
+    while True:
+        message = wintypes.DWORD()
+        completion_key = ULONG_PTR()
+        completion_value = ctypes.c_void_p()
+        ctypes.set_last_error(0)
+        if not kernel32.GetQueuedCompletionStatus(
+            port,
+            ctypes.byref(message),
+            ctypes.byref(completion_key),
+            ctypes.byref(completion_value),
+            0,
+        ):
+            error = ctypes.get_last_error()
+            if error == WAIT_TIMEOUT:
+                return events
+            raise _winerror("GetQueuedCompletionStatus failed")
+        if int(completion_key.value) != JOB_COMPLETION_KEY:
+            raise JobMeasurementError(
+                "Job completion port returned an unexpected completion key: "
+                f"{int(completion_key.value)}"
+            )
+        events.append(
+            (int(message.value), int(completion_value.value or 0))
+        )
 
 
 def current_process_handle_count() -> int:
@@ -425,6 +503,7 @@ def run_in_job(
     stderr_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     job: int | None = None
+    completion_port: int | None = None
     process_handle: int | None = None
     thread_handle: int | None = None
     retained_handles: dict[int, int] = {}
@@ -436,7 +515,7 @@ def run_in_job(
     pid = 0
 
     def release_handles() -> None:
-        nonlocal job, process_handle, thread_handle
+        nonlocal completion_port, job, process_handle, thread_handle
         if thread_handle is not None:
             _close_handle(thread_handle)
             thread_handle = None
@@ -450,6 +529,20 @@ def run_in_job(
         if job is not None:
             _close_handle(job)
             job = None
+        if completion_port is not None:
+            _close_handle(completion_port)
+            completion_port = None
+
+    def drain_completion_events() -> None:
+        assert completion_port is not None
+        for message, completion_value in _drain_completion_port(completion_port):
+            if message == JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT:
+                sampling_errors.add(
+                    "active_process_limit_reached: "
+                    f"completion_message={message}, "
+                    f"completion_value={completion_value}, "
+                    f"limit={active_process_limit}"
+                )
 
     with (
         open(os.devnull, "rb", buffering=0) as stdin_file,
@@ -471,6 +564,11 @@ def run_in_job(
         command_line = subprocess.list2cmdline(list(argv))
         child_env = dict(os.environ if env is None else env)
         job = _new_job(memory_limit_bytes, active_process_limit)
+        try:
+            completion_port = _new_completion_port(job)
+        except BaseException:
+            release_handles()
+            raise
 
         try:
             hp, ht, pid, _tid = _winapi.CreateProcess(
@@ -521,6 +619,7 @@ def run_in_job(
 
         try:
             while True:
+                drain_completion_events()
                 sample_begin = time.perf_counter_ns()
                 try:
                     current_pids = _job_pids(job)
@@ -558,6 +657,9 @@ def run_in_job(
                     == _winapi.WAIT_OBJECT_0
                 )
                 if root_done and accounting_now.ActiveProcesses == 0:
+                    # The Job is quiescent; retain every notification already
+                    # queued for the completed process tree before returning.
+                    drain_completion_events()
                     break
 
                 now_ns = time.perf_counter_ns()

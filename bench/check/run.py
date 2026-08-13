@@ -178,6 +178,10 @@ SAMPLE_ID_RE = re.compile(
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 ERROR_ALREADY_EXISTS = 183
 MEASUREMENT_LOCK_NAME = "Global\\RingLang-B176-formal-measurement-v1"
+HARD_RESOURCE_ERROR_PREFIXES = (
+    "job_memory_limit_reached:",
+    "active_process_limit_reached:",
+)
 
 
 class HarnessError(RuntimeError):
@@ -316,11 +320,12 @@ def _run_capped_command(
     limit_errors = [
         error
         for error in measurement["measurement_errors"]
-        if error.startswith("job_memory_limit_reached:")
+        if isinstance(error, str)
+        and error.startswith(HARD_RESOURCE_ERROR_PREFIXES)
     ]
     if limit_errors:
         raise HarnessError(
-            f"{label} exceeded its Job memory limit: {limit_errors[0]}{retained}"
+            f"{label} exceeded its Job resource limit: {limit_errors[0]}{retained}"
         )
     returncode = measurement["exit_code"]
     if not isinstance(returncode, int):
@@ -3013,8 +3018,10 @@ def derive_invalid_reason(
 
 
 def _is_replaceable_measurement_invalid(reason: Any) -> bool:
-    if isinstance(reason, str) and reason.startswith(
-        "measurement_errors: job_memory_limit_reached:"
+    if (
+        isinstance(reason, str)
+        and reason.startswith("measurement_errors:")
+        and any(prefix in reason for prefix in HARD_RESOURCE_ERROR_PREFIXES)
     ):
         return False
     return (

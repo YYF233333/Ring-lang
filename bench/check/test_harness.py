@@ -2353,7 +2353,7 @@ for index in range(5):
             child.kill()
         for child in children:
             child.wait()
-        sys.exit(23)
+        sys.exit(0)
 for child in children:
     child.kill()
 for child in children:
@@ -2370,7 +2370,7 @@ sys.exit(24)
                 stderr_path=root / "stderr.txt",
                 timeout_seconds=5,
             )
-            self.assertEqual(result["exit_code"], 23)
+            self.assertEqual(result["exit_code"], 0)
             self.assertEqual(
                 result["process_count"]["total"],
                 windows_job.DEFAULT_ACTIVE_PROCESS_LIMIT,
@@ -2378,6 +2378,16 @@ sys.exit(24)
             self.assertIn(
                 "spawn-failed:4:",
                 (root / "stdout.txt").read_text(encoding="utf-8"),
+            )
+            limit_errors = [
+                error
+                for error in result["measurement_errors"]
+                if error.startswith("active_process_limit_reached:")
+            ]
+            self.assertEqual(len(limit_errors), 1)
+            self.assertIn(
+                f"completion_message={windows_job.JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT}",
+                limit_errors[0],
             )
 
     def test_capped_preparation_entry_uses_the_fixed_job_identity(self) -> None:
@@ -2452,6 +2462,14 @@ sys.exit(24)
                     "exit_code": 1,
                     "measurement_errors": [
                         "job_memory_limit_reached: peak_job_commit=2, limit=1"
+                    ],
+                },
+                "active process cap": {
+                    "timed_out": False,
+                    "exit_code": 0,
+                    "measurement_errors": [
+                        "active_process_limit_reached: "
+                        "completion_message=3, completion_value=0, limit=5"
                     ],
                 },
             }
