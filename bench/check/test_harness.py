@@ -2473,6 +2473,58 @@ sys.exit(24)
                     timeout_seconds=5,
                 )
 
+    def test_completion_port_failure_before_resume_releases_handles(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            # Warm CPython's process-global CreateProcess synchronization state
+            # before requiring steady-state handle equality on the error path.
+            run_in_job(
+                [sys.executable, "-c", "pass"],
+                cwd=Path.cwd(),
+                env=os.environ,
+                stdout_path=root / "warmup-stdout.txt",
+                stderr_path=root / "warmup-stderr.txt",
+                timeout_seconds=5,
+            )
+            before = current_process_handle_count()
+            failure = windows_job.JobMeasurementError(
+                "fixture completion-port failure"
+            )
+            with (
+                mock.patch.object(
+                    windows_job,
+                    "_drain_completion_port",
+                    side_effect=failure,
+                ),
+                self.assertRaisesRegex(
+                    windows_job.JobMeasurementError,
+                    "fixture completion-port failure",
+                ),
+            ):
+                run_in_job(
+                    [sys.executable, "-c", "pass"],
+                    cwd=Path.cwd(),
+                    env=os.environ,
+                    stdout_path=root / "stdout.txt",
+                    stderr_path=root / "stderr.txt",
+                    timeout_seconds=5,
+                )
+            self.assertEqual(current_process_handle_count(), before)
+
+    def test_completion_port_poll_is_bounded_under_continuous_events(self) -> None:
+        with mock.patch.object(
+            windows_job,
+            "_read_completion_port",
+            return_value=(6, 1),
+        ) as read:
+            events = windows_job._drain_completion_port(1)
+        self.assertEqual(
+            len(events), windows_job.MAX_COMPLETION_EVENTS_PER_POLL
+        )
+        self.assertEqual(
+            read.call_count, windows_job.MAX_COMPLETION_EVENTS_PER_POLL
+        )
+
     def test_capped_preparation_entry_uses_the_fixed_job_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

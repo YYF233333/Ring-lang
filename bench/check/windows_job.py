@@ -37,6 +37,7 @@ DEFAULT_JOB_MEMORY_LIMIT_BYTES = 12_884_901_888
 DEFAULT_ACTIVE_PROCESS_LIMIT = 5
 JOB_COMPLETION_KEY = 0xB176
 JOB_QUIESCENCE_NOTIFICATION_TIMEOUT_MS = 1_000
+MAX_COMPLETION_EVENTS_PER_POLL = 1_024
 SIZE_T_MAX = (1 << (ctypes.sizeof(ctypes.c_size_t) * 8)) - 1
 
 
@@ -329,11 +330,12 @@ def _read_completion_port(
 
 def _drain_completion_port(port: int) -> list[tuple[int, int]]:
     events: list[tuple[int, int]] = []
-    while True:
+    for _ in range(MAX_COMPLETION_EVENTS_PER_POLL):
         event = _read_completion_port(port, 0)
         if event is None:
             return events
         events.append(event)
+    return events
 
 
 def current_process_handle_count() -> int:
@@ -650,7 +652,12 @@ def run_in_job(
             raise error
         # Establish the notification epoch for this suspended root.  This also
         # discards any association-time packet before the process tree can run.
-        drain_completion_events()
+        try:
+            drain_completion_events()
+        except BaseException:
+            kernel32.TerminateJobObject(job, 127)
+            release_handles()
+            raise
         saw_active_process_zero = False
 
         resumed = kernel32.ResumeThread(thread_handle)
