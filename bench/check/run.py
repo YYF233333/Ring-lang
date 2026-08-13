@@ -192,6 +192,20 @@ class DuplicateJsonKeyError(HarnessError):
     """A JSON object contained two spellings of the same exact key."""
 
 
+def _hard_resource_measurement_errors(
+    measurement: Mapping[str, Any],
+) -> list[str]:
+    errors = measurement.get("measurement_errors")
+    if not isinstance(errors, list):
+        return []
+    return [
+        error
+        for error in errors
+        if isinstance(error, str)
+        and error.startswith(HARD_RESOURCE_ERROR_PREFIXES)
+    ]
+
+
 def _expected_job_preflight() -> dict[str, int]:
     return job_limit_identity(
         DEFAULT_JOB_MEMORY_LIMIT_BYTES, DEFAULT_ACTIVE_PROCESS_LIMIT
@@ -317,12 +331,7 @@ def _run_capped_command(
         raise HarnessError(
             f"{label} invocation timed out after {timeout_seconds} seconds{retained}"
         )
-    limit_errors = [
-        error
-        for error in measurement["measurement_errors"]
-        if isinstance(error, str)
-        and error.startswith(HARD_RESOURCE_ERROR_PREFIXES)
-    ]
+    limit_errors = _hard_resource_measurement_errors(measurement)
     if limit_errors:
         raise HarnessError(
             f"{label} exceeded its Job resource limit: {limit_errors[0]}{retained}"
@@ -2984,6 +2993,9 @@ def derive_invalid_reason(
     warmups = DIRECT_WARMUPS if policy == "direct_short" else 0
     if invocation_error is not None:
         return f"invocation_error: {invocation_error}"
+    hard_resource_errors = _hard_resource_measurement_errors(measurement)
+    if hard_resource_errors:
+        return f"measurement_errors: {'; '.join(measurement['measurement_errors'])}"
     if measurement["timed_out"]:
         return "timeout"
     if exit_code not in expected_exit_codes:

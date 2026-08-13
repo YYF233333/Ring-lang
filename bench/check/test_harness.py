@@ -630,18 +630,60 @@ class ManifestAndPolicyTests(unittest.TestCase):
         )
         self.assertEqual(reason, "invocation_error: launch failed")
 
+    def test_warmup_hard_resource_failure_is_not_masked(self) -> None:
+        errors = (
+            "job_memory_limit_reached: peak_job_commit=2, limit=1",
+            "active_process_limit_reached: completion_message=3, "
+            "completion_value=0, limit=5",
+        )
+        for error in errors:
+            with self.subTest(error=error):
+                reason = harness.derive_invalid_reason(
+                    policy="direct_short",
+                    index=0,
+                    invocation_error=None,
+                    measurement={
+                        "timed_out": False,
+                        "measurement_errors": [error],
+                    },
+                    exit_code=0,
+                    expected_exit_codes=[0],
+                    runner_expected=False,
+                    runner_summary=None,
+                    artifacts=[],
+                    phase_errors=[],
+                    runtime_errors=[],
+                )
+                self.assertEqual(reason, f"measurement_errors: {error}")
+                self.assertFalse(
+                    harness._is_replaceable_measurement_invalid(reason)
+                )
+
     def test_fatal_warmup_and_measured_attempt_stop_without_replacement(self) -> None:
         cases = (
-            ("direct_short", "invocation_error: launch failed"),
-            ("adaptive", "unexpected_exit: 1"),
+            ("warmup invocation", "direct_short", "invocation_error: launch failed"),
             (
+                "warmup memory cap",
+                "direct_short",
+                "measurement_errors: job_memory_limit_reached: "
+                "peak_job_commit=2, limit=1",
+            ),
+            (
+                "warmup active process cap",
+                "direct_short",
+                "measurement_errors: active_process_limit_reached: "
+                "completion_message=3, completion_value=0, limit=5",
+            ),
+            ("measured exit", "adaptive", "unexpected_exit: 1"),
+            (
+                "measured memory cap",
                 "adaptive",
                 "measurement_errors: job_memory_limit_reached: "
                 "peak_job_commit=2, limit=1",
             ),
         )
-        for policy, reason in cases:
-            with self.subTest(policy=policy):
+        for name, policy, reason in cases:
+            with self.subTest(case=name):
                 lane = {"case_id": f"fatal_{policy}", "policy": policy}
 
                 def fake_execute(**_kwargs: object) -> dict:
