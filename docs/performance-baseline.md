@@ -56,13 +56,17 @@ needed here is which whole-loop candidate was kept or rejected.
 
 - One resource-intensive measurement lane at a time; candidate implementation,
   static inspection and review may continue in other worktrees.
-- Planned Job Object memory cap: `19327352832` bytes (18 GiB).
-- Planned active child-process cap: 8; formal lane concurrency: 1.
+- Planned Job Object memory cap: `12884901888` bytes (12 GiB aggregate
+  committed memory).
+- Planned active process cap: 5 including the lane root; formal lane
+  concurrency: 1.
 - Keep at least 8 GiB available to Windows and the root session before starting
   a lane. A cap hit or raw command failure is retained and is not retried.
-- No baseline command starts until these limits are enforced by the measurement
-  entry point. `self-compile`, `full_gate` profile loops and A7-to-A8 generation
-  are outside the initial measurement set.
+- No baseline command starts until these limits and a fail-fast single-formal-
+  harness lock are enforced by the measurement entry point. Runner lanes also
+  wait for their post-ownership case contract to be replayed. `self-compile`,
+  `full_gate` profile loops and A7-to-A8 generation are outside the initial
+  measurement set.
 
 ## Raw evidence
 
