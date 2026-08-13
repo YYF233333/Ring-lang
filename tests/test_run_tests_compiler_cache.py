@@ -6,9 +6,10 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
-from contextlib import redirect_stderr
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,7 +21,7 @@ if str(TESTS_DIR) not in sys.path:
 import run_tests as runner
 
 
-class CompilerArtifactCacheTests(unittest.TestCase):
+class CompilerAnchorCacheTests(unittest.TestCase):
     def setUp(self) -> None:
         runner._PHASE_TRACER = None
 
@@ -28,19 +29,46 @@ class CompilerArtifactCacheTests(unittest.TestCase):
         runner._PHASE_TRACER = None
 
     @staticmethod
-    def make_plan(root: Path) -> runner._CompilerBuildPlan:
+    def make_plan(
+        root: Path,
+        *,
+        controlled: bool = True,
+        cache_supported: bool = True,
+    ) -> runner._CompilerBuildPlan:
         anchor = root / "compiler" / "dist-c" / "main.c"
         runtime = root / "ring_runtime.cpp"
-        clang = root / "tools" / "clang.exe"
-        clangxx = root / "tools" / "clang++.exe"
-        linker = root / "tools" / "lld-link.exe"
+        clang = root / "tool chain" / "clang.exe"
+        clangxx = root / "tool chain" / "clang++.exe"
+        linker = root / "tool chain" / "lld-link.exe"
         anchor.parent.mkdir(parents=True)
         clang.parent.mkdir(parents=True)
-        anchor.write_bytes(b"tracked anchor\n")
+        anchor.write_bytes(b"#include \"anchor_support.h\"\ntracked anchor\n")
+        (anchor.parent / "anchor_support.h").write_bytes(b"#define VALUE 1\n")
         runtime.write_bytes(b"runtime\n")
         clang.write_bytes(b"clang tool\n")
         clangxx.write_bytes(b"clang++ tool\n")
         linker.write_bytes(b"linker tool\n")
+        target = "x86_64-pc-windows-msvc" if controlled else None
+        driver_flags = (
+            ("--no-default-config", f"--target={target}")
+            if controlled else ()
+        )
+        linker_pin_flags = (
+            (f"-B{linker.parent.resolve()}",) if controlled else ()
+        )
+        environment = (
+            (
+                ("COMPILER_PATH", str(root / "compiler-path")),
+                ("CPATH", str(root / "c headers")),
+                ("CPLUS_INCLUDE_PATH", str(root / "cxx headers")),
+                ("LANG", "C"),
+                ("LC_ALL", "C"),
+                ("LIBRARY_PATH", str(root / "libraries")),
+                ("PATH", str(clang.parent.resolve())),
+                ("SOURCE_DATE_EPOCH", "0"),
+            )
+            if controlled else ()
+        )
         return runner._CompilerBuildPlan(
             anchor_source=anchor,
             runtime_source=runtime,
@@ -52,284 +80,807 @@ class CompilerArtifactCacheTests(unittest.TestCase):
             compile_flags=("-O3", "-flto=thin"),
             test_link_flags=("-fuse-ld=lld", "-lmsvcrt"),
             compiler_link_flags=("-flto=thin",),
+            controlled=controlled,
+            cache_supported=cache_supported,
+            target=target,
+            driver_flags=driver_flags,
+            linker_pin_flags=linker_pin_flags,
+            environment=environment,
         )
 
     @staticmethod
-    def seed_cache(
-        cache_root: Path,
+    def replace_plan(
         plan: runner._CompilerBuildPlan,
-        payload: bytes = b"compiler artifact\n",
-    ):
-        inputs = runner._compiler_cache_inputs(plan)
-        key = runner._compiler_cache_key(inputs)
-        cache_root.parent.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(
-            prefix=f"seed-{key[:8]}-", dir=str(cache_root.parent),
-        ))
-        executable = staging / plan.exe_name
-        executable.write_bytes(payload)
-        artifact = runner._publish_cached_compiler(
-            cache_root, key, inputs, plan.exe_name, executable,
-        )
-        return inputs, key, artifact
+        **changes,
+    ) -> runner._CompilerBuildPlan:
+        return runner._CompilerBuildPlan(**{**plan.__dict__, **changes})
 
-    def test_key_is_stable_and_invalidates_on_every_trust_input(self) -> None:
+    @staticmethod
+    def makefile_escape(path: Path) -> str:
+        return (
+            str(path)
+            .replace("$", "$$")
+            .replace("#", r"\#")
+            .replace(" ", r"\ ")
+        )
+
+    @classmethod
+    def dependency_runner(
+        cls,
+        header: Path,
+        *,
+        macros: bytes = b"#define TEST_TARGET 1\n",
+        capture=None,
+    ):
+        def run(command, **kwargs):
+            depfile = Path(command[command.index("-MF") + 1])
+            anchor = Path(command[-1])
+            depfile.write_text(
+                "ring-cache-probe: "
+                f"{cls.makefile_escape(anchor)} \\\n "
+                f"{cls.makefile_escape(header)}\n",
+                encoding="utf-8",
+            )
+            if capture is not None:
+                capture.append((list(command), dict(kwargs)))
+            return subprocess.CompletedProcess(command, 0, macros, b"")
+
+        return run
+
+    @classmethod
+    def cache_inputs(
+        cls,
+        plan: runner._CompilerBuildPlan,
+        staging_dir: Path,
+        *,
+        macros: bytes = b"#define TEST_TARGET 1\n",
+    ):
+        staging_dir.mkdir(parents=True)
+        snapshot = runner._stage_anchor_snapshot(plan, staging_dir)
+        header = plan.anchor_source.parent / "anchor_support.h"
+        with patch.object(
+            runner.subprocess,
+            "run",
+            side_effect=cls.dependency_runner(header, macros=macros),
+        ):
+            inputs = runner._compiler_cache_inputs(
+                plan, snapshot, staging_dir,
+            )
+        return inputs, snapshot
+
+    @staticmethod
+    def simple_inputs(tag: str = "baseline"):
+        return {
+            "schema": runner.COMPILER_CACHE_SCHEMA,
+            "version": runner.COMPILER_CACHE_VERSION,
+            "tag": tag,
+        }
+
+    @classmethod
+    def publish(
+        cls,
+        cache_root: Path,
+        staging_root: Path,
+        payload: bytes = b"anchor object\n",
+        *,
+        tag: str = "baseline",
+    ):
+        inputs = cls.simple_inputs(tag)
+        key = runner._compiler_cache_key(inputs)
+        staging_root.mkdir(parents=True, exist_ok=True)
+        staged_object = staging_root / f"{tag}.o"
+        staged_object.write_bytes(payload)
+        cached = runner._publish_cached_anchor(
+            cache_root, key, inputs, staged_object,
+        )
+        return inputs, key, cached
+
+    def test_dependency_parser_preserves_windows_paths_and_escapes(self) -> None:
+        dependencies = runner._parse_make_dependencies(
+            "ring-cache-probe: "
+            "C:\\repo\\main.c C:/Program\\ Files/SDK/header\\#1.h "
+            "C:/cash$$dir/value.h \\\n C:/next/header.h\n"
+        )
+        self.assertEqual(
+            dependencies,
+            [
+                r"C:\repo\main.c",
+                "C:/Program Files/SDK/header#1.h",
+                "C:/cash$dir/value.h",
+                "C:/next/header.h",
+            ],
+        )
+
+    def test_controlled_environment_keeps_closure_inputs_but_drops_injection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
+            tools = root / "tools"
+            tools.mkdir()
+            clang = tools / "clang.exe"
+            clangxx = tools / "clang++.exe"
+            linker = tools / "lld-link.exe"
+            for tool in (clang, clangxx, linker):
+                tool.write_bytes(b"tool\n")
+            source_environment = {
+                "SystemRoot": str(root / "windows"),
+                "PATH": str(root / "uncontrolled-path"),
+                "CPATH": str(root / "c-headers"),
+                "CPLUS_INCLUDE_PATH": str(root / "cxx-headers"),
+                "LIBRARY_PATH": str(root / "libraries"),
+                "COMPILER_PATH": str(root / "compiler-path"),
+                "CCC_OVERRIDE_OPTIONS": "+-funsafe-option",
+                "CLANG_CONFIG_FILE_SYSTEM_DIR": str(root / "config"),
+            }
+            with patch.dict(os.environ, source_environment, clear=True):
+                controlled = dict(runner._controlled_environment(
+                    str(clang), str(clangxx), str(linker),
+                ))
+
+            for name in (
+                "CPATH",
+                "CPLUS_INCLUDE_PATH",
+                "LIBRARY_PATH",
+                "COMPILER_PATH",
+            ):
+                self.assertEqual(controlled[name], source_environment[name])
+            self.assertNotIn("CCC_OVERRIDE_OPTIONS", controlled)
+            self.assertNotIn("CLANG_CONFIG_FILE_SYSTEM_DIR", controlled)
+            self.assertNotIn(source_environment["PATH"], controlled["PATH"])
+            self.assertIn(
+                str(tools.resolve()), controlled["PATH"].split(os.pathsep),
+            )
+            self.assertEqual(controlled["LC_ALL"], "C")
+            self.assertEqual(controlled["LANG"], "C")
+            self.assertEqual(controlled["SOURCE_DATE_EPOCH"], "0")
+
+    def test_dependency_scan_uses_exact_controlled_recipe_and_hashes_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "fixture with space"
             plan = self.make_plan(root)
-            baseline_inputs = runner._compiler_cache_inputs(plan)
-            baseline_key = runner._compiler_cache_key(baseline_inputs)
-            self.assertEqual(
-                baseline_inputs["commands"]["linker_selection_flags"],
-                ["-fuse-ld=lld"],
-            )
-            self.assertEqual(
-                runner._compiler_cache_key(runner._compiler_cache_inputs(plan)),
-                baseline_key,
-            )
-
-            plan.anchor_source.write_bytes(b"changed tracked anchor\n")
-            self.assertNotEqual(
-                runner._compiler_cache_key(runner._compiler_cache_inputs(plan)),
-                baseline_key,
-            )
-            plan.anchor_source.write_bytes(b"tracked anchor\n")
-
-            plan.runtime_source.write_bytes(b"changed runtime\n")
-            self.assertNotEqual(
-                runner._compiler_cache_key(runner._compiler_cache_inputs(plan)),
-                baseline_key,
-            )
-            plan.runtime_source.write_bytes(b"runtime\n")
-
-            changed_flags = runner._CompilerBuildPlan(
-                **{
-                    **plan.__dict__,
-                    "compiler_link_flags": ("-flto=thin", "-Wl,changed"),
-                }
-            )
-            self.assertNotEqual(
-                runner._compiler_cache_key(
-                    runner._compiler_cache_inputs(changed_flags)
+            staging = Path(temp_dir) / "probe"
+            staging.mkdir()
+            snapshot = runner._stage_anchor_snapshot(plan, staging)
+            header = plan.anchor_source.parent / "anchor_support.h"
+            calls = []
+            macros = b"#define TARGET_ABI 42\n"
+            with patch.object(
+                runner.subprocess,
+                "run",
+                side_effect=self.dependency_runner(
+                    header, macros=macros, capture=calls,
                 ),
-                baseline_key,
-            )
-
-            Path(plan.linker).write_bytes(b"changed linker tool\n")
-            self.assertNotEqual(
-                runner._compiler_cache_key(runner._compiler_cache_inputs(plan)),
-                baseline_key,
-            )
-            Path(plan.linker).write_bytes(b"linker tool\n")
-
-            with patch.object(runner.platform, "machine", return_value="other-cpu"):
-                self.assertNotEqual(
-                    runner._compiler_cache_key(
-                        runner._compiler_cache_inputs(plan)
-                    ),
-                    baseline_key,
+            ):
+                closure, state_hash = runner._scan_anchor_dependencies(
+                    plan, snapshot, staging,
                 )
 
-    def test_cache_miss_builds_from_a_verified_source_snapshot(self) -> None:
+            self.assertEqual(len(calls), 1)
+            command, kwargs = calls[0]
+            self.assertEqual(command[0], plan.clang)
+            self.assertIn("--no-default-config", command)
+            self.assertIn(f"--target={plan.target}", command)
+            self.assertIn("-E", command)
+            self.assertIn("-dM", command)
+            self.assertIn("-MD", command)
+            self.assertNotIn("-c", command)
+            self.assertEqual(kwargs["env"], dict(plan.environment))
+            self.assertEqual(
+                state_hash, hashlib.sha256(macros).hexdigest(),
+            )
+            self.assertEqual(
+                closure,
+                (runner._stable_file_identity(header.resolve()),),
+            )
+            self.assertEqual(list(staging.glob("anchor-*.d")), [])
+
+    def test_cache_key_is_stable_across_fresh_snapshot_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan = self.make_plan(root / "fixture with space")
+            first, _ = self.cache_inputs(plan, root / "staging one")
+            second, _ = self.cache_inputs(plan, root / "staging two")
+
+            self.assertEqual(first, second)
+            self.assertEqual(
+                runner._compiler_cache_key(first),
+                runner._compiler_cache_key(second),
+            )
+            self.assertEqual(first["anchor"]["path"], "$tracked_c_anchor")
+            recipes = first["recipes"]
+            self.assertEqual(
+                set(recipes),
+                {
+                    "anchor_dependency_scan",
+                    "anchor_compile",
+                    "runtime_compile",
+                    "link",
+                },
+            )
+            for recipe in recipes.values():
+                self.assertIn("--no-default-config", recipe)
+                self.assertIn(f"--target={plan.target}", recipe)
+            self.assertIn(plan.linker_pin_flags[0], recipes["link"])
+            self.assertEqual(first["environment"], dict(plan.environment))
+
+    def test_cache_key_invalidates_for_source_header_macro_and_recipe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             plan = self.make_plan(root / "fixture")
-            inputs = runner._compiler_cache_inputs(plan)
+            baseline, _ = self.cache_inputs(plan, root / "baseline")
+            baseline_key = runner._compiler_cache_key(baseline)
+
+            plan.anchor_source.write_bytes(b"changed anchor\n")
+            changed_anchor, _ = self.cache_inputs(plan, root / "anchor change")
+            self.assertNotEqual(
+                runner._compiler_cache_key(changed_anchor), baseline_key,
+            )
+            plan.anchor_source.write_bytes(
+                b"#include \"anchor_support.h\"\ntracked anchor\n"
+            )
+
+            header = plan.anchor_source.parent / "anchor_support.h"
+            header.write_bytes(b"#define VALUE 2\n")
+            changed_header, _ = self.cache_inputs(plan, root / "header change")
+            self.assertNotEqual(
+                runner._compiler_cache_key(changed_header), baseline_key,
+            )
+            header.write_bytes(b"#define VALUE 1\n")
+
+            changed_macros, _ = self.cache_inputs(
+                plan, root / "macro change",
+                macros=b"#define TEST_TARGET 2\n",
+            )
+            self.assertNotEqual(
+                runner._compiler_cache_key(changed_macros), baseline_key,
+            )
+
+            changed_flags = self.replace_plan(
+                plan, compile_flags=("-O2", "-flto=thin"),
+            )
+            changed_recipe, _ = self.cache_inputs(
+                changed_flags, root / "recipe change",
+            )
+            self.assertNotEqual(
+                runner._compiler_cache_key(changed_recipe), baseline_key,
+            )
+
+    def test_cache_key_invalidates_for_environment_target_and_tool_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan = self.make_plan(root / "fixture")
+            baseline, _ = self.cache_inputs(plan, root / "baseline")
+            baseline_key = runner._compiler_cache_key(baseline)
+
+            for name in (
+                "CPATH",
+                "CPLUS_INCLUDE_PATH",
+                "LIBRARY_PATH",
+                "COMPILER_PATH",
+            ):
+                environment = dict(plan.environment)
+                environment[name] += "-changed"
+                changed_plan = self.replace_plan(
+                    plan,
+                    environment=tuple(sorted(environment.items())),
+                )
+                changed, _ = self.cache_inputs(
+                    changed_plan, root / f"environment {name}",
+                )
+                self.assertNotEqual(
+                    runner._compiler_cache_key(changed), baseline_key, name,
+                )
+
+            other_target = "aarch64-pc-windows-msvc"
+            target_plan = self.replace_plan(
+                plan,
+                target=other_target,
+                driver_flags=(
+                    "--no-default-config", f"--target={other_target}",
+                ),
+            )
+            target_inputs, _ = self.cache_inputs(
+                target_plan, root / "target change",
+            )
+            self.assertNotEqual(
+                runner._compiler_cache_key(target_inputs), baseline_key,
+            )
+
+            Path(plan.clang).write_bytes(b"changed clang tool\n")
+            tool_inputs, _ = self.cache_inputs(plan, root / "tool change")
+            self.assertNotEqual(
+                runner._compiler_cache_key(tool_inputs), baseline_key,
+            )
+
+    def test_dependency_probe_failure_is_loud_and_leaves_no_depfile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan = self.make_plan(root / "fixture")
             staging = root / "staging"
             staging.mkdir()
+            snapshot = runner._stage_anchor_snapshot(plan, staging)
+            failure = subprocess.CalledProcessError(
+                17, [plan.clang, "-E"], stderr=b"probe failed",
+            )
+            with patch.object(
+                runner.subprocess, "run", side_effect=failure,
+            ):
+                with self.assertRaises(subprocess.CalledProcessError) as raised:
+                    runner._scan_anchor_dependencies(plan, snapshot, staging)
 
-            staged_plan = runner._staged_compiler_build_plan(
-                plan, inputs, staging,
-            )
-            self.assertEqual(staged_plan.anchor_source.parent, staging / "inputs")
-            self.assertEqual(staged_plan.runtime_source.parent, staging / "inputs")
-            self.assertEqual(
-                staged_plan.anchor_source.read_bytes(), b"tracked anchor\n",
-            )
-            self.assertEqual(
-                staged_plan.runtime_source.read_bytes(), b"runtime\n",
-            )
+            self.assertIs(raised.exception, failure)
+            self.assertEqual(list(staging.glob("anchor-*.d")), [])
+            self.assertFalse((staging / "main.o").exists())
 
-            plan.anchor_source.write_bytes(b"later worktree edit\n")
-            self.assertEqual(
-                staged_plan.anchor_source.read_bytes(), b"tracked anchor\n",
-            )
-
-    def test_partial_stale_and_corrupt_entries_are_rejected(self) -> None:
+    def test_dependency_probe_rejects_an_unresolved_closure_member(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            cache_root = root / "cache"
             plan = self.make_plan(root / "fixture")
-            inputs = runner._compiler_cache_inputs(plan)
-            key = runner._compiler_cache_key(inputs)
-            receipt_path, _ = runner._cache_paths(cache_root, key)
-            receipt_path.parent.mkdir(parents=True)
-
-            receipt_path.write_text("{", encoding="utf-8")
-            self.assertIsNone(runner._validated_cached_compiler(
-                cache_root, key, inputs, plan.exe_name,
-            ))
-
-            _, _, artifact = self.seed_cache(cache_root, plan)
-            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-            receipt["key"] = "0" * 64
-            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            self.assertIsNone(runner._validated_cached_compiler(
-                cache_root, key, inputs, plan.exe_name,
-            ))
-
-            self.seed_cache(cache_root, plan)
-            artifact.write_bytes(b"corrupt after receipt\n")
-            self.assertIsNone(runner._validated_cached_compiler(
-                cache_root, key, inputs, plan.exe_name,
-            ))
-
-    def test_invalid_receipt_fails_loud_without_rebuilding(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            cache_root = root / "cache"
-            plan = self.make_plan(root / "fixture")
-            inputs = runner._compiler_cache_inputs(plan)
-            key = runner._compiler_cache_key(inputs)
-            receipt_path, _ = runner._cache_paths(cache_root, key)
-            receipt_path.parent.mkdir(parents=True)
-            receipt_path.write_text("{", encoding="utf-8")
-
-            with (
-                patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
-                patch.dict(os.environ, {runner.COMPILER_CACHE_ENV: "1"}),
-                patch.object(runner, "_build_compiler_in_directory") as build,
+            staging = root / "staging"
+            staging.mkdir()
+            snapshot = runner._stage_anchor_snapshot(plan, staging)
+            missing = root / "missing header.h"
+            with patch.object(
+                runner.subprocess,
+                "run",
+                side_effect=self.dependency_runner(missing),
             ):
                 with self.assertRaisesRegex(
                     runner.CompilerPreparationError,
-                    "compiler cache entry failed validation",
+                    "dependency cannot be resolved",
                 ):
-                    runner._prepare_compiler(plan)
+                    runner._scan_anchor_dependencies(
+                        plan, snapshot, staging,
+                    )
 
-            build.assert_not_called()
+    def test_controlled_commands_share_driver_environment_and_linker_pin(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan = self.make_plan(root / "fixture")
+            build_dir = root / "build"
+            build_dir.mkdir()
+            snapshot = runner._stage_anchor_snapshot(plan, build_dir)
+            calls = []
 
-    def test_hit_copies_verified_artifact_to_each_fresh_run_directory(self) -> None:
+            def successful_stage(stage, command, **kwargs):
+                calls.append((stage, list(command), dict(kwargs)))
+                output = Path(command[command.index("-o") + 1])
+                output.write_bytes(stage.encode("utf-8"))
+                return subprocess.CompletedProcess(command, 0, b"", b"")
+
+            with (
+                patch.object(runner, "THINLTO_CACHE", root / "thinlto"),
+                patch.object(
+                    runner, "_run_subprocess", side_effect=successful_stage,
+                ),
+            ):
+                runner._compile_anchor(plan, build_dir, snapshot)
+                runner._compile_runtime_and_link(plan, build_dir, snapshot)
+
+            self.assertEqual(
+                [stage for stage, _command, _kwargs in calls],
+                [
+                    "compiler_anchor_compile",
+                    "compiler_runtime_compile",
+                    "compiler_link",
+                ],
+            )
+            for _stage, command, kwargs in calls:
+                self.assertIn("--no-default-config", command)
+                self.assertIn(f"--target={plan.target}", command)
+                self.assertEqual(kwargs["env"], dict(plan.environment))
+            anchor_command = calls[0][1]
+            prefix_flag = next(
+                flag for flag in anchor_command
+                if flag.startswith("-ffile-prefix-map=")
+            )
+            self.assertEqual(
+                prefix_flag,
+                f"-ffile-prefix-map={snapshot.parent}="
+                f"{plan.anchor_source.parent.resolve()}",
+            )
+            self.assertIn(plan.linker_pin_flags[0], calls[2][1])
+
+    def test_partial_stale_corrupt_and_wrong_mode_entries_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             cache_root = root / "cache"
-            plan = self.make_plan(root / "fixture")
-            self.seed_cache(cache_root, plan)
-            with (
-                patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
-                patch.dict(os.environ, {runner.COMPILER_CACHE_ENV: "1"}),
-                patch.object(runner, "_build_compiler_in_directory") as build,
-            ):
-                first = Path(runner._prepare_compiler(plan))
-                second = Path(runner._prepare_compiler(plan))
+            inputs = self.simple_inputs()
+            key = runner._compiler_cache_key(inputs)
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            receipt_path.parent.mkdir(parents=True)
 
-            build.assert_not_called()
-            self.assertNotEqual(first.parent, second.parent)
-            self.assertNotEqual(first.parent, cache_root)
-            self.assertEqual(first.read_bytes(), b"compiler artifact\n")
-            self.assertEqual(second.read_bytes(), b"compiler artifact\n")
+            receipt_path.write_text("{", encoding="utf-8")
+            self.assertIsNone(
+                runner._validated_cached_anchor(cache_root, key, inputs)
+            )
+            receipt_path.unlink()
 
-    def test_fresh_copy_rechecks_the_content_address(self) -> None:
+            _inputs, _key, cached = self.publish(
+                cache_root, root / "staging",
+            )
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["inputs"] = self.simple_inputs("stale")
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            self.assertIsNone(
+                runner._validated_cached_anchor(cache_root, key, inputs)
+            )
+
+            receipt_path.write_text(
+                json.dumps({**receipt, "inputs": inputs}), encoding="utf-8",
+            )
+            cached.path.write_bytes(b"corrupt after receipt\n")
+            self.assertIsNone(
+                runner._validated_cached_anchor(cache_root, key, inputs)
+            )
+
+            cached.path.write_bytes(b"anchor object\n")
+            receipt["inputs"] = inputs
+            receipt["artifact_mode"] = receipt["artifact_mode"] ^ 0o100
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            self.assertIsNone(
+                runner._validated_cached_anchor(cache_root, key, inputs)
+            )
+
+    def test_invalid_receipt_fails_loud_on_lookup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            original = b"verified artifact\n"
-            artifact_hash = hashlib.sha256(original).hexdigest()
-            artifact = root / f"{artifact_hash}.exe"
-            artifact.write_bytes(b"changed after validation\n")
+            cache_root = root / "cache"
+            inputs = self.simple_inputs()
+            key = runner._compiler_cache_key(inputs)
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            receipt_path.parent.mkdir(parents=True)
+            receipt_path.write_text("{", encoding="utf-8")
 
             with self.assertRaisesRegex(
                 runner.CompilerPreparationError,
-                "fresh compiler copy failed hash validation",
+                "cache entry failed validation",
             ):
-                runner._copy_compiler_for_run(artifact, "ring.exe")
+                runner._lookup_cached_anchor(
+                    cache_root, key, inputs, root / "fresh" / "main.o",
+                )
 
-    def test_cache_hit_uses_single_phase_timing_authority(self) -> None:
+    def test_hit_copies_verified_object_into_each_fresh_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            inputs, key, _cached = self.publish(
+                cache_root, root / "staging",
+            )
+            first = root / "run one" / "main.o"
+            second = root / "run two" / "main.o"
+            first.parent.mkdir()
+            second.parent.mkdir()
+
+            self.assertTrue(runner._lookup_cached_anchor(
+                cache_root, key, inputs, first,
+            ))
+            self.assertTrue(runner._lookup_cached_anchor(
+                cache_root, key, inputs, second,
+            ))
+            self.assertEqual(first.read_bytes(), b"anchor object\n")
+            self.assertEqual(second.read_bytes(), b"anchor object\n")
+            self.assertNotEqual(first.parent, second.parent)
+            self.assertNotEqual(first.parent, cache_root)
+
+    def test_fresh_copy_revalidates_hash_size_and_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source.o"
+            destination = root / "destination.o"
+            source.write_bytes(b"changed object\n")
+            expected = runner._CachedAnchor(
+                path=source,
+                sha256=hashlib.sha256(b"expected object\n").hexdigest(),
+                size=len(b"expected object\n"),
+                mode=runner._artifact_mode(source),
+            )
+            with self.assertRaisesRegex(
+                runner.CompilerPreparationError,
+                "copy failed receipt validation",
+            ):
+                runner._copy_cached_anchor(expected, destination)
+
+    def test_same_payload_concurrent_publish_shares_immutable_winner(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            inputs = self.simple_inputs()
+            key = runner._compiler_cache_key(inputs)
+            objects = [root / "first.o", root / "second.o"]
+            for path in objects:
+                path.write_bytes(b"identical object\n")
+            barrier = threading.Barrier(2)
+
+            def publish(path):
+                barrier.wait(timeout=5)
+                return runner._publish_cached_anchor(
+                    cache_root, key, inputs, path,
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                winners = list(pool.map(publish, objects))
+
+            self.assertTrue(runner._same_cached_anchor(
+                winners[0], winners[1],
+            ))
+            self.assertIsNotNone(
+                runner._validated_cached_anchor(cache_root, key, inputs)
+            )
+            self.assertEqual(
+                list((cache_root / "receipts").glob("*.json")).__len__(),
+                1,
+            )
+            self.assertEqual(
+                list((cache_root / "conflicts").glob("*/*.json")), [],
+            )
+
+    def test_divergent_concurrent_publish_persists_conflict_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            inputs = self.simple_inputs()
+            key = runner._compiler_cache_key(inputs)
+            objects = [root / "first.o", root / "second.o"]
+            objects[0].write_bytes(b"first divergent object\n")
+            objects[1].write_bytes(b"second divergent object\n")
+            barrier = threading.Barrier(2)
+
+            def publish(path):
+                barrier.wait(timeout=5)
+                try:
+                    return runner._publish_cached_anchor(
+                        cache_root, key, inputs, path,
+                    )
+                except BaseException as exc:
+                    return exc
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(publish, objects))
+
+            winners = [
+                result for result in results
+                if isinstance(result, runner._CachedAnchor)
+            ]
+            failures = [
+                result for result in results
+                if isinstance(result, runner.CompilerPreparationError)
+            ]
+            self.assertEqual(len(winners), 1)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("divergent anchor objects", str(failures[0]))
+            validated = runner._validated_cached_anchor(
+                cache_root, key, inputs,
+            )
+            self.assertIsNotNone(validated)
+            self.assertTrue(runner._same_cached_anchor(
+                validated, winners[0],
+            ))
+            receipt_path, _ = runner._cache_paths(cache_root, key)
+            receipt_before = receipt_path.read_bytes()
+            conflicts = list(
+                (cache_root / "conflicts" / key).glob("*.json")
+            )
+            self.assertEqual(len(conflicts), 1)
+            evidence = json.loads(conflicts[0].read_text(encoding="utf-8"))
+            self.assertEqual(evidence["winner"]["sha256"], validated.sha256)
+            self.assertNotEqual(
+                evidence["candidate"]["sha256"], validated.sha256,
+            )
+            self.assertEqual(receipt_path.read_bytes(), receipt_before)
+
+    def test_hardlink_publication_failure_is_loud_and_never_creates_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            inputs = self.simple_inputs()
+            key = runner._compiler_cache_key(inputs)
+            staged = root / "main.o"
+            staged.write_bytes(b"object\n")
+
+            with patch.object(
+                runner.os, "link", side_effect=OSError("no hard links"),
+            ):
+                with self.assertRaisesRegex(
+                    runner.CompilerPreparationError,
+                    "requires atomic hard-link publication",
+                ):
+                    runner._publish_cached_anchor(
+                        cache_root, key, inputs, staged,
+                    )
+
+            receipt, artifacts = runner._cache_paths(cache_root, key)
+            self.assertFalse(receipt.exists())
+            self.assertEqual(list(artifacts.glob("*.o")), [])
+
+    def test_cleanup_bounds_entries_bytes_conflicts_and_orphan_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_root = Path(temp_dir) / "cache"
+            receipts = cache_root / "receipts"
+            artifacts = cache_root / "artifacts"
+            access = cache_root / "access"
+            conflicts = cache_root / "conflicts" / "key"
+            for directory in (receipts, artifacts, access, conflicts):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            now = time.time()
+            for key, artifact, payload, used in (
+                ("old", "old.o", b"old", now - 20),
+                ("new", "new.o", b"newer", now - 10),
+            ):
+                (artifacts / artifact).write_bytes(payload)
+                (receipts / f"{key}.json").write_text(
+                    json.dumps({
+                        "artifact": artifact,
+                        "artifact_size": len(payload),
+                    }),
+                    encoding="utf-8",
+                )
+                marker = access / key
+                marker.touch()
+                os.utime(marker, (used, used))
+
+            (artifacts / "orphan.o").write_bytes(b"orphan")
+            old_staging = cache_root / ".staging-old"
+            new_staging = cache_root / ".staging-new"
+            old_staging.mkdir()
+            new_staging.mkdir()
+            old_time = now - runner.COMPILER_CACHE_STALE_SECONDS - 1
+            os.utime(old_staging, (old_time, old_time))
+            for index in range(3):
+                conflict = conflicts / f"{index}.json"
+                conflict.write_text("{}", encoding="utf-8")
+                os.utime(conflict, (now + index, now + index))
+
+            with (
+                patch.object(runner, "COMPILER_CACHE_MAX_ENTRIES", 10),
+                patch.object(runner, "COMPILER_CACHE_MAX_BYTES", 5),
+                patch.object(runner, "COMPILER_CACHE_MAX_CONFLICTS", 1),
+            ):
+                runner._cleanup_compiler_cache_locked(
+                    cache_root, now=now,
+                )
+
+            self.assertFalse((receipts / "old.json").exists())
+            self.assertTrue((receipts / "new.json").exists())
+            self.assertFalse((artifacts / "old.o").exists())
+            self.assertTrue((artifacts / "new.o").exists())
+            self.assertFalse((artifacts / "orphan.o").exists())
+            self.assertFalse((access / "old").exists())
+            self.assertTrue((access / "new").exists())
+            self.assertFalse(old_staging.exists())
+            self.assertTrue(new_staging.exists())
+            self.assertEqual(len(list(conflicts.glob("*.json"))), 1)
+            self.assertTrue((conflicts / "2.json").exists())
+
+    def test_cache_hit_phase_order_and_exact_runner_scoped_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             cache_root = root / "cache"
             trace_path = root / "trace.jsonl"
             plan = self.make_plan(root / "fixture")
-            self.seed_cache(cache_root, plan)
+            inputs = self.simple_inputs()
+
+            def cache_hit(_root, _key, _inputs, destination):
+                destination.write_bytes(b"cached anchor\n")
+                return True
+
+            def successful_tool(command, **_kwargs):
+                output = Path(command[command.index("-o") + 1])
+                output.write_bytes(b"stage output\n")
+                return subprocess.CompletedProcess(command, 0, b"", b"")
+
+            clock = iter(range(0, 1000, 10))
             with (
                 patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
-                patch.dict(os.environ, {runner.COMPILER_CACHE_ENV: "1"}),
-                patch.object(
-                    runner.time, "perf_counter_ns",
-                    side_effect=[0, 10, 25, 50],
+                patch.dict(
+                    os.environ, {runner.COMPILER_CACHE_ENV: "1"}, clear=False,
                 ),
-                patch.object(runner, "_build_compiler_in_directory") as build,
+                patch.object(
+                    runner, "_compiler_cache_inputs", return_value=inputs,
+                ) as cache_inputs,
+                patch.object(
+                    runner, "_lookup_cached_anchor", side_effect=cache_hit,
+                ),
+                patch.object(
+                    runner.subprocess, "run", side_effect=successful_tool,
+                ),
+                patch.object(
+                    runner.time, "perf_counter_ns", side_effect=clock,
+                ),
             ):
                 tracer = runner.PhaseTimingTrace(str(trace_path))
                 runner._PHASE_TRACER = tracer
-                runner._prepare_compiler(plan)
+                executable = Path(runner._prepare_compiler(plan))
                 tracer.finish(complete=True, outcome="success", exit_code=0)
                 tracer.close()
 
-            build.assert_not_called()
+            self.assertTrue(executable.is_file())
+            self.assertEqual(cache_inputs.call_count, 2)
             records = [
                 json.loads(line)
                 for line in trace_path.read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual(
-                [row["stage"] for row in records],
+                [record["stage"] for record in records],
                 [
-                    "compiler_prepare",
+                    "compiler_anchor_prepare",
+                    "compiler_runtime_compile",
+                    "compiler_link",
                     "orchestration_residual",
                     "runner_total",
                 ],
             )
-            record, residual, total = records
-            self.assertEqual(set(record), runner.PHASE_TIMING_FIELDS)
-            self.assertEqual(record["duration_ns"], 15)
-            self.assertFalse(record["executed"])
-            self.assertTrue(record["complete"])
-            self.assertEqual(record["outcome"], "cached")
-            self.assertIsNone(record["exit_code"])
-            self.assertIsNone(record["command_category"])
-            self.assertEqual(residual["duration_ns"], 35)
-            self.assertEqual(total["duration_ns"], 50)
+            cached = records[0]
+            self.assertEqual(set(cached), runner.PHASE_TIMING_FIELDS)
+            self.assertIsNone(cached["suite"])
+            self.assertEqual(cached["case"], "runner")
+            self.assertFalse(cached["executed"])
+            self.assertTrue(cached["complete"])
+            self.assertEqual(cached["outcome"], "cached")
+            self.assertIsNone(cached["exit_code"])
+            self.assertIsNone(cached["command_category"])
+            for child in records[1:3]:
+                self.assertTrue(child["executed"])
+                self.assertTrue(child["complete"])
+                self.assertEqual(child["outcome"], "success")
+                self.assertEqual(child["exit_code"], 0)
+                self.assertEqual(child["command_category"], "clang")
             self.assertEqual(
-                record["duration_ns"] + residual["duration_ns"],
-                total["duration_ns"],
+                sum(record["duration_ns"] for record in records[:-1]),
+                records[-1]["duration_ns"],
             )
 
-    def test_cache_miss_keeps_the_three_compiler_subprocess_stages(self) -> None:
+    def test_cache_miss_keeps_exactly_three_compiler_subprocess_stages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             cache_root = root / "cache"
             trace_path = root / "trace.jsonl"
             plan = self.make_plan(root / "fixture")
+            inputs = self.simple_inputs()
 
             def successful_tool(command, **_kwargs):
-                if "-c" not in command:
-                    output = Path(command[command.index("-o") + 1])
-                    output.write_bytes(b"linked compiler\n")
+                output = Path(command[command.index("-o") + 1])
+                output.write_bytes(
+                    b"linked compiler\n"
+                    if output.suffix == ".exe" else b"object\n"
+                )
                 return subprocess.CompletedProcess(command, 0, b"", b"")
 
+            clock = iter(range(0, 1000, 10))
             with (
                 patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
                 patch.object(runner, "THINLTO_CACHE", root / "thinlto"),
-                patch.dict(os.environ, {runner.COMPILER_CACHE_ENV: "1"}),
+                patch.dict(
+                    os.environ, {runner.COMPILER_CACHE_ENV: "1"}, clear=False,
+                ),
                 patch.object(
-                    runner.time, "perf_counter_ns",
-                    side_effect=[0, 10, 20, 30, 40, 50, 60, 70, 100],
+                    runner, "_compiler_cache_inputs", return_value=inputs,
+                ) as cache_inputs,
+                patch.object(
+                    runner, "_lookup_cached_anchor", return_value=False,
                 ),
                 patch.object(
                     runner.subprocess, "run", side_effect=successful_tool,
                 ) as child_run,
+                patch.object(
+                    runner.time, "perf_counter_ns", side_effect=clock,
+                ),
             ):
                 tracer = runner.PhaseTimingTrace(str(trace_path))
                 runner._PHASE_TRACER = tracer
-                runner._prepare_compiler(plan)
+                executable = Path(runner._prepare_compiler(plan))
                 tracer.finish(complete=True, outcome="success", exit_code=0)
                 tracer.close()
 
+            self.assertTrue(executable.is_file())
+            self.assertEqual(cache_inputs.call_count, 2)
             self.assertEqual(child_run.call_count, 3)
             records = [
                 json.loads(line)
                 for line in trace_path.read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual(
-                [row["stage"] for row in records],
+                [record["stage"] for record in records],
                 [
                     "compiler_anchor_compile",
                     "compiler_runtime_compile",
@@ -338,41 +889,214 @@ class CompilerArtifactCacheTests(unittest.TestCase):
                     "runner_total",
                 ],
             )
-            for record in records[:3]:
-                self.assertTrue(record["executed"])
-                self.assertTrue(record["complete"])
-                self.assertEqual(record["outcome"], "success")
-                self.assertEqual(record["exit_code"], 0)
-                self.assertEqual(record["command_category"], "clang")
-            self.assertEqual(
-                sum(row["duration_ns"] for row in records[:4]),
-                records[-1]["duration_ns"],
-            )
+            for child in records[:3]:
+                self.assertTrue(child["executed"])
+                self.assertTrue(child["complete"])
+                self.assertEqual(child["outcome"], "success")
+                self.assertEqual(child["exit_code"], 0)
+                self.assertEqual(child["command_category"], "clang")
 
-    def test_build_failure_is_not_published_or_retried(self) -> None:
+    def test_changed_post_compile_closure_is_not_published_or_linked(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             cache_root = root / "cache"
             plan = self.make_plan(root / "fixture")
+            inputs = self.simple_inputs()
+            changed_inputs = self.simple_inputs("changed-after-compile")
+
+            def successful_anchor(command, **_kwargs):
+                output = Path(command[command.index("-o") + 1])
+                output.write_bytes(b"object\n")
+                return subprocess.CompletedProcess(command, 0, b"", b"")
+
+            with (
+                patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
+                patch.object(runner, "THINLTO_CACHE", root / "thinlto"),
+                patch.dict(
+                    os.environ, {runner.COMPILER_CACHE_ENV: "1"}, clear=False,
+                ),
+                patch.object(
+                    runner, "_compiler_cache_inputs",
+                    side_effect=[inputs, changed_inputs],
+                ),
+                patch.object(
+                    runner, "_lookup_cached_anchor", return_value=False,
+                ),
+                patch.object(
+                    runner.subprocess, "run", side_effect=successful_anchor,
+                ) as child_run,
+                patch.object(runner, "_publish_cached_anchor") as publish,
+            ):
+                with self.assertRaisesRegex(
+                    runner.CompilerPreparationError,
+                    "inputs changed during construction",
+                ):
+                    runner._prepare_compiler(plan)
+
+            self.assertEqual(child_run.call_count, 1)
+            publish.assert_not_called()
+            self.assertEqual(list(cache_root.glob(".staging-*")), [])
+
+    def test_build_failure_is_not_retried_or_published(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            plan = self.make_plan(root / "fixture")
+            inputs = self.simple_inputs()
             failure = subprocess.CalledProcessError(
                 23, [plan.clang, "-c"], stderr=b"original compiler failure",
             )
             with (
                 patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
-                patch.dict(os.environ, {runner.COMPILER_CACHE_ENV: "1"}),
+                patch.object(runner, "THINLTO_CACHE", root / "thinlto"),
+                patch.dict(
+                    os.environ, {runner.COMPILER_CACHE_ENV: "1"}, clear=False,
+                ),
                 patch.object(
-                    runner, "_build_compiler_in_directory",
-                    side_effect=failure,
-                ) as build,
+                    runner, "_compiler_cache_inputs", return_value=inputs,
+                ),
+                patch.object(
+                    runner, "_lookup_cached_anchor", return_value=False,
+                ),
+                patch.object(
+                    runner.subprocess, "run", side_effect=failure,
+                ) as child_run,
+                patch.object(runner, "_publish_cached_anchor") as publish,
             ):
                 with self.assertRaises(subprocess.CalledProcessError) as raised:
                     runner._prepare_compiler(plan)
 
             self.assertIs(raised.exception, failure)
-            build.assert_called_once()
+            self.assertEqual(child_run.call_count, 1)
+            publish.assert_not_called()
             self.assertFalse((cache_root / "receipts").exists())
-            self.assertFalse((cache_root / "artifacts").exists())
             self.assertEqual(list(cache_root.glob(".staging-*")), [])
+
+    def test_disable_switch_bypasses_only_cache_with_same_controlled_recipe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_root = root / "cache"
+            plan = self.make_plan(root / "fixture")
+            commands = []
+
+            def successful_tool(command, **kwargs):
+                commands.append((list(command), dict(kwargs)))
+                output = Path(command[command.index("-o") + 1])
+                output.write_bytes(b"uncached stage\n")
+                return subprocess.CompletedProcess(command, 0, b"", b"")
+
+            with (
+                patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
+                patch.object(runner, "THINLTO_CACHE", root / "thinlto"),
+                patch.dict(
+                    os.environ, {runner.COMPILER_CACHE_ENV: "0"}, clear=False,
+                ),
+                patch.object(
+                    runner, "_compiler_cache_inputs",
+                ) as cache_inputs,
+                patch.object(
+                    runner, "_lookup_cached_anchor",
+                ) as lookup,
+                patch.object(
+                    runner.subprocess, "run", side_effect=successful_tool,
+                ),
+            ):
+                executable = Path(runner._prepare_compiler(plan))
+
+            self.assertTrue(executable.is_file())
+            cache_inputs.assert_not_called()
+            lookup.assert_not_called()
+            self.assertEqual(len(commands), 3)
+            for command, kwargs in commands:
+                self.assertIn("--no-default-config", command)
+                self.assertIn(f"--target={plan.target}", command)
+                self.assertEqual(kwargs["env"], dict(plan.environment))
+            self.assertIn(plan.linker_pin_flags[0], commands[-1][0])
+            self.assertNotEqual(executable.parent, cache_root)
+
+    def test_unsupported_platform_path_uses_original_uncached_full_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan = self.make_plan(
+                root / "fixture", controlled=False, cache_supported=False,
+            )
+            calls = []
+
+            def compile_anchor(_plan, build_dir, source):
+                calls.append(("anchor", source))
+                output = build_dir / "main.o"
+                output.write_bytes(b"object\n")
+                return output
+
+            def runtime_and_link(_plan, build_dir, source):
+                calls.append(("runtime-link", source))
+                output = build_dir / plan.exe_name
+                output.write_bytes(b"compiler\n")
+                return output
+
+            with (
+                patch.object(
+                    runner, "_compile_anchor", side_effect=compile_anchor,
+                ),
+                patch.object(
+                    runner, "_compile_runtime_and_link",
+                    side_effect=runtime_and_link,
+                ),
+                patch.object(runner, "_stage_anchor_snapshot") as snapshot,
+                patch.object(runner, "_compiler_cache_inputs") as inputs,
+            ):
+                executable = Path(runner._prepare_compiler(plan))
+
+            self.assertTrue(executable.is_file())
+            self.assertEqual(
+                calls,
+                [
+                    ("anchor", plan.anchor_source),
+                    ("runtime-link", plan.anchor_source),
+                ],
+            )
+            snapshot.assert_not_called()
+            inputs.assert_not_called()
+
+    def test_incompatible_controlled_driver_falls_back_to_original_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = self.make_plan(Path(temp_dir) / "fixture")
+            with (
+                patch.object(runner.sys, "platform", "win32"),
+                patch.object(runner, "DIST_C_MAIN", fixture.anchor_source),
+                patch.object(runner, "RUNTIME_CPP", fixture.runtime_source),
+                patch.object(
+                    runner, "find_clang", return_value=fixture.clang,
+                ),
+                patch.object(
+                    runner.shutil, "which",
+                    return_value=fixture.runtime_compiler,
+                ),
+                patch.object(
+                    runner, "_resolved_executable",
+                    side_effect=lambda executable: executable,
+                ),
+                patch.object(
+                    runner, "_find_lld_linker", return_value=fixture.linker,
+                ),
+                patch.object(
+                    runner, "_controlled_environment",
+                    return_value=fixture.environment,
+                ),
+                patch.object(
+                    runner, "_probe_controlled_target",
+                    side_effect=[fixture.target, None],
+                ),
+            ):
+                plan = runner._compiler_build_plan()
+
+            self.assertIsNotNone(plan)
+            self.assertFalse(plan.controlled)
+            self.assertFalse(plan.cache_supported)
+            self.assertEqual(plan.driver_flags, ())
+            self.assertEqual(plan.linker_pin_flags, ())
+            self.assertIsNone(plan.target)
+            self.assertIsNone(runner._plan_environment(plan))
 
     def test_build_failure_report_preserves_original_diagnostics(self) -> None:
         failure = subprocess.CalledProcessError(
@@ -387,72 +1111,6 @@ class CompilerArtifactCacheTests(unittest.TestCase):
         self.assertIn("command exited 23", report)
         self.assertIn("original stdout", report)
         self.assertIn("original stderr", report)
-
-    def test_disable_switch_bypasses_an_existing_entry(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            cache_root = root / "cache"
-            plan = self.make_plan(root / "fixture")
-            self.seed_cache(cache_root, plan, b"cached compiler\n")
-
-            def build_uncached(_plan, build_dir):
-                executable = build_dir / plan.exe_name
-                executable.write_bytes(b"uncached compiler\n")
-                return executable
-
-            with (
-                patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
-                patch.dict(os.environ, {runner.COMPILER_CACHE_ENV: "0"}),
-                patch.object(
-                    runner, "_build_compiler_in_directory",
-                    side_effect=build_uncached,
-                ) as build,
-            ):
-                executable = Path(runner._prepare_compiler(plan))
-
-            build.assert_called_once()
-            self.assertEqual(executable.read_bytes(), b"uncached compiler\n")
-            self.assertNotEqual(executable.parent, cache_root)
-
-    def test_concurrent_misses_publish_only_complete_entries(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            cache_root = root / "cache"
-            plan = self.make_plan(root / "fixture")
-            barrier = threading.Barrier(2)
-
-            def concurrent_build(_plan, build_dir):
-                executable = build_dir / plan.exe_name
-                executable.write_bytes(b"concurrent compiler\n")
-                barrier.wait(timeout=5)
-                return executable
-
-            with (
-                patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
-                patch.dict(os.environ, {runner.COMPILER_CACHE_ENV: "1"}),
-                patch.object(
-                    runner, "_build_compiler_in_directory",
-                    side_effect=concurrent_build,
-                ) as build,
-            ):
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    paths = list(pool.map(
-                        lambda _index: Path(runner._prepare_compiler(plan)),
-                        range(2),
-                    ))
-
-            self.assertEqual(build.call_count, 2)
-            self.assertNotEqual(paths[0].parent, paths[1].parent)
-            self.assertEqual(
-                [path.read_bytes() for path in paths],
-                [b"concurrent compiler\n", b"concurrent compiler\n"],
-            )
-            inputs = runner._compiler_cache_inputs(plan)
-            key = runner._compiler_cache_key(inputs)
-            self.assertIsNotNone(runner._validated_cached_compiler(
-                cache_root, key, inputs, plan.exe_name,
-            ))
-            self.assertEqual(list(cache_root.glob(".staging-*")), [])
 
 
 if __name__ == "__main__":
