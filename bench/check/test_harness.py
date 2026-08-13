@@ -2510,6 +2510,44 @@ sys.exit(24)
                 self.assertIn(str(stdout), str(raised.exception))
                 self.assertIn(str(stderr), str(raised.exception))
 
+    def test_capped_preparation_prefers_memory_cap_to_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            stdout = root / "stdout.txt"
+            stderr = root / "stderr.txt"
+
+            def failed_job(
+                *_args: object, **kwargs: object
+            ) -> dict[str, object]:
+                Path(kwargs["stdout_path"]).write_bytes(b"raw-out")
+                Path(kwargs["stderr_path"]).write_bytes(b"raw-err")
+                return {
+                    "timed_out": True,
+                    "exit_code": 1,
+                    "measurement_errors": [
+                        "job_memory_limit_reached: peak_job_commit=2, limit=1"
+                    ],
+                }
+
+            with (
+                mock.patch.object(harness, "run_in_job", side_effect=failed_job),
+                self.assertRaises(harness.HarnessError) as raised,
+            ):
+                harness._run_capped_command(
+                    [sys.executable, "-c", "pass"],
+                    cwd=root,
+                    timeout_seconds=5,
+                    label="combined failure",
+                    stdout_path=stdout,
+                    stderr_path=stderr,
+                )
+            message = str(raised.exception)
+            self.assertIn("exceeded its Job memory limit", message)
+            self.assertIn("job_memory_limit_reached:", message)
+            self.assertNotIn("invocation timed out", message)
+            self.assertEqual(stdout.read_bytes(), b"raw-out")
+            self.assertEqual(stderr.read_bytes(), b"raw-err")
+
     def test_environment_rejects_job_limit_identity_drift(self) -> None:
         evidence = {
             **harness._expected_job_preflight(),

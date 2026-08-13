@@ -326,14 +326,14 @@ def _run_capped_command(
         raise HarnessError(
             f"{label} stdout/stderr could not be read{retained}: {exc}"
         ) from exc
-    if measurement["timed_out"]:
-        raise HarnessError(
-            f"{label} invocation timed out after {timeout_seconds} seconds{retained}"
-        )
     limit_errors = _hard_resource_measurement_errors(measurement)
     if limit_errors:
         raise HarnessError(
             f"{label} exceeded its Job memory limit: {limit_errors[0]}{retained}"
+        )
+    if measurement["timed_out"]:
+        raise HarnessError(
+            f"{label} invocation timed out after {timeout_seconds} seconds{retained}"
         )
     returncode = measurement["exit_code"]
     if not isinstance(returncode, int):
