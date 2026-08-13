@@ -1017,6 +1017,12 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                 return True
 
             def successful_tool(command, **_kwargs):
+                if "-dumpmachine" in command:
+                    return subprocess.CompletedProcess(
+                        command, 0, (plan.target or "") + "\n", "",
+                    )
+                if "-E" in command and command[-1] == "-":
+                    return subprocess.CompletedProcess(command, 0, "", "")
                 if "-MF" in command:
                     depfile = Path(command[command.index("-MF") + 1])
                     anchor = Path(command[-1])
@@ -1036,6 +1042,17 @@ class CompilerAnchorCacheTests(unittest.TestCase):
 
             clock = iter(range(0, 1000, 10))
             with (
+                patch.object(runner.sys, "platform", "win32"),
+                patch.object(runner, "DIST_C_MAIN", plan.anchor_source),
+                patch.object(runner, "RUNTIME_CPP", plan.runtime_source),
+                patch.object(runner, "find_clang", return_value=plan.clang),
+                patch.object(
+                    runner.shutil, "which", return_value=plan.runtime_compiler,
+                ),
+                patch.object(
+                    runner, "_controlled_environment",
+                    return_value=plan.environment,
+                ),
                 patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
                 patch.dict(
                     os.environ, {runner.COMPILER_CACHE_ENV: "1"}, clear=False,
@@ -1052,7 +1069,9 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             ):
                 tracer = runner.PhaseTimingTrace(str(trace_path))
                 runner._PHASE_TRACER = tracer
-                executable = Path(runner._prepare_compiler(plan))
+                discovered_plan = runner._compiler_build_plan()
+                self.assertIsNotNone(discovered_plan)
+                executable = Path(runner._prepare_compiler(discovered_plan))
                 tracer.finish(complete=True, outcome="success", exit_code=0)
                 tracer.close()
 
@@ -1064,6 +1083,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(
                 [record["stage"] for record in records],
                 [
+                    *runner.COMPILER_PROBE_STAGES,
                     "compiler_anchor_dependency_scan",
                     "compiler_anchor_prepare",
                     "compiler_anchor_dependency_scan",
@@ -1073,7 +1093,10 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                     "runner_total",
                 ],
             )
-            cached = records[1]
+            cached = next(
+                record for record in records
+                if record["stage"] == "compiler_anchor_prepare"
+            )
             self.assertEqual(set(cached), runner.PHASE_TIMING_FIELDS)
             self.assertIsNone(cached["suite"])
             self.assertEqual(cached["case"], "runner")
@@ -1082,7 +1105,14 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(cached["outcome"], "cached")
             self.assertIsNone(cached["exit_code"])
             self.assertIsNone(cached["command_category"])
-            for child in (records[0], records[2], records[3], records[4]):
+            for child in (
+                record for record in records
+                if record["stage"] not in {
+                    "compiler_anchor_prepare",
+                    "orchestration_residual",
+                    "runner_total",
+                }
+            ):
                 self.assertTrue(child["executed"])
                 self.assertTrue(child["complete"])
                 self.assertEqual(child["outcome"], "success")
@@ -1101,6 +1131,12 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             plan = self.make_plan(root / "fixture")
 
             def successful_tool(command, **_kwargs):
+                if "-dumpmachine" in command:
+                    return subprocess.CompletedProcess(
+                        command, 0, (plan.target or "") + "\n", "",
+                    )
+                if "-E" in command and command[-1] == "-":
+                    return subprocess.CompletedProcess(command, 0, "", "")
                 if "-MF" in command:
                     depfile = Path(command[command.index("-MF") + 1])
                     anchor = Path(command[-1])
@@ -1123,6 +1159,17 @@ class CompilerAnchorCacheTests(unittest.TestCase):
 
             clock = iter(range(0, 1000, 10))
             with (
+                patch.object(runner.sys, "platform", "win32"),
+                patch.object(runner, "DIST_C_MAIN", plan.anchor_source),
+                patch.object(runner, "RUNTIME_CPP", plan.runtime_source),
+                patch.object(runner, "find_clang", return_value=plan.clang),
+                patch.object(
+                    runner.shutil, "which", return_value=plan.runtime_compiler,
+                ),
+                patch.object(
+                    runner, "_controlled_environment",
+                    return_value=plan.environment,
+                ),
                 patch.object(runner, "COMPILER_ARTIFACT_CACHE", cache_root),
                 patch.object(runner, "THINLTO_CACHE", root / "thinlto"),
                 patch.dict(
@@ -1140,12 +1187,14 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             ):
                 tracer = runner.PhaseTimingTrace(str(trace_path))
                 runner._PHASE_TRACER = tracer
-                executable = Path(runner._prepare_compiler(plan))
+                discovered_plan = runner._compiler_build_plan()
+                self.assertIsNotNone(discovered_plan)
+                executable = Path(runner._prepare_compiler(discovered_plan))
                 tracer.finish(complete=True, outcome="success", exit_code=0)
                 tracer.close()
 
             self.assertTrue(executable.is_file())
-            self.assertEqual(child_run.call_count, 5)
+            self.assertEqual(child_run.call_count, 9)
             records = [
                 json.loads(line)
                 for line in trace_path.read_text(encoding="utf-8").splitlines()
@@ -1153,6 +1202,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(
                 [record["stage"] for record in records],
                 [
+                    *runner.COMPILER_PROBE_STAGES,
                     "compiler_anchor_dependency_scan",
                     "compiler_anchor_compile",
                     "compiler_anchor_dependency_scan",
@@ -1162,7 +1212,7 @@ class CompilerAnchorCacheTests(unittest.TestCase):
                     "runner_total",
                 ],
             )
-            for child in records[:5]:
+            for child in records[:9]:
                 self.assertTrue(child["executed"])
                 self.assertTrue(child["complete"])
                 self.assertEqual(child["outcome"], "success")

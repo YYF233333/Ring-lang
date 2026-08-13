@@ -1630,6 +1630,14 @@ class RunnerPhaseTimingTests(unittest.TestCase):
     def _e2e_rows(self) -> list[dict]:
         rows = [
             self._row(
+                0, suite=None, case="runner", stage=stage, duration_ns=1,
+                executed=True, complete=True, outcome="success", exit_code=0,
+                command_category="clang",
+            )
+            for stage in harness.RUNNER_COMPILER_PROBE_STAGES
+        ]
+        rows.extend([
+            self._row(
                 0, suite=None, case="runner",
                 stage="compiler_anchor_dependency_scan", duration_ns=1,
                 executed=True, complete=True, outcome="success", exit_code=0,
@@ -1689,10 +1697,10 @@ class RunnerPhaseTimingTests(unittest.TestCase):
             ),
             self._row(
                 9, suite=None, case="runner", stage="runner_total",
-                duration_ns=115, executed=True, complete=True, outcome="success",
+                duration_ns=119, executed=True, complete=True, outcome="success",
                 exit_code=0, command_category=None,
             ),
-        ]
+        ])
         for sequence, row in enumerate(rows, 1):
             row["sequence"] = sequence
         return rows
@@ -1707,6 +1715,10 @@ class RunnerPhaseTimingTests(unittest.TestCase):
 
     def _cached_compiler_rows(self) -> list[dict]:
         rows = self._e2e_rows()
+        compile_index = next(
+            index for index, row in enumerate(rows)
+            if row["stage"] == "compiler_anchor_compile"
+        )
         cached = self._row(
             1,
             suite=None,
@@ -1719,8 +1731,8 @@ class RunnerPhaseTimingTests(unittest.TestCase):
             exit_code=None,
             command_category=None,
         )
-        rows[1] = cached
-        rows[-1]["duration_ns"] = 109
+        rows[compile_index] = cached
+        rows[-1]["duration_ns"] = 113
         for sequence, row in enumerate(rows, 1):
             row["sequence"] = sequence
         return rows
@@ -1751,14 +1763,39 @@ class RunnerPhaseTimingTests(unittest.TestCase):
         runner = runpy.run_path(str(harness.REPO_ROOT / "tests" / "run_tests.py"))
         self.assertEqual(runner["PHASE_TIMING_SCHEMA"], harness.RUNNER_PHASE_SCHEMA)
         self.assertEqual(runner["PHASE_TIMING_FIELDS"], harness.RUNNER_PHASE_FIELDS)
+        self.assertEqual(
+            runner["COMPILER_PROBE_STAGES"],
+            harness.RUNNER_COMPILER_PROBE_STAGES,
+        )
         self.assertEqual(len(harness.RUNNER_PHASE_FIELDS), 12)
 
     def test_valid_runner_trace_and_negative_child_are_eligible(self) -> None:
-        classified = self._classify(self._e2e_rows())
+        miss_rows = self._e2e_rows()
+        self.assertEqual(
+            tuple(
+                row["stage"] for row in miss_rows
+                if row["suite"] is None
+                and row["stage"] not in {
+                    "runtime_prepare", "orchestration_residual", "runner_total",
+                }
+            ),
+            harness.RUNNER_COMPILER_STAGES,
+        )
+        classified = self._classify(miss_rows)
         self.assertEqual(classified.hard_errors, ())
         self.assertEqual(classified.eligibility_errors, ())
 
         cached_rows = self._cached_compiler_rows()
+        self.assertEqual(
+            tuple(
+                row["stage"] for row in cached_rows
+                if row["suite"] is None
+                and row["stage"] not in {
+                    "runtime_prepare", "orchestration_residual", "runner_total",
+                }
+            ),
+            harness.RUNNER_COMPILER_CACHED_STAGES,
+        )
         classified = self._classify(cached_rows)
         self.assertEqual(classified.hard_errors, ())
         self.assertEqual(classified.eligibility_errors, ())
@@ -1778,16 +1815,35 @@ class RunnerPhaseTimingTests(unittest.TestCase):
         summary = harness._summarize_runner_phase_timing([record])
         assert summary is not None
         self.assertEqual(
-            summary["compiler_construction"]["duration_ns"]["median"], 56
+            summary["compiler_construction"]["duration_ns"]["median"], 60
         )
         self.assertEqual(summary["accounting"]["runner"]["balance_ns"]["median"], 0)
 
     def test_cached_compiler_setup_rejects_mixed_duplicate_or_wrong_order(self) -> None:
+        def cached_index(rows: list[dict]) -> int:
+            return next(
+                index for index, row in enumerate(rows)
+                if row["stage"] == harness.RUNNER_COMPILER_CACHED_STAGE
+            )
+
         mutations = {
-            "mixed": lambda rows: rows.insert(2, self._e2e_rows()[1]),
-            "duplicate": lambda rows: rows.insert(2, dict(rows[1])),
+            "mixed": lambda rows: rows.insert(
+                cached_index(rows) + 1,
+                next(
+                    dict(row) for row in self._e2e_rows()
+                    if row["stage"] == "compiler_anchor_compile"
+                ),
+            ),
+            "duplicate": lambda rows: rows.insert(
+                cached_index(rows) + 1, dict(rows[cached_index(rows)])
+            ),
             "wrong-order": lambda rows: rows.__setitem__(
                 slice(0, 2), [rows[1], rows[0]]
+            ),
+            "missing-probe": lambda rows: rows.pop(0),
+            "duplicate-probe": lambda rows: rows.insert(1, dict(rows[0])),
+            "wrong-probe-order": lambda rows: rows.__setitem__(
+                slice(2, 4), [rows[3], rows[2]]
             ),
         }
         for name, mutate in mutations.items():
@@ -1812,7 +1868,7 @@ class RunnerPhaseTimingTests(unittest.TestCase):
             ("command_category", "clang"),
         ):
             rows = self._cached_compiler_rows()
-            rows[1][field] = value
+            rows[cached_index(rows)][field] = value
             with self.subTest(field=field):
                 classified = self._classify(rows)
                 self.assertTrue(
@@ -1821,6 +1877,23 @@ class RunnerPhaseTimingTests(unittest.TestCase):
                         for error in classified.hard_errors
                     )
                 )
+
+    def test_compiler_probe_failure_is_ineligible_even_when_runner_succeeds(
+        self,
+    ) -> None:
+        rows = self._e2e_rows()
+        failed_probe = next(
+            row for row in rows
+            if row["stage"] == "compiler_runtime_header_probe"
+        )
+        failed_probe.update(outcome="nonzero", exit_code=17)
+
+        classified = self._classify(rows)
+        self.assertEqual(classified.hard_errors, ())
+        self.assertTrue(any(
+            "compiler capability probe did not succeed" in error
+            for error in classified.eligibility_errors
+        ))
 
     def test_unknown_schema_or_extra_thirteenth_field_is_hard(self) -> None:
         for name, mutate in (
@@ -1936,9 +2009,9 @@ class RunnerPhaseTimingTests(unittest.TestCase):
         summary = harness._summarize_runner_phase_timing([record])
         assert summary is not None
         self.assertEqual(summary["sample_count"], 1)
-        self.assertEqual(summary["compiler_construction"]["duration_ns"]["median"], 62)
-        self.assertEqual(summary["runner_total_ns"]["median"], 115)
-        self.assertEqual(summary["outside_runner_wall_ns"]["median"], 5)
+        self.assertEqual(summary["compiler_construction"]["duration_ns"]["median"], 66)
+        self.assertEqual(summary["runner_total_ns"]["median"], 119)
+        self.assertEqual(summary["outside_runner_wall_ns"]["median"], 1)
         self.assertEqual(
             summary["accounting"]["suites"]["e2e"]["balance_ns"]["median"],
             0,

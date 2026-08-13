@@ -122,7 +122,14 @@ RUNNER_COMPILER_SUITES = frozenset(
 )
 RUNNER_RUNTIME_SUITES = frozenset({"e2e", "golden"})
 RUNNER_COMPILER_CACHED_STAGE = "compiler_anchor_prepare"
+RUNNER_COMPILER_PROBE_STAGES = (
+    "compiler_anchor_target_probe",
+    "compiler_runtime_target_probe",
+    "compiler_anchor_header_probe",
+    "compiler_runtime_header_probe",
+)
 RUNNER_COMPILER_STAGES = (
+    *RUNNER_COMPILER_PROBE_STAGES,
     "compiler_anchor_dependency_scan",
     "compiler_anchor_compile",
     "compiler_anchor_dependency_scan",
@@ -130,6 +137,7 @@ RUNNER_COMPILER_STAGES = (
     "compiler_link",
 )
 RUNNER_COMPILER_CACHED_STAGES = (
+    *RUNNER_COMPILER_PROBE_STAGES,
     "compiler_anchor_dependency_scan",
     RUNNER_COMPILER_CACHED_STAGE,
     "compiler_anchor_dependency_scan",
@@ -2455,6 +2463,13 @@ def _classify_runner_phase_rows(
                     hard.append(f"{prefix} has an invalid cached-runtime combination")
             elif category != "clang" or not _runner_subprocess_outcome_is_valid(row):
                 hard.append(f"{prefix} has an invalid compiler-stage combination")
+            elif (
+                stage in RUNNER_COMPILER_PROBE_STAGES
+                and row["outcome"] != "success"
+            ):
+                eligibility.append(
+                    f"{prefix} compiler capability probe did not succeed"
+                )
         elif is_child:
             if (
                 not isinstance(suite, str)

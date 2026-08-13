@@ -16,7 +16,10 @@
 
 - Integration branch/worktree: `codex/b180-runner-cache-integration`; final
   implementation checkpoint before this documentation update is
-  `25ae0bba` (the retained cold/warm samples were taken at `f02d176b1`).
+  `25ae0bba`. The retained cold sample source is
+  `8a3cf3d4966537f1c8671d51450af9b3bda57abb`; the warm sample source is
+  `f02d176b1f6b458beed8d27bb7d8695e7f4f38f3`. They provide directional
+  cold-to-warm evidence only, not a paired comparison from the same snapshot.
 - The runner caches only the controlled Windows `main.c` to ThinLTO anchor
   object. Runtime compilation, final link and every test action stay fresh.
 - Key closure, immutable publication, cache bounds, poison-on-divergence and

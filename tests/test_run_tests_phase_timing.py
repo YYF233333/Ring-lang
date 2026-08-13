@@ -112,6 +112,80 @@ class PhaseTimingTests(unittest.TestCase):
                 self.assertEqual(row["version"], runner.PHASE_TIMING_VERSION)
                 self.assertTrue(row["executed"])
 
+    def test_controlled_probes_are_distinct_runner_stages_and_flush_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trace_path = Path(temp_dir) / "controlled-probes.jsonl"
+            target = "x86_64-pc-windows-msvc"
+            success_target = subprocess.CompletedProcess(
+                ["clang", "-dumpmachine"], 0, target + "\n", "",
+            )
+            success_header = subprocess.CompletedProcess(
+                ["clang", "-E"], 0, "", "",
+            )
+            failed_header = subprocess.CalledProcessError(
+                9, ["clang++", "-E"], output="", stderr="missing header",
+            )
+            environment = (("PATH", "controlled"),)
+            with (
+                patch.object(
+                    runner.time,
+                    "perf_counter_ns",
+                    side_effect=range(0, 90, 10),
+                ),
+                patch.object(
+                    runner.subprocess,
+                    "run",
+                    side_effect=[
+                        success_target,
+                        success_target,
+                        success_header,
+                        failed_header,
+                    ],
+                ),
+            ):
+                tracer = runner.PhaseTimingTrace(str(trace_path))
+                runner._PHASE_TRACER = tracer
+                self.assertEqual(
+                    runner._probe_controlled_target(
+                        "clang", environment,
+                        phase_stage=runner.COMPILER_ANCHOR_TARGET_PROBE_STAGE,
+                    ),
+                    target,
+                )
+                self.assertEqual(
+                    runner._probe_controlled_target(
+                        "clang++", environment,
+                        phase_stage=runner.COMPILER_RUNTIME_TARGET_PROBE_STAGE,
+                    ),
+                    target,
+                )
+                self.assertTrue(runner._probe_controlled_headers(
+                    "clang", environment, target,
+                    phase_stage=runner.COMPILER_ANCHOR_HEADER_PROBE_STAGE,
+                    language="c", headers=("stdint.h",),
+                ))
+                self.assertFalse(runner._probe_controlled_headers(
+                    "clang++", environment, target,
+                    phase_stage=runner.COMPILER_RUNTIME_HEADER_PROBE_STAGE,
+                    language="c++", headers=("vector",),
+                ))
+                records = self.read_records(trace_path)
+                tracer.close()
+
+            self.assertEqual(
+                [record["stage"] for record in records],
+                list(runner.COMPILER_PROBE_STAGES),
+            )
+            for record in records:
+                self.assertIsNone(record["suite"])
+                self.assertEqual(record["case"], "runner")
+                self.assertEqual(record["command_category"], "clang")
+            self.assertEqual(records[-1]["outcome"], "nonzero")
+            self.assertTrue(records[-1]["complete"])
+            self.assertEqual(records[-1]["exit_code"], 9)
+
     def test_suite_and_runner_totals_partition_residual(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             trace_path = Path(temp_dir) / "accounting.jsonl"

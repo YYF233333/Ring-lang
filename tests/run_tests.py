@@ -193,6 +193,16 @@ PHASE_TIMING_FIELDS = frozenset({
     "duration_ns", "executed", "complete", "outcome", "exit_code",
     "command_category",
 })
+COMPILER_ANCHOR_TARGET_PROBE_STAGE = "compiler_anchor_target_probe"
+COMPILER_RUNTIME_TARGET_PROBE_STAGE = "compiler_runtime_target_probe"
+COMPILER_ANCHOR_HEADER_PROBE_STAGE = "compiler_anchor_header_probe"
+COMPILER_RUNTIME_HEADER_PROBE_STAGE = "compiler_runtime_header_probe"
+COMPILER_PROBE_STAGES = (
+    COMPILER_ANCHOR_TARGET_PROBE_STAGE,
+    COMPILER_RUNTIME_TARGET_PROBE_STAGE,
+    COMPILER_ANCHOR_HEADER_PROBE_STAGE,
+    COMPILER_RUNTIME_HEADER_PROBE_STAGE,
+)
 
 # Every retained gap carries an actionable reason instead of a bare skip name.
 SHARED_POSITIVE_GAPS = {}
@@ -722,10 +732,14 @@ def _plan_environment(plan: _CompilerBuildPlan) -> Optional[Dict[str, str]]:
 def _probe_controlled_target(
     compiler: str,
     environment: Tuple[Tuple[str, str], ...],
+    *,
+    phase_stage: str,
 ) -> Optional[str]:
     try:
-        result = subprocess.run(
+        result = _run_subprocess(
+            phase_stage,
             [compiler, "--no-default-config", "-dumpmachine"],
+            phase_case="runner",
             check=True,
             capture_output=True,
             text=True,
@@ -746,12 +760,14 @@ def _probe_controlled_headers(
     environment: Tuple[Tuple[str, str], ...],
     target: str,
     *,
+    phase_stage: str,
     language: str,
     headers: Tuple[str, ...],
 ) -> bool:
     source = "".join(f"#include <{header}>\n" for header in headers)
     try:
-        subprocess.run(
+        _run_subprocess(
+            phase_stage,
             [
                 compiler,
                 "--no-default-config",
@@ -761,6 +777,7 @@ def _probe_controlled_headers(
                 language,
                 "-",
             ],
+            phase_case="runner",
             input=source,
             check=True,
             capture_output=True,
@@ -807,8 +824,16 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
         environment = _controlled_environment(
             clang, runtime_compiler, linker,
         )
-        clang_target = _probe_controlled_target(clang, environment)
-        runtime_target = _probe_controlled_target(runtime_compiler, environment)
+        clang_target = _probe_controlled_target(
+            clang,
+            environment,
+            phase_stage=COMPILER_ANCHOR_TARGET_PROBE_STAGE,
+        )
+        runtime_target = _probe_controlled_target(
+            runtime_compiler,
+            environment,
+            phase_stage=COMPILER_RUNTIME_TARGET_PROBE_STAGE,
+        )
         headers_supported = (
             clang_target is not None
             and clang_target == runtime_target
@@ -816,6 +841,7 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
                 clang,
                 environment,
                 clang_target,
+                phase_stage=COMPILER_ANCHOR_HEADER_PROBE_STAGE,
                 language="c",
                 headers=("math.h", "stdint.h"),
             )
@@ -823,6 +849,7 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
                 runtime_compiler,
                 environment,
                 clang_target,
+                phase_stage=COMPILER_RUNTIME_HEADER_PROBE_STAGE,
                 language="c++",
                 headers=("vector", "string", "windows.h"),
             )
