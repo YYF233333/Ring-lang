@@ -195,12 +195,17 @@ tool executables (including the exact `lld-link`), flags, exact seed
 argv/outcome, the built compiler and intermediate outputs, and a per-file
 canonical cache inventory. The bootstrap output remains beside the cache as
 `ring-lang-b176-warm-seed-output`; formal lanes use only its receipt-proven
-`ring.exe`. Formal cold and warm batches verify the same receipt, build output,
-and current seed bytes. Warm batches copy the seed cache into their run
+`ring.exe`. Exact raw seed stdout/stderr remain beside them as the stable
+`ring-lang-b176-warm-seed.stdout.txt` and `.stderr.txt` sidecars. They are kept
+on success and on every failure, including a pre-spawn failure (which leaves
+provable empty sidecars), and failure messages name both paths. Formal cold and
+warm batches verify the same receipt, build output, and current seed bytes.
+Warm batches copy the seed cache into their run
 directory and mutate only that isolated working copy, so one batch cannot warm
-a later batch. Keep the seed cache, receipt, and bootstrap output together until
-all dependent formal batches have been combined, then remove the three as one
-seed lifecycle. The retained receipt is part of the combine fingerprint. OS
+a later batch. Keep the seed cache, receipt, bootstrap output, and two stream
+sidecars together until all dependent formal batches have been combined, then
+remove the five as one seed lifecycle. The retained receipt is part of the
+combine fingerprint. OS
 file cache is deliberately not flushed or claimed as controlled.
 
 The Python runner also has a separate ignored root artifact,

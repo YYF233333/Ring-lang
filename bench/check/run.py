@@ -160,6 +160,8 @@ RSS_POLL_MS = 10
 WARM_CACHE_SEED_TIMEOUT_SECONDS = 600
 WARM_CACHE_RECEIPT_NAME = "ring-lang-b176-warm-seed-receipt.json"
 WARM_CACHE_OUTPUT_NAME = "ring-lang-b176-warm-seed-output"
+WARM_CACHE_STDOUT_NAME = "ring-lang-b176-warm-seed.stdout.txt"
+WARM_CACHE_STDERR_NAME = "ring-lang-b176-warm-seed.stderr.txt"
 LINKER_BINDING_SCHEMA = "ring.check-benchmark.linker-binding.v1"
 WARM_CACHE_BUILD_FILES = {
     "compiler_object": "ring_compiler_lto.o",
@@ -271,54 +273,59 @@ def _run_capped_command(
     cwd: str | os.PathLike[str],
     timeout_seconds: float,
     label: str,
-    stdout_path: Path | None = None,
-    stderr_path: Path | None = None,
+    stdout_path: Path,
+    stderr_path: Path,
 ) -> subprocess.CompletedProcess[bytes]:
     """Run an unmeasured preparation command under the formal Job limits."""
 
-    if (stdout_path is None) != (stderr_path is None):
-        raise ValueError("stdout_path and stderr_path must be provided together")
-    temporary: tempfile.TemporaryDirectory[str] | None = None
-    if stdout_path is None:
-        temporary = tempfile.TemporaryDirectory(prefix="ring-b176-capped-")
-        temporary_root = Path(temporary.name)
-        stdout_path = temporary_root / "stdout.txt"
-        stderr_path = temporary_root / "stderr.txt"
+    retained = f"; stdout retained at {stdout_path}; stderr retained at {stderr_path}"
     try:
+        measurement = run_in_job(
+            argv,
+            cwd=cwd,
+            env=os.environ,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            timeout_seconds=timeout_seconds,
+            poll_ms=RSS_POLL_MS,
+            memory_limit_bytes=DEFAULT_JOB_MEMORY_LIMIT_BYTES,
+            active_process_limit=DEFAULT_ACTIVE_PROCESS_LIMIT,
+        )
+    except (OSError, ValueError, JobMeasurementError) as exc:
         try:
-            measurement = run_in_job(
-                argv,
-                cwd=cwd,
-                env=os.environ,
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
-                timeout_seconds=timeout_seconds,
-                poll_ms=RSS_POLL_MS,
-                memory_limit_bytes=DEFAULT_JOB_MEMORY_LIMIT_BYTES,
-                active_process_limit=DEFAULT_ACTIVE_PROCESS_LIMIT,
-            )
-        except (OSError, ValueError, JobMeasurementError) as exc:
-            raise HarnessError(f"{label} invocation failed: {exc}") from exc
+            for path in (stdout_path, stderr_path):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch(exist_ok=True)
+        except OSError as retention_error:
+            raise HarnessError(
+                f"{label} invocation failed: {exc}; failed to retain stdout/stderr "
+                f"at {stdout_path} and {stderr_path}: {retention_error}"
+            ) from exc
+        raise HarnessError(f"{label} invocation failed: {exc}{retained}") from exc
+    try:
         stdout = stdout_path.read_bytes()
         stderr = stderr_path.read_bytes()
-        if measurement["timed_out"]:
-            raise HarnessError(
-                f"{label} invocation timed out after {timeout_seconds} seconds"
-            )
-        limit_errors = [
-            error
-            for error in measurement["measurement_errors"]
-            if error.startswith("job_memory_limit_reached:")
-        ]
-        if limit_errors:
-            raise HarnessError(f"{label} exceeded its Job memory limit: {limit_errors[0]}")
-        returncode = measurement["exit_code"]
-        if not isinstance(returncode, int):
-            raise HarnessError(f"{label} invocation returned no exit code")
-        return subprocess.CompletedProcess(list(argv), returncode, stdout, stderr)
-    finally:
-        if temporary is not None:
-            temporary.cleanup()
+    except OSError as exc:
+        raise HarnessError(
+            f"{label} stdout/stderr could not be read{retained}: {exc}"
+        ) from exc
+    if measurement["timed_out"]:
+        raise HarnessError(
+            f"{label} invocation timed out after {timeout_seconds} seconds{retained}"
+        )
+    limit_errors = [
+        error
+        for error in measurement["measurement_errors"]
+        if error.startswith("job_memory_limit_reached:")
+    ]
+    if limit_errors:
+        raise HarnessError(
+            f"{label} exceeded its Job memory limit: {limit_errors[0]}{retained}"
+        )
+    returncode = measurement["exit_code"]
+    if not isinstance(returncode, int):
+        raise HarnessError(f"{label} invocation returned no exit code{retained}")
+    return subprocess.CompletedProcess(list(argv), returncode, stdout, stderr)
 
 
 def _strict_json_loads(text: str, source: str) -> Any:
@@ -1038,6 +1045,14 @@ def _warm_cache_paths(cache: Path) -> tuple[Path, Path]:
     )
 
 
+def _warm_cache_stream_paths(cache: Path) -> tuple[Path, Path]:
+    receipt, _output = _warm_cache_paths(cache)
+    return (
+        receipt.with_name(WARM_CACHE_STDOUT_NAME),
+        receipt.with_name(WARM_CACHE_STDERR_NAME),
+    )
+
+
 def _seed_tool_records(tools: Mapping[str, str | None]) -> dict[str, Any]:
     records: dict[str, Any] = {}
     for name in ("python", "clang", "clangxx", "lld_link"):
@@ -1396,10 +1411,14 @@ def prepare_warm_cache_seed(
 ) -> Path:
     cache = cache.resolve()
     receipt_path, output = _warm_cache_paths(cache)
+    stdout_path, stderr_path = _warm_cache_stream_paths(cache)
     if receipt_path.exists():
         raise HarnessError(f"warm-cache receipt already exists: {receipt_path}")
     if output.exists():
         raise HarnessError(f"warm-cache seed output already exists: {output}")
+    for path in (stdout_path, stderr_path):
+        if path.exists():
+            raise HarnessError(f"warm-cache seed stream already exists: {path}")
     if cache.exists() and (not cache.is_dir() or any(cache.iterdir())):
         raise HarnessError(f"warm-cache seed requires a fresh empty cache: {cache}")
     cache.mkdir(parents=True, exist_ok=True)
@@ -1413,11 +1432,14 @@ def prepare_warm_cache_seed(
         cwd=recipe["cwd"],
         timeout_seconds=recipe["timeout_seconds"],
         label="warm-cache seed",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
     )
     if completed.returncode != 0:
         raise HarnessError(
             "warm-cache seed failed with exit "
-            f"{completed.returncode}; output retained at {output}"
+            f"{completed.returncode}; build output path is {output}; "
+            f"stdout retained at {stdout_path}; stderr retained at {stderr_path}"
         )
     if _warm_cache_source_identity() != source:
         raise HarnessError("warm-cache seed source identity changed during bootstrap")

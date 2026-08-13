@@ -2417,6 +2417,71 @@ sys.exit(24)
                 windows_job.DEFAULT_ACTIVE_PROCESS_LIMIT,
             )
 
+    def test_capped_preparation_failures_retain_named_streams(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            stdout = root / "retained" / "stdout.txt"
+            stderr = root / "retained" / "stderr.txt"
+            spawn_error = OSError("fixture spawn failure")
+            with (
+                mock.patch.object(harness, "run_in_job", side_effect=spawn_error),
+                self.assertRaises(harness.HarnessError) as raised,
+            ):
+                harness._run_capped_command(
+                    [sys.executable, "-c", "pass"],
+                    cwd=root,
+                    timeout_seconds=5,
+                    label="fixture",
+                    stdout_path=stdout,
+                    stderr_path=stderr,
+                )
+            self.assertIs(raised.exception.__cause__, spawn_error)
+            self.assertEqual(stdout.read_bytes(), b"")
+            self.assertEqual(stderr.read_bytes(), b"")
+            self.assertIn(str(stdout), str(raised.exception))
+            self.assertIn(str(stderr), str(raised.exception))
+
+            failures = {
+                "timeout": {
+                    "timed_out": True,
+                    "exit_code": 1,
+                    "measurement_errors": [],
+                },
+                "memory cap": {
+                    "timed_out": False,
+                    "exit_code": 1,
+                    "measurement_errors": [
+                        "job_memory_limit_reached: peak_job_commit=2, limit=1"
+                    ],
+                },
+            }
+            for label, measurement in failures.items():
+                stdout.unlink()
+                stderr.unlink()
+
+                def fake_job(*_args: object, **kwargs: object) -> dict[str, object]:
+                    Path(kwargs["stdout_path"]).write_bytes(b"raw-out")
+                    Path(kwargs["stderr_path"]).write_bytes(b"raw-err")
+                    return measurement
+
+                with (
+                    self.subTest(label=label),
+                    mock.patch.object(harness, "run_in_job", side_effect=fake_job),
+                    self.assertRaises(harness.HarnessError) as raised,
+                ):
+                    harness._run_capped_command(
+                        [sys.executable, "-c", "pass"],
+                        cwd=root,
+                        timeout_seconds=5,
+                        label=label,
+                        stdout_path=stdout,
+                        stderr_path=stderr,
+                    )
+                self.assertEqual(stdout.read_bytes(), b"raw-out")
+                self.assertEqual(stderr.read_bytes(), b"raw-err")
+                self.assertIn(str(stdout), str(raised.exception))
+                self.assertIn(str(stderr), str(raised.exception))
+
     def test_environment_rejects_job_limit_identity_drift(self) -> None:
         evidence = {
             **harness._expected_job_preflight(),
@@ -2453,6 +2518,14 @@ sys.exit(24)
                 "cwd": str(root),
                 "timeout_seconds": 5,
             }
+
+            def seed_success(
+                argv: list[str], **kwargs: object
+            ) -> subprocess.CompletedProcess[bytes]:
+                Path(kwargs["stdout_path"]).write_bytes(b"seed-out")
+                Path(kwargs["stderr_path"]).write_bytes(b"seed-err")
+                return subprocess.CompletedProcess(argv, 0, b"seed-out", b"seed-err")
+
             with (
                 mock.patch.object(
                     harness, "_warm_cache_source_identity",
@@ -2466,9 +2539,7 @@ sys.exit(24)
                 ),
                 mock.patch.object(
                     harness, "_run_capped_command",
-                    return_value=subprocess.CompletedProcess(
-                        recipe["argv"], 0, b"seed-out", b"seed-err"
-                    ),
+                    side_effect=seed_success,
                 ) as capped_seed,
                 mock.patch.object(
                     harness, "_cache_inventory", return_value={"files": 1}
@@ -2478,9 +2549,17 @@ sys.exit(24)
                 ),
                 mock.patch.object(harness, "_validate_warm_cache_receipt_shape"),
             ):
-                harness.prepare_warm_cache_seed(manifest, {}, cache)
+                receipt_path = harness.prepare_warm_cache_seed(manifest, {}, cache)
             capped_seed.assert_called_once()
             self.assertEqual(capped_seed.call_args.kwargs["label"], "warm-cache seed")
+            seed_stdout, seed_stderr = harness._warm_cache_stream_paths(cache)
+            self.assertEqual(capped_seed.call_args.kwargs["stdout_path"], seed_stdout)
+            self.assertEqual(capped_seed.call_args.kwargs["stderr_path"], seed_stderr)
+            self.assertEqual(seed_stdout.read_bytes(), b"seed-out")
+            self.assertEqual(seed_stderr.read_bytes(), b"seed-err")
+            receipt = harness._load_json(receipt_path)
+            self.assertEqual(receipt["outcome"]["stdout"], harness._bytes_record(b"seed-out"))
+            self.assertEqual(receipt["outcome"]["stderr"], harness._bytes_record(b"seed-err"))
 
             repo = root / "repo"
             repo.mkdir()
@@ -2514,6 +2593,54 @@ sys.exit(24)
                 "warm runner runtime preparation",
             )
             self.assertTrue(setup["prepared"]["exists"])
+
+    def test_warm_seed_nonzero_retains_named_raw_streams(self) -> None:
+        manifest = {
+            "fingerprint_flags": {
+                "compiler": [],
+                "runtime": [],
+                "runner_runtime": [],
+                "link": [],
+            }
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cache = root / "ring-lang-thinlto-cache"
+            recipe = {
+                "argv": [sys.executable, "-c", "pass"],
+                "cwd": str(root),
+                "timeout_seconds": 5,
+            }
+
+            def failed_job(*_args: object, **kwargs: object) -> dict[str, object]:
+                Path(kwargs["stdout_path"]).write_bytes(b"seed-failed-out")
+                Path(kwargs["stderr_path"]).write_bytes(b"seed-failed-err")
+                return {
+                    "timed_out": False,
+                    "exit_code": 7,
+                    "measurement_errors": [],
+                }
+
+            with (
+                mock.patch.object(
+                    harness,
+                    "_warm_cache_source_identity",
+                    return_value={"git_dirty": False},
+                ),
+                mock.patch.object(harness, "_seed_tool_records", return_value={}),
+                mock.patch.object(
+                    harness, "_warm_cache_seed_recipe", return_value=recipe
+                ),
+                mock.patch.object(harness, "run_in_job", side_effect=failed_job),
+                self.assertRaises(harness.HarnessError) as raised,
+            ):
+                harness.prepare_warm_cache_seed(manifest, {}, cache)
+            stdout, stderr = harness._warm_cache_stream_paths(cache)
+            self.assertEqual(stdout.read_bytes(), b"seed-failed-out")
+            self.assertEqual(stderr.read_bytes(), b"seed-failed-err")
+            self.assertIn("exit 7", str(raised.exception))
+            self.assertIn(str(stdout), str(raised.exception))
+            self.assertIn(str(stderr), str(raised.exception))
 
     def test_machine_lock_is_cross_worktree_fail_fast_and_released(self) -> None:
         with (
