@@ -448,7 +448,9 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 > **2026-08-12 用户细化**：正式基线不再等待全部 critical 长尾清零，但必须等待 developer-unblock checkpoint：当前 compiler source 可严格 `check/build compiler/main.ring` 且无 panic/ICE；compiler/std/benchmark manifest 所需的聚焦 ownership/RC 矩阵稳定、fail loud；compiler source、tracked anchor、toolchain 与测量 manifest 精确钉住；至少有一次由该精确快照建立的 strict native bootstrap 或等价的 exact-generation 证据。checkpoint 之后可完成 B-176 并进入 B-180；后续 correctness 修复若改变 workload、通过集合或 phase 工作量，必须刷新同快照配对基线，禁止混用前后数字。
 
-当前测量完整性框架已合入；正在补齐 opt-in compiler phase timing，随后在 clean worktree 执行正式 cold/warm baseline、形成 top-3 构成与 B-180 逐项预算后收口。
+> **2026-08-13 developer-unblock checkpoint：ACHIEVED。** 用户验收并关闭 `ownership-reachable-dispatch` item：final A7 对 current source 完成 clean C generation 与 O3+ThinLTO native link，tracked `compiler/dist-c/main.c` 与该 generation byte-identical（SHA256 `D7BB015B32EF8F4A438093509C794C82B60C13548808B0A1093AEFEAB0DF7F2E`），focused ownership/default/const-reexport/transaction/effect-mapping 正负矩阵无新增 ICE/panic。A7→A8 byte fixed point 与 final full-suite 明确保留为 B-180 完成认定/release 门，不再阻塞 B-176 baseline 或性能实现；不得把本 checkpoint 写成完整 release acceptance。
+
+当前测量完整性框架已合入，developer-unblock checkpoint 已成立；下一独立 session 在本提交快照上执行正式 cold/warm baseline、形成 top-3 构成与 B-180 逐项预算后收口。
 
 本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。developer-unblock checkpoint 前可以准备采样/只读 instrumentation；checkpoint 成立后形成正式 baseline，并允许 B-180 开始改变 compiler/runner 行为。剩余 critical 不从 manifest 消失；若其修复改变测量工作量，baseline 与候选必须在修复后的同一语义快照上成对重测。
 

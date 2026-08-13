@@ -1,4 +1,4 @@
-// expect-error: E0801
+// expect-error: E0301
 struct Resource { id: Int }
 
 impl Drop for Resource {

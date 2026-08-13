@@ -14,7 +14,7 @@ use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef,
     ImplEntry, ImplDictBound, MethodOrigin, mono, add_impl,
     install_method_scheme, specialize_trait_method_scheme,
-    new_local_callable_scheme}
+    new_local_callable_scheme, new_local_callable_owning_scheme}
 use ast::{span_zero}
 use hir::{variant_ctor_name, compare_by_first}
 use diagnostics::{CollectingSink}
@@ -31,7 +31,7 @@ struct OpenRow {
 fn bind_builtin_callable(
     mut env: TypeEnv, name: Str, scheme: TypeScheme
 ) {
-    let local_scheme = new_local_callable_scheme(
+    let local_scheme = new_local_callable_owning_scheme(
         env, scheme, CALLABLE_SOURCE_BUILTIN)
     env.bind(name, local_scheme)
 }
@@ -59,7 +59,7 @@ fn install_builtin_method_map(
             },
             none => {
                 let unlocalized_scheme = scheme
-                new_local_callable_scheme(
+                new_local_callable_owning_scheme(
                     env, unlocalized_scheme, CALLABLE_SOURCE_BUILTIN)
             }
         }
@@ -90,12 +90,39 @@ fn builtin_trait_method(
     mut env: TypeEnv, name: Str, ty: Type, has_default: Bool,
     param_mutabilities: List<Bool>
 ) -> TraitMethodDef {
-    let scheme = new_local_callable_scheme(env,
+    let scheme = new_local_callable_owning_scheme(env,
         TypeScheme { ty: ty, type_vars: [], bounds: [], def_id: none },
         CALLABLE_SOURCE_BUILTIN)
     let def_id = match scheme.def_id {
         some(id) => id,
         none => panic("unreachable: builtin trait method has no local DefId")
+    }
+    TraitMethodDef {
+        name: name, def_id: def_id, ty: scheme.ty,
+        has_default: has_default,
+        param_mutabilities: param_mutabilities,
+        method_type_params: []
+    }
+}
+
+fn bind_builtin_force_callable(
+    mut env: TypeEnv, name: Str, scheme: TypeScheme
+) {
+    let local_scheme = new_local_callable_scheme(
+        env, scheme, CALLABLE_SOURCE_BUILTIN)
+    env.bind(name, local_scheme)
+}
+
+fn builtin_force_trait_method(
+    mut env: TypeEnv, name: Str, ty: Type, has_default: Bool,
+    param_mutabilities: List<Bool>
+) -> TraitMethodDef {
+    let scheme = new_local_callable_scheme(env,
+        TypeScheme { ty: ty, type_vars: [], bounds: [], def_id: none },
+        CALLABLE_SOURCE_BUILTIN)
+    let def_id = match scheme.def_id {
+        some(id) => id,
+        none => panic("unreachable: FORCE builtin trait method has no local DefId")
     }
     TraitMethodDef {
         name: name, def_id: def_id, ty: scheme.ty,
@@ -744,7 +771,7 @@ fn register_drop_trait(mut env: TypeEnv) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            builtin_trait_method(env, "drop", drop_fn, false, [false])
+            builtin_force_trait_method(env, "drop", drop_fn, false, [false])
         ],
         supertraits: [],
         assoc_types: []
@@ -1461,7 +1488,7 @@ fn register_ptr_builtins(mut env: TypeEnv, sink: CollectingSink) {
     let dealloc_t_id = env.fresh_var_id()
     let dealloc_t = Type::TypeVar { id: dealloc_t_id, name: none }
     let dealloc_ptr = Type::PtrType { pointee: dealloc_t }
-    bind_builtin_callable(env, "dealloc", TypeScheme {
+    bind_builtin_force_callable(env, "dealloc", TypeScheme {
         ty: Type::FnType {
             params: [dealloc_ptr, INT], return_type: UNIT,
             meta: fn_meta(builtin_unsafe_effect_row(),

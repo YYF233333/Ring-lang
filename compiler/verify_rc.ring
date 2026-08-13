@@ -108,16 +108,20 @@ use types::{Type, OwnershipMetadata,
     CALLABLE_RESULT_ROLE_NONE,
     CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT,
     CALLABLE_RESULT_ROLE_UNKNOWN,
-    callable_param_ownership, callable_return_ownership, type_may_own}
+    callable_param_ownership, callable_param_requires_force,
+    callable_return_ownership, type_may_own}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HPatternBinding, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
     is_rc_excluded_type, type_is_physical_rc_eligible,
+    type_has_logical_transfer_value,
+    type_crosses_logical_owning_edge_by_value,
     is_fresh_owned_bool_value,
     is_nullary_variant_ctor_ident, is_option_none_ctor_ident,
     is_materialized_fn_value,
     move_edge_has_reachable_bare_binding,
-    expr_has_reachable_value, stmt_reaches_next, hparam_ownership,
+    expr_has_reachable_value, hmatch_arm_body_is_reachable,
+    stmt_reaches_next, hparam_ownership,
     hparam_is_external_drop_owner, collect_exact_free_bindings,
     BUILTIN_RANGE}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
@@ -547,18 +551,30 @@ fn v_callable_ownership_id(ctx: VCtx, def_id: Int) -> Int? {
     }
 }
 
-fn v_call_param_mode(
+fn v_call_param_transfer(
     mut ctx: VCtx, callee_def_id: Int?, index: Int, span: Span
-) -> Int {
+) -> (Int, Bool) {
     match callee_def_id {
         some(def_id) => match v_callable_ownership_id(ctx, def_id) {
             some(ownership_id) => {
                 let mode = callable_param_ownership(
                     ctx.ownership, ownership_id, index)
                 if mode == PARAM_OWNERSHIP_UNKNOWN {
-                    PARAM_OWNERSHIP_UNKNOWN
+                    (PARAM_OWNERSHIP_UNKNOWN, false)
+                } else if mode == PARAM_OWNERSHIP_MOVE {
+                    match callable_param_requires_force(
+                            ctx.ownership, def_id, index) {
+                        some(force) => (mode, force),
+                        none => {
+                            let missing_strength_span = span
+                            v_report(ctx, "uaf-call-contract", true,
+                                "exact Move call edge has no transfer-strength authority",
+                                missing_strength_span)
+                            (PARAM_OWNERSHIP_UNKNOWN, false)
+                        }
+                    }
                 } else {
-                    mode
+                    (mode, false)
                 }
             },
             none => {
@@ -566,23 +582,31 @@ fn v_call_param_mode(
                 v_report(ctx, "uaf-call-contract", true,
                     "exact callable DefId has no ownership descriptor",
                     missing_span)
-                PARAM_OWNERSHIP_UNKNOWN
+                (PARAM_OWNERSHIP_UNKNOWN, false)
             }
         },
         none => {
             let missing_span = span
             v_report(ctx, "uaf-call-contract", true,
                 "call has no exact callable DefId", missing_span)
-            PARAM_OWNERSHIP_UNKNOWN
+            (PARAM_OWNERSHIP_UNKNOWN, false)
         }
     }
 }
 
 fn v_call_edge(
-    expr: HExpr, expected_mode: Int, mut ctx: VCtx, span: Span
+    expr: HExpr, expected_mode: Int, force: Bool,
+    mut ctx: VCtx, span: Span
 ) {
     let has_take = v_is_transfer_expr(expr)
-    if expected_mode == PARAM_OWNERSHIP_MOVE {
+    let invalidates = expected_mode == PARAM_OWNERSHIP_MOVE &&
+        if force {
+            type_has_logical_transfer_value(hexpr_type(expr))
+        } else {
+            type_crosses_logical_owning_edge_by_value(
+                hexpr_type(expr), ctx.externs)
+        }
+    if invalidates {
         if move_edge_has_reachable_bare_binding(expr, true) {
             let missing_take_span = span
             v_report(ctx, "uaf-call-missing-take", true,
@@ -593,7 +617,7 @@ fn v_call_edge(
     } else if has_take {
         let unexpected_take_span = span
         v_report(ctx, "uaf-call-unexpected-take", true,
-            "Borrow/MutBorrow call edge unexpectedly transfers ownership",
+            "non-invalidating call edge unexpectedly transfers ownership",
             unexpected_take_span)
         v_consume(expr, ctx)
     } else {
@@ -1561,9 +1585,10 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             // inline here is therefore a fatal accounting gap.
             let is_method = match callee {
                 HExpr::FieldAccess { receiver, .. } => {
-                    let receiver_mode = v_call_param_mode(
+                    let receiver_transfer = v_call_param_transfer(
                         ctx, callee_def_id, 0, span)
-                    v_call_edge(receiver, receiver_mode, ctx, span)
+                    v_call_edge(receiver, receiver_transfer.0,
+                        receiver_transfer.1, ctx, span)
                     true
                 },
                 _ => {
@@ -1572,7 +1597,7 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 }
             }
             if !is_method && args.len() == 0 {
-                let _ = v_call_param_mode(ctx, callee_def_id, 0, span)
+                let _ = v_call_param_transfer(ctx, callee_def_id, 0, span)
             }
             let result_role = match callee_def_id {
                 some(def_id) => match ctx.ownership
@@ -1597,9 +1622,10 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             let mut index = 0
             for a in args {
                 let descriptor_index = index + if is_method { 1 } else { 0 }
-                let expected_mode = v_call_param_mode(
+                let expected_transfer = v_call_param_transfer(
                     ctx, callee_def_id, descriptor_index, span)
-                v_call_edge(a, expected_mode, ctx, span)
+                v_call_edge(a, expected_transfer.0,
+                    expected_transfer.1, ctx, span)
                 index = index + 1
             }
             if result_role == CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT {
@@ -1807,42 +1833,53 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 v_restore(ctx, incoming)
                 v_push_frame(ctx)
                 v_bind_pattern_bindings(ctx, arm.bindings, arm.span)
+                let guard_reaches_value =
+                    hmatch_arm_body_is_reachable(arm)
                 match arm.guard {
                     some(g) => {
                         v_cond(g, ctx)
-                        let guard_join = v_join_fallthrough_states(
-                            incoming, v_snapshot(ctx), ctx.kinds, snap0.len())
-                        if !guard_join.1 {
-                            let guard_span = arm.span
-                            v_report(ctx, "rc-imbalance", true,
-                                "match guard fall-through leaves incompatible enclosing RC binding states",
-                                guard_span)
+                        if guard_reaches_value {
+                            let guard_join = v_join_fallthrough_states(
+                                incoming, v_snapshot(ctx), ctx.kinds,
+                                snap0.len())
+                            if !guard_join.1 {
+                                let guard_span = arm.span
+                                v_report(ctx, "rc-imbalance", true,
+                                    "match guard fall-through leaves incompatible enclosing RC binding states",
+                                    guard_span)
+                            }
+                            next_arm_snap = guard_join.0
                         }
-                        next_arm_snap = guard_join.0
                     },
                     none => {},
                 }
-                let r = v_cf_branch(arm.body, mode, ctx)
-                v_pop_frame(ctx)
-                let arm_diverges = r.1
-                let arm_result = r
-                results.push(arm_result)
-                if arm_diverges == false {
-                    if have_ref {
-                        let cur = v_snapshot(ctx)
-                        let joined = v_join_forward_states(
-                            ref_snap, cur, ctx.kinds, snap0.len())
-                        if !joined.1 {
-                            let imbalance_span = span
-                            v_report(ctx, "rc-imbalance", true,
-                                "match arms leave incompatible enclosing RC binding states",
-                                imbalance_span)
+                if guard_reaches_value {
+                    let r = v_cf_branch(arm.body, mode, ctx)
+                    v_pop_frame(ctx)
+                    let arm_diverges = r.1
+                    let arm_result = r
+                    results.push(arm_result)
+                    if arm_diverges == false {
+                        if have_ref {
+                            let cur = v_snapshot(ctx)
+                            let joined = v_join_forward_states(
+                                ref_snap, cur, ctx.kinds, snap0.len())
+                            if !joined.1 {
+                                let imbalance_span = span
+                                v_report(ctx, "rc-imbalance", true,
+                                    "match arms leave incompatible enclosing RC binding states",
+                                    imbalance_span)
+                            }
+                            ref_snap = joined.0
+                        } else {
+                            ref_snap = v_snapshot(ctx)
+                            have_ref = true
                         }
-                        ref_snap = joined.0
-                    } else {
-                        ref_snap = v_snapshot(ctx)
-                        have_ref = true
                     }
+                } else {
+                    // The guard was fully checked, but no guard-false or arm-
+                    // body edge exists. Pattern miss alone reaches later arms.
+                    v_pop_frame(ctx)
                 }
             }
             if have_ref { v_restore(ctx, ref_snap) } else { v_restore(ctx, snap0) }
@@ -1866,32 +1903,43 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 v_restore(ctx, incoming)
                 v_push_frame(ctx)
                 v_bind_pattern_bindings(ctx, arm.bindings, arm.span)
+                let guard_reaches_value =
+                    hmatch_arm_body_is_reachable(arm)
                 match arm.guard {
                     some(g) => {
                         v_cond(g, ctx)
-                        let guard_join = v_join_fallthrough_states(
-                            incoming, v_snapshot(ctx), ctx.kinds, snap0.len())
-                        if !guard_join.1 {
-                            let guard_span = arm.span
-                            v_report(ctx, "rc-imbalance", true,
-                                "catch guard fall-through leaves incompatible enclosing RC binding states",
-                                guard_span)
+                        if guard_reaches_value {
+                            let guard_join = v_join_fallthrough_states(
+                                incoming, v_snapshot(ctx), ctx.kinds,
+                                snap0.len())
+                            if !guard_join.1 {
+                                let guard_span = arm.span
+                                v_report(ctx, "rc-imbalance", true,
+                                    "catch guard fall-through leaves incompatible enclosing RC binding states",
+                                    guard_span)
+                            }
+                            next_arm_snap = guard_join.0
                         }
-                        next_arm_snap = guard_join.0
                     },
                     none => {},
                 }
-                v_cf_branch(arm.body, mode, ctx)
-                v_pop_frame(ctx)
-                // #167: detect catch arm altering enclosing binding state
-                let snap_arm = v_snapshot(ctx)
-                let mut ci = 0
-                while ci < snap0.len() && ci < snap_arm.len() {
-                    if snap0[ci] == S_LIVE && snap_arm[ci] != S_LIVE {
-                        v_report(ctx, "rc-imbalance", true,
-                            "catch arm drops/moves enclosing owned binding '${ctx.names[ci]}' — scope-end will double-free (#167 class)", arm.span)
+                if guard_reaches_value {
+                    v_cf_branch(arm.body, mode, ctx)
+                    v_pop_frame(ctx)
+                    // #167: detect catch arm altering enclosing binding state
+                    let snap_arm = v_snapshot(ctx)
+                    let mut ci = 0
+                    while ci < snap0.len() && ci < snap_arm.len() {
+                        if snap0[ci] == S_LIVE && snap_arm[ci] != S_LIVE {
+                            v_report(ctx, "rc-imbalance", true,
+                                "catch arm drops/moves enclosing owned binding '${ctx.names[ci]}' — scope-end will double-free (#167 class)", arm.span)
+                        }
+                        ci = ci + 1
                     }
-                    ci = ci + 1
+                } else {
+                    // Pattern miss can continue, but the diverging guard has
+                    // no false edge and its dependent catch body never runs.
+                    v_pop_frame(ctx)
                 }
             }
             v_restore(ctx, snap_body)

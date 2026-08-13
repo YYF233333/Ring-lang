@@ -3,7 +3,10 @@ struct Resource { id: Int }
 impl Drop for Resource { fn drop(self) {} }
 
 enum CallbackBox {
-    Callback(fn(Resource) -> Int),
+    // Match the body-inferred Move contract so this probe reaches its real
+    // boundary: build_callback returns an opaque container, which cannot
+    // invent producer-specific callable provenance for the extracted payload.
+    Callback(fn(move Resource) -> Int),
     Empty,
 }
 

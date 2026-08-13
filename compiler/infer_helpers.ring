@@ -7,12 +7,12 @@ use hir::{HExpr, HStmt, TraitDispatch, DictRef, ValueBindingKind,
     trait_dict_name, trait_bound_param_name,
     hexpr_type, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
-use codes::{E0201, E0205, E0208, E0303, E0307, E0308, E0504, E0705}
+use codes::{E0201, E0205, E0208, E0301, E0303, E0307, E0308, E0504, E0705}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme,
     apply_subst, has_impl, lookup_variant}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry,
-    type_error, unify_at, resolve_relative_qualifier,
+    CompileError, type_error, unify_at, resolve_relative_qualifier,
     resolve_dict_ref_for_type, resolve_dicts_from_scheme, variant_ctor_origin,
     value_binding_kind, fresh_call_result_callable_def_id}
 
@@ -20,6 +20,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry,
 pub struct MethodLookupResult {
     method_type: Type?,
     method_scheme: TypeScheme?,
+    instantiation_map: Map<Int, Type>,
     is_authoritative_drop: Bool
 }
 
@@ -37,7 +38,8 @@ pub struct LiveSchemeBinding {
 
 pub struct CalleeDefaults {
     min_arity: Int,
-    values: List<HExpr>
+    values: List<HExpr>,
+    local_var_bounds: Map<Int, Set<Str>>
 }
 
 pub struct CalleeMetadata {
@@ -46,8 +48,181 @@ pub struct CalleeMetadata {
     ultimate_origin: Str,
     kind: ValueBindingKind,
     live_scheme: TypeScheme,
+    instantiation_map: Map<Int, Type>,
     defaults: CalleeDefaults?,
     mut_flags: List<Bool>?
+}
+
+fn instantiate_value_scheme(mut ctx: InferCtx, scheme: TypeScheme) -> Type {
+    let instantiation = ctx.env.instantiate_with_map(scheme)
+    match scheme.def_id {
+        some(def_id) => {
+            ctx.latest_value_instantiation_maps.insert(
+                def_id, instantiation.var_map)
+        },
+        none => {}
+    }
+    instantiation.ty
+}
+
+fn exact_value_source_def_id(ctx: InferCtx, start: Int) -> Int {
+    let mut current = start
+    let mut visited: Set<Int> = set_new()
+    let mut fuel = ctx.pre_solve_exact_value_alias_targets.entries().len() + 1
+    while fuel > 0 {
+        if visited.contains(current) { return current }
+        visited.insert(current)
+        match ctx.pre_solve_exact_value_alias_targets.get(current) {
+            some(target) => { current = target },
+            none => return current
+        }
+        fuel = fuel - 1
+    }
+    current
+}
+
+pub fn callable_defaults_by_def_id(
+    ctx: InferCtx, def_id: Int
+) -> CalleeDefaults? {
+    let owner_def_id = exact_value_source_def_id(ctx, def_id)
+    match (
+        ctx.fn_min_arity.get(owner_def_id),
+        ctx.fn_defaults.get(owner_def_id),
+        ctx.fn_default_var_bounds.get(owner_def_id)
+    ) {
+        (some(min_arity), some(values), some(bounds)) =>
+            some(CalleeDefaults {
+                min_arity: min_arity,
+                values: values,
+                local_var_bounds: bounds
+            }),
+        _ => none
+    }
+}
+
+// An exact import/project alias may be registered before an unannotated const
+// owner has published its type. Function bodies use isolated substitutions, so
+// accepting that TypeVar in any value position would lose the constraint when
+// the body exits (and could later cross the callable freeze barrier). Reject
+// the read itself; this covers calls, arguments, storage and projections with
+// one source-order-safe boundary and does not monomorphize generalized consts.
+fn exact_value_alias_is_unfinalized(
+    ctx: InferCtx, scheme: TypeScheme
+) -> Bool {
+    let mut current = match scheme.def_id {
+        some(def_id) => def_id,
+        none => return false
+    }
+    let mut visited: Set<Int> = set_new()
+    let mut fuel = ctx.pre_solve_exact_value_alias_targets.entries().len() + 1
+    while fuel > 0 {
+        if ctx.pending_inferred_const_def_ids.contains(current) {
+            return true
+        }
+        if visited.contains(current) { return false }
+        let visited_def_id = current
+        visited.insert(visited_def_id)
+        match ctx.pre_solve_exact_value_alias_targets.get(current) {
+            some(source_def_id) => { current = source_def_id },
+            none => return false
+        }
+        fuel = fuel - 1
+    }
+    panic("unreachable: exact value alias source chain exceeded its edge count")
+}
+
+fn abort_discarded_precheck_if_active(mut ctx: InferCtx) {
+    let mut blocked = false
+    if ctx.impl_effect_precheck_active {
+        ctx.impl_effect_precheck_blocked = true
+        blocked = true
+    }
+    if ctx.discarded_fn_precheck_active {
+        ctx.discarded_fn_precheck_blocked = true
+        blocked = true
+    }
+    if blocked { fail.raise(CompileError {}) }
+}
+
+pub fn precheck_callable_summary_is_pending(
+    ctx: InferCtx, def_id: Int?
+) -> Bool {
+    let mut current = match def_id {
+        some(exact_def_id) => exact_def_id,
+        none => return false
+    }
+    let mut visited: Set<Int> = set_new()
+    let mut fuel = ctx.pre_solve_exact_value_alias_targets.entries().len() + 1
+    while fuel > 0 {
+        if ctx.pending_precheck_callable_def_ids.contains(current) {
+            return true
+        }
+        if visited.contains(current) { return false }
+        let visited_def_id = current
+        visited.insert(visited_def_id)
+        match ctx.pre_solve_exact_value_alias_targets.get(current) {
+            some(source_def_id) => { current = source_def_id },
+            none => return false
+        }
+        fuel = fuel - 1
+    }
+    panic("unreachable: pending precheck callable chain exceeded its edge count")
+}
+
+pub fn guard_pending_precheck_callable_summary(
+    mut ctx: InferCtx, def_id: Int?, display_name: Str, span: Span
+) -> Bool {
+    if !precheck_callable_summary_is_pending(ctx, def_id) { return false }
+    abort_discarded_precheck_if_active(ctx)
+    let _ = type_error(ctx.sink, E0301,
+        "Cannot use callable '${display_name}' before its inferred effect summary is finalized",
+        span, DiagnosticContext::TypeMismatch {
+            expected: "finalized callable effect summary",
+            actual: "discarded precheck summary",
+            expression: none
+        })
+    true
+}
+
+fn unfinalized_exact_value_alias_result(
+    mut ctx: InferCtx, name: Str, def_id: Int?, span: Span,
+    subst: UnionFind
+) -> InferResult {
+    // This HIR and its substitution are discarded. Abort silently instead of
+    // committing an open effect tail unrelated to the eventual const type;
+    // the enclosing precheck records its exact callable summary as pending.
+    abort_discarded_precheck_if_active(ctx)
+    let _ = type_error(ctx.sink, E0301,
+        "Cannot use exact value alias '${name}' before its inferred const source is finalized",
+        span, DiagnosticContext::TypeMismatch {
+            expected: "finalized inferred const type",
+            actual: "unresolved exact alias type",
+            expression: none
+        })
+    InferResult {
+        hexpr: HExpr::Ident {
+            name: name, resolved_name: none, def_id: def_id,
+            dict_closure_dicts: none, ty: Type::ErrorType,
+            effects: EMPTY_ROW, span: span
+        },
+        subst: subst, effects: EMPTY_ROW
+    }
+}
+
+fn pending_precheck_callable_value_result(
+    mut ctx: InferCtx, name: Str, def_id: Int?, span: Span,
+    subst: UnionFind
+) -> InferResult {
+    let _ = guard_pending_precheck_callable_summary(
+        ctx, def_id, name, span)
+    InferResult {
+        hexpr: HExpr::Ident {
+            name: name, resolved_name: none, def_id: def_id,
+            dict_closure_dicts: none, ty: Type::ErrorType,
+            effects: EMPTY_ROW, span: span
+        },
+        subst: subst, effects: EMPTY_ROW
+    }
 }
 
 
@@ -345,7 +520,15 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             let mod_scheme = ctx.env.lookup(qualified_name)
             match mod_scheme {
                 some(ms) => {
-                    let t = ctx.env.instantiate(ms)
+                    let t = instantiate_value_scheme(ctx, ms)
+                    if exact_value_alias_is_unfinalized(ctx, ms) {
+                        return unfinalized_exact_value_alias_result(
+                            ctx, qualified_name, ms.def_id, span, subst)
+                    }
+                    if precheck_callable_summary_is_pending(ctx, ms.def_id) {
+                        return pending_precheck_callable_value_result(
+                            ctx, qualified_name, ms.def_id, span, subst)
+                    }
                     let actual_name = exact_value_origin(ctx, qualified_name, ms)
                     return InferResult {
                         hexpr: HExpr::Ident { name: actual_name, resolved_name: variant_ctor_origin(ctx, ms), def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
@@ -361,7 +544,18 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
                         let full_scheme = ctx.env.lookup(full_qualified)
                         match full_scheme {
                             some(fs) => {
-                                let t = ctx.env.instantiate(fs)
+                                let t = instantiate_value_scheme(ctx, fs)
+                                if exact_value_alias_is_unfinalized(ctx, fs) {
+                                    return unfinalized_exact_value_alias_result(
+                                        ctx, full_qualified, fs.def_id,
+                                        span, subst)
+                                }
+                                if precheck_callable_summary_is_pending(
+                                    ctx, fs.def_id) {
+                                    return pending_precheck_callable_value_result(
+                                        ctx, full_qualified, fs.def_id,
+                                        span, subst)
+                                }
                                 let actual_name = exact_value_origin(ctx, full_qualified, fs)
                                 return InferResult {
                                     hexpr: HExpr::Ident { name: actual_name, resolved_name: variant_ctor_origin(ctx, fs), def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
@@ -406,7 +600,15 @@ pub fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, q
             }
         },
         some(s) => {
-            let t = ctx.env.instantiate(s)
+            let t = instantiate_value_scheme(ctx, s)
+            if exact_value_alias_is_unfinalized(ctx, s) {
+                return unfinalized_exact_value_alias_result(
+                    ctx, name, s.def_id, span, subst)
+            }
+            if precheck_callable_summary_is_pending(ctx, s.def_id) {
+                return pending_precheck_callable_value_result(
+                    ctx, name, s.def_id, span, subst)
+            }
             // Auto-boxing: mark mutable vars captured by closures
             match s.def_id {
                 some(did) => {
@@ -682,7 +884,16 @@ fn live_scheme_by_def_id(ctx: InferCtx, wanted: Int) -> LiveSchemeBinding? {
         }
         scope_idx = scope_idx - 1
     }
-    none
+    match ctx.default_template_live_schemes.get(wanted) {
+        some(scheme) => some(LiveSchemeBinding {
+            binding_key: match ctx.use_aliases.get(wanted) {
+                some(origin) => origin,
+                none => "<default-template:${wanted.to_str()}>"
+            },
+            live_scheme: scheme
+        }),
+        none => none
+    }
 }
 
 pub fn resolve_callee_metadata(ctx: InferCtx, callee: HExpr) -> CalleeMetadata? {
@@ -701,19 +912,7 @@ pub fn resolve_callee_metadata(ctx: InferCtx, callee: HExpr) -> CalleeMetadata? 
                     let mut mut_flags: List<Bool>? = none
                     match kind {
                         ValueBindingKind::DirectCallable => {
-                            defaults = match (
-                                ctx.fn_min_arity.get(ultimate_origin),
-                                ctx.fn_defaults.get(ultimate_origin)
-                            ) {
-                                (some(min_arity), some(values)) => {
-                                    let default_values = values
-                                    some(CalleeDefaults {
-                                        min_arity: min_arity,
-                                        values: default_values
-                                    })
-                                },
-                                _ => none
-                            }
+                            defaults = callable_defaults_by_def_id(ctx, def_id)
                             mut_flags = match ctx.fn_mut_params.get(ultimate_origin) {
                                 some(flags) => {
                                     let result_flags = flags
@@ -737,6 +936,11 @@ pub fn resolve_callee_metadata(ctx: InferCtx, callee: HExpr) -> CalleeMetadata? 
                         ultimate_origin: ultimate_origin,
                         kind: kind,
                         live_scheme: binding.live_scheme,
+                        instantiation_map: match
+                            ctx.latest_value_instantiation_maps.get(def_id) {
+                            some(mapping) => mapping,
+                            none => map_new()
+                        },
                         defaults: defaults,
                         mut_flags: mut_flags
                     })
@@ -1060,11 +1264,13 @@ pub fn lookup_impl_method(mut ctx: InferCtx, type_name: Str, method: Str) -> Met
     match ctx.env.trait_reg.impl_methods.get(type_name) {
         some(impl_methods) => match impl_methods.get(method) {
             some(scheme) => {
-                let method_type = ctx.env.instantiate(scheme)
+                let instantiation = ctx.env.instantiate_with_map(scheme)
+                let method_type = instantiation.ty
                 let result_scheme = scheme
                 MethodLookupResult {
                     method_type: some(method_type),
                     method_scheme: some(result_scheme),
+                    instantiation_map: instantiation.var_map,
                     is_authoritative_drop: match
                         ctx.env.trait_reg.method_origins.get(type_name) {
                         some(origins) => match origins.get(method) {
@@ -1078,10 +1284,12 @@ pub fn lookup_impl_method(mut ctx: InferCtx, type_name: Str, method: Str) -> Met
                 }
             },
             none => MethodLookupResult { method_type: none,
-                method_scheme: none, is_authoritative_drop: false }
+                method_scheme: none, instantiation_map: map_new(),
+                is_authoritative_drop: false }
         },
         none => MethodLookupResult { method_type: none,
-            method_scheme: none, is_authoritative_drop: false }
+            method_scheme: none, instantiation_map: map_new(),
+            is_authoritative_drop: false }
     }
 }
 
@@ -1090,6 +1298,7 @@ pub fn lookup_trait_method(
 ) -> MethodLookupResult {
     let mut found_type: Type? = none
     let mut found_scheme: TypeScheme? = none
+    let mut found_instantiation_map: Map<Int, Type> = map_new()
     let mut found_trait_name: Str? = none
     let mut found_is_authoritative_drop = false
     match ctx.env.trait_reg.trait_impls.get(type_name) {
@@ -1111,6 +1320,8 @@ pub fn lookup_trait_method(
                                         return MethodLookupResult {
                                             method_type: found_type,
                                             method_scheme: found_scheme,
+                                            instantiation_map:
+                                                found_instantiation_map,
                                             is_authoritative_drop:
                                                 found_is_authoritative_drop
                                         }
@@ -1122,8 +1333,12 @@ pub fn lookup_trait_method(
                                             bounds: [],
                                             def_id: some(found_method.def_id)
                                         }
-                                        found_type = some(ctx.env.instantiate(
-                                            exact_scheme))
+                                        let instantiation =
+                                            ctx.env.instantiate_with_map(
+                                                exact_scheme)
+                                        found_type = some(instantiation.ty)
+                                        found_instantiation_map =
+                                            instantiation.var_map
                                         found_scheme = some(exact_scheme)
                                         found_trait_name = some(impl_entry.trait_name)
                                         found_is_authoritative_drop =
@@ -1143,6 +1358,7 @@ pub fn lookup_trait_method(
     MethodLookupResult {
         method_type: found_type,
         method_scheme: found_scheme,
+        instantiation_map: found_instantiation_map,
         is_authoritative_drop: found_is_authoritative_drop
     }
 }

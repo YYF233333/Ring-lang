@@ -1,8 +1,12 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField,
     OwnershipMetadata, FnMeta, INT, new_ownership_metadata,
-    effects_match_kind_with_ownership, nominal_display_name,
-    record_callable_ownership,
-    fn_meta, freeze_callable_ownership_type}
+    effects_match_kind_with_ownership, types_equal_with_ownership,
+    nominal_display_name,
+    record_callable_ownership, record_callable_ownership_with_transfer_levels,
+    callable_owning_transfer_levels, callable_interface_transfer_levels,
+    CallableTransferLevel,
+    fn_meta, freeze_callable_ownership_type,
+    resolve_callable_ownership_term}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use ast::{Span, EffectExpr, TypeParam, DeriveAttribute}
 use diagnostics::{CollectingSink, DiagnosticSink, DiagnosticContext, Severity,
@@ -29,6 +33,11 @@ pub struct TypeScheme {
     pub type_vars: List<Int>,
     pub bounds: List<SchemeBound>,
     pub def_id: Int?
+}
+
+pub struct SchemeInstantiation {
+    pub ty: Type,
+    pub var_map: Map<Int, Type>
 }
 
 // Follow a scheme's lexical DefId to its final declaration identity. Alias
@@ -314,6 +323,17 @@ pub fn new_local_callable_identity_scheme(
     TypeScheme { ..scheme, def_id: some(def_id) }
 }
 
+pub fn new_local_callable_identity_scheme_with_transfer_levels(
+    mut env: TypeEnv, scheme: TypeScheme, ownership_term: Int,
+    source: Int, transfer_levels: List<CallableTransferLevel>
+) -> TypeScheme {
+    let def_id = env.fresh_def_id()
+    record_callable_ownership_with_transfer_levels(
+        env.types.ownership_metadata, def_id, ownership_term, source,
+        transfer_levels)
+    TypeScheme { ..scheme, def_id: some(def_id) }
+}
+
 // The sole constructor for an ordinary FnType scheme that is entering a local
 // registry.  DefIds are checker-local declaration identities: imported or
 // specialized schemes must never carry a foreign DefId into this map.
@@ -321,12 +341,34 @@ pub fn new_local_callable_scheme(
     mut env: TypeEnv, scheme: TypeScheme,
     source: Int
 ) -> TypeScheme {
-    let ownership_term = match scheme.ty {
+    let type_for_contract = scheme.ty
+    let type_for_levels = scheme.ty
+    let ownership_term = match type_for_contract {
         Type::FnType { meta, .. } => meta.ownership_term,
         _ => panic("unreachable: local callable scheme is not a function")
     }
-    new_local_callable_identity_scheme(
-        env, scheme, ownership_term, source)
+    let levels = callable_interface_transfer_levels(
+        env.types.ownership_metadata, type_for_levels)
+    new_local_callable_identity_scheme_with_transfer_levels(
+        env, scheme, ownership_term, source, levels)
+}
+
+// Storage/constructor callable producers share the public Move descriptor but
+// do not impose logical FORCE on copy-by-value scalar/direct-foreign payloads.
+pub fn new_local_callable_owning_scheme(
+    mut env: TypeEnv, scheme: TypeScheme,
+    source: Int
+) -> TypeScheme {
+    let type_for_contract = scheme.ty
+    let type_for_levels = scheme.ty
+    let ownership_term = match type_for_contract {
+        Type::FnType { meta, .. } => meta.ownership_term,
+        _ => panic("unreachable: local owning callable scheme is not a function")
+    }
+    let levels = callable_owning_transfer_levels(
+        env.types.ownership_metadata, type_for_levels)
+    new_local_callable_identity_scheme_with_transfer_levels(
+        env, scheme, ownership_term, source, levels)
 }
 
 // Replace the contract on an already-local callable without changing its
@@ -351,10 +393,14 @@ pub fn update_local_callable_scheme(
         },
         _ => panic("unreachable: local callable scheme is not a function")
     }
-    record_callable_ownership(
+    let type_for_levels = updated_type
+    let type_for_result = updated_type
+    let levels = callable_owning_transfer_levels(
+        env.types.ownership_metadata, type_for_levels)
+    record_callable_ownership_with_transfer_levels(
         env.types.ownership_metadata, def_id, ownership_id,
-        source)
-    TypeScheme { ..scheme, ty: updated_type }
+        source, levels)
+    TypeScheme { ..scheme, ty: type_for_result }
 }
 
 fn freeze_assoc_constraints(
@@ -647,11 +693,35 @@ impl TypeEnv {
     }
 
     pub fn instantiate(mut self, scheme: TypeScheme) -> Type {
-        if scheme.type_vars.len() == 0 { return scheme.ty }
+        self.instantiate_with_map(scheme).ty
+    }
+
+    pub fn instantiate_with_map(
+        mut self, scheme: TypeScheme
+    ) -> SchemeInstantiation {
         let mut mapping: Map<Int, Type> = map_new()
         for tv in scheme.type_vars {
             let type_var = tv
             mapping.insert(type_var, self.fresh_var())
+        }
+        // The exact call map also carries monomorphic owner variables. They
+        // are not freshened, but default templates must keep them connected to
+        // the instantiated callable instead of treating them as template-local
+        // variables. Include bound/associated-constraint-only variables too.
+        let mut owner_vars: Set<Int> = set_new()
+        collect_type_var_ids(scheme.ty, owner_vars)
+        for bound in scheme.bounds {
+            owner_vars.insert(bound.type_var)
+            for constraint in bound.assoc_constraints {
+                collect_type_var_ids(constraint.ty, owner_vars)
+            }
+        }
+        for owner_id in owner_vars {
+            if !mapping.contains_key(owner_id) {
+                mapping.insert(owner_id, Type::TypeVar {
+                    id: owner_id, name: none
+                })
+            }
         }
         for bound in scheme.bounds {
             match mapping.get(bound.type_var) {
@@ -670,7 +740,12 @@ impl TypeEnv {
                 none => {}
             }
         }
-        apply_subst_map(mapping, scheme.ty)
+        let mapping_for_type = mapping
+        let mapping_for_result = mapping
+        SchemeInstantiation {
+            ty: apply_subst_map(mapping_for_type, scheme.ty),
+            var_map: mapping_for_result
+        }
     }
 }
 
@@ -1121,6 +1196,56 @@ pub fn apply_subst_row_map(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
 // Shared structural TypeVar mapping
 // ============================================================
 
+fn collect_effect_payload_var_mappings(
+    metadata: OwnershipMetadata,
+    source_effect: Effect, target_effect: Effect,
+    source_vars: Set<Int>, mut result: Map<Int, Type>
+) {
+    match (source_effect, target_effect) {
+        (Effect::FailEffect { error_type: source_type },
+         Effect::FailEffect { error_type: target_type }) =>
+            collect_var_mappings(
+                metadata, source_type, target_type,
+                source_vars, result),
+        (Effect::MutEffect { state_type: source_type },
+         Effect::MutEffect { state_type: target_type }) =>
+            collect_var_mappings(
+                metadata, source_type, target_type,
+                source_vars, result),
+        (Effect::CustomEffect { type_args: source_args, .. },
+         Effect::CustomEffect { type_args: target_args, .. }) => {
+            let mut i = 0
+            while i < source_args.len() && i < target_args.len() {
+                match (source_args.get(i), target_args.get(i)) {
+                    (some(source_arg), some(target_arg)) =>
+                        collect_var_mappings(
+                            metadata, source_arg, target_arg,
+                            source_vars, result),
+                    _ => {}
+                }
+                i = i + 1
+            }
+        },
+        _ => {}
+    }
+}
+
+fn effect_mapping_preserves_existing(
+    metadata: OwnershipMetadata,
+    before: Map<Int, Type>, after: Map<Int, Type>
+) -> Bool {
+    for entry in before.entries() {
+        match after.get(entry.0) {
+            some(mapped) => if !types_equal_with_ownership(
+                    metadata, entry.1, mapped) {
+                return false
+            },
+            none => return false
+        }
+    }
+    true
+}
+
 fn collect_effect_var_mappings(
     metadata: OwnershipMetadata,
     source_row: EffectRow, target_row: EffectRow,
@@ -1139,54 +1264,60 @@ fn collect_effect_var_mappings(
         _ => {}
     }
 
-    for source_effect in source_row.effects {
-        for target_effect in target_row.effects {
-            let compare_source = source_effect
-            let compare_target = target_effect
-            let match_source = source_effect
-            let match_target = target_effect
-            if effects_match_kind_with_ownership(
-                metadata, compare_source, compare_target
-            ) {
-                match (match_source, match_target) {
-                    (Effect::FailEffect { error_type: source_type },
-                     Effect::FailEffect { error_type: target_type }) => {
-                        let source_type_ = source_type
-                        let target_type_ = target_type
-                        collect_var_mappings(
-                            metadata, source_type_, target_type_,
-                            source_vars, result)
-                    },
-                    (Effect::MutEffect { state_type: source_type },
-                     Effect::MutEffect { state_type: target_type }) => {
-                        let source_type_ = source_type
-                        let target_type_ = target_type
-                        collect_var_mappings(
-                            metadata, source_type_, target_type_,
-                            source_vars, result)
-                    },
-                    (Effect::CustomEffect { type_args: source_args, .. },
-                     Effect::CustomEffect { type_args: target_args, .. }) => {
-                        let mut i = 0
-                        while i < source_args.len() && i < target_args.len() {
-                            match (source_args.get(i), target_args.get(i)) {
-                                (some(source_arg), some(target_arg)) => {
-                                    let source_arg_ = source_arg
-                                    let target_arg_ = target_arg
-                                    collect_var_mappings(
-                                        metadata,
-                                        source_arg_, target_arg_,
-                                        source_vars, result)
-                                },
-                                _ => {}
-                            }
-                            i = i + 1
+    // Effect rows are unordered, but their payloads are not interchangeable.
+    // Pair each source with one compatible target, preferring an existing
+    // param/return mapping and consuming the target exactly once. This keeps
+    // legal mut<T> + mut<U> rows from collapsing both variables onto the last
+    // same-kind target.
+    let mut used_targets: Set<Int> = set_new()
+    let mut source_index = 0
+    while source_index < source_row.effects.len() {
+        match source_row.effects.get(source_index) {
+            some(source_effect) => {
+                let mut chosen: Int? = none
+                let mut target_index = 0
+                while target_index < target_row.effects.len() &&
+                      chosen.is_none() {
+                    if !used_targets.contains(target_index) {
+                        match target_row.effects.get(target_index) {
+                            some(target_effect) => {
+                                let source_for_kind = source_effect
+                                let target_for_kind = target_effect
+                                if effects_match_kind_with_ownership(
+                                    metadata,
+                                    source_for_kind, target_for_kind
+                                ) {
+                                    let trial = map_clone(result)
+                                    collect_effect_payload_var_mappings(
+                                        metadata, source_effect, target_effect,
+                                        source_vars, trial)
+                                    if effect_mapping_preserves_existing(
+                                            metadata, result, trial) {
+                                        chosen = some(target_index)
+                                    }
+                                }
+                            },
+                            none => {}
                         }
-                    },
-                    _ => {}
+                    }
+                    target_index = target_index + 1
                 }
-            }
+                match chosen {
+                    some(index) => match target_row.effects.get(index) {
+                        some(target_effect) => {
+                            collect_effect_payload_var_mappings(
+                                metadata, source_effect, target_effect,
+                                source_vars, result)
+                            used_targets.insert(index)
+                        },
+                        none => {}
+                    },
+                    none => {}
+                }
+            },
+            none => {}
         }
+        source_index = source_index + 1
     }
 }
 
@@ -1402,18 +1533,367 @@ fn collect_var_mappings(
     }
 }
 
+fn try_record_exact_type_var_mapping(
+    metadata: OwnershipMetadata, source_id: Int, target_type: Type,
+    mut mapping: Map<Int, Type>
+) -> Bool {
+    match mapping.get(source_id) {
+        some(existing) => types_equal_with_ownership(
+            metadata, existing, target_type),
+        none => {
+            mapping.insert(source_id, target_type)
+            true
+        }
+    }
+}
+
+fn try_collect_exact_effect_payload_mappings(
+    metadata: OwnershipMetadata,
+    source_effect: Effect, target_effect: Effect,
+    source_vars: Set<Int>, mut mapping: Map<Int, Type>
+) -> Bool {
+    match (source_effect, target_effect) {
+        (Effect::IoEffect, Effect::IoEffect) => true,
+        (Effect::UnsafeEffect, Effect::UnsafeEffect) => true,
+        (Effect::FailEffect { error_type: source_type },
+         Effect::FailEffect { error_type: target_type }) =>
+            try_collect_exact_var_mappings(
+                metadata, source_type, target_type,
+                source_vars, mapping),
+        (Effect::MutEffect { state_type: source_type },
+         Effect::MutEffect { state_type: target_type }) =>
+            try_collect_exact_var_mappings(
+                metadata, source_type, target_type,
+                source_vars, mapping),
+        (Effect::CustomEffect {
+             name: source_name, type_args: source_args
+         }, Effect::CustomEffect {
+             name: target_name, type_args: target_args
+         }) => {
+            if source_name != target_name ||
+               source_args.len() != target_args.len() {
+                return false
+            }
+            let mut index = 0
+            while index < source_args.len() {
+                match (source_args.get(index), target_args.get(index)) {
+                    (some(source_arg), some(target_arg)) => if
+                            !try_collect_exact_var_mappings(
+                                metadata, source_arg, target_arg,
+                                source_vars, mapping) {
+                        return false
+                    },
+                    _ => return false
+                }
+                index = index + 1
+            }
+            true
+        },
+        _ => false
+    }
+}
+
+fn try_match_exact_effect_mappings_from(
+    metadata: OwnershipMetadata,
+    source_effects: List<Effect>, target_effects: List<Effect>,
+    source_vars: Set<Int>, source_index: Int,
+    used_targets: Set<Int>, mapping: Map<Int, Type>
+) -> Map<Int, Type>? {
+    if source_index >= source_effects.len() { return some(mapping) }
+    let source_effect = match source_effects.get(source_index) {
+        some(eff_item) => eff_item,
+        none => return none
+    }
+    let mut target_index = 0
+    while target_index < target_effects.len() {
+        if !used_targets.contains(target_index) {
+            match target_effects.get(target_index) {
+                some(target_effect) => {
+                    // The exact payload matcher is also the kind discriminator.
+                    // Using ordinary effect equality here would reject
+                    // mut<List<T>> versus mut<List<Tfresh>> before this
+                    // projection has a chance to record T -> Tfresh.
+                    let trial_mapping = map_clone(mapping)
+                    let source_for_payload = source_effect
+                    let target_for_payload = target_effect
+                    if try_collect_exact_effect_payload_mappings(
+                        metadata, source_for_payload,
+                        target_for_payload, source_vars,
+                        trial_mapping
+                    ) {
+                        let mut trial_used = set_clone(used_targets)
+                        trial_used.insert(target_index)
+                        let matched = try_match_exact_effect_mappings_from(
+                            metadata, source_effects, target_effects,
+                            source_vars, source_index + 1,
+                            trial_used, trial_mapping)
+                        // Keep the owning Option intact. Extracting the Map
+                        // through a match payload would create a borrowed
+                        // projection with no representable partial Take.
+                        if matched.is_some() {
+                            return matched
+                        }
+                    }
+                },
+                none => {}
+            }
+        }
+        target_index = target_index + 1
+    }
+    none
+}
+
+fn try_collect_exact_effect_var_mappings(
+    metadata: OwnershipMetadata,
+    source_row: EffectRow, target_row: EffectRow,
+    source_vars: Set<Int>, mut mapping: Map<Int, Type>
+) -> Bool {
+    // Effect rows are multisets.  A mapping is authoritative only when every
+    // source effect and every target effect participates in the same exact
+    // matching; accepting a target suffix would turn a partial projection
+    // into a scheme-instantiation witness.
+    if source_row.effects.len() != target_row.effects.len() {
+        return false
+    }
+    match (source_row.tail, target_row.tail) {
+        (some(source_id), some(target_id)) => {
+            if source_vars.contains(source_id) {
+                if !try_record_exact_type_var_mapping(
+                        metadata, source_id,
+                        Type::TypeVar { id: target_id, name: none },
+                        mapping) {
+                    return false
+                }
+            } else if source_id != target_id {
+                return false
+            }
+        },
+        (none, none) => {},
+        _ => return false
+    }
+    match try_match_exact_effect_mappings_from(
+        metadata, source_row.effects, target_row.effects,
+        source_vars, 0, set_new(), map_clone(mapping)
+    ) {
+        some(complete) => {
+            for entry in complete.entries() {
+                mapping.insert(entry.0, entry.1)
+            }
+            true
+        },
+        none => false
+    }
+}
+
+fn try_collect_exact_var_mappings(
+    metadata: OwnershipMetadata,
+    source_type: Type, target_type: Type,
+    source_vars: Set<Int>, mut mapping: Map<Int, Type>
+) -> Bool {
+    // Keep an owned copy for the TypeVar arm. A payload bound through the
+    // pair match below is a borrowed projection, while an exact mapping must
+    // retain the complete target Type in the returned map.
+    let target_for_type_var = target_type
+    match (source_type, target_type) {
+        (Type::TypeVar { id, .. }, _) => {
+            if source_vars.contains(id) {
+                try_record_exact_type_var_mapping(
+                    metadata, id, target_for_type_var, mapping)
+            } else {
+                // Variables outside the declared projection set are rigid.
+                // Treating an arbitrary target as an exact match here would
+                // let a structurally incompatible scheme return a seemingly
+                // authoritative (often empty) instantiation map.
+                types_equal_with_ownership(
+                    metadata,
+                    Type::TypeVar { id, name: none },
+                    target_for_type_var)
+            }
+        },
+        (Type::IntType, Type::IntType) |
+        (Type::FloatType, Type::FloatType) |
+        (Type::StrType, Type::StrType) |
+        (Type::BoolType, Type::BoolType) |
+        (Type::UnitType, Type::UnitType) |
+        (Type::NeverType, Type::NeverType) |
+        (Type::AnyType, Type::AnyType) |
+        (Type::ErrorType, Type::ErrorType) => true,
+        (Type::StructType {
+             name: source_name, type_params: source_params
+         }, Type::StructType {
+             name: target_name, type_params: target_params
+         }) |
+        (Type::EnumType {
+             name: source_name, type_params: source_params
+         }, Type::EnumType {
+             name: target_name, type_params: target_params
+         }) => {
+            if source_name != target_name ||
+               source_params.len() != target_params.len() {
+                return false
+            }
+            let mut index = 0
+            while index < source_params.len() {
+                match (source_params.get(index), target_params.get(index)) {
+                    (some(source_param), some(target_param)) => if
+                            !try_collect_exact_var_mappings(
+                                metadata, source_param, target_param,
+                                source_vars, mapping) {
+                        return false
+                    },
+                    _ => return false
+                }
+                index = index + 1
+            }
+            true
+        },
+        (Type::FnType {
+             params: source_params, return_type: source_return,
+             meta: source_meta
+         }, Type::FnType {
+             params: target_params, return_type: target_return,
+             meta: target_meta
+         }) => {
+            // Exact scheme projection may rename type/effect variables, but it
+            // must never equate distinct callable ownership contracts.  Use
+            // rigid solved/root identity rather than compatibility: two open
+            // terms are exact only when they are the same inference root.
+            let source_ownership = resolve_callable_ownership_term(
+                metadata, source_meta.ownership_term)
+            let target_ownership = resolve_callable_ownership_term(
+                metadata, target_meta.ownership_term)
+            if source_ownership != target_ownership { return false }
+            if source_params.len() != target_params.len() { return false }
+            let mut index = 0
+            while index < source_params.len() {
+                match (source_params.get(index), target_params.get(index)) {
+                    (some(source_param), some(target_param)) => if
+                            !try_collect_exact_var_mappings(
+                                metadata, source_param, target_param,
+                                source_vars, mapping) {
+                        return false
+                    },
+                    _ => return false
+                }
+                index = index + 1
+            }
+            if !try_collect_exact_var_mappings(
+                    metadata, source_return, target_return,
+                    source_vars, mapping) {
+                return false
+            }
+            try_collect_exact_effect_var_mappings(
+                metadata, source_meta.effects, target_meta.effects,
+                source_vars, mapping)
+        },
+        (Type::TupleType { elements: source_elements },
+         Type::TupleType { elements: target_elements }) => {
+            if source_elements.len() != target_elements.len() { return false }
+            let mut index = 0
+            while index < source_elements.len() {
+                match (source_elements.get(index), target_elements.get(index)) {
+                    (some(source_element), some(target_element)) => if
+                            !try_collect_exact_var_mappings(
+                                metadata, source_element, target_element,
+                                source_vars, mapping) {
+                        return false
+                    },
+                    _ => return false
+                }
+                index = index + 1
+            }
+            true
+        },
+        (Type::GenericType { base: source_base, args: source_args },
+         Type::GenericType { base: target_base, args: target_args }) => {
+            if source_args.len() != target_args.len() ||
+               !try_collect_exact_var_mappings(
+                   metadata, source_base, target_base,
+                   source_vars, mapping) {
+                return false
+            }
+            let mut index = 0
+            while index < source_args.len() {
+                match (source_args.get(index), target_args.get(index)) {
+                    (some(source_arg), some(target_arg)) => if
+                            !try_collect_exact_var_mappings(
+                                metadata, source_arg, target_arg,
+                                source_vars, mapping) {
+                        return false
+                    },
+                    _ => return false
+                }
+                index = index + 1
+            }
+            true
+        },
+        (Type::RecordType {
+             fields: source_fields, tail: source_tail, ..
+         }, Type::RecordType {
+             fields: target_fields, tail: target_tail, ..
+         }) => {
+            if source_fields.len() != target_fields.len() { return false }
+            for source_field in source_fields {
+                match target_fields.find(fn(field) {
+                    field.name == source_field.name
+                }) {
+                    some(target_field) => if
+                            !try_collect_exact_var_mappings(
+                                metadata, source_field.ty, target_field.ty,
+                                source_vars, mapping) {
+                        return false
+                    },
+                    none => return false
+                }
+            }
+            match (source_tail, target_tail) {
+                (some(source_id), some(target_id)) => {
+                    if source_vars.contains(source_id) {
+                        try_record_exact_type_var_mapping(
+                            metadata, source_id,
+                            Type::TypeVar { id: target_id, name: none },
+                            mapping)
+                    } else { source_id == target_id }
+                },
+                (none, none) => true,
+                _ => false
+            }
+        },
+        (Type::PtrType { pointee: source_pointee },
+         Type::PtrType { pointee: target_pointee }) =>
+            try_collect_exact_var_mappings(
+                metadata, source_pointee, target_pointee,
+                source_vars, mapping),
+        (Type::EffectRowType {
+             effects: source_effects, tail: source_tail
+         }, Type::EffectRowType {
+             effects: target_effects, tail: target_tail
+         }) => try_collect_exact_effect_var_mappings(
+            metadata,
+            EffectRow { effects: source_effects, tail: source_tail },
+            EffectRow { effects: target_effects, tail: target_tail },
+            source_vars, mapping),
+        _ => false
+    }
+}
+
 pub fn build_type_var_map(
     metadata: OwnershipMetadata,
     source_type: Type, target_type: Type, source_var_ids: List<Int>
 ) -> Map<Int, Type> {
-    let mut result: Map<Int, Type> = map_new()
+    // All-or-nothing: recursive matching writes into a private trial map.
+    // A late structural conflict must not expose the prefix accumulated before
+    // that conflict as an exact instantiation map.
+    let mut trial: Map<Int, Type> = map_new()
     let source_type_ = source_type
     let target_type_ = target_type
     let source_var_ids_ = source_var_ids
-    collect_var_mappings(
+    if !try_collect_exact_var_mappings(
         metadata, source_type_, target_type_,
-        set_from(source_var_ids_), result)
-    result
+        set_from(source_var_ids_), trial) {
+        return map_new()
+    }
+    trial
 }
 
 pub fn build_scheme_var_map(

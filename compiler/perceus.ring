@@ -16,7 +16,8 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler, HEffectOp,
     HPatternBinding,
     hexpr_type, hexpr_span, hexpr_effects,
-    type_is_physical_rc_eligible,
+    type_is_physical_rc_eligible, type_has_logical_transfer_value,
+    type_crosses_logical_owning_edge_by_value,
     call_returns_borrowed, hparam_ownership,
     hparam_is_external_drop_owner,
     is_nullary_variant_ctor_ident, is_option_none_ctor_ident,
@@ -32,7 +33,7 @@ use types::{Type, EffectRow, OwnershipMetadata, CallableOwnershipState,
     CALLABLE_RESULT_ROLE_NONE,
     CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT,
     CALLABLE_RESULT_ROLE_UNKNOWN,
-    callable_param_ownership, type_may_own,
+    callable_param_ownership, callable_param_requires_force, type_may_own,
     validate_callable_ownership_metadata,
     project_synthetic_anf_callable_metadata,
     project_synthetic_rc_callable_metadata}
@@ -419,12 +420,27 @@ fn ownership_metadata_with_role_maps(
     returned_roles: Map<Int, Int>, callable_by_def_id: Map<Int, Int>,
     callable_states: Map<Int, CallableOwnershipState>
 ) -> OwnershipMetadata {
+    let mut role_spines: Map<Int, List<Int>> = map_new()
+    for def_id in callable_by_def_id.keys() {
+        match (direct_roles.get(def_id), returned_roles.get(def_id)) {
+            (some(direct), some(returned)) => {
+                let mut spine = metadata.callable_result_role_spine_by_def_id
+                    .get(def_id).unwrap_or([direct, returned])
+                while spine.len() < 2 { spine.push(CALLABLE_RESULT_ROLE_NONE) }
+                spine.set(0, direct)
+                spine.set(1, returned)
+                role_spines.insert(def_id, spine)
+            },
+            _ => {}
+        }
+    }
     OwnershipMetadata {
         callable_descriptors: metadata.callable_descriptors,
         callable_by_def_id: callable_by_def_id,
         callable_state_by_def_id: callable_states,
         callable_result_role_by_def_id: direct_roles,
         returned_callable_result_role_by_def_id: returned_roles,
+        callable_result_role_spine_by_def_id: role_spines,
         callable_inference_parents: metadata.callable_inference_parents,
         callable_inference_solutions: metadata.callable_inference_solutions,
         next_callable_inference_term: metadata.next_callable_inference_term,
@@ -551,6 +567,27 @@ fn perceus_call_param_mode(
         panic("unreachable: Perceus call parameter ownership is unknown")
     }
     mode
+}
+
+fn perceus_move_edge_requires_invalidation(
+    ownership: OwnershipMetadata, callee_def_id: Int?, index: Int,
+    ty: Type, externs: Set<Str>
+) -> Bool {
+    let def_id = match callee_def_id {
+        some(id) => id,
+        none => panic("unreachable: Perceus Move edge has no exact callable DefId")
+    }
+    let force = match callable_param_requires_force(
+            ownership, def_id, index) {
+        some(value) => value,
+        none => panic(
+            "unreachable: Perceus Move edge has no transfer-strength authority")
+    }
+    if force {
+        type_has_logical_transfer_value(ty)
+    } else {
+        type_crosses_logical_owning_edge_by_value(ty, externs)
+    }
 }
 
 fn assert_perceus_move_edge(expr: HExpr) {
@@ -3876,11 +3913,16 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, e
                     is_method = true
                     let mode = perceus_call_param_mode(
                         drop_types, callee_def_id, 0)
+                    let receiver_ty = hexpr_type(receiver)
+                    let invalidates = mode == PARAM_OWNERSHIP_MOVE &&
+                        perceus_move_edge_requires_invalidation(
+                            drop_types, callee_def_id, 0,
+                            receiver_ty, externs)
                     let assert_receiver = receiver
                     let mutation_receiver = receiver
                     let escape_receiver = receiver
                     let borrow_receiver = receiver
-                    let new_receiver = if mode == PARAM_OWNERSHIP_MOVE {
+                    let new_receiver = if invalidates {
                         assert_perceus_move_edge(assert_receiver)
                         match mutate_missing_call_edge_take(
                                 mutation_receiver, gensym.counters) {
@@ -3911,7 +3953,12 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, e
                 let descriptor_index = index + if is_method { 1 } else { 0 }
                 let mode = perceus_call_param_mode(
                     drop_types, callee_def_id, descriptor_index)
-                if mode == PARAM_OWNERSHIP_MOVE {
+                let arg_ty = hexpr_type(a)
+                let invalidates = mode == PARAM_OWNERSHIP_MOVE &&
+                    perceus_move_edge_requires_invalidation(
+                        drop_types, callee_def_id, descriptor_index,
+                        arg_ty, externs)
+                if invalidates {
                     assert_perceus_move_edge(assert_arg)
                     match mutate_missing_call_edge_take(
                             mutation_arg, gensym.counters) {

@@ -8,39 +8,50 @@
 //
 // No consumer is allowed to recover either fact from a source spelling.
 
-use types::{Type, EffectRow, OwnershipMetadata,
+use types::{Type, EffectRow, OwnershipMetadata, CallableTransferLevel,
     PARAM_OWNERSHIP_BORROW, PARAM_OWNERSHIP_MUT_BORROW,
     PARAM_OWNERSHIP_MOVE, PARAM_OWNERSHIP_UNKNOWN,
     CALLABLE_UNKNOWN, CALLABLE_BORROW_OWNED,
     RETURN_OWNERSHIP_OWNED, RETURN_OWNERSHIP_BORROWED,
     CALLABLE_SOURCE_BODY_INFERRED,
+    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE,
+    CALLABLE_SOURCE_CALL_CONSTRAINT,
+    CALLABLE_SOURCE_ERROR_RECOVERY,
     CALLABLE_RESULT_ROLE_NONE, CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT,
     CALLABLE_RESULT_ROLE_UNKNOWN,
     callable_param_ownership, callable_return_ownership,
     intern_callable_ownership_descriptor, intern_callable_param_modes,
-    record_callable_ownership, validate_callable_ownership_metadata,
+    record_callable_ownership, record_callable_ownership_with_transfer_levels,
+    callable_transfer_level, clone_callable_transfer_levels,
+    callable_transfer_levels_for_def_id, join_callable_transfer_levels,
+    callable_param_requires_force, callable_interface_transfer_levels,
+    set_callable_transfer_levels,
+    validate_callable_ownership_metadata,
     callable_ownership_constraint_compatible,
     constrain_callable_ownership_terms,
     is_callable_ownership_inference_term,
+    is_resolved_callable_ownership_term,
+    resolve_callable_ownership_term,
     require_exact_callable_ownership_term,
     freeze_callable_ownership_type, freeze_callable_ownership_row,
     freeze_callable_ownership_metadata,
     type_may_own, fn_meta, set_callable_result_role,
-    set_returned_callable_result_role}
+    set_returned_callable_result_role, set_callable_result_role_spine,
+    callable_result_role_is_valid}
 use ast::{Span, Pattern, span_zero}
-use hir::{HProgram, HDecl, HParam, HExpr, HStmt, HMatchArm,
+use hir::{HProgram, HDecl, HParam, HExpr, HStmt, HMatchArm, ValueBindingKind,
     HStructFieldInit, HStringInterpPart, HEffectHandler, HTraitMethod,
     HEffectOp, HForInDestructure, HLetDestructureBinding,
     HPatternBinding, HFreeBinding, HStructField, HEnumVariant,
     HAssocType, HSigMember,
     DictRef,
-    hparam_is_mutable, hparam_ownership,
+    hparam_is_mutable, hparam_ownership, hparam_is_declared_force,
     hparam_is_external_drop_owner, hparam_replace_ownership,
     hexpr_type, hexpr_effects, hexpr_span, compare_by_first,
     is_nullary_variant_ctor_ident, is_option_none_ctor_ident,
     is_materialized_fn_value,
     move_edge_has_reachable_bare_binding, expr_has_reachable_value,
-    stmt_reaches_next,
+    hmatch_arm_body_is_reachable, stmt_reaches_next,
     collect_exact_free_bindings,
     variant_ctor_name}
 use env::{TypeEnv, TypeScheme, TraitDef, TraitMethodDef, ImplEntry, SigDef,
@@ -54,6 +65,9 @@ struct CallableSolveState {
     def_id: Int,
     param_def_ids: List<Int?>,
     modes: List<Int>,
+    // Fixed caller-invalidation authority captured before body inference.
+    // Body evidence may raise modes to Move but must never raise this vector.
+    force_params: List<Bool>,
     body: HExpr,
     return_callable_contract: Int?,
     return_callable_arity: Int,
@@ -66,7 +80,8 @@ struct CallableSolveState {
     // already-declared descriptor through their exact local slot. This is not
     // a callee-expression fallback: calls still resolve this map by DefId.
     callable_contracts: Map<Int, Int>,
-    callable_arities: Map<Int, Int>
+    callable_arities: Map<Int, Int>,
+    callable_types: Map<Int, Type>
 }
 
 struct CallableSolveTable {
@@ -83,6 +98,7 @@ struct CallableSolveTable {
     alias_spans: Map<Int, Span>,
     callable_contracts: Map<Int, Int>,
     callable_arities: Map<Int, Int>,
+    callable_types: Map<Int, Type>,
     // A callable-valued Call owns a fresh result DefId.  For local callees the
     // result aliases every exact callable returned by the callee body; for an
     // imported callee its finalized Fn return type is the authoritative
@@ -105,7 +121,22 @@ struct CallableSolveTable {
     // Sticky proof poison for a source path that was structurally opaque.  A
     // later assignment carrying some DefId must not wash this fact away; only
     // the producer-specific exact pattern/return analysis may remove it.
-    opaque_callable_slots: Map<Int, Bool>
+    opaque_callable_slots: Map<Int, Bool>,
+    // Structural census and semantic collection deliberately use different
+    // maps. Every retained call must be metadata-total; only a semantically
+    // reachable call is allowed to turn an opaque producer into a user error.
+    retained_callee_spans: Map<Int, Span>,
+    reachable_callee_spans: Map<Int, Span>,
+    // A module-level callable const is a durable identity and can be exposed by
+    // `pub use` even when its own declaration is private. It must never carry
+    // deterministic recovery as if that were producer authority.
+    durable_callable_spans: Map<Int, Span>,
+    diagnosed_callable_slots: Map<Int, Bool>,
+    // A const DefId is the zero-argument getter in codegen metadata. When an
+    // HDecl::Const has a FnType its stored callable is the getter's return
+    // target, never an alias of the getter identity itself.
+    const_getter_def_ids: Set<Int>,
+    const_callable_types: Map<Int, Type>
 }
 
 // Alias contracts form a finite lattice. `BackEdge` is DFS-only fixed-point
@@ -114,6 +145,12 @@ struct CallableSolveTable {
 enum CallableContractResolution {
     Exact { term: Int },
     Conflict { recovery: Int },
+    NoBase,
+    BackEdge
+}
+
+enum CallableTransferResolution {
+    Exact { levels: List<CallableTransferLevel> },
     NoBase,
     BackEdge
 }
@@ -133,8 +170,8 @@ const REACHABLE_CHILD_IF_CONDITION: Int = 0
 const REACHABLE_CHILD_IF_THEN: Int = 1
 const REACHABLE_CHILD_IF_ELSE: Int = 2
 const REACHABLE_CHILD_MATCH_SCRUTINEE: Int = 3
-const REACHABLE_CHILD_MATCH_GUARD: Int = 4
-const REACHABLE_CHILD_MATCH_BODY: Int = 5
+const REACHABLE_CHILD_ARM_GUARD: Int = 4
+const REACHABLE_CHILD_ARM_BODY: Int = 5
 
 struct ReachableControlChild {
     kind: Int,
@@ -162,6 +199,36 @@ fn enumerate_reachable_if_children(
     children
 }
 
+fn enumerate_reachable_arm_children(
+    arms: List<HMatchArm>
+) -> List<ReachableControlChild> {
+    let mut children: List<ReachableControlChild> = []
+    let mut arm_index = 0
+    for arm in arms {
+        let body_is_reachable = hmatch_arm_body_is_reachable(arm)
+        match arm.guard {
+            some(_) => {
+                children.push(ReachableControlChild {
+                    kind: REACHABLE_CHILD_ARM_GUARD,
+                    arm_index: arm_index
+                })
+                if body_is_reachable {
+                    children.push(ReachableControlChild {
+                        kind: REACHABLE_CHILD_ARM_BODY,
+                        arm_index: arm_index
+                    })
+                }
+            },
+            none => children.push(ReachableControlChild {
+                kind: REACHABLE_CHILD_ARM_BODY,
+                arm_index: arm_index
+            })
+        }
+        arm_index = arm_index + 1
+    }
+    children
+}
+
 fn enumerate_reachable_match_children(
     scrutinee: HExpr, arms: List<HMatchArm>
 ) -> List<ReachableControlChild> {
@@ -171,30 +238,32 @@ fn enumerate_reachable_match_children(
         }
     ]
     if !expr_has_reachable_value(scrutinee) { return children }
-
-    let mut arm_index = 0
-    for arm in arms {
-        match arm.guard {
-            some(guard) => {
-                children.push(ReachableControlChild {
-                    kind: REACHABLE_CHILD_MATCH_GUARD,
-                    arm_index: arm_index
-                })
-                if expr_has_reachable_value(guard) {
-                    children.push(ReachableControlChild {
-                        kind: REACHABLE_CHILD_MATCH_BODY,
-                        arm_index: arm_index
-                    })
-                }
-            },
-            none => children.push(ReachableControlChild {
-                kind: REACHABLE_CHILD_MATCH_BODY,
-                arm_index: arm_index
-            })
-        }
-        arm_index = arm_index + 1
+    for arm_child in enumerate_reachable_arm_children(arms) {
+        children.push(ReachableControlChild {
+            kind: arm_child.kind,
+            arm_index: arm_child.arm_index
+        })
     }
     children
+}
+
+// These small phase-boundary copies mirror hir::{hexpr_type,
+// hexpr_effects,hexpr_span}. Pattern-matched HIR fields and Map values are
+// borrowed views; returning or storing them must materialize an owned value
+// without changing the ownership authority carried by the value itself.
+fn copy_ownership_type(value: Type) -> Type {
+    let copied = value
+    copied
+}
+
+fn copy_ownership_effects(value: EffectRow) -> EffectRow {
+    let copied = value
+    copied
+}
+
+fn copy_ownership_span(value: Span) -> Span {
+    let copied = value
+    copied
 }
 
 fn mark_value_origin_opaque(
@@ -308,19 +377,28 @@ fn new_callable_solve_state(
 ) -> CallableSolveState {
     let mut param_def_ids: List<Int?> = []
     let mut modes: List<Int> = []
+    let mut force_params: List<Bool> = []
     let mut contracts: Map<Int, Int> = map_new()
     let mut arities: Map<Int, Int> = map_new()
+    let mut callable_types: Map<Int, Type> = map_new()
     for param in params {
         param_def_ids.push(param.def_id)
         modes.push(initial_solver_param_mode(param))
+        force_params.push(hparam_is_declared_force(param) ||
+            hparam_is_external_drop_owner(param))
+        let param_type_for_match = param.ty
+        let param_type_for_store = param.ty
         match param.def_id {
-            some(param_id) => match param.ty {
+            some(param_id) => match param_type_for_match {
                 Type::FnType { params: callable_params, meta, .. } => {
                     let contract_param_id = param_id
                     contracts.insert(
                         contract_param_id, meta.ownership_term)
                     let arity_param_id = param_id
                     arities.insert(arity_param_id, callable_params.len())
+                    let type_param_id = param_id
+                    let callable_param_type = param_type_for_store
+                    callable_types.insert(type_param_id, callable_param_type)
                 },
                 _ => {}
             },
@@ -334,11 +412,11 @@ fn new_callable_solve_state(
     }
     CallableSolveState {
         def_id: def_id, param_def_ids: param_def_ids,
-        modes: modes, body: body,
+        modes: modes, force_params: force_params, body: body,
         return_callable_contract: return_contract,
         return_callable_arity: return_arity, span: span,
         alias_targets: map_new(), callable_contracts: contracts,
-        callable_arities: arities
+        callable_arities: arities, callable_types: callable_types
     }
 }
 
@@ -361,29 +439,106 @@ fn insert_callable_solve_state(
         let callable_arity = arity
         table.callable_arities.insert(arity_def_id, callable_arity)
     }
+    for entry in state.callable_types.entries() {
+        let (def_id, callable_type) = entry
+        let callable_type_def_id = def_id
+        let stored_callable_type = callable_type
+        table.callable_types.insert(
+            callable_type_def_id, stored_callable_type)
+    }
     let ordered_def_id = state.def_id
     table.states.insert(state.def_id, state)
     table.order.push(ordered_def_id)
 }
 
-// Definition census is deliberately structural rather than semantic. Exact
-// freeze requires every lambda DefId to have a solved descriptor even when
-// its construction expression is unreachable. The census registers only
-// callable definitions; it never records an alias, return target, call-result
-// edge, or value origin from the unreachable construction context. Each
-// discovered lambda body is then collected under its own fresh entry CFG.
+fn record_retained_callee(
+    mut table: CallableSolveTable, def_id: Int?, span: Span
+) {
+    match def_id {
+        some(id) => if !table.retained_callee_spans.contains_key(id) {
+            let retained_id = id
+            table.retained_callee_spans.insert(retained_id, span)
+        },
+        none => {}
+    }
+}
+
+fn record_reachable_callee(
+    mut table: CallableSolveTable, def_id: Int?, span: Span
+) {
+    match def_id {
+        some(id) => if !table.reachable_callee_spans.contains_key(id) {
+            let reachable_id = id
+            table.reachable_callee_spans.insert(reachable_id, span)
+        },
+        none => {}
+    }
+}
+
+// Handler parameters and resume continuations are bodyless callable
+// interfaces. Their exact FnType is authority for invoking that slot, but not
+// proof of a nested callable identity returned by it.
+fn register_structural_declared_callable_slot(
+    mut table: CallableSolveTable, target: Int?, ty: Type
+) {
+    let type_for_match = ty
+    let type_for_state = ty
+    match (target, type_for_match) {
+        (some(def_id), Type::FnType { params, meta, .. }) => {
+            let contract_id = def_id
+            table.callable_contracts.insert(contract_id, meta.ownership_term)
+            let arity_id = def_id
+            table.callable_arities.insert(arity_id, params.len())
+            let type_id = def_id
+            table.callable_types.insert(type_id, type_for_state)
+        },
+        _ => {}
+    }
+}
+
+// Retained-HIR callable census is deliberately structural rather than
+// semantic. Callable identity, fresh result DefIds and type-level ABI
+// descriptors must remain total even in a dependent child that cannot run.
+// Move/capture/argument/return effects remain exclusively in the reachable
+// collector and solver below. In particular, this census never records an
+// assignment into an existing slot.
 fn discover_callable_definitions_stmt(
     stmt: HStmt, mut table: CallableSolveTable
 ) {
     match stmt {
-        HStmt::Let { init, .. } =>
-            discover_callable_definitions_expr(init, table),
-        HStmt::Var { init, .. } =>
-            discover_callable_definitions_expr(init, table),
+        HStmt::Let { def_id, ty, init, .. } => {
+            let definition_init = init
+            let origin_init = init
+            let alias_init = init
+            let origin_def_id = def_id
+            let alias_def_id = def_id
+            let alias_ty = ty
+            discover_callable_definitions_expr(definition_init, table)
+            append_value_origin(table, origin_def_id, origin_init)
+            register_callable_alias(
+                table, alias_def_id, alias_ty, alias_init)
+        },
+        HStmt::Var { def_id, ty, init, .. } => {
+            let definition_init = init
+            let origin_init = init
+            let alias_init = init
+            let origin_def_id = def_id
+            let alias_def_id = def_id
+            let alias_ty = ty
+            discover_callable_definitions_expr(definition_init, table)
+            append_value_origin(table, origin_def_id, origin_init)
+            register_callable_alias(
+                table, alias_def_id, alias_ty, alias_init)
+        },
         HStmt::ExprStmt { expr: init, .. } =>
             discover_callable_definitions_expr(init, table),
-        HStmt::LetDestructure { init, .. } =>
-            discover_callable_definitions_expr(init, table),
+        HStmt::LetDestructure { pattern, bindings, init, .. } => {
+            let definition_init = init
+            let provenance_init = init
+            discover_callable_definitions_expr(definition_init, table)
+            register_destructure_provenance(
+                table, pattern, bindings, provenance_init)
+        },
         HStmt::Assign { target, value, .. } => {
             discover_callable_definitions_expr(target, table)
             discover_callable_definitions_expr(value, table)
@@ -401,8 +556,13 @@ fn discover_callable_definitions_stmt(
             discover_callable_definitions_expr(iterable, table)
             discover_callable_definitions_expr(body, table)
         },
-        HStmt::IfLet { expr, then_block, else_block, .. } => {
-            discover_callable_definitions_expr(expr, table)
+        HStmt::IfLet { pattern, bindings, expr,
+                       then_block, else_block, .. } => {
+            let definition_expr = expr
+            let provenance_expr = expr
+            discover_callable_definitions_expr(definition_expr, table)
+            register_pattern_provenance(
+                table, pattern, bindings, provenance_expr)
             discover_callable_definitions_expr(then_block, table)
             match else_block {
                 some(branch) =>
@@ -425,7 +585,18 @@ fn discover_callable_definitions_expr(
         },
         HExpr::UnaryOp { operand, .. } =>
             discover_callable_definitions_expr(operand, table),
-        HExpr::Call { callee, args, .. } => {
+        HExpr::Call { callee, callee_def_id, callable_result_def_id,
+                      args, ty, span, .. } => {
+            let retained_callee_id = callee_def_id
+            let result_callee_id = callee_def_id
+            let result_def_id = callable_result_def_id
+            let result_ty = ty
+            let retained_span = span
+            let result_span = span
+            record_retained_callee(
+                table, retained_callee_id, retained_span)
+            register_call_result(table, result_def_id,
+                result_callee_id, result_ty, result_span)
             discover_callable_definitions_expr(callee, table)
             for arg in args {
                 discover_callable_definitions_expr(arg, table)
@@ -454,8 +625,13 @@ fn discover_callable_definitions_expr(
             }
         },
         HExpr::MatchExpr { scrutinee, arms, .. } => {
-            discover_callable_definitions_expr(scrutinee, table)
+            let definition_scrutinee = scrutinee
+            let provenance_scrutinee = scrutinee
+            discover_callable_definitions_expr(
+                definition_scrutinee, table)
             for arm in arms {
+                register_pattern_provenance(table, arm.pattern,
+                    arm.bindings, provenance_scrutinee)
                 match arm.guard {
                     some(guard) =>
                         discover_callable_definitions_expr(guard, table),
@@ -467,6 +643,14 @@ fn discover_callable_definitions_expr(
         HExpr::TryCatch { body, arms, .. } => {
             discover_callable_definitions_expr(body, table)
             for arm in arms {
+                // Catch payloads are provided by the effect runtime rather
+                // than an HExpr producer. Preserve their declared callable
+                // contracts for deterministic recovery without inventing a
+                // payload identity.
+                for binding in arm.bindings {
+                    register_callable_contract(table,
+                        some(binding.def_id), binding.ty)
+                }
                 match arm.guard {
                     some(guard) =>
                         discover_callable_definitions_expr(guard, table),
@@ -506,6 +690,16 @@ fn discover_callable_definitions_expr(
         HExpr::HandleExpr { body, handlers, .. } => {
             discover_callable_definitions_expr(body, table)
             for handler in handlers {
+                for param in handler.params {
+                    register_structural_declared_callable_slot(
+                        table, param.def_id, param.ty)
+                }
+                match handler.resume_binding {
+                    some(binding) =>
+                        register_structural_declared_callable_slot(
+                            table, some(binding.def_id), binding.ty),
+                    none => {}
+                }
                 discover_callable_definitions_expr(handler.body, table)
             }
         },
@@ -607,6 +801,10 @@ fn collect_callable_decl(
         },
         HDecl::Effect { ops, .. } => {
             for op in ops {
+                for param in op.params {
+                    register_structural_declared_callable_slot(
+                        table, param.def_id, param.ty)
+                }
                 match op.default_body {
                     some(body) => {
                         let definition_body = body
@@ -625,21 +823,16 @@ fn collect_callable_decl(
             discover_callable_definitions_expr(definition_body, table)
             collect_callable_expr(semantic_body, table)
         },
-        HDecl::Const { def_id, ty, init, .. } => {
+        HDecl::Const { def_id, ty, init, span, .. } => {
             let definition_init = init
             let origin_init = init
-            let alias_init = init
             let semantic_init = init
             discover_callable_definitions_expr(definition_init, table)
             append_value_origin(table, def_id, origin_init)
-            // A first-class callable const is a real alias binder.  This is
-            // also the only surface form that can publish a prelude callable
-            // alias through ModuleExports, so its result role must follow the
-            // exact init DefId instead of falling back to the annotated type.
-            let alias_def_id = def_id
-            let alias_type = ty
-            register_callable_alias(
-                table, alias_def_id, alias_type, alias_init)
+            // The DefId is the zero-argument getter. Its stored callable is a
+            // return producer, so a getter Call yields the init identity
+            // itself rather than the callable returned by invoking that init.
+            register_callable_const_getter(table, def_id, ty, init, span)
             collect_callable_expr(semantic_init, table)
         },
         _ => {}
@@ -650,12 +843,24 @@ fn collect_callable_stmt(stmt: HStmt, mut table: CallableSolveTable) {
     match stmt {
         HStmt::Let { def_id, init, .. } => {
             let origin_init = init
-            append_value_origin(table, def_id, origin_init)
+            match def_id {
+                some(id) => if !table.value_origins.contains_key(id) {
+                    let origin_id = id
+                    append_value_origin(table, some(origin_id), origin_init)
+                },
+                none => {}
+            }
             collect_callable_expr(init, table)
         },
         HStmt::Var { def_id, init, .. } => {
             let origin_init = init
-            append_value_origin(table, def_id, origin_init)
+            match def_id {
+                some(id) => if !table.value_origins.contains_key(id) {
+                    let origin_id = id
+                    append_value_origin(table, some(origin_id), origin_init)
+                },
+                none => {}
+            }
             collect_callable_expr(init, table)
         },
         HStmt::ExprStmt { expr: init, .. } =>
@@ -681,19 +886,37 @@ fn collect_callable_stmt(stmt: HStmt, mut table: CallableSolveTable) {
             none => {}
         },
         HStmt::While { condition, body, .. } => {
-            collect_callable_expr(condition, table)
-            collect_callable_expr(body, table)
+            let reachability_condition = condition
+            let semantic_condition = condition
+            let condition_reaches_value =
+                expr_has_reachable_value(reachability_condition)
+            collect_callable_expr(semantic_condition, table)
+            if condition_reaches_value {
+                collect_callable_expr(body, table)
+            }
         },
         HStmt::ForIn { iterable, body, .. } => {
-            collect_callable_expr(iterable, table)
-            collect_callable_expr(body, table)
+            let reachability_iterable = iterable
+            let semantic_iterable = iterable
+            let iterable_reaches_value =
+                expr_has_reachable_value(reachability_iterable)
+            collect_callable_expr(semantic_iterable, table)
+            if iterable_reaches_value {
+                collect_callable_expr(body, table)
+            }
         },
         HStmt::IfLet { expr, then_block, else_block, .. } => {
-            collect_callable_expr(expr, table)
-            collect_callable_expr(then_block, table)
-            match else_block {
-                some(branch) => collect_callable_expr(branch, table),
-                none => {}
+            let reachability_expr = expr
+            let semantic_expr = expr
+            let expr_reaches_value =
+                expr_has_reachable_value(reachability_expr)
+            collect_callable_expr(semantic_expr, table)
+            if expr_reaches_value {
+                collect_callable_expr(then_block, table)
+                match else_block {
+                    some(branch) => collect_callable_expr(branch, table),
+                    none => {}
+                }
             }
         },
         HStmt::Break { .. } | HStmt::Continue { .. } |
@@ -711,11 +934,16 @@ fn collect_callable_expr(expr: HExpr, mut table: CallableSolveTable) {
             collect_callable_expr(operand, table),
         HExpr::Call { callee, callee_def_id, callable_result_def_id,
                       args, ty, span, .. } => {
+            let reachable_callee_id = callee_def_id
+            let registered_callee_id = callee_def_id
+            let reachable_span = span
+            record_reachable_callee(
+                table, reachable_callee_id, reachable_span)
             let registered_result_id = callable_result_def_id
             let registered_type = ty
             let registered_span = span
             register_call_result(table, registered_result_id,
-                callee_def_id, registered_type, registered_span)
+                registered_callee_id, registered_type, registered_span)
             collect_callable_expr(callee, table)
             for arg in args { collect_callable_expr(arg, table) }
         },
@@ -742,7 +970,7 @@ fn collect_callable_expr(expr: HExpr, mut table: CallableSolveTable) {
                 let child: ReachableControlChild = inferred_child
                 if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE {
                     collect_callable_expr(scrutinee, table)
-                } else if child.kind == REACHABLE_CHILD_MATCH_GUARD {
+                } else if child.kind == REACHABLE_CHILD_ARM_GUARD {
                     let arm: HMatchArm = match arms.get(child.arm_index) {
                         some(value) => value,
                         none => panic(
@@ -753,7 +981,7 @@ fn collect_callable_expr(expr: HExpr, mut table: CallableSolveTable) {
                         none => panic(
                             "unreachable: reachable guard child has no guard")
                     }
-                } else if child.kind == REACHABLE_CHILD_MATCH_BODY {
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
                     let arm: HMatchArm = match arms.get(child.arm_index) {
                         some(value) => value,
                         none => panic(
@@ -815,12 +1043,24 @@ fn collect_callable_expr(expr: HExpr, mut table: CallableSolveTable) {
         },
         HExpr::TryCatch { body, arms, .. } => {
             collect_callable_expr(body, table)
-            for arm in arms {
-                match arm.guard {
-                    some(guard) => collect_callable_expr(guard, table),
-                    none => {}
+            for inferred_child in enumerate_reachable_arm_children(arms) {
+                let child: ReachableControlChild = inferred_child
+                let arm: HMatchArm = match arms.get(child.arm_index) {
+                    some(value) => value,
+                    none => panic(
+                        "unreachable: reachable Catch child has no arm")
                 }
-                collect_callable_expr(arm.body, table)
+                if child.kind == REACHABLE_CHILD_ARM_GUARD {
+                    match arm.guard {
+                        some(guard) => collect_callable_expr(guard, table),
+                        none => panic(
+                            "unreachable: reachable Catch guard has no guard")
+                    }
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    collect_callable_expr(arm.body, table)
+                } else {
+                    panic("unreachable: invalid Catch reachable-child kind")
+                }
             }
         },
         HExpr::HandleExpr { body, handlers, .. } => {
@@ -983,6 +1223,73 @@ fn solver_param_mode(
     }
 }
 
+fn join_solver_force(left: Bool?, right: Bool?) -> Bool? {
+    match (left, right) {
+        (none, value) => value,
+        (value, none) => value,
+        (some(a), some(b)) => {
+            let right_value = b
+            some(a || right_value)
+        }
+    }
+}
+
+fn solver_force_for_def_id(
+    table: CallableSolveTable, metadata: OwnershipMetadata,
+    def_id: Int, index: Int, fuel: Int
+) -> Bool? {
+    let mut result: Bool? = none
+    if fuel > 0 {
+        match table.alias_targets.get(def_id) {
+            some(targets) => {
+                for target in targets {
+                    result = join_solver_force(result, solver_force_for_def_id(
+                        table, metadata, target, index, fuel - 1))
+                }
+            },
+            none => {}
+        }
+    }
+    match table.states.get(def_id) {
+        some(target_state) => {
+            result = join_solver_force(
+                result, target_state.force_params.get(index))
+        },
+        none => {}
+    }
+    result = join_solver_force(result,
+        callable_param_requires_force(metadata, def_id, index))
+    // A callable-valued HParam/handler slot is an interface view. Its explicit
+    // FnType Move contract is locally strengthened to FORCE even when an
+    // OWNING producer such as `some` is supplied at a call site.
+    match table.callable_contracts.get(def_id) {
+        some(ownership_id) => if callable_param_ownership(
+                metadata, ownership_id, index) == PARAM_OWNERSHIP_MOVE {
+            result = join_solver_force(result, some(true))
+        },
+        none => {}
+    }
+    result
+}
+
+fn solver_param_transfer(
+    table: CallableSolveTable, metadata: OwnershipMetadata,
+    callee_def_id: Int?, index: Int
+) -> Int {
+    let mode = solver_param_mode(table, metadata, callee_def_id, index)
+    if mode != PARAM_OWNERSHIP_MOVE { return TRANSFER_BORROW }
+    match callee_def_id {
+        some(def_id) => if solver_force_for_def_id(
+                table, metadata, def_id, index,
+                solver_alias_edge_count(table) + 1).unwrap_or(false) {
+            TRANSFER_FORCE
+        } else {
+            TRANSFER_OWNING
+        },
+        none => TRANSFER_BORROW
+    }
+}
+
 fn list_has_def_id(values: List<Int>, target: Int) -> Bool {
     for value in values { if value == target { return true } }
     false
@@ -1076,8 +1383,8 @@ fn collect_callable_identity_sources(
             for inferred_child in children {
                 let child: ReachableControlChild = inferred_child
                 if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE ||
-                        child.kind == REACHABLE_CHILD_MATCH_GUARD {
-                } else if child.kind == REACHABLE_CHILD_MATCH_BODY {
+                        child.kind == REACHABLE_CHILD_ARM_GUARD {
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
                     reachable_bodies.insert(child.arm_index)
                 } else {
                     panic(
@@ -1112,13 +1419,28 @@ fn collect_callable_identity_sources(
         HExpr::UnsafeBlock { body, .. } =>
             collect_callable_identity_sources(body, out),
         HExpr::TryCatch { body, arms, .. } => {
-            let mut exact = collect_callable_identity_sources(body, out)
-            for arm in arms {
-                if collect_callable_identity_sources(arm.body, out) == false {
-                    exact = false
+            let mut exact = true
+            let mut any = false
+            if expr_has_reachable_value(body) {
+                exact = collect_callable_identity_sources(body, out)
+                any = true
+            }
+            for inferred_child in enumerate_reachable_arm_children(arms) {
+                let child: ReachableControlChild = inferred_child
+                if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    let arm: HMatchArm = match arms.get(child.arm_index) {
+                        some(value) => value,
+                        none => panic(
+                            "unreachable: reachable Catch body has no arm")
+                    }
+                    if collect_callable_identity_sources(
+                            arm.body, out) == false {
+                        exact = false
+                    }
+                    any = true
                 }
             }
-            exact
+            any && exact
         },
         HExpr::HandleExpr { body, handlers, .. } => {
             let mut exact = collect_callable_identity_sources(body, out)
@@ -1237,16 +1559,57 @@ fn register_callable_alias(
     }
 }
 
+fn register_callable_const_getter(
+    mut table: CallableSolveTable,
+    getter: Int?, stored_ty: Type, init: HExpr, span: Span
+) {
+    match (getter, stored_ty) {
+        (some(getter_id), Type::FnType { .. }) => {
+            let stored_type_getter_id = getter_id
+            let stored_type = stored_ty
+            table.const_callable_types.insert(
+                stored_type_getter_id, stored_type)
+            let durable_getter_id = getter_id
+            table.durable_callable_spans.insert(
+                durable_getter_id, copy_ownership_span(span))
+
+            let mut sources: List<Int> = []
+            let exact = collect_callable_identity_sources(init, sources)
+            let mut filtered: List<Int> = []
+            for source_id in sources {
+                if source_id != getter_id &&
+                   !list_has_def_id(filtered, source_id) {
+                    let stored_source_id = source_id
+                    filtered.push(stored_source_id)
+                }
+            }
+            if exact && filtered.len() > 0 {
+                let return_getter_id = getter_id
+                table.return_targets.insert(return_getter_id, filtered)
+                table.opaque_callable_returns.remove(getter_id)
+            } else {
+                let opaque_getter_id = getter_id
+                table.opaque_callable_returns.insert(opaque_getter_id, true)
+            }
+        },
+        _ => {}
+    }
+}
+
 fn register_callable_contract(
     mut table: CallableSolveTable, target: Int?, ty: Type
 ) {
-    match (target, ty) {
+    let type_for_match = ty
+    let type_for_state = ty
+    match (target, type_for_match) {
         (some(def_id), Type::FnType { params, meta, .. }) => {
             let contract_def_id = def_id
             table.callable_contracts.insert(
                 contract_def_id, meta.ownership_term)
             let arity_def_id = def_id
             table.callable_arities.insert(arity_def_id, params.len())
+            let type_def_id = def_id
+            table.callable_types.insert(type_def_id, type_for_state)
             let untrusted_def_id = def_id
             table.untrusted_callable_slots.insert(untrusted_def_id, true)
         },
@@ -1522,185 +1885,230 @@ fn optional_pattern_payload_name_equal(left: Str?, right: Str?) -> Bool {
     }
 }
 
-fn pattern_payload_path_relation_from_nodes(
-    nodes: (Pattern, Pattern),
+fn pattern_payload_path_relation_from_non_or_nodes(
+    left: Pattern, right: Pattern,
     left_indices: List<Int>, left_position: Int,
     right_indices: List<Int>, right_position: Int
 ) -> Int {
-    match nodes {
-        (Pattern::OrPattern { patterns, .. }, other) => {
+    match left {
+        Pattern::Binding { name: left_name, .. } => match right {
+            Pattern::Binding { name: right_name, .. } => {
+                if left_position == left_indices.len() &&
+                   right_position == right_indices.len() &&
+                   left_name == right_name {
+                    PAYLOAD_PATH_RELATION_SAME
+                } else {
+                    PAYLOAD_PATH_RELATION_OVERLAP
+                }
+            },
+            _ => PAYLOAD_PATH_RELATION_OVERLAP
+        },
+        Pattern::TuplePattern { elements: left_elements, .. } =>
+            match right {
+                Pattern::Binding { .. } | Pattern::OrPattern { .. } =>
+                    PAYLOAD_PATH_RELATION_OVERLAP,
+                Pattern::TuplePattern {
+                    elements: right_elements, ..
+                } => {
+                    match (left_indices.get(left_position),
+                           right_indices.get(right_position)) {
+                        (some(left_index), some(right_index)) => {
+                            if left_elements.len() != right_elements.len() ||
+                               left_index != right_index {
+                                return PAYLOAD_PATH_RELATION_DISJOINT
+                            }
+                            match (left_elements.get(left_index),
+                                   right_elements.get(right_index)) {
+                                (some(left_child), some(right_child)) => {
+                                    let relation_left_child = left_child
+                                    let relation_right_child = right_child
+                                    let child_relation =
+                                        pattern_payload_path_relation_from_nodes(
+                                            relation_left_child,
+                                            relation_right_child,
+                                            left_indices,
+                                            left_position + 1,
+                                            right_indices,
+                                            right_position + 1)
+                                    if child_relation ==
+                                       PAYLOAD_PATH_RELATION_SAME {
+                                        PAYLOAD_PATH_RELATION_SAME
+                                    } else {
+                                        PAYLOAD_PATH_RELATION_OVERLAP
+                                    }
+                                },
+                                _ => PAYLOAD_PATH_RELATION_OVERLAP
+                            }
+                        },
+                        _ => PAYLOAD_PATH_RELATION_OVERLAP
+                    }
+                },
+                _ => PAYLOAD_PATH_RELATION_DISJOINT
+            },
+        Pattern::Constructor {
+            name: left_name, qualifier: left_qualifier,
+            fields: left_fields, ..
+        } => match right {
+            Pattern::Binding { .. } | Pattern::OrPattern { .. } =>
+                PAYLOAD_PATH_RELATION_OVERLAP,
+            Pattern::Constructor {
+                name: right_name, qualifier: right_qualifier,
+                fields: right_fields, ..
+            } => {
+                let names_compatible = left_name == right_name
+                let left_qualifier_for_relation = left_qualifier
+                let right_qualifier_for_relation = right_qualifier
+                let qualifiers_compatible =
+                    optional_pattern_payload_name_equal(
+                        left_qualifier_for_relation,
+                        right_qualifier_for_relation)
+                let arities_compatible =
+                    left_fields.len() == right_fields.len()
+                let constructors_compatible = names_compatible &&
+                    qualifiers_compatible && arities_compatible
+                match (left_indices.get(left_position),
+                       right_indices.get(right_position)) {
+                    (some(left_index), some(right_index)) => {
+                        if !constructors_compatible ||
+                           left_index != right_index {
+                            return PAYLOAD_PATH_RELATION_DISJOINT
+                        }
+                        match (left_fields.get(left_index),
+                               right_fields.get(right_index)) {
+                            (some(left_child), some(right_child)) => {
+                                let relation_left_child = left_child
+                                let relation_right_child = right_child
+                                let child_relation =
+                                    pattern_payload_path_relation_from_nodes(
+                                        relation_left_child,
+                                        relation_right_child,
+                                        left_indices,
+                                        left_position + 1,
+                                        right_indices,
+                                        right_position + 1)
+                                if child_relation ==
+                                   PAYLOAD_PATH_RELATION_SAME {
+                                    PAYLOAD_PATH_RELATION_SAME
+                                } else {
+                                    PAYLOAD_PATH_RELATION_OVERLAP
+                                }
+                            },
+                            _ => PAYLOAD_PATH_RELATION_OVERLAP
+                        }
+                    },
+                    _ => PAYLOAD_PATH_RELATION_OVERLAP
+                }
+            },
+            _ => PAYLOAD_PATH_RELATION_DISJOINT
+        },
+        Pattern::NamedConstructor {
+            name: left_name, qualifier: left_qualifier,
+            fields: left_fields, ..
+        } => match right {
+            Pattern::Binding { .. } | Pattern::OrPattern { .. } =>
+                PAYLOAD_PATH_RELATION_OVERLAP,
+            Pattern::NamedConstructor {
+                name: right_name, qualifier: right_qualifier,
+                fields: right_fields, ..
+            } => {
+                let names_compatible = left_name == right_name
+                let left_qualifier_for_relation = left_qualifier
+                let right_qualifier_for_relation = right_qualifier
+                let qualifiers_compatible =
+                    optional_pattern_payload_name_equal(
+                        left_qualifier_for_relation,
+                        right_qualifier_for_relation)
+                let constructors_compatible =
+                    names_compatible && qualifiers_compatible
+                match (left_indices.get(left_position),
+                       right_indices.get(right_position)) {
+                    (some(left_index), some(right_index)) => {
+                        if !constructors_compatible {
+                            return PAYLOAD_PATH_RELATION_DISJOINT
+                        }
+                        match (left_fields.get(left_index),
+                               right_fields.get(right_index)) {
+                            (some(left_field), some(right_field)) => {
+                                if left_field.name != right_field.name {
+                                    return PAYLOAD_PATH_RELATION_DISJOINT
+                                }
+                                let relation_left_child = left_field.pattern
+                                let relation_right_child = right_field.pattern
+                                let child_relation =
+                                    pattern_payload_path_relation_from_nodes(
+                                        relation_left_child,
+                                        relation_right_child,
+                                        left_indices,
+                                        left_position + 1,
+                                        right_indices,
+                                        right_position + 1)
+                                if child_relation ==
+                                   PAYLOAD_PATH_RELATION_SAME {
+                                    PAYLOAD_PATH_RELATION_SAME
+                                } else {
+                                    PAYLOAD_PATH_RELATION_OVERLAP
+                                }
+                            },
+                            _ => PAYLOAD_PATH_RELATION_OVERLAP
+                        }
+                    },
+                    _ => PAYLOAD_PATH_RELATION_OVERLAP
+                }
+            },
+            _ => PAYLOAD_PATH_RELATION_DISJOINT
+        },
+        Pattern::Wildcard { .. } => match right {
+            Pattern::Binding { .. } | Pattern::Wildcard { .. } |
+            Pattern::OrPattern { .. } => PAYLOAD_PATH_RELATION_OVERLAP,
+            _ => PAYLOAD_PATH_RELATION_DISJOINT
+        },
+        Pattern::Literal { .. } => match right {
+            Pattern::Binding { .. } | Pattern::Literal { .. } |
+            Pattern::OrPattern { .. } => PAYLOAD_PATH_RELATION_OVERLAP,
+            _ => PAYLOAD_PATH_RELATION_DISJOINT
+        },
+        Pattern::OrPattern { .. } => PAYLOAD_PATH_RELATION_OVERLAP
+    }
+}
+
+fn pattern_payload_path_relation_from_nodes(
+    left: Pattern, right: Pattern,
+    left_indices: List<Int>, left_position: Int,
+    right_indices: List<Int>, right_position: Int
+) -> Int {
+    match left {
+        Pattern::OrPattern { patterns, .. } => {
             let index = left_indices.get(left_position).unwrap_or(-1)
-            let other_for_lookup = other
-            match (patterns.get(index), other_for_lookup) {
-                (some(alternative), relation_other) => {
+            match patterns.get(index) {
+                some(alternative) => {
                     let alternative_for_relation = alternative
-                    let other_for_relation = relation_other
                     pattern_payload_path_relation_from_nodes(
-                        (alternative_for_relation, other_for_relation),
+                        alternative_for_relation, right,
                         left_indices, left_position + 1,
                         right_indices, right_position)
                 },
-                _ => PAYLOAD_PATH_RELATION_OVERLAP
+                none => PAYLOAD_PATH_RELATION_OVERLAP
             }
         },
-        (other, Pattern::OrPattern { patterns, .. }) => {
-            let index = right_indices.get(right_position).unwrap_or(-1)
-            let other_for_lookup = other
-            match (other_for_lookup, patterns.get(index)) {
-                (relation_other, some(alternative)) => {
-                    let other_for_relation = relation_other
-                    let alternative_for_relation = alternative
-                    pattern_payload_path_relation_from_nodes(
-                        (other_for_relation, alternative_for_relation),
-                        left_indices, left_position,
-                        right_indices, right_position + 1)
-                },
-                _ => PAYLOAD_PATH_RELATION_OVERLAP
-            }
-        },
-        (Pattern::Binding { name: left_name, .. },
-         Pattern::Binding { name: right_name, .. }) => {
-            if left_position == left_indices.len() &&
-               right_position == right_indices.len() &&
-               left_name == right_name {
-                PAYLOAD_PATH_RELATION_SAME
-            } else {
-                PAYLOAD_PATH_RELATION_OVERLAP
-            }
-        },
-        (Pattern::Binding { .. }, _) | (_, Pattern::Binding { .. }) =>
-            PAYLOAD_PATH_RELATION_OVERLAP,
-        (Pattern::TuplePattern { elements: left_elements, .. },
-         Pattern::TuplePattern { elements: right_elements, .. }) => {
-            match (left_indices.get(left_position),
-                   right_indices.get(right_position)) {
-                (some(left_index), some(right_index)) => {
-                    if left_elements.len() != right_elements.len() ||
-                       left_index != right_index {
-                        return PAYLOAD_PATH_RELATION_DISJOINT
-                    }
-                    match (left_elements.get(left_index),
-                           right_elements.get(right_index)) {
-                        (some(left_child), some(right_child)) => {
-                            let relation_left_child = left_child
-                            let relation_right_child = right_child
-                            let child_relation =
-                                pattern_payload_path_relation_from_nodes(
-                                    (relation_left_child,
-                                     relation_right_child),
-                                    left_indices, left_position + 1,
-                                    right_indices,
-                                    right_position + 1)
-                            if child_relation == PAYLOAD_PATH_RELATION_SAME {
-                                PAYLOAD_PATH_RELATION_SAME
-                            } else {
-                                PAYLOAD_PATH_RELATION_OVERLAP
-                            }
-                        },
-                        _ => PAYLOAD_PATH_RELATION_OVERLAP
-                    }
-                },
-                _ => PAYLOAD_PATH_RELATION_OVERLAP
-            }
-        },
-        (Pattern::Constructor {
-             name: left_name, qualifier: left_qualifier,
-             fields: left_fields, ..
-         },
-         Pattern::Constructor {
-             name: right_name, qualifier: right_qualifier,
-             fields: right_fields, ..
-        }) => {
-            let names_compatible = left_name == right_name
-            let left_qualifier_for_relation = left_qualifier
-            let right_qualifier_for_relation = right_qualifier
-            let qualifiers_compatible = optional_pattern_payload_name_equal(
-                left_qualifier_for_relation,
-                right_qualifier_for_relation)
-            let arities_compatible =
-                left_fields.len() == right_fields.len()
-            let constructors_compatible = names_compatible &&
-                qualifiers_compatible && arities_compatible
-            match (left_indices.get(left_position),
-                   right_indices.get(right_position)) {
-                (some(left_index), some(right_index)) => {
-                    if !constructors_compatible || left_index != right_index {
-                        return PAYLOAD_PATH_RELATION_DISJOINT
-                    }
-                    match (left_fields.get(left_index),
-                           right_fields.get(right_index)) {
-                        (some(left_child), some(right_child)) => {
-                            let relation_left_child = left_child
-                            let relation_right_child = right_child
-                            let child_relation =
-                                pattern_payload_path_relation_from_nodes(
-                                    (relation_left_child,
-                                     relation_right_child),
-                                    left_indices, left_position + 1,
-                                    right_indices,
-                                    right_position + 1)
-                            if child_relation == PAYLOAD_PATH_RELATION_SAME {
-                                PAYLOAD_PATH_RELATION_SAME
-                            } else {
-                                PAYLOAD_PATH_RELATION_OVERLAP
-                            }
-                        },
-                        _ => PAYLOAD_PATH_RELATION_OVERLAP
-                    }
-                },
-                _ => PAYLOAD_PATH_RELATION_OVERLAP
-            }
-        },
-        (Pattern::NamedConstructor {
-             name: left_name, qualifier: left_qualifier,
-             fields: left_fields, ..
-         },
-         Pattern::NamedConstructor {
-             name: right_name, qualifier: right_qualifier,
-             fields: right_fields, ..
-         }) => {
-            let names_compatible = left_name == right_name
-            let left_qualifier_for_relation = left_qualifier
-            let right_qualifier_for_relation = right_qualifier
-            let qualifiers_compatible = optional_pattern_payload_name_equal(
-                left_qualifier_for_relation,
-                right_qualifier_for_relation)
-            let constructors_compatible =
-                names_compatible && qualifiers_compatible
-            match (left_indices.get(left_position),
-                   right_indices.get(right_position)) {
-                (some(left_index), some(right_index)) => {
-                    if !constructors_compatible {
-                        return PAYLOAD_PATH_RELATION_DISJOINT
-                    }
-                    match (left_fields.get(left_index),
-                           right_fields.get(right_index)) {
-                        (some(left_field), some(right_field)) => {
-                            if left_field.name != right_field.name {
-                                return PAYLOAD_PATH_RELATION_DISJOINT
-                            }
-                            let child_relation =
-                                pattern_payload_path_relation_from_nodes(
-                                    (left_field.pattern, right_field.pattern),
-                                    left_indices, left_position + 1,
-                                    right_indices,
-                                    right_position + 1)
-                            if child_relation == PAYLOAD_PATH_RELATION_SAME {
-                                PAYLOAD_PATH_RELATION_SAME
-                            } else {
-                                PAYLOAD_PATH_RELATION_OVERLAP
-                            }
-                        },
-                        _ => PAYLOAD_PATH_RELATION_OVERLAP
-                    }
-                },
-                _ => PAYLOAD_PATH_RELATION_OVERLAP
-            }
-        },
-        (Pattern::Wildcard { .. }, Pattern::Wildcard { .. }) |
-        (Pattern::Literal { .. }, Pattern::Literal { .. }) =>
-            PAYLOAD_PATH_RELATION_OVERLAP,
-        _ => PAYLOAD_PATH_RELATION_DISJOINT
+        left_non_or => match right {
+            Pattern::OrPattern { patterns, .. } => {
+                let index = right_indices.get(right_position).unwrap_or(-1)
+                match patterns.get(index) {
+                    some(alternative) => {
+                        let alternative_for_relation = alternative
+                        pattern_payload_path_relation_from_nodes(
+                            left_non_or, alternative_for_relation,
+                            left_indices, left_position,
+                            right_indices, right_position + 1)
+                    },
+                    none => PAYLOAD_PATH_RELATION_OVERLAP
+                }
+            },
+            right_non_or => pattern_payload_path_relation_from_non_or_nodes(
+                left_non_or, right_non_or,
+                left_indices, left_position,
+                right_indices, right_position)
+        }
     }
 }
 
@@ -1715,8 +2123,8 @@ fn pattern_payload_path_relation(
                     let relation_left_alternative = left_alternative
                     let relation_right_alternative = right_alternative
                     pattern_payload_path_relation_from_nodes(
-                        (relation_left_alternative,
-                         relation_right_alternative),
+                        relation_left_alternative,
+                        relation_right_alternative,
                         left.indices, 0, right.indices, 0)
                 },
                 _ => PAYLOAD_PATH_RELATION_OVERLAP
@@ -2258,6 +2666,52 @@ fn apply_or_payload_paths(
     if !expr_has_reachable_value(value) { return PAYLOAD_NO_MATCH }
     if fuel <= 0 { return PAYLOAD_OPAQUE }
 
+    // Once a path reaches its binding, the current value is the exact payload.
+    // Project it before expanding aliases: named callable Idents intentionally
+    // have no value-origin entry, but their DefId is the ownership authority.
+    let mut whole_path_index = -1
+    for active_path in active {
+        let (path_index, path_position) = active_path
+        match plan.paths.get(path_index) {
+            some(path) => {
+                let (path_status, _, _) = match_pattern_payload_path(
+                    root, path, path_position,
+                    PAYLOAD_PRODUCER_UNKNOWN, "", "", 0)
+                if path_status == PAYLOAD_PATH_WHOLE {
+                    if whole_path_index >= 0 { return PAYLOAD_OPAQUE }
+                    whole_path_index = path_index
+                }
+            },
+            none => return PAYLOAD_OPAQUE
+        }
+    }
+    if whole_path_index >= 0 {
+        let whole_source_ordinal = if projection_source_ordinal >= 0 {
+            projection_source_ordinal
+        } else {
+            let next_ordinal = source_state.next_ordinal
+            source_state.next_ordinal = source_state.next_ordinal + 1
+            next_ordinal
+        }
+        match plan.paths.get(whole_path_index) {
+            some(path) => {
+                let emission_ordinal = source_state.next_emission_ordinal
+                source_state.next_emission_ordinal =
+                    source_state.next_emission_ordinal + 1
+                let projected_value = value
+                projected.push(ProjectedPatternPayload {
+                    alternative_index: path.alternative_index,
+                    source_ordinal: whole_source_ordinal,
+                    ordinal: path.ordinal,
+                    emission_ordinal: emission_ordinal,
+                    value: projected_value
+                })
+                return PAYLOAD_EXACT
+            },
+            none => return PAYLOAD_OPAQUE
+        }
+    }
+
     // Resolve aliases and reachable value producers before applying any
     // alternative projection.  The Pattern plan is Borrow-only and may be
     // shared across these source edges; every HExpr edge is owned exactly once.
@@ -2358,8 +2812,8 @@ fn apply_or_payload_paths(
             for inferred_child in children {
                 let child: ReachableControlChild = inferred_child
                 if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE ||
-                        child.kind == REACHABLE_CHILD_MATCH_GUARD {
-                } else if child.kind == REACHABLE_CHILD_MATCH_BODY {
+                        child.kind == REACHABLE_CHILD_ARM_GUARD {
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
                     reachable_bodies.insert(child.arm_index)
                 } else {
                     panic(
@@ -2391,13 +2845,21 @@ fn apply_or_payload_paths(
                 table, root, plan, active, projected_try_body,
                 visited, fuel - 1, projection_source_ordinal,
                 source_state, projected)
-            for arm in arms {
-                let projected_arm_body = arm.body
-                status = merge_payload_status(status,
-                    apply_or_payload_paths(
-                        table, root, plan, active, projected_arm_body,
-                        visited, fuel - 1, projection_source_ordinal,
-                        source_state, projected))
+            for inferred_child in enumerate_reachable_arm_children(arms) {
+                let child: ReachableControlChild = inferred_child
+                if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    let arm: HMatchArm = match arms.get(child.arm_index) {
+                        some(value) => value,
+                        none => panic(
+                            "unreachable: payload Catch body has no arm")
+                    }
+                    let projected_arm_body = arm.body
+                    status = merge_payload_status(status,
+                        apply_or_payload_paths(
+                            table, root, plan, active, projected_arm_body,
+                            visited, fuel - 1, projection_source_ordinal,
+                            source_state, projected))
+                }
             }
             return status
         },
@@ -2429,41 +2891,6 @@ fn apply_or_payload_paths(
         let next_ordinal = source_state.next_ordinal
         source_state.next_ordinal = source_state.next_ordinal + 1
         next_ordinal
-    }
-    let mut whole_path_index = -1
-    for active_path in active {
-        let (path_index, path_position) = active_path
-        match plan.paths.get(path_index) {
-            some(path) => {
-                let (path_status, _, _) = match_pattern_payload_path(
-                    root, path, path_position,
-                    PAYLOAD_PRODUCER_UNKNOWN, "", "", 0)
-                if path_status == PAYLOAD_PATH_WHOLE {
-                    if whole_path_index >= 0 { return PAYLOAD_OPAQUE }
-                    whole_path_index = path_index
-                }
-            },
-            none => return PAYLOAD_OPAQUE
-        }
-    }
-    if whole_path_index >= 0 {
-        match plan.paths.get(whole_path_index) {
-            some(path) => {
-                let emission_ordinal = source_state.next_emission_ordinal
-                source_state.next_emission_ordinal =
-                    source_state.next_emission_ordinal + 1
-                let projected_value = value
-                projected.push(ProjectedPatternPayload {
-                    alternative_index: path.alternative_index,
-                    source_ordinal: current_source_ordinal,
-                    ordinal: path.ordinal,
-                    emission_ordinal: emission_ordinal,
-                    value: projected_value
-                })
-                return PAYLOAD_EXACT
-            },
-            none => return PAYLOAD_OPAQUE
-        }
     }
 
     match value {
@@ -2752,8 +3179,8 @@ fn collect_pattern_payloads(
             for inferred_child in children {
                 let child: ReachableControlChild = inferred_child
                 if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE ||
-                        child.kind == REACHABLE_CHILD_MATCH_GUARD {
-                } else if child.kind == REACHABLE_CHILD_MATCH_BODY {
+                        child.kind == REACHABLE_CHILD_ARM_GUARD {
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
                     reachable_bodies.insert(child.arm_index)
                 } else {
                     panic(
@@ -2782,12 +3209,20 @@ fn collect_pattern_payloads(
             let body_for_collect = body
             let mut status = collect_pattern_payloads(table, pattern, target,
                 body_for_collect, visited, fuel - 1, out)
-            for arm in arms {
-                let arm_body_for_collect = arm.body
-                status = merge_payload_status(status,
-                    collect_pattern_payloads(
-                        table, pattern, target, arm_body_for_collect,
-                        visited, fuel - 1, out))
+            for inferred_child in enumerate_reachable_arm_children(arms) {
+                let child: ReachableControlChild = inferred_child
+                if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    let arm: HMatchArm = match arms.get(child.arm_index) {
+                        some(value) => value,
+                        none => panic(
+                            "unreachable: pattern-payload Catch body has no arm")
+                    }
+                    let arm_body_for_collect = arm.body
+                    status = merge_payload_status(status,
+                        collect_pattern_payloads(
+                            table, pattern, target, arm_body_for_collect,
+                            visited, fuel - 1, out))
+                }
             }
             return status
         },
@@ -3095,6 +3530,27 @@ fn mark_param_move(mut state: CallableSolveState, expr: HExpr) {
     }
 }
 
+// A tuple written directly as a Match scrutinee is a borrow-only inspection
+// view, not an owning tuple construction.  Recurse through nested tuple views
+// while leaving every non-tuple child to its own ordinary expression rules
+// (constructor/call children still decide their argument transfers exactly).
+fn solve_match_scrutinee_borrow_view(
+    env: TypeEnv, mut table: CallableSolveTable,
+    metadata: OwnershipMetadata, mut state: CallableSolveState,
+    expr: HExpr
+) {
+    match expr {
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                solve_match_scrutinee_borrow_view(
+                    env, table, metadata, state, element)
+            }
+        },
+        _ => solve_expr(
+            env, table, metadata, state, expr, TRANSFER_BORROW)
+    }
+}
+
 fn solve_expr(
     env: TypeEnv, table: CallableSolveTable,
     metadata: OwnershipMetadata, mut state: CallableSolveState,
@@ -3124,7 +3580,8 @@ fn solve_expr(
                         mark_value_origin_opaque(table, receiver)
                     }
                     solve_expr(env, table, metadata, state, receiver,
-                        transfer_for_mode(receiver_mode))
+                        solver_param_transfer(
+                            table, metadata, callee_def_id, 0))
                     true
                 },
                 _ => {
@@ -3142,7 +3599,8 @@ fn solve_expr(
                     mark_value_origin_opaque(table, arg)
                 }
                 solve_expr(env, table, metadata, state, arg,
-                    transfer_for_mode(mode))
+                    solver_param_transfer(
+                        table, metadata, callee_def_id, descriptor_index))
                 index = index + 1
             }
         },
@@ -3205,8 +3663,8 @@ fn solve_expr(
             for inferred_child in children {
                 let child: ReachableControlChild = inferred_child
                 if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE {
-                    solve_expr(env, table, metadata, state, scrutinee,
-                        TRANSFER_BORROW)
+                    solve_match_scrutinee_borrow_view(
+                        env, table, metadata, state, scrutinee)
                 } else {
                     let arm: HMatchArm = match arms.get(child.arm_index) {
                         some(value) => value,
@@ -3218,14 +3676,14 @@ fn solve_expr(
                             arm.bindings, provenance_scrutinee)
                         registered_arms.insert(child.arm_index)
                     }
-                    if child.kind == REACHABLE_CHILD_MATCH_GUARD {
+                    if child.kind == REACHABLE_CHILD_ARM_GUARD {
                         match arm.guard {
                             some(guard) => solve_expr(env, table, metadata,
                                 state, guard, TRANSFER_BORROW),
                             none => panic(
                                 "unreachable: reachable guard child has no guard")
                         }
-                    } else if child.kind == REACHABLE_CHILD_MATCH_BODY {
+                    } else if child.kind == REACHABLE_CHILD_ARM_BODY {
                         solve_expr(env, table, metadata, state, arm.body,
                             transfer)
                     } else {
@@ -3290,18 +3748,35 @@ fn solve_expr(
         },
         HExpr::TryCatch { body, arms, .. } => {
             solve_expr(env, table, metadata, state, body, transfer)
-            for arm in arms {
-                for binding in arm.bindings {
-                    register_callable_contract(table,
-                        some(binding.def_id), binding.ty)
+            let children = enumerate_reachable_arm_children(arms)
+            let mut registered_arms: Set<Int> = set_new()
+            for inferred_child in children {
+                let child: ReachableControlChild = inferred_child
+                let arm: HMatchArm = match arms.get(child.arm_index) {
+                    some(value) => value,
+                    none => panic(
+                        "unreachable: reachable Catch child has no arm")
                 }
-                match arm.guard {
-                    some(guard) => solve_expr(
-                        env, table, metadata, state, guard, TRANSFER_BORROW),
-                    none => {}
+                if !registered_arms.contains(child.arm_index) {
+                    for binding in arm.bindings {
+                        register_callable_contract(table,
+                            some(binding.def_id), binding.ty)
+                    }
+                    registered_arms.insert(child.arm_index)
                 }
-                solve_expr(env, table, metadata, state, arm.body,
-                    transfer)
+                if child.kind == REACHABLE_CHILD_ARM_GUARD {
+                    match arm.guard {
+                        some(guard) => solve_expr(env, table, metadata, state,
+                            guard, TRANSFER_BORROW),
+                        none => panic(
+                            "unreachable: reachable Catch guard has no guard")
+                    }
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    solve_expr(env, table, metadata, state, arm.body,
+                        transfer)
+                } else {
+                    panic("unreachable: invalid Catch reachable-child kind")
+                }
             }
         },
         HExpr::HandleExpr { body, .. } =>
@@ -3398,14 +3873,28 @@ fn solve_stmt(
             none => {}
         },
         HStmt::While { condition, body, .. } => {
-            solve_expr(env, table, metadata, state, condition,
+            let reachability_condition = condition
+            let solver_condition = condition
+            let condition_reaches_value =
+                expr_has_reachable_value(reachability_condition)
+            solve_expr(env, table, metadata, state, solver_condition,
                 TRANSFER_BORROW)
-            solve_expr(env, table, metadata, state, body, TRANSFER_BORROW)
+            if condition_reaches_value {
+                solve_expr(env, table, metadata, state, body,
+                    TRANSFER_BORROW)
+            }
         },
         HStmt::ForIn { iterable, body, .. } => {
-            solve_expr(env, table, metadata, state, iterable,
+            let reachability_iterable = iterable
+            let solver_iterable = iterable
+            let iterable_reaches_value =
+                expr_has_reachable_value(reachability_iterable)
+            solve_expr(env, table, metadata, state, solver_iterable,
                 TRANSFER_BORROW)
-            solve_expr(env, table, metadata, state, body, TRANSFER_BORROW)
+            if iterable_reaches_value {
+                solve_expr(env, table, metadata, state, body,
+                    TRANSFER_BORROW)
+            }
         },
         HStmt::LetDestructure { pattern, bindings, init, .. } => {
             solve_expr(env, table, metadata, state, init, TRANSFER_BORROW)
@@ -3414,14 +3903,24 @@ fn solve_stmt(
         },
         HStmt::IfLet { pattern, bindings, expr,
                        then_block, else_block, .. } => {
-            solve_expr(env, table, metadata, state, expr, TRANSFER_BORROW)
-            register_pattern_provenance(table, pattern, bindings, expr)
-            solve_expr(env, table, metadata, state, then_block,
-                TRANSFER_BORROW)
-            match else_block {
-                some(branch) => solve_expr(
-                    env, table, metadata, state, branch, TRANSFER_BORROW),
-                none => {}
+            let reachability_expr = expr
+            let solver_expr = expr
+            let provenance_expr = expr
+            let expr_reaches_value =
+                expr_has_reachable_value(reachability_expr)
+            solve_expr(env, table, metadata, state,
+                solver_expr, TRANSFER_BORROW)
+            if expr_reaches_value {
+                register_pattern_provenance(
+                    table, pattern, bindings, provenance_expr)
+                solve_expr(env, table, metadata, state, then_block,
+                    TRANSFER_BORROW)
+                match else_block {
+                    some(branch) => solve_expr(
+                        env, table, metadata, state, branch,
+                        TRANSFER_BORROW),
+                    none => {}
+                }
             }
         },
         HStmt::Break { .. } | HStmt::Continue { .. } |
@@ -3429,9 +3928,33 @@ fn solve_stmt(
     }
 }
 
+fn direct_transfer_levels(
+    ownership_term: Int, force_params: List<Bool>
+) -> List<CallableTransferLevel> {
+    let mut copied_forces: List<Bool> = []
+    for force in force_params {
+        let copied_force = force
+        copied_forces.push(copied_force)
+    }
+    [callable_transfer_level(ownership_term, copied_forces)]
+}
+
+fn recovery_transfer_levels(
+    ownership_term: Int, arity: Int
+) -> List<CallableTransferLevel> {
+    let mut forces: List<Bool> = []
+    let mut index = 0
+    while index < arity {
+        forces.push(false)
+        index = index + 1
+    }
+    direct_transfer_levels(ownership_term, forces)
+}
+
 fn publish_solved_callable_ownership(
     mut metadata: OwnershipMetadata, def_id: Int, exact: Int,
-    source: Int, mut sink: CollectingSink, span: Span
+    source: Int, transfer_levels: List<CallableTransferLevel>,
+    mut sink: CollectingSink, span: Span
 ) {
     match metadata.callable_by_def_id.get(def_id) {
         some(term) => {
@@ -3451,7 +3974,8 @@ fn publish_solved_callable_ownership(
     }
     // Keep the DefId map exact after publication. FnType occurrences still
     // carry their shared inference term until the atomic recursive freeze.
-    record_callable_ownership(metadata, def_id, exact, source)
+    record_callable_ownership_with_transfer_levels(
+        metadata, def_id, exact, source, transfer_levels)
 }
 
 fn type_with_ownership(ty: Type, ownership_id: Int) -> Type {
@@ -3484,6 +4008,24 @@ fn finalized_callable_type(
     table: CallableSolveTable, metadata: OwnershipMetadata,
     def_id: Int, ty: Type
 ) -> Type {
+    if table.const_getter_def_ids.contains(def_id) {
+        match ty {
+            Type::FnType { .. } => {
+                let levels = match callable_transfer_levels_for_def_id(
+                        metadata, def_id) {
+                    some(value) => value,
+                    none => panic(
+                        "unreachable: callable const getter has no transfer spine")
+                }
+                if levels.len() < 2 {
+                    panic(
+                        "unreachable: callable const getter has no stored-callable transfer level")
+                }
+                return type_with_transfer_spine_at(ty, levels, 1)
+            },
+            _ => {}
+        }
+    }
     let outer = match metadata.callable_by_def_id.get(def_id) {
         some(ownership_id) => {
             let source_type = ty
@@ -3504,6 +4046,31 @@ fn finalized_callable_type(
             }
         },
         _ => outer
+    }
+}
+
+fn type_with_transfer_spine_at(
+    ty: Type, levels: List<CallableTransferLevel>, level_index: Int
+) -> Type {
+    match ty {
+        Type::FnType { params, return_type, meta } => {
+            let final_params = params
+            let recursive_return_type = return_type
+            let final_effects = meta.effects
+            let level_ownership_term = match levels.get(level_index) {
+                some(value) => value.ownership_term,
+                none => panic(
+                    "unreachable: callable transfer spine is shorter than its type")
+            }
+            let recursive_levels = clone_callable_transfer_levels(levels)
+            Type::FnType {
+                params: final_params,
+                return_type: type_with_transfer_spine_at(
+                    recursive_return_type, recursive_levels, level_index + 1),
+                meta: fn_meta(final_effects, level_ownership_term)
+            }
+        },
+        _ => ty
     }
 }
 
@@ -3913,6 +4480,347 @@ fn freeze_hdecl_ownership(
     }
 }
 
+fn require_retained_callable_metadata(
+    metadata: OwnershipMetadata, def_id: Int
+) {
+    let term = match metadata.callable_by_def_id.get(def_id) {
+        some(value) => value,
+        none => panic(
+            "unreachable: retained HIR callee has no ownership descriptor")
+    }
+    let _ = require_exact_callable_ownership_term(metadata, term)
+    if !metadata.callable_state_by_def_id.contains_key(def_id) {
+        panic("unreachable: retained HIR callee has no ownership source state")
+    }
+    match metadata.callable_result_role_by_def_id.get(def_id) {
+        some(role) => if !callable_result_role_is_valid(role) {
+            panic("unreachable: retained HIR callee has an invalid direct result role")
+        },
+        none => panic(
+            "unreachable: retained HIR callee has no direct result role")
+    }
+    match metadata.returned_callable_result_role_by_def_id.get(def_id) {
+        some(role) => if !callable_result_role_is_valid(role) {
+            panic("unreachable: retained HIR callee has an invalid returned result role")
+        },
+        none => panic(
+            "unreachable: retained HIR callee has no returned result role")
+    }
+}
+
+fn require_retained_callable_identity(
+    metadata: OwnershipMetadata, def_id: Int?
+) {
+    match def_id {
+        some(id) => require_retained_callable_metadata(metadata, id),
+        none => panic(
+            "unreachable: retained callable definition has no exact DefId")
+    }
+}
+
+fn require_retained_callable_binding(
+    metadata: OwnershipMetadata, def_id: Int?, ty: Type
+) {
+    match ty {
+        Type::FnType { .. } => require_retained_callable_identity(
+            metadata, def_id),
+        _ => {}
+    }
+}
+
+fn validate_retained_callable_param_totality(
+    metadata: OwnershipMetadata, param: HParam
+) {
+    require_retained_callable_binding(metadata, param.def_id, param.ty)
+}
+
+fn validate_retained_callable_arm_totality(
+    metadata: OwnershipMetadata, arm: HMatchArm
+) {
+    for binding in arm.bindings {
+        require_retained_callable_binding(
+            metadata, some(binding.def_id), binding.ty)
+    }
+    match arm.guard {
+        some(guard) => validate_retained_callable_expr_totality(
+            metadata, guard),
+        none => {}
+    }
+    validate_retained_callable_expr_totality(metadata, arm.body)
+}
+
+fn validate_retained_callable_handler_totality(
+    metadata: OwnershipMetadata, handler: HEffectHandler
+) {
+    for param in handler.params {
+        validate_retained_callable_param_totality(metadata, param)
+    }
+    match handler.resume_binding {
+        some(binding) => require_retained_callable_binding(
+            metadata, some(binding.def_id), binding.ty),
+        none => {}
+    }
+    validate_retained_callable_expr_totality(metadata, handler.body)
+}
+
+fn validate_retained_callable_stmt_totality(
+    metadata: OwnershipMetadata, stmt: HStmt
+) {
+    match stmt {
+        HStmt::Let { def_id, ty, init, .. } |
+        HStmt::Var { def_id, ty, init, .. } => {
+            require_retained_callable_binding(metadata, def_id, ty)
+            validate_retained_callable_expr_totality(metadata, init)
+        },
+        HStmt::ExprStmt { expr: init, .. } =>
+            validate_retained_callable_expr_totality(metadata, init),
+        HStmt::LetDestructure { bindings, init, .. } => {
+            for binding in bindings {
+                require_retained_callable_binding(
+                    metadata, binding.def_id, binding.ty)
+            }
+            validate_retained_callable_expr_totality(metadata, init)
+        },
+        HStmt::Assign { target, value, .. } => {
+            validate_retained_callable_expr_totality(metadata, target)
+            validate_retained_callable_expr_totality(metadata, value)
+        },
+        HStmt::Return { value, .. } => match value {
+            some(returned) => validate_retained_callable_expr_totality(
+                metadata, returned),
+            none => {}
+        },
+        HStmt::While { condition, body, .. } => {
+            validate_retained_callable_expr_totality(metadata, condition)
+            validate_retained_callable_expr_totality(metadata, body)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            validate_retained_callable_expr_totality(metadata, iterable)
+            validate_retained_callable_expr_totality(metadata, body)
+        },
+        HStmt::IfLet { bindings, expr, then_block, else_block, .. } => {
+            for binding in bindings {
+                require_retained_callable_binding(
+                    metadata, some(binding.def_id), binding.ty)
+            }
+            validate_retained_callable_expr_totality(metadata, expr)
+            validate_retained_callable_expr_totality(metadata, then_block)
+            match else_block {
+                some(branch) => validate_retained_callable_expr_totality(
+                    metadata, branch),
+                none => {}
+            }
+        },
+        HStmt::Break { .. } | HStmt::Continue { .. } |
+        HStmt::Drop { .. } => {}
+    }
+}
+
+fn validate_retained_callable_expr_totality(
+    metadata: OwnershipMetadata, expr: HExpr
+) {
+    match expr {
+        HExpr::BinOp { left, right, .. } => {
+            validate_retained_callable_expr_totality(metadata, left)
+            validate_retained_callable_expr_totality(metadata, right)
+        },
+        HExpr::UnaryOp { operand, .. } =>
+            validate_retained_callable_expr_totality(metadata, operand),
+        HExpr::Call { callee, callee_def_id, callable_result_def_id,
+                      args, .. } => {
+            match callee_def_id {
+                some(def_id) => require_retained_callable_metadata(
+                    metadata, def_id),
+                none => {}
+            }
+            match callable_result_def_id {
+                some(def_id) => require_retained_callable_metadata(
+                    metadata, def_id),
+                none => {}
+            }
+            validate_retained_callable_expr_totality(metadata, callee)
+            for arg in args {
+                validate_retained_callable_expr_totality(metadata, arg)
+            }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            validate_retained_callable_expr_totality(metadata, receiver),
+        HExpr::StructLit { fields, spread, .. } |
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields {
+                validate_retained_callable_expr_totality(
+                    metadata, field.value)
+            }
+            match spread {
+                some(source) => validate_retained_callable_expr_totality(
+                    metadata, source),
+                none => {}
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            validate_retained_callable_expr_totality(metadata, scrutinee)
+            for arm in arms {
+                validate_retained_callable_arm_totality(metadata, arm)
+            }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts {
+                validate_retained_callable_stmt_totality(metadata, stmt)
+            }
+            match tail {
+                some(value) => validate_retained_callable_expr_totality(
+                    metadata, value),
+                none => {}
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            validate_retained_callable_expr_totality(metadata, condition)
+            validate_retained_callable_expr_totality(metadata, then_branch)
+            match else_branch {
+                some(branch) => validate_retained_callable_expr_totality(
+                    metadata, branch),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(value) =>
+                        validate_retained_callable_expr_totality(
+                            metadata, value),
+                    HStringInterpPart::Literal(_) => {}
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            validate_retained_callable_expr_totality(metadata, body)
+            for arm in arms {
+                validate_retained_callable_arm_totality(metadata, arm)
+            }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            validate_retained_callable_expr_totality(metadata, body)
+            for handler in handlers {
+                validate_retained_callable_handler_totality(
+                    metadata, handler)
+            }
+        },
+        HExpr::Lambda { def_id, params, body, .. } => {
+            require_retained_callable_metadata(metadata, def_id)
+            for param in params {
+                validate_retained_callable_param_totality(metadata, param)
+            }
+            validate_retained_callable_expr_totality(metadata, body)
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            validate_retained_callable_expr_totality(metadata, body),
+        HExpr::EffectOp { args, .. } => {
+            for arg in args {
+                validate_retained_callable_expr_totality(metadata, arg)
+            }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            validate_retained_callable_expr_totality(metadata, start)
+            validate_retained_callable_expr_totality(metadata, end)
+        },
+        HExpr::ListLit { elements, .. } |
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                validate_retained_callable_expr_totality(metadata, element)
+            }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            validate_retained_callable_expr_totality(metadata, receiver)
+            validate_retained_callable_expr_totality(metadata, index)
+        },
+        HExpr::Clone { inner, .. } =>
+            validate_retained_callable_expr_totality(metadata, inner),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(returned) => validate_retained_callable_expr_totality(
+                metadata, returned),
+            none => {}
+        },
+        HExpr::Take { .. } | HExpr::Ident { .. } |
+        HExpr::DictConstruct { .. } | HExpr::IntLit { .. } |
+        HExpr::FloatLit { .. } | HExpr::StrLit { .. } |
+        HExpr::BoolLit { .. } => {}
+    }
+}
+
+fn validate_retained_callable_decl_totality(
+    metadata: OwnershipMetadata, decl: HDecl
+) {
+    match decl {
+        HDecl::Fn { def_id, params, body, .. } => {
+            require_retained_callable_identity(metadata, def_id)
+            for param in params {
+                validate_retained_callable_param_totality(metadata, param)
+            }
+            validate_retained_callable_expr_totality(metadata, body)
+        },
+        HDecl::Test { body, .. } =>
+            validate_retained_callable_expr_totality(metadata, body),
+        HDecl::Impl { methods, .. } => {
+            for method in methods {
+                validate_retained_callable_decl_totality(metadata, method)
+            }
+        },
+        HDecl::Effect { ops, .. } => {
+            for op in ops {
+                for param in op.params {
+                    validate_retained_callable_param_totality(metadata, param)
+                }
+                match op.default_body {
+                    some(body) => validate_retained_callable_expr_totality(
+                        metadata, body),
+                    none => {}
+                }
+            }
+        },
+        HDecl::Trait { methods, .. } => {
+            for method in methods {
+                require_retained_callable_metadata(metadata, method.def_id)
+                for param in method.params {
+                    validate_retained_callable_param_totality(metadata, param)
+                }
+                match method.body {
+                    some(body) => validate_retained_callable_expr_totality(
+                        metadata, body),
+                    none => {}
+                }
+            }
+        },
+        HDecl::ExternFn { def_id, .. } => {
+            require_retained_callable_identity(metadata, def_id)
+            // Extern parameters are ABI signature components, not lexical HIR
+            // binders: check_extern_fn_decl deliberately gives every HParam a
+            // `none` DefId because there is no retained body that could call a
+            // callable-valued parameter. The enclosing extern DefId owns the
+            // exact descriptor and result-role authority.
+        },
+        HDecl::Const { def_id, init, .. } => {
+            require_retained_callable_identity(metadata, def_id)
+            validate_retained_callable_expr_totality(metadata, init)
+        },
+        HDecl::ModBlock { decls, .. } => {
+            for nested in decls {
+                validate_retained_callable_decl_totality(metadata, nested)
+            }
+        },
+        HDecl::Struct { .. } | HDecl::Enum { .. } |
+        HDecl::ExternType { .. } |
+        HDecl::TypeAlias { .. } | HDecl::Sig { .. } => {}
+    }
+}
+
+fn validate_retained_callable_program_totality(
+    metadata: OwnershipMetadata, decls: List<HDecl>
+) {
+    for decl in decls {
+        validate_retained_callable_decl_totality(metadata, decl)
+    }
+}
+
 fn freeze_program_ownership(
     mut env: TypeEnv, program: HProgram
 ) -> HProgram {
@@ -3929,6 +4837,8 @@ fn freeze_program_ownership(
     let census_frozen_metadata = frozen_metadata
     collect_scalar_mut_borrow_boxes_decls(
         census_frozen_metadata, frozen_decls, boxed_vars)
+    validate_retained_callable_program_totality(
+        frozen_metadata, frozen_decls)
     let program_frozen_metadata = frozen_metadata
     let frozen = HProgram { ..program, decls: frozen_decls,
         boxed_vars: boxed_vars,
@@ -4000,18 +4910,6 @@ fn mark_scalar_mut_borrow_params(
     }
 }
 
-fn collect_scalar_mut_borrow_boxes_arm(
-    metadata: OwnershipMetadata, arm: HMatchArm,
-    mut boxed_vars: Set<Int>
-) {
-    match arm.guard {
-        some(guard) => collect_scalar_mut_borrow_boxes_expr(
-            metadata, guard, boxed_vars),
-        none => {}
-    }
-    collect_scalar_mut_borrow_boxes_expr(metadata, arm.body, boxed_vars)
-}
-
 fn collect_scalar_mut_borrow_boxes_handler(
     metadata: OwnershipMetadata, handler: HEffectHandler,
     mut boxed_vars: Set<Int>
@@ -4049,26 +4947,44 @@ fn collect_scalar_mut_borrow_boxes_stmt(
             none => {}
         },
         HStmt::While { condition, body, .. } => {
+            let reachability_condition = condition
+            let semantic_condition = condition
+            let condition_reaches_value =
+                expr_has_reachable_value(reachability_condition)
             collect_scalar_mut_borrow_boxes_expr(
-                metadata, condition, boxed_vars)
-            collect_scalar_mut_borrow_boxes_expr(
-                metadata, body, boxed_vars)
+                metadata, semantic_condition, boxed_vars)
+            if condition_reaches_value {
+                collect_scalar_mut_borrow_boxes_expr(
+                    metadata, body, boxed_vars)
+            }
         },
         HStmt::ForIn { iterable, body, .. } => {
+            let reachability_iterable = iterable
+            let semantic_iterable = iterable
+            let iterable_reaches_value =
+                expr_has_reachable_value(reachability_iterable)
             collect_scalar_mut_borrow_boxes_expr(
-                metadata, iterable, boxed_vars)
-            collect_scalar_mut_borrow_boxes_expr(
-                metadata, body, boxed_vars)
+                metadata, semantic_iterable, boxed_vars)
+            if iterable_reaches_value {
+                collect_scalar_mut_borrow_boxes_expr(
+                    metadata, body, boxed_vars)
+            }
         },
         HStmt::IfLet { expr, then_block, else_block, .. } => {
+            let reachability_expr = expr
+            let semantic_expr = expr
+            let expr_reaches_value =
+                expr_has_reachable_value(reachability_expr)
             collect_scalar_mut_borrow_boxes_expr(
-                metadata, expr, boxed_vars)
-            collect_scalar_mut_borrow_boxes_expr(
-                metadata, then_block, boxed_vars)
-            match else_block {
-                some(branch) => collect_scalar_mut_borrow_boxes_expr(
-                    metadata, branch, boxed_vars),
-                none => {}
+                metadata, semantic_expr, boxed_vars)
+            if expr_reaches_value {
+                collect_scalar_mut_borrow_boxes_expr(
+                    metadata, then_block, boxed_vars)
+                match else_block {
+                    some(branch) => collect_scalar_mut_borrow_boxes_expr(
+                        metadata, branch, boxed_vars),
+                    none => {}
+                }
             }
         },
         HStmt::Break { .. } | HStmt::Continue { .. } |
@@ -4134,17 +5050,42 @@ fn collect_scalar_mut_borrow_boxes_expr(
             }
         },
         HExpr::MatchExpr { scrutinee, arms, .. } => {
+            let reachable_children = enumerate_reachable_match_children(
+                scrutinee, arms)
             collect_scalar_mut_borrow_boxes_expr(
                 metadata, scrutinee, boxed_vars)
-            for arm in arms {
-                collect_scalar_mut_borrow_boxes_arm(
-                    metadata, arm, boxed_vars)
+            for inferred_child in reachable_children {
+                let child: ReachableControlChild = inferred_child
+                if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE {
+                } else {
+                    let arm: HMatchArm = match arms.get(child.arm_index) {
+                        some(value) => value,
+                        none => panic(
+                            "unreachable: scalar-box Match child has no arm")
+                    }
+                    if child.kind == REACHABLE_CHILD_ARM_GUARD {
+                        match arm.guard {
+                            some(guard) =>
+                                collect_scalar_mut_borrow_boxes_expr(
+                                    metadata, guard, boxed_vars),
+                            none => panic(
+                                "unreachable: scalar-box guard child has no guard")
+                        }
+                    } else if child.kind == REACHABLE_CHILD_ARM_BODY {
+                        collect_scalar_mut_borrow_boxes_expr(
+                            metadata, arm.body, boxed_vars)
+                    } else {
+                        panic(
+                            "unreachable: invalid scalar-box Match child kind")
+                    }
+                }
             }
         },
         HExpr::Block { stmts, tail, .. } => {
             for stmt in stmts {
                 collect_scalar_mut_borrow_boxes_stmt(
                     metadata, stmt, boxed_vars)
+                if !stmt_reaches_next(stmt) { return }
             }
             match tail {
                 some(value) => collect_scalar_mut_borrow_boxes_expr(
@@ -4153,14 +5094,18 @@ fn collect_scalar_mut_borrow_boxes_expr(
             }
         },
         HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            let condition_reaches_value =
+                expr_has_reachable_value(condition)
             collect_scalar_mut_borrow_boxes_expr(
                 metadata, condition, boxed_vars)
-            collect_scalar_mut_borrow_boxes_expr(
-                metadata, then_branch, boxed_vars)
-            match else_branch {
-                some(branch) => collect_scalar_mut_borrow_boxes_expr(
-                    metadata, branch, boxed_vars),
-                none => {}
+            if condition_reaches_value {
+                collect_scalar_mut_borrow_boxes_expr(
+                    metadata, then_branch, boxed_vars)
+                match else_branch {
+                    some(branch) => collect_scalar_mut_borrow_boxes_expr(
+                        metadata, branch, boxed_vars),
+                    none => {}
+                }
             }
         },
         HExpr::StringInterp { parts, .. } => {
@@ -4176,9 +5121,26 @@ fn collect_scalar_mut_borrow_boxes_expr(
         HExpr::TryCatch { body, arms, .. } => {
             collect_scalar_mut_borrow_boxes_expr(
                 metadata, body, boxed_vars)
-            for arm in arms {
-                collect_scalar_mut_borrow_boxes_arm(
-                    metadata, arm, boxed_vars)
+            for inferred_child in enumerate_reachable_arm_children(arms) {
+                let child: ReachableControlChild = inferred_child
+                let arm: HMatchArm = match arms.get(child.arm_index) {
+                    some(value) => value,
+                    none => panic(
+                        "unreachable: scalar-box Catch child has no arm")
+                }
+                if child.kind == REACHABLE_CHILD_ARM_GUARD {
+                    match arm.guard {
+                        some(guard) => collect_scalar_mut_borrow_boxes_expr(
+                            metadata, guard, boxed_vars),
+                        none => panic(
+                            "unreachable: scalar-box Catch guard has no guard")
+                    }
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    collect_scalar_mut_borrow_boxes_expr(
+                        metadata, arm.body, boxed_vars)
+                } else {
+                    panic("unreachable: invalid Catch reachable-child kind")
+                }
             }
         },
         HExpr::HandleExpr { body, handlers, .. } => {
@@ -4361,11 +5323,20 @@ fn validate_callable_alias_contracts(
             synthetic_ownership_span())
         match resolve_callable_contract_for_def_id(
                 table, metadata, slot_def_id) {
-            CallableContractResolution::Exact { .. } => {},
+            CallableContractResolution::Exact { .. } => match
+                    resolve_callable_transfer_for_def_id(
+                        table, metadata, slot_def_id) {
+                CallableTransferResolution::Exact { .. } => {},
+                _ => panic(
+                    "unreachable: exact callable alias has no transfer authority")
+            },
             CallableContractResolution::Conflict { recovery } => {
                 let untrusted_slot_def_id = slot_def_id
                 table.untrusted_callable_slots.insert(
                     untrusted_slot_def_id, true)
+                let diagnosed_slot_def_id = slot_def_id
+                table.diagnosed_callable_slots.insert(
+                    diagnosed_slot_def_id, true)
                 report_ownership_error(sink,
                     "callable alias has incompatible ownership targets",
                     span,
@@ -4376,16 +5347,40 @@ fn validate_callable_alias_contracts(
                 // user mismatch into a later ICE.
                 publish_solved_callable_ownership(
                     metadata, slot_def_id, recovery,
-                    CALLABLE_SOURCE_BODY_INFERRED, sink, span)
+                    CALLABLE_SOURCE_ERROR_RECOVERY,
+                    recovery_transfer_levels(recovery,
+                        table.callable_arities.get(slot_def_id).unwrap_or(0)),
+                    sink, span)
             },
             CallableContractResolution::NoBase => {
                 let untrusted_slot_def_id = slot_def_id
                 table.untrusted_callable_slots.insert(
                     untrusted_slot_def_id, true)
-                report_ownership_error(sink,
-                    "callable alias has no exact ownership source",
-                    span,
-                    "bind or annotate the callable source before assigning it")
+                // Retained dead HIR still needs deterministic metadata, but an
+                // interface-only producer that cannot run is not a semantic
+                // call edge. Diagnose NoBase when this exact slot is invoked
+                // on a reachable path or would otherwise cross an export
+                // boundary as fake producer authority.
+                let reachable_alias =
+                    table.reachable_callee_spans.contains_key(slot_def_id)
+                let durable_alias =
+                    table.durable_callable_spans.contains_key(slot_def_id)
+                if reachable_alias || durable_alias {
+                    let diagnosed_slot_def_id = slot_def_id
+                    table.diagnosed_callable_slots.insert(
+                        diagnosed_slot_def_id, true)
+                    if durable_alias && !reachable_alias {
+                        report_ownership_error(sink,
+                            "callable constant has no exact ownership source",
+                            span,
+                            "a durable callable value requires DefId-keyed producer provenance before it can be used or re-exported")
+                    } else {
+                        report_ownership_error(sink,
+                            "callable alias has no exact ownership source",
+                            span,
+                            "bind or annotate the callable source before assigning it")
+                    }
+                }
                 // NoBase is a proof failure, so even an exact-looking cached
                 // constraint is not authoritative recovery.  In particular it
                 // may still be an unresolved inference term; requiring it here
@@ -4393,12 +5388,47 @@ fn validate_callable_alias_contracts(
                 let recovery = CALLABLE_BORROW_OWNED
                 publish_solved_callable_ownership(
                     metadata, slot_def_id, recovery,
-                    CALLABLE_SOURCE_BODY_INFERRED, sink, span)
+                    CALLABLE_SOURCE_ERROR_RECOVERY,
+                    recovery_transfer_levels(recovery,
+                        table.callable_arities.get(slot_def_id).unwrap_or(0)),
+                    sink, span)
             },
             CallableContractResolution::BackEdge => panic(
                 "unreachable: callable alias resolution leaked DFS bottom")
         }
     }
+}
+
+fn resolved_callable_recovery_term(
+    metadata: OwnershipMetadata, term: Int
+) -> Int? {
+    let resolved = resolve_callable_ownership_term(metadata, term)
+    if resolved == CALLABLE_UNKNOWN ||
+       !is_resolved_callable_ownership_term(metadata, resolved) {
+        none
+    } else {
+        some(resolved)
+    }
+}
+
+fn callable_recovery_contract_for_def_id(
+    table: CallableSolveTable, metadata: OwnershipMetadata, def_id: Int
+) -> Int {
+    match table.callable_contracts.get(def_id) {
+        some(term) => match resolved_callable_recovery_term(metadata, term) {
+            some(exact) => return exact,
+            none => {}
+        },
+        none => {}
+    }
+    match metadata.callable_by_def_id.get(def_id) {
+        some(term) => match resolved_callable_recovery_term(metadata, term) {
+            some(exact) => return exact,
+            none => {}
+        },
+        none => {}
+    }
+    CALLABLE_BORROW_OWNED
 }
 
 fn synthetic_ownership_span() -> Span {
@@ -4427,20 +5457,38 @@ fn collect_callable_return_stmt(
             collect_callable_return_value(value, false, out)
         },
         HStmt::While { condition, body, .. } => {
-            collect_callable_return_value(condition, false, out)
-            collect_callable_return_value(body, false, out)
+            let reachability_condition = condition
+            let semantic_condition = condition
+            let condition_reaches_value =
+                expr_has_reachable_value(reachability_condition)
+            collect_callable_return_value(semantic_condition, false, out)
+            if condition_reaches_value {
+                collect_callable_return_value(body, false, out)
+            }
         },
         HStmt::ForIn { iterable, body, .. } => {
-            collect_callable_return_value(iterable, false, out)
-            collect_callable_return_value(body, false, out)
+            let reachability_iterable = iterable
+            let semantic_iterable = iterable
+            let iterable_reaches_value =
+                expr_has_reachable_value(reachability_iterable)
+            collect_callable_return_value(semantic_iterable, false, out)
+            if iterable_reaches_value {
+                collect_callable_return_value(body, false, out)
+            }
         },
         HStmt::IfLet { expr, then_block, else_block, .. } => {
-            collect_callable_return_value(expr, false, out)
-            collect_callable_return_value(then_block, false, out)
-            match else_block {
-                some(branch) => collect_callable_return_value(
-                    branch, false, out),
-                none => {}
+            let reachability_expr = expr
+            let semantic_expr = expr
+            let expr_reaches_value =
+                expr_has_reachable_value(reachability_expr)
+            collect_callable_return_value(semantic_expr, false, out)
+            if expr_reaches_value {
+                collect_callable_return_value(then_block, false, out)
+                match else_block {
+                    some(branch) => collect_callable_return_value(
+                        branch, false, out),
+                    none => {}
+                }
             }
         },
         HStmt::Break { .. } | HStmt::Continue { .. } |
@@ -4499,7 +5547,7 @@ fn collect_callable_return_value(
                 let child: ReachableControlChild = inferred_child
                 if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE {
                     collect_callable_return_value(scrutinee, false, out)
-                } else if child.kind == REACHABLE_CHILD_MATCH_GUARD {
+                } else if child.kind == REACHABLE_CHILD_ARM_GUARD {
                     let arm: HMatchArm = match arms.get(child.arm_index) {
                         some(value) => value,
                         none => panic(
@@ -4511,7 +5559,7 @@ fn collect_callable_return_value(
                         none => panic(
                             "unreachable: reachable guard child has no guard")
                     }
-                } else if child.kind == REACHABLE_CHILD_MATCH_BODY {
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
                     let arm: HMatchArm = match arms.get(child.arm_index) {
                         some(value) => value,
                         none => panic(
@@ -4526,13 +5574,25 @@ fn collect_callable_return_value(
         },
         HExpr::TryCatch { body, arms, .. } => {
             collect_callable_return_value(body, is_tail, out)
-            for arm in arms {
-                match arm.guard {
-                    some(guard) => collect_callable_return_value(
-                        guard, false, out),
-                    none => {}
+            for inferred_child in enumerate_reachable_arm_children(arms) {
+                let child: ReachableControlChild = inferred_child
+                let arm: HMatchArm = match arms.get(child.arm_index) {
+                    some(value) => value,
+                    none => panic(
+                        "unreachable: callable-return Catch child has no arm")
                 }
-                collect_callable_return_value(arm.body, is_tail, out)
+                if child.kind == REACHABLE_CHILD_ARM_GUARD {
+                    match arm.guard {
+                        some(guard) => collect_callable_return_value(
+                            guard, false, out),
+                        none => panic(
+                            "unreachable: callable-return Catch guard has no guard")
+                    }
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    collect_callable_return_value(arm.body, is_tail, out)
+                } else {
+                    panic("unreachable: invalid Catch reachable-child kind")
+                }
             }
         },
         HExpr::UnsafeBlock { body, .. } =>
@@ -4708,12 +5768,21 @@ fn collect_return_targets_for_callee(
     table: CallableSolveTable, def_id: Int, visited: List<Int>,
     fuel: Int, mut out: List<Int>
 ) -> Bool {
-    if fuel <= 0 || list_has_def_id(visited, def_id) { return false }
+    if fuel <= 0 { return false }
+    if table.untrusted_callable_slots.contains_key(def_id) ||
+       table.opaque_callable_slots.contains_key(def_id) {
+        return false
+    }
+    // An alias SCC back-edge is neutral. The top-level caller additionally
+    // requires at least one concrete target, so a pure cycle cannot become
+    // accidental proof.
+    if list_has_def_id(visited, def_id) { return true }
     let next_visited = visited.concat([def_id])
-    let mut found = false
+    let mut found_route = false
+    let mut all_exact = true
     match table.return_targets.get(def_id) {
         some(targets) => {
-            found = targets.len() > 0
+            found_route = targets.len() > 0
             for target in targets {
                 if !list_has_def_id(out, target) {
                     let return_target = target
@@ -4725,22 +5794,24 @@ fn collect_return_targets_for_callee(
     }
     match table.alias_targets.get(def_id) {
         some(targets) => {
+            if targets.len() > 0 { found_route = true }
             for target in targets {
-                if collect_return_targets_for_callee(table, target,
+                if !collect_return_targets_for_callee(table, target,
                         next_visited, fuel - 1, out) {
-                    found = true
+                    all_exact = false
                 }
             }
         },
         none => {}
     }
-    found
+    found_route && all_exact
 }
 
 fn local_callee_has_callable_return(
     table: CallableSolveTable, def_id: Int, visited: List<Int>, fuel: Int
 ) -> Bool {
     if fuel <= 0 || list_has_def_id(visited, def_id) { return false }
+    if table.const_callable_types.contains_key(def_id) { return true }
     let next_visited = visited.concat([def_id])
     match table.states.get(def_id) {
         some(state) => if state.return_callable_contract.is_some() {
@@ -4762,7 +5833,68 @@ fn local_callee_has_callable_return(
     false
 }
 
-fn refresh_call_result_edges(mut table: CallableSolveTable) {
+// A callable-valued Call may use its nested FnType as an exact return contract
+// only when the callee itself carries durable implementation/interface
+// authority. A callable parameter or conservative interface slot has merely a
+// call-site constraint; matching surface descriptors cannot prove which
+// callable identity it returns. Alias traversal is all-or-nothing so one
+// opaque branch poisons the whole factory result.
+fn callee_return_type_is_authoritative(
+    table: CallableSolveTable, metadata: OwnershipMetadata,
+    def_id: Int, visited: List<Int>, fuel: Int
+) -> Bool {
+    if fuel <= 0 || list_has_def_id(visited, def_id) { return false }
+    if table.untrusted_callable_slots.contains_key(def_id) ||
+       table.opaque_callable_slots.contains_key(def_id) {
+        return false
+    }
+    let next_visited = visited.concat([def_id])
+    match table.alias_targets.get(def_id) {
+        some(targets) => if targets.len() > 0 {
+            for target in targets {
+                if !callee_return_type_is_authoritative(
+                        table, metadata, target, next_visited, fuel - 1) {
+                    return false
+                }
+            }
+            return true
+        },
+        none => {}
+    }
+    // An authoritative callable-valued result can itself be invoked as a
+    // factory. Follow its producer proof rather than promoting the result's
+    // checker-local CALL_CONSTRAINT term.
+    match table.call_result_callees.get(def_id) {
+        some(callee_id) => return callee_return_type_is_authoritative(
+            table, metadata, callee_id, next_visited, fuel - 1),
+        none => {}
+    }
+    if table.states.contains_key(def_id) { return false }
+    let term = match metadata.callable_by_def_id.get(def_id) {
+        some(found) => found,
+        none => return false
+    }
+    if term == CALLABLE_UNKNOWN ||
+       is_callable_ownership_inference_term(term) {
+        return false
+    }
+    let source_is_authoritative = match metadata.callable_state_by_def_id.get(
+            def_id) {
+        some(state) => state.source != CALLABLE_SOURCE_CALL_CONSTRAINT &&
+            state.source != CALLABLE_SOURCE_CONSERVATIVE_INTERFACE &&
+            state.source != CALLABLE_SOURCE_ERROR_RECOVERY,
+        none => false
+    }
+    if !source_is_authoritative { return false }
+    match metadata.returned_callable_result_role_by_def_id.get(def_id) {
+        some(role) => role != CALLABLE_RESULT_ROLE_UNKNOWN,
+        none => false
+    }
+}
+
+fn refresh_call_result_edges(
+    mut table: CallableSolveTable, metadata: OwnershipMetadata
+) {
     let fuel = solver_alias_edge_count(table) + table.order.len() + 2
     for entry in table.call_result_callees.entries() {
         let (result_id, callee_id) = entry
@@ -4777,12 +5909,26 @@ fn refresh_call_result_edges(mut table: CallableSolveTable) {
                     table, alias_result_id, alias_target)
             }
             table.untrusted_callable_slots.remove(result_id)
+            table.opaque_callable_slots.remove(result_id)
         } else if local_callee_has_callable_return(
                 table, callee_id, [], fuel) {
             // A local body was available but its returned producer could not
             // be reduced to exact DefIds.  Do not publish the stale Call type.
             let untrusted_result_id = result_id
             table.untrusted_callable_slots.insert(untrusted_result_id, true)
+            let opaque_result_id = result_id
+            table.opaque_callable_slots.insert(opaque_result_id, true)
+        } else if callee_return_type_is_authoritative(
+                table, metadata, callee_id, [], fuel) {
+            // Imported/bodyless authorities retain their frozen nested return
+            // contract without inventing a local return-target edge.
+            table.untrusted_callable_slots.remove(result_id)
+            table.opaque_callable_slots.remove(result_id)
+        } else {
+            let untrusted_result_id = result_id
+            table.untrusted_callable_slots.insert(untrusted_result_id, true)
+            let opaque_result_id = result_id
+            table.opaque_callable_slots.insert(opaque_result_id, true)
         }
     }
 }
@@ -4935,6 +6081,159 @@ fn callable_contract_for_def_id(
         CallableContractResolution::Conflict { .. } |
         CallableContractResolution::NoBase |
         CallableContractResolution::BackEdge => none
+    }
+}
+
+fn returned_callable_transfer_levels(
+    levels: List<CallableTransferLevel>
+) -> List<CallableTransferLevel> {
+    let mut result: List<CallableTransferLevel> = []
+    let mut index = 1
+    while index < levels.len() {
+        match levels.get(index) {
+            some(level) => {
+                let mut forces: List<Bool> = []
+                for force in level.force_params {
+                    let copied_force = force
+                    forces.push(copied_force)
+                }
+                result.push(callable_transfer_level(
+                    level.ownership_term, forces))
+            },
+            none => panic(
+                "unreachable: missing returned callable transfer level")
+        }
+        index = index + 1
+    }
+    result
+}
+
+fn merge_callable_transfer_resolution(
+    metadata: OwnershipMetadata,
+    left: CallableTransferResolution,
+    right: CallableTransferResolution
+) -> CallableTransferResolution {
+    match (left, right) {
+        (CallableTransferResolution::NoBase, _) |
+        (_, CallableTransferResolution::NoBase) =>
+            CallableTransferResolution::NoBase,
+        (CallableTransferResolution::BackEdge, value) => value,
+        (value, CallableTransferResolution::BackEdge) => value,
+        (CallableTransferResolution::Exact { levels: first },
+         CallableTransferResolution::Exact { levels: second }) =>
+            CallableTransferResolution::Exact {
+                levels: join_callable_transfer_levels(
+                    metadata, first, second)
+            }
+    }
+}
+
+fn callable_transfer_base(
+    table: CallableSolveTable, metadata: OwnershipMetadata, def_id: Int
+) -> CallableTransferResolution {
+    if table.untrusted_callable_slots.contains_key(def_id) ||
+       table.opaque_callable_slots.contains_key(def_id) {
+        return CallableTransferResolution::NoBase
+    }
+    match callable_transfer_levels_for_def_id(metadata, def_id) {
+        some(levels) => if levels.len() > 0 {
+            return CallableTransferResolution::Exact { levels: levels }
+        },
+        none => {}
+    }
+    match table.states.get(def_id) {
+        some(state) => {
+            let term = intern_callable_param_modes(metadata, state.modes)
+            return CallableTransferResolution::Exact {
+                levels: direct_transfer_levels(term, state.force_params)
+            }
+        },
+        none => {}
+    }
+    match table.callable_types.get(def_id) {
+        some(ty) => {
+            let levels = callable_interface_transfer_levels(metadata, ty)
+            if levels.len() > 0 {
+                return CallableTransferResolution::Exact { levels: levels }
+            }
+        },
+        none => {}
+    }
+    CallableTransferResolution::NoBase
+}
+
+fn callable_transfer_for_def_id_inner(
+    table: CallableSolveTable, metadata: OwnershipMetadata,
+    def_id: Int, active: List<Int>, mut settled: Set<Int>
+) -> CallableTransferResolution {
+    if list_has_def_id(active, def_id) || settled.contains(def_id) {
+        return CallableTransferResolution::BackEdge
+    }
+    if table.opaque_callable_slots.contains_key(def_id) {
+        return CallableTransferResolution::NoBase
+    }
+    let next_active = active.concat([def_id])
+    let mut result = CallableTransferResolution::BackEdge
+    let mut has_alias_edge = false
+    match table.alias_targets.get(def_id) {
+        some(targets) => {
+            has_alias_edge = targets.len() > 0
+            for target in targets {
+                let target_def_id = target
+                result = merge_callable_transfer_resolution(
+                    metadata, result,
+                    callable_transfer_for_def_id_inner(
+                        table, metadata, target_def_id, next_active, settled))
+            }
+        },
+        none => {}
+    }
+    if !has_alias_edge {
+        match table.call_result_callees.get(def_id) {
+            some(callee_id) => {
+                let returned_resolution = match
+                        callable_transfer_for_def_id_inner(
+                            table, metadata, callee_id,
+                            next_active, settled) {
+                    CallableTransferResolution::Exact { levels } => {
+                        let returned = returned_callable_transfer_levels(levels)
+                        if returned.len() > 0 {
+                            CallableTransferResolution::Exact {
+                                levels: returned
+                            }
+                        } else {
+                            CallableTransferResolution::NoBase
+                        }
+                    },
+                    CallableTransferResolution::NoBase =>
+                        CallableTransferResolution::NoBase,
+                    CallableTransferResolution::BackEdge =>
+                        CallableTransferResolution::BackEdge
+                }
+                result = merge_callable_transfer_resolution(
+                    metadata, result, returned_resolution)
+            },
+            none => {
+                result = merge_callable_transfer_resolution(
+                    metadata, result,
+                    callable_transfer_base(table, metadata, def_id))
+            }
+        }
+    }
+    settled.insert(def_id)
+    result
+}
+
+fn resolve_callable_transfer_for_def_id(
+    table: CallableSolveTable, metadata: OwnershipMetadata, def_id: Int
+) -> CallableTransferResolution {
+    let mut settled: Set<Int> = set_new()
+    let root_def_id = def_id
+    match callable_transfer_for_def_id_inner(
+            table, metadata, root_def_id, [], settled) {
+        CallableTransferResolution::BackEdge =>
+            CallableTransferResolution::NoBase,
+        result => result
     }
 }
 
@@ -5103,32 +6402,114 @@ fn resolved_callable_result_role(
     }
 }
 
+fn callable_result_role_at_depth_inner(
+    table: CallableSolveTable, metadata: OwnershipMetadata,
+    def_id: Int, depth: Int, active: List<Str>, fuel: Int
+) -> CallableResultRoleResolution {
+    if fuel <= 0 { return CallableResultRoleResolution::Unknown }
+    let key = "${def_id.to_str()}:${depth.to_str()}"
+    if active.any(fn(existing) { existing == key }) {
+        return CallableResultRoleResolution::BackEdge
+    }
+    if table.untrusted_callable_slots.contains_key(def_id) ||
+       table.opaque_callable_slots.contains_key(def_id) ||
+       (depth > 0 && table.opaque_callable_returns.contains_key(def_id)) {
+        return CallableResultRoleResolution::Unknown
+    }
+    let next_active = active.concat([key])
+    match table.alias_targets.get(def_id) {
+        some(targets) => if targets.len() > 0 {
+            let mut result = CallableResultRoleResolution::BackEdge
+            for target in targets {
+                result = merge_callable_result_role_resolution(
+                    result, callable_result_role_at_depth_inner(
+                        table, metadata, target, depth,
+                        next_active, fuel - 1))
+            }
+            return match result {
+                CallableResultRoleResolution::BackEdge =>
+                    CallableResultRoleResolution::Unknown,
+                value => value
+            }
+        },
+        none => {}
+    }
+    // A call-result identity denotes the callable returned by its callee, so
+    // every role lookup shifts one level into the callee's frozen summary.
+    match table.call_result_callees.get(def_id) {
+        some(callee_id) => return callable_result_role_at_depth_inner(
+            table, metadata, callee_id, depth + 1,
+            next_active, fuel - 1),
+        none => {}
+    }
+    if depth > 0 {
+        match table.return_targets.get(def_id) {
+            some(targets) => if targets.len() > 0 {
+                let mut result = CallableResultRoleResolution::BackEdge
+                for target in targets {
+                    result = merge_callable_result_role_resolution(
+                        result, callable_result_role_at_depth_inner(
+                            table, metadata, target, depth - 1,
+                            next_active, fuel - 1))
+                }
+                return match result {
+                    CallableResultRoleResolution::BackEdge =>
+                        CallableResultRoleResolution::Unknown,
+                    value => value
+                }
+            },
+            none => {}
+        }
+    }
+    match metadata.callable_result_role_spine_by_def_id.get(def_id) {
+        some(spine) => match spine.get(depth) {
+            some(role) => if callable_result_role_is_valid(role) {
+                CallableResultRoleResolution::Exact { role: role }
+            } else {
+                panic("unreachable: invalid callable result role spine")
+            },
+            none => CallableResultRoleResolution::Unknown
+        },
+        none => if depth == 0 {
+            metadata_callable_result_role(metadata, def_id, false)
+        } else if depth == 1 {
+            metadata_callable_result_role(metadata, def_id, true)
+        } else {
+            CallableResultRoleResolution::Unknown
+        }
+    }
+}
+
 fn publish_callable_result_roles(
     table: CallableSolveTable, mut metadata: OwnershipMetadata
 ) {
     // Snapshot every resolution before mutating either total role map, so
     // iteration order cannot turn an UNKNOWN SCC into an accidental NONE.
-    let mut direct: Map<Int, Int> = map_new()
-    let mut returned: Map<Int, Int> = map_new()
+    let mut spines: Map<Int, List<Int>> = map_new()
     let mut def_ids = metadata.callable_by_def_id.keys()
     def_ids.sort()
+    let fuel = solver_alias_edge_count(table) +
+        table.call_result_callees.entries().len() +
+        table.return_targets.entries().len() + table.order.len() + 8
     for def_id in def_ids {
-        let direct_role = resolved_callable_result_role(
-            callable_result_role_for_def_id_inner(
-                table, metadata, def_id, [], []))
-        let returned_role = resolved_callable_result_role(
-            returned_callable_result_role_for_def_id_inner(
-                table, metadata, def_id, [], []))
-        let direct_def_id = def_id
-        let returned_def_id = def_id
-        direct.insert(direct_def_id, direct_role)
-        returned.insert(returned_def_id, returned_role)
+        let mut depth_count = match callable_transfer_levels_for_def_id(
+                metadata, def_id) {
+            some(levels) => levels.len(),
+            none => 0
+        }
+        if depth_count < 2 { depth_count = 2 }
+        let mut roles: List<Int> = []
+        let mut depth = 0
+        while depth < depth_count {
+            roles.push(resolved_callable_result_role(
+                callable_result_role_at_depth_inner(
+                    table, metadata, def_id, depth, [], fuel)))
+            depth = depth + 1
+        }
+        spines.insert(def_id, roles)
     }
-    for entry in direct.entries() {
-        set_callable_result_role(metadata, entry.0, entry.1)
-    }
-    for entry in returned.entries() {
-        set_returned_callable_result_role(metadata, entry.0, entry.1)
+    for entry in spines.entries() {
+        set_callable_result_role_spine(metadata, entry.0, entry.1)
     }
 }
 
@@ -5143,21 +6524,54 @@ fn finalize_callable_return_contracts(
                 match state.return_callable_contract {
                     some(declared_return_contract) => {
                     let mut expected: Int? = none
+                    let mut expected_transfer:
+                        List<CallableTransferLevel>? = none
                     match table.return_targets.get(def_id) {
                         some(targets) => {
                             for target in targets {
                                 match callable_contract_for_def_id(
                                         table, metadata, target) {
-                                    some(actual) => match expected {
-                                        some(first) => if first != actual {
-                                            report_ownership_error(sink,
-                                                "returned callable ownership contract mismatch",
-                                                state.span,
-                                                "all returned function values must have the same Borrow/MutBorrow/Move contract")
-                                        },
-                                        none => {
-                                            let expected_actual = actual
-                                            expected = some(expected_actual)
+                                    some(actual) => {
+                                        let compatible = match expected {
+                                            some(first) => {
+                                                if first != actual {
+                                                    report_ownership_error(sink,
+                                                        "returned callable ownership contract mismatch",
+                                                        state.span,
+                                                        "all returned function values must have the same Borrow/MutBorrow/Move contract")
+                                                    false
+                                                } else { true }
+                                            },
+                                            none => {
+                                                let expected_actual = actual
+                                                expected = some(expected_actual)
+                                                true
+                                            }
+                                        }
+                                        if compatible {
+                                            match resolve_callable_transfer_for_def_id(
+                                                    table, metadata, target) {
+                                                CallableTransferResolution::Exact {
+                                                        levels } => {
+                                                    let levels_for_join =
+                                                        clone_callable_transfer_levels(levels)
+                                                    let levels_for_first =
+                                                        clone_callable_transfer_levels(levels)
+                                                    expected_transfer = match
+                                                            expected_transfer {
+                                                        some(existing) => some(
+                                                            join_callable_transfer_levels(
+                                                                metadata,
+                                                                existing,
+                                                                levels_for_join)),
+                                                        none => some(levels_for_first)
+                                                    }
+                                                },
+                                                _ => report_ownership_error(sink,
+                                                    "returned callable has no exact transfer authority",
+                                                    state.span,
+                                                    "returned function values must preserve producer-specific FORCE/OWNING provenance")
+                                            }
                                         }
                                     },
                                     none => report_ownership_error(sink,
@@ -5212,6 +6626,38 @@ fn finalize_callable_return_contracts(
                                 CALLABLE_BORROW_OWNED)
                         }
                     }
+                    match expected_transfer {
+                        some(returned_levels) => {
+                            let mut combined = match
+                                    callable_transfer_levels_for_def_id(
+                                        metadata, def_id) {
+                                some(levels) => levels,
+                                none => panic(
+                                    "unreachable: body callable has no direct transfer state")
+                            }
+                            if combined.len() != 1 {
+                                panic("unreachable: body callable return transfer was finalized twice")
+                            }
+                            for returned_level in returned_levels {
+                                let mut forces: List<Bool> = []
+                                for force in returned_level.force_params {
+                                    let copied_force = force
+                                    forces.push(copied_force)
+                                }
+                                combined.push(callable_transfer_level(
+                                    returned_level.ownership_term, forces))
+                            }
+                            let source = match metadata
+                                    .callable_state_by_def_id.get(def_id) {
+                                some(current) => current.source,
+                                none => panic(
+                                    "unreachable: body callable has no ownership state")
+                            }
+                            set_callable_transfer_levels(
+                                metadata, def_id, source, combined)
+                        },
+                        none => {}
+                    }
                     },
                     none => {}
                 }
@@ -5221,22 +6667,305 @@ fn finalize_callable_return_contracts(
     }
 }
 
+fn callable_type_recovery_transfer_levels(
+    metadata: OwnershipMetadata, ty: Type
+) -> List<CallableTransferLevel> {
+    match ty {
+        Type::FnType { params, return_type, meta } => {
+            let resolved = resolve_callable_ownership_term(
+                metadata, meta.ownership_term)
+            let exact = if resolved != CALLABLE_UNKNOWN &&
+                    is_resolved_callable_ownership_term(metadata, resolved) {
+                require_exact_callable_ownership_term(metadata, resolved)
+            } else {
+                if !constrain_callable_ownership_terms(
+                        metadata, meta.ownership_term,
+                        CALLABLE_BORROW_OWNED) {
+                    panic("unreachable: callable const recovery term is incompatible with Borrow")
+                }
+                CALLABLE_BORROW_OWNED
+            }
+            let mut forces: List<Bool> = []
+            for _param in params { forces.push(false) }
+            let mut levels: List<CallableTransferLevel> = [
+                callable_transfer_level(exact, forces)
+            ]
+            for returned_level in callable_type_recovery_transfer_levels(
+                    metadata, return_type) {
+                let stored_level = returned_level
+                levels.push(stored_level)
+            }
+            levels
+        },
+        _ => []
+    }
+}
+
+fn constrain_const_callable_type_spine_at(
+    metadata: OwnershipMetadata, ty: Type,
+    levels: List<CallableTransferLevel>, level_index: Int,
+    mut sink: CollectingSink, span: Span
+) -> Int {
+    match ty {
+        Type::FnType { params, return_type, meta } => {
+            let level = match levels.get(level_index) {
+                some(value) => value,
+                none => panic(
+                    "unreachable: callable const producer transfer spine is too short")
+            }
+            if level.force_params.len() != params.len() {
+                panic(
+                    "unreachable: callable const producer transfer arity disagrees with its type")
+            }
+            let actual = require_exact_callable_ownership_term(
+                metadata, level.ownership_term)
+            if callable_ownership_constraint_compatible(
+                    metadata, meta.ownership_term, actual) {
+                if !constrain_callable_ownership_terms(
+                        metadata, meta.ownership_term, actual) {
+                    panic("unreachable: callable const ownership bind changed after preflight")
+                }
+            } else {
+                report_ownership_error(sink,
+                    "callable ownership contract mismatch", span,
+                    "the stored callable must match the const's explicit Borrow/MutBorrow/Move type")
+            }
+            constrain_const_callable_type_spine_at(
+                metadata, return_type, levels, level_index + 1,
+                sink, span)
+        },
+        _ => level_index
+    }
+}
+
+fn const_callable_contract_resolution(
+    table: CallableSolveTable, metadata: OwnershipMetadata,
+    getter_def_id: Int
+) -> CallableContractResolution {
+    if table.opaque_callable_returns.contains_key(getter_def_id) {
+        return CallableContractResolution::NoBase
+    }
+    let mut result = CallableContractResolution::BackEdge
+    match table.return_targets.get(getter_def_id) {
+        some(targets) => {
+            for target in targets {
+                result = merge_callable_contract_resolution(result,
+                    resolve_callable_contract_for_def_id(
+                        table, metadata, target))
+            }
+        },
+        none => return CallableContractResolution::NoBase
+    }
+    match result {
+        CallableContractResolution::BackEdge =>
+            CallableContractResolution::NoBase,
+        value => value
+    }
+}
+
+fn const_callable_transfer_resolution(
+    table: CallableSolveTable, metadata: OwnershipMetadata,
+    getter_def_id: Int
+) -> CallableTransferResolution {
+    if table.opaque_callable_returns.contains_key(getter_def_id) {
+        return CallableTransferResolution::NoBase
+    }
+    let mut result = CallableTransferResolution::BackEdge
+    match table.return_targets.get(getter_def_id) {
+        some(targets) => {
+            for target in targets {
+                result = merge_callable_transfer_resolution(
+                    metadata, result,
+                    resolve_callable_transfer_for_def_id(
+                        table, metadata, target))
+            }
+        },
+        none => return CallableTransferResolution::NoBase
+    }
+    match result {
+        CallableTransferResolution::BackEdge =>
+            CallableTransferResolution::NoBase,
+        value => value
+    }
+}
+
+fn getter_transfer_spine(
+    returned_levels: List<CallableTransferLevel>
+) -> List<CallableTransferLevel> {
+    let mut levels: List<CallableTransferLevel> = [
+        callable_transfer_level(CALLABLE_BORROW_OWNED, [])
+    ]
+    for returned_level in returned_levels {
+        let mut forces: List<Bool> = []
+        for force in returned_level.force_params {
+            let copied_force = force
+            forces.push(copied_force)
+        }
+        levels.push(callable_transfer_level(
+            returned_level.ownership_term, forces))
+    }
+    levels
+}
+
+fn finalize_callable_const_getters(
+    table: CallableSolveTable, mut metadata: OwnershipMetadata,
+    mut sink: CollectingSink
+) {
+    let mut getters = table.const_callable_types.entries()
+    getters.sort_by(compare_int_key)
+    for entry in getters {
+        let (getter_def_id, stored_ty) = entry
+        let span = table.durable_callable_spans.get(getter_def_id).unwrap_or(
+            synthetic_ownership_span())
+        let returned_levels = match const_callable_contract_resolution(
+                table, metadata, getter_def_id) {
+            CallableContractResolution::Exact { .. } => match
+                    const_callable_transfer_resolution(
+                        table, metadata, getter_def_id) {
+                CallableTransferResolution::Exact { levels } => levels,
+                _ => {
+                    report_ownership_error(sink,
+                        "callable constant has no exact transfer authority",
+                        span,
+                        "a durable callable value must preserve its producer's complete transfer spine")
+                    callable_type_recovery_transfer_levels(
+                        metadata, stored_ty)
+                }
+            },
+            CallableContractResolution::Conflict { .. } => {
+                report_ownership_error(sink,
+                    "callable constant has incompatible ownership targets",
+                    span,
+                    "all callable producers stored by one const must agree on Borrow/MutBorrow/Move")
+                callable_type_recovery_transfer_levels(metadata, stored_ty)
+            },
+            CallableContractResolution::NoBase |
+            CallableContractResolution::BackEdge => {
+                report_ownership_error(sink,
+                    "callable constant has no exact ownership source", span,
+                    "a durable callable value requires DefId-keyed producer provenance before it can be used or re-exported")
+                callable_type_recovery_transfer_levels(metadata, stored_ty)
+            }
+        }
+        let consumed = constrain_const_callable_type_spine_at(
+            metadata, stored_ty, returned_levels, 0, sink, span)
+        if consumed != returned_levels.len() {
+            panic(
+                "unreachable: callable const producer transfer spine exceeds its type")
+        }
+        let source = match metadata.callable_state_by_def_id.get(
+                getter_def_id) {
+            some(state) => state.source,
+            none => panic(
+                "unreachable: callable const getter has no ownership state")
+        }
+        record_callable_ownership_with_transfer_levels(
+            metadata, getter_def_id, CALLABLE_BORROW_OWNED, source,
+            getter_transfer_spine(returned_levels))
+    }
+}
+
+fn finalize_callable_const_getter_aliases(
+    table: CallableSolveTable, mut metadata: OwnershipMetadata
+) {
+    let mut aliases = table.alias_targets.entries()
+    aliases.sort_by(compare_int_key)
+    for entry in aliases {
+        let (alias_def_id, _) = entry
+        if !table.const_getter_def_ids.contains(alias_def_id) ||
+           table.const_callable_types.contains_key(alias_def_id) {
+            continue
+        }
+        let exact = match resolve_callable_contract_for_def_id(
+                table, metadata, alias_def_id) {
+            CallableContractResolution::Exact { term } => term,
+            _ => panic(
+                "unreachable: exact const getter alias has no ownership contract")
+        }
+        if require_exact_callable_ownership_term(metadata, exact) !=
+                CALLABLE_BORROW_OWNED {
+            panic(
+                "unreachable: const getter alias changed its zero-argument Borrow contract")
+        }
+        let levels = match resolve_callable_transfer_for_def_id(
+                table, metadata, alias_def_id) {
+            CallableTransferResolution::Exact { levels } => levels,
+            _ => panic(
+                "unreachable: exact const getter alias has no transfer authority")
+        }
+        let source = match metadata.callable_state_by_def_id.get(alias_def_id) {
+            some(state) => state.source,
+            none => panic(
+                "unreachable: const getter alias has no ownership state")
+        }
+        record_callable_ownership_with_transfer_levels(
+            metadata, alias_def_id, CALLABLE_BORROW_OWNED,
+            source, levels)
+    }
+}
+
 fn solve_callable_modes(
-    mut env: TypeEnv, program: HProgram, mut sink: CollectingSink
+    mut env: TypeEnv, program: HProgram, mut sink: CollectingSink,
+    value_binding_kinds: Map<Int, ValueBindingKind>,
+    pre_solve_const_getter_aliases: Set<Int>,
+    pre_solve_alias_targets: Map<Int, Int>,
+    pre_solve_alias_arities: Map<Int, Int>,
+    pre_solve_alias_contracts: Map<Int, Int>
 ) -> HProgram {
     let mut table = CallableSolveTable {
         states: map_new(), order: [], alias_targets: map_new(),
         alias_edge_count: 0,
         alias_spans: map_new(), callable_contracts: map_new(),
-        callable_arities: map_new(), call_result_callees: map_new(),
+        callable_arities: map_new(), callable_types: map_new(),
+        call_result_callees: map_new(),
         call_result_spans: map_new(), return_targets: map_new(),
         opaque_callable_returns: map_new(), value_origins: map_new(),
         opaque_value_origins: map_new(),
-        untrusted_callable_slots: map_new(), opaque_callable_slots: map_new()
+        untrusted_callable_slots: map_new(), opaque_callable_slots: map_new(),
+        retained_callee_spans: map_new(), reachable_callee_spans: map_new(),
+        durable_callable_spans: map_new(),
+        diagnosed_callable_slots: map_new(), const_getter_def_ids: set_new(),
+        const_callable_types: map_new()
+    }
+    for entry in value_binding_kinds.entries() {
+        match entry.1 {
+            ValueBindingKind::ConstGetter => {
+                table.const_getter_def_ids.insert(entry.0)
+            },
+            _ => {}
+        }
+    }
+    for alias_def_id in pre_solve_const_getter_aliases {
+        let retained_getter_alias_def_id = alias_def_id
+        table.const_getter_def_ids.insert(retained_getter_alias_def_id)
     }
     for decl in program.decls { collect_callable_decl(decl, table) }
+    let mut pre_solve_aliases = pre_solve_alias_targets.entries()
+    pre_solve_aliases.sort_by(compare_int_key)
+    for entry in pre_solve_aliases {
+        let (alias_def_id, source_def_id) = entry
+        if table.const_getter_def_ids.contains(alias_def_id) {
+            table.alias_spans.insert(alias_def_id, span_zero())
+            append_solver_alias_target(table, alias_def_id, source_def_id)
+            continue
+        }
+        let arity = match pre_solve_alias_arities.get(alias_def_id) {
+            some(value) => value,
+            none => panic(
+                "unreachable: project callable alias has no recorded arity")
+        }
+        let alias_term = match pre_solve_alias_contracts.get(alias_def_id) {
+            some(value) => value,
+            none => panic(
+                "unreachable: project callable alias has no ownership contract")
+        }
+        table.callable_contracts.insert(alias_def_id, alias_term)
+        table.callable_arities.insert(alias_def_id, arity)
+        table.alias_spans.insert(alias_def_id, span_zero())
+        append_solver_alias_target(table, alias_def_id, source_def_id)
+    }
     prepare_callable_return_edges(table)
-    refresh_call_result_edges(table)
+    refresh_call_result_edges(table, env.types.ownership_metadata)
     validate_solver_alias_edge_count(table)
     // One extra round is reserved for aliases first discovered after an earlier
     // call site (for example across a loop back-edge). Mode changes themselves
@@ -5280,7 +7009,7 @@ fn solve_callable_modes(
                 none => {}
             }
         }
-        refresh_call_result_edges(table)
+        refresh_call_result_edges(table, env.types.ownership_metadata)
         validate_solver_alias_edge_count(table)
         if round_modes_before != solver_mode_score(table) ||
            round_aliases_before != solver_alias_edge_count(table) {
@@ -5297,7 +7026,9 @@ fn solve_callable_modes(
                     env.types.ownership_metadata, state.modes)
                 publish_solved_callable_ownership(
                     env.types.ownership_metadata, def_id, ownership_id,
-                    CALLABLE_SOURCE_BODY_INFERRED, sink, state.span)
+                    CALLABLE_SOURCE_BODY_INFERRED,
+                    direct_transfer_levels(ownership_id, state.force_params),
+                    sink, state.span)
             },
             none => {}
         }
@@ -5314,6 +7045,52 @@ fn solve_callable_modes(
     for entry in callable_slots {
         let (slot_def_id, _) = entry
         if table.untrusted_callable_slots.contains_key(slot_def_id) {
+            let diagnostic_span = match table.reachable_callee_spans.get(
+                    slot_def_id) {
+                some(value) => {
+                    let reachable_span = copy_ownership_span(value)
+                    some(reachable_span)
+                },
+                none => table.durable_callable_spans.get(slot_def_id)
+            }
+            match diagnostic_span {
+                some(call_span) => if !table.diagnosed_callable_slots
+                        .contains_key(slot_def_id) {
+                    let diagnosed_slot_id = slot_def_id
+                    table.diagnosed_callable_slots.insert(
+                        diagnosed_slot_id, true)
+                    if table.reachable_callee_spans.contains_key(slot_def_id) {
+                        report_ownership_error(sink,
+                            "callable call target has no exact ownership source",
+                            call_span,
+                            "a callable type constraint cannot replace DefId-keyed producer provenance")
+                    } else {
+                        report_ownership_error(sink,
+                            "callable constant has no exact ownership source",
+                            call_span,
+                            "a durable callable value requires DefId-keyed producer provenance before it can be used or re-exported")
+                    }
+                },
+                none => {}
+            }
+            // Retained dead HIR must stay total through validation and the
+            // ownership planner. The planner physically removes dependent
+            // dead children before RC/codegen. ERROR_RECOVERY is rejected by
+            // every producer-authority check and therefore cannot make a
+            // reachable path exact.
+            let recovery = callable_recovery_contract_for_def_id(
+                table, env.types.ownership_metadata, slot_def_id)
+            let recovery_span = match table.call_result_spans.get(slot_def_id) {
+                some(value) => value,
+                none => table.alias_spans.get(slot_def_id).unwrap_or(
+                    synthetic_ownership_span())
+            }
+            publish_solved_callable_ownership(
+                env.types.ownership_metadata, slot_def_id, recovery,
+                CALLABLE_SOURCE_ERROR_RECOVERY,
+                recovery_transfer_levels(recovery,
+                    table.callable_arities.get(slot_def_id).unwrap_or(0)),
+                sink, recovery_span)
             continue
         }
         let ownership_id = match callable_contract_for_def_id(
@@ -5322,11 +7099,22 @@ fn solve_callable_modes(
             none => panic(
                 "unreachable: callable slot has no full exact ownership contract")
         }
+        let transfer_levels = match resolve_callable_transfer_for_def_id(
+                table, env.types.ownership_metadata, slot_def_id) {
+            CallableTransferResolution::Exact { levels } => levels,
+            _ => panic(
+                "unreachable: callable slot has no full transfer authority")
+        }
         publish_solved_callable_ownership(
             env.types.ownership_metadata, slot_def_id, ownership_id,
-            CALLABLE_SOURCE_BODY_INFERRED, sink,
+            CALLABLE_SOURCE_BODY_INFERRED,
+            transfer_levels, sink,
             table.alias_spans.get(slot_def_id).unwrap_or(span_zero()))
     }
+    finalize_callable_const_getters(
+        table, env.types.ownership_metadata, sink)
+    finalize_callable_const_getter_aliases(
+        table, env.types.ownership_metadata)
     publish_callable_result_roles(table, env.types.ownership_metadata)
     validate_trait_callable_contracts(
         env, env.types.ownership_metadata, sink)
@@ -5707,6 +7495,23 @@ fn call_param_mode(
         // binding site.  Keep planning total so malformed user input cannot
         // turn that E0801 into an internal compiler panic.
         none => PARAM_OWNERSHIP_BORROW
+    }
+}
+
+fn call_param_transfer(
+    metadata: OwnershipMetadata, plan: MovePlan,
+    callee_def_id: Int?, index: Int
+) -> Int {
+    let mode = call_param_mode(metadata, plan, callee_def_id, index)
+    if mode != PARAM_OWNERSHIP_MOVE { return TRANSFER_BORROW }
+    match callee_def_id {
+        some(def_id) => if callable_param_requires_force(
+                metadata, def_id, index).unwrap_or(false) {
+            TRANSFER_FORCE
+        } else {
+            TRANSFER_OWNING
+        },
+        none => TRANSFER_BORROW
     }
 }
 
@@ -6245,14 +8050,6 @@ fn finish_loop_flow(
     plan.continue_states.remove(depth)
 }
 
-fn transfer_for_mode(mode: Int) -> Int {
-    if mode == PARAM_OWNERSHIP_MOVE {
-        TRANSFER_FORCE
-    } else {
-        TRANSFER_BORROW
-    }
-}
-
 fn report_partial_transfer(
     metadata: OwnershipMetadata, transfer: Int, ty: Type,
     mut sink: CollectingSink, span: Span
@@ -6713,16 +8510,65 @@ fn plan_lambda_body(
         TRANSFER_OWNING)
 }
 
+// The retained-HIR census and validator run before ownership planning, so dead
+// dependent children have already contributed every required DefId descriptor.
+// They must not then flow into ANF/Perceus/codegen as ordinary expressions:
+// those passes would demand Takes/boxing for code that cannot execute. A root
+// that itself diverges is preserved as the sole statement; a child behind a
+// diverging guard becomes an inert typed block.
+fn backend_neutral_dead_child(expr: HExpr) -> HExpr {
+    HExpr::Block { stmts: [], tail: none,
+        ty: hexpr_type(expr), effects: hexpr_effects(expr),
+        span: hexpr_span(expr) }
+}
+
+fn retain_only_diverging_root(
+    root: HExpr, ty: Type, effects: EffectRow, span: Span
+) -> HExpr {
+    let root_span = hexpr_span(root)
+    HExpr::Block {
+        stmts: [HStmt::ExprStmt { expr: root, span: root_span }],
+        tail: none, ty: ty, effects: effects, span: span
+    }
+}
+
 // Default post-plan invariant for callable Move edges.  The shared HIR
 // predicate ignores Return/Never-only value paths consistently with Perceus
 // and the post-RC verifier.
-fn assert_planned_move_edge(
-    expr: HExpr, mode: Int, sink: CollectingSink
+fn assert_planned_transfer_edge(
+    env: TypeEnv, metadata: OwnershipMetadata,
+    expr: HExpr, transfer: Int, sink: CollectingSink
 ) {
-    if mode == PARAM_OWNERSHIP_MOVE &&
+    if transfer_requires_binding_invalidation(
+            env, metadata, transfer, hexpr_type(expr)) &&
        !sink.has_errors() &&
        move_edge_has_reachable_bare_binding(expr, false) {
-        panic("unreachable: callable Move binding edge has no exact Take")
+        panic("unreachable: callable transfer binding edge has no exact Take")
+    }
+}
+
+// Preserve the same direct-Match tuple-view authority in the concrete move
+// plan.  This must not be folded into the ordinary TupleLit arm: a tuple value
+// constructed for storage/return or passed as an owning argument still owns
+// its elements.
+fn plan_match_scrutinee_borrow_view(
+    mut env: TypeEnv, metadata: OwnershipMetadata, mut plan: MovePlan,
+    boxed_vars: Set<Int>, mut sink: CollectingSink, move expr: HExpr
+) -> HExpr {
+    match expr {
+        HExpr::TupleLit { elements, ty, effects, span } => {
+            let mut final_elements: List<HExpr> = []
+            for element in elements {
+                let element_for_planning = element
+                final_elements.push(plan_match_scrutinee_borrow_view(
+                    env, metadata, plan, boxed_vars, sink,
+                    element_for_planning))
+            }
+            HExpr::TupleLit { elements: final_elements,
+                ty: ty, effects: effects, span: span }
+        },
+        _ => plan_expr(
+            env, metadata, plan, boxed_vars, sink, expr, TRANSFER_BORROW)
     }
 }
 
@@ -6812,16 +8658,17 @@ fn plan_expr(
                     let result_callee_ty = callee_ty
                     let result_callee_effects = callee_effects
                     let result_callee_span = callee_span
-                    let receiver_mode = match callee_def_id {
-                        some(_) => call_param_mode(
+                    let receiver_transfer = match callee_def_id {
+                        some(_) => call_param_transfer(
                             metadata, plan, callee_def_id, 0),
-                        none => PARAM_OWNERSHIP_BORROW
+                        none => TRANSFER_BORROW
                     }
                     let planned_receiver = plan_expr(env, metadata, plan,
                         boxed_vars, sink, receiver_for_planning,
-                        transfer_for_mode(receiver_mode))
-                    assert_planned_move_edge(
-                        planned_receiver, receiver_mode, sink)
+                        receiver_transfer)
+                    assert_planned_transfer_edge(
+                        env, metadata, planned_receiver,
+                        receiver_transfer, sink)
                     final_callee = HExpr::FieldAccess {
                         receiver: planned_receiver,
                         field: result_field, ty: result_callee_ty,
@@ -6844,14 +8691,15 @@ fn plan_expr(
                 let descriptor_index = index + if is_method { 1 } else { 0 }
                 validate_callable_argument(env, metadata, plan, callee,
                     descriptor_index, arg, sink, span)
-                let mode = match callee_def_id {
-                    some(_) => call_param_mode(metadata, plan,
+                let arg_transfer = match callee_def_id {
+                    some(_) => call_param_transfer(metadata, plan,
                         callee_def_id, descriptor_index),
-                    none => PARAM_OWNERSHIP_BORROW
+                    none => TRANSFER_BORROW
                 }
                 let planned_arg = plan_expr(env, metadata, plan, boxed_vars,
-                    sink, arg_for_planning, transfer_for_mode(mode))
-                assert_planned_move_edge(planned_arg, mode, sink)
+                    sink, arg_for_planning, arg_transfer)
+                assert_planned_transfer_edge(
+                    env, metadata, planned_arg, arg_transfer, sink)
                 final_args.push(planned_arg)
                 index = index + 1
             }
@@ -7030,6 +8878,8 @@ fn plan_expr(
                 effects: result_effects, span: result_span }
         },
         HExpr::MatchExpr { scrutinee, arms, ty, effects, span } => {
+            let scrutinee_reaches_value =
+                expr_has_reachable_value(scrutinee)
             let reachable_children = enumerate_reachable_match_children(
                 scrutinee, arms)
             let mut reachable_guards: Set<Int> = set_new()
@@ -7037,9 +8887,9 @@ fn plan_expr(
             for inferred_child in reachable_children {
                 let child: ReachableControlChild = inferred_child
                 if child.kind == REACHABLE_CHILD_MATCH_SCRUTINEE {
-                } else if child.kind == REACHABLE_CHILD_MATCH_GUARD {
+                } else if child.kind == REACHABLE_CHILD_ARM_GUARD {
                     reachable_guards.insert(child.arm_index)
-                } else if child.kind == REACHABLE_CHILD_MATCH_BODY {
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
                     reachable_bodies.insert(child.arm_index)
                 } else {
                     panic(
@@ -7047,8 +8897,16 @@ fn plan_expr(
                 }
             }
             let scrutinee_for_planning = scrutinee
-            let final_scrutinee = plan_expr(env, metadata, plan, boxed_vars,
-                sink, scrutinee_for_planning, TRANSFER_BORROW)
+            let final_scrutinee = plan_match_scrutinee_borrow_view(
+                env, metadata, plan, boxed_vars, sink,
+                scrutinee_for_planning)
+            if !scrutinee_reaches_value {
+                let result_ty = copy_ownership_type(ty)
+                let result_effects = copy_ownership_effects(effects)
+                let result_span = copy_ownership_span(span)
+                return retain_only_diverging_root(
+                    final_scrutinee, result_ty, result_effects, result_span)
+            }
             let mut final_arms: List<HMatchArm> = []
             let mut aggregate = clone_move_plan(plan)
             let mut next_arm_plan = clone_move_plan(plan)
@@ -7074,11 +8932,15 @@ fn plan_expr(
                             TRANSFER_BORROW)
                         // Pattern miss preserves the incoming state; guard
                         // false preserves every effect of evaluating the guard
-                        // before trying the next arm.
-                        let mut fallthrough = clone_move_plan(next_arm_plan)
-                        join_move_plans(fallthrough,
-                            next_arm_plan, arm_plan)
-                        next_arm_plan = fallthrough
+                        // before trying the next arm. A diverging guard has no
+                        // false edge, so only pattern miss reaches later arms.
+                        if body_is_child {
+                            let mut fallthrough = clone_move_plan(
+                                next_arm_plan)
+                            join_move_plans(fallthrough,
+                                next_arm_plan, arm_plan)
+                            next_arm_plan = fallthrough
+                        }
                         some(value)
                     },
                     none => panic(
@@ -7100,10 +8962,7 @@ fn plan_expr(
                     }
                     value
                 } else {
-                    // The raw typed HIR remains available for structural
-                    // rebuilding, but it is not an ownership child and must
-                    // not reach closure-capture policy or Take planning.
-                    arm.body
+                    backend_neutral_dead_child(arm.body)
                 }
                 final_arms.push(HMatchArm { pattern: arm.pattern,
                     bindings: arm.bindings, guard: final_guard,
@@ -7131,6 +8990,8 @@ fn plan_expr(
         },
         HExpr::IfExpr { condition, then_branch, else_branch,
                         ty, effects, span } => {
+            let condition_reaches_value =
+                expr_has_reachable_value(condition)
             let has_else = match else_branch {
                 some(_) => true,
                 none => false
@@ -7141,6 +9002,13 @@ fn plan_expr(
             let then_branch_for_planning = then_branch
             let final_condition = plan_expr(env, metadata, plan,
                 boxed_vars, sink, condition_for_planning, TRANSFER_BORROW)
+            if !condition_reaches_value {
+                let result_ty = copy_ownership_type(ty)
+                let result_effects = copy_ownership_effects(effects)
+                let result_span = copy_ownership_span(span)
+                return retain_only_diverging_root(
+                    final_condition, result_ty, result_effects, result_span)
+            }
             let mut then_plan = clone_move_plan(plan)
             let mut else_plan = clone_move_plan(plan)
             let mut final_then = then_branch
@@ -7211,6 +9079,19 @@ fn plan_expr(
                 ty: result_ty, effects: result_effects, span: result_span }
         },
         HExpr::TryCatch { body, arms, ty, effects, span } => {
+            let reachable_children = enumerate_reachable_arm_children(arms)
+            let mut reachable_guards: Set<Int> = set_new()
+            let mut reachable_bodies: Set<Int> = set_new()
+            for inferred_child in reachable_children {
+                let child: ReachableControlChild = inferred_child
+                if child.kind == REACHABLE_CHILD_ARM_GUARD {
+                    reachable_guards.insert(child.arm_index)
+                } else if child.kind == REACHABLE_CHILD_ARM_BODY {
+                    reachable_bodies.insert(child.arm_index)
+                } else {
+                    panic("unreachable: invalid Catch reachable-child kind")
+                }
+            }
             let mut body_plan = clone_move_plan(plan)
             body_plan.blocked_takes = block_current_slots(plan)
             let body_for_planning = body
@@ -7220,6 +9101,7 @@ fn plan_expr(
             let mut final_arms: List<HMatchArm> = []
             let mut next_arm_plan = clone_move_plan(plan)
             next_arm_plan.blocked_takes = block_current_slots(plan)
+            let mut arm_index = 0
             for arm in arms {
                 let mut arm_plan = clone_move_plan(next_arm_plan)
                 report_unproven_pattern_callables(
@@ -7228,27 +9110,43 @@ fn plan_expr(
                     arm_plan, metadata, arm.bindings, false)
                 let final_guard = match arm.guard {
                     some(guard) => {
+                        if !reachable_guards.contains(arm_index) {
+                            panic(
+                                "unreachable: Catch guard missing reachability child")
+                        }
                         let guard_for_planning = guard
                         let value = plan_expr(env, metadata, arm_plan,
                             boxed_vars, sink, guard_for_planning,
                             TRANSFER_BORROW)
-                        let mut fallthrough = clone_move_plan(next_arm_plan)
-                        join_move_plans(fallthrough,
-                            next_arm_plan, arm_plan)
-                        next_arm_plan = fallthrough
+                        // A guard that can produce a Bool has a false edge to
+                        // the next arm. A diverging guard has only the pattern-
+                        // miss edge, which preserves the incoming state.
+                        if reachable_bodies.contains(arm_index) {
+                            let mut fallthrough = clone_move_plan(
+                                next_arm_plan)
+                            join_move_plans(fallthrough,
+                                next_arm_plan, arm_plan)
+                            next_arm_plan = fallthrough
+                        }
                         some(value)
                     },
                     none => none
                 }
-                let final_arm_body = plan_expr(env, metadata, arm_plan,
-                    boxed_vars, sink, arm.body, transfer)
-                let before = clone_move_plan(plan)
-                join_move_plans(before, aggregate, arm_plan)
-                aggregate = before
+                let final_arm_body = if reachable_bodies.contains(arm_index) {
+                    let value = plan_expr(env, metadata, arm_plan,
+                        boxed_vars, sink, arm.body, transfer)
+                    let before = clone_move_plan(plan)
+                    join_move_plans(before, aggregate, arm_plan)
+                    aggregate = before
+                    value
+                } else {
+                    backend_neutral_dead_child(arm.body)
+                }
                 final_arms.push(HMatchArm { pattern: arm.pattern,
                     bindings: arm.bindings, guard: final_guard,
                     body: final_arm_body,
                     span: arm.span })
+                arm_index = arm_index + 1
             }
             join_move_plans(plan, aggregate, aggregate)
             let result_ty = ty
@@ -7701,26 +9599,38 @@ fn plan_stmt(
             // A while condition is part of the repeating region. Snapshot the
             // loop head before evaluating it so condition-side Takes are
             // checked against every normal/continue back-edge.
+            let condition_for_reachability = condition
             let condition_for_planning = condition
             let body_for_planning = body
+            let condition_reaches_value =
+                expr_has_reachable_value(condition_for_reachability)
             let result_span = span
             let entry = flow_snapshot(plan)
             let final_condition = plan_expr(env, metadata, plan,
                 boxed_vars, sink, condition_for_planning, TRANSFER_BORROW)
+            if !condition_reaches_value {
+                return HStmt::ExprStmt {
+                    expr: final_condition, span: result_span
+                }
+            }
             let depth = plan.loop_depth + 1
             let mut body_plan = clone_move_plan(plan)
             body_plan.loop_depth = depth
             let final_body = plan_expr(env, metadata, body_plan,
                 boxed_vars, sink, body_for_planning, TRANSFER_BORROW)
-            finish_loop_flow(plan, body_plan, depth, entry, sink, span)
+            finish_loop_flow(
+                plan, body_plan, depth, entry, sink, span)
             HStmt::While { condition: final_condition,
                 body: final_body, span: result_span }
         },
         HStmt::ForIn { binding, binding_span, def_id, destructure,
                        iterable, body, iterable_type_name, iter_type_name,
                        span } => {
+            let iterable_for_reachability = iterable
             let iterable_for_planning = iterable
             let body_for_planning = body
+            let iterable_reaches_value =
+                expr_has_reachable_value(iterable_for_reachability)
             let result_binding = binding
             let result_binding_span = binding_span
             let result_def_id = def_id
@@ -7730,12 +9640,17 @@ fn plan_stmt(
             let result_span = span
             let final_iterable = plan_expr(env, metadata, plan,
                 boxed_vars, sink, iterable_for_planning, TRANSFER_BORROW)
+            if !iterable_reaches_value {
+                return HStmt::ExprStmt {
+                    expr: final_iterable, span: result_span
+                }
+            }
             let entry = flow_snapshot(plan)
             let depth = plan.loop_depth + 1
             let mut body_plan = clone_move_plan(plan)
             body_plan.loop_depth = depth
             // Inference lowers every non-Range for..in through explicit
-            // Iterable/Iterator calls before ownership planning.  The HStmt
+            // Iterable/Iterator calls before ownership planning. The HStmt
             // that remains here is the direct Range loop: its binding is a
             // fresh complete value on every iteration, not a projection borrow.
             match def_id {
@@ -7746,7 +9661,8 @@ fn plan_stmt(
                 some(bindings) => {
                     for binding_ in bindings {
                         match binding_.def_id {
-                            some(id) => register_slot(body_plan, id, false, none),
+                            some(id) => register_slot(
+                                body_plan, id, false, none),
                             none => {}
                         }
                     }
@@ -7755,7 +9671,8 @@ fn plan_stmt(
             }
             let final_body = plan_expr(env, metadata, body_plan,
                 boxed_vars, sink, body_for_planning, TRANSFER_BORROW)
-            finish_loop_flow(plan, body_plan, depth, entry, sink, span)
+            finish_loop_flow(
+                plan, body_plan, depth, entry, sink, span)
             HStmt::ForIn { binding: result_binding,
                 binding_span: result_binding_span, def_id: result_def_id,
                 destructure: result_destructure, iterable: final_iterable,
@@ -7810,22 +9727,32 @@ fn plan_stmt(
         },
         HStmt::IfLet { pattern, bindings, expr, then_block,
                        else_block, span } => {
+            let expr_for_reachability = expr
             let expr_for_planning = expr
             let then_block_for_planning = then_block
+            let else_block_for_planning = else_block
+            let expr_reaches_value =
+                expr_has_reachable_value(expr_for_reachability)
             let result_pattern = pattern
             let result_bindings = bindings
             let result_span = span
             let final_expr = plan_expr(env, metadata, plan, boxed_vars,
                 sink, expr_for_planning, TRANSFER_BORROW)
+            if !expr_reaches_value {
+                return HStmt::ExprStmt {
+                    expr: final_expr, span: result_span
+                }
+            }
             let mut then_plan = clone_move_plan(plan)
             report_unproven_pattern_callables(
                 metadata, bindings, sink, span)
             register_pattern_slots(
                 then_plan, metadata, bindings, false)
             let final_then = plan_expr(env, metadata, then_plan,
-                boxed_vars, sink, then_block_for_planning, TRANSFER_BORROW)
+                boxed_vars, sink, then_block_for_planning,
+                TRANSFER_BORROW)
             let mut else_plan = clone_move_plan(plan)
-            let final_else = match else_block {
+            let final_else = match else_block_for_planning {
                 some(branch) => {
                     let branch_for_planning = branch
                     some(plan_expr(env, metadata, else_plan,
@@ -8019,8 +9946,16 @@ fn plan_program_ownership(
 }
 
 pub fn solve_and_plan_ownership(
-    mut env: TypeEnv, program: HProgram, mut sink: CollectingSink
+    mut env: TypeEnv, program: HProgram, mut sink: CollectingSink,
+    value_binding_kinds: Map<Int, ValueBindingKind>,
+    pre_solve_const_getter_aliases: Set<Int>,
+    pre_solve_alias_targets: Map<Int, Int>,
+    pre_solve_alias_arities: Map<Int, Int>,
+    pre_solve_alias_contracts: Map<Int, Int>
 ) -> HProgram {
-    let solved = solve_callable_modes(env, program, sink)
+    let solved = solve_callable_modes(env, program, sink,
+        value_binding_kinds, pre_solve_const_getter_aliases,
+        pre_solve_alias_targets, pre_solve_alias_arities,
+        pre_solve_alias_contracts)
     plan_program_ownership(env, solved, sink)
 }

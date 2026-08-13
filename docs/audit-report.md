@@ -109,6 +109,8 @@
 
 **优先级裁决（2026-08-12，适用于 #268/#269）**：两项仍为 `[critical] [doing]`，finding、严重度与最终验收矩阵均不缩减。当前先关闭会阻断 strict `check/build compiler/main.ring`、可信 bootstrap 与 B-176 同快照测量的 development-blocking 部分（包括 impl effect-precheck transaction、project namespace callable alias provenance 及其精确 self-host checkpoint）；checkpoint 成立后，剩余不影响开发回路的长尾可在 B-176/B-180 实现期间显式暂缓。暂缓不等于关闭：任何触及当前优化 authority、破坏测量可比性或产生 panic/ICE/false-green 的 critical 立即回到前台，全部长尾仍阻塞 B-180 完成认定、完整门和 release。
 
+**Development-blocking subitem closure（2026-08-13）**：用户已验收 `ownership-reachable-dispatch` item 完成。final A7 clean generation/native link、tracked anchor byte identity 与 focused callable/default/const/project/transaction/effect-mapping 矩阵共同满足 developer-unblock checkpoint；后续主线转入 B-176/B-180。#268/#269 继续保持 `[critical] [doing]` 仅表示 final-acceptance 长尾尚未清零，不得用来重新打开本 subitem 或阻塞性能实现；若性能工作发现会破坏该 checkpoint、baseline 可比性或 ownership authority 的确定失败，再按原 critical 优先级回切。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

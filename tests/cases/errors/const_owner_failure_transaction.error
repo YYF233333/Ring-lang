@@ -1,0 +1,6 @@
+E0301
+for item in 1
+!GOOD(41)
+!callable ownership contract mismatch
+!internal compiler error
+!ring panic

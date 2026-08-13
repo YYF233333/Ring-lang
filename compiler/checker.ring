@@ -2,7 +2,10 @@ use types::{Type, EffectRow, OwnershipMetadata, UNIT, nominal_display_name,
     types_equal_with_ownership,
     CALLABLE_SOURCE_BUILTIN,
     set_callable_result_role, set_returned_callable_result_role,
-    merge_callable_ownership_descriptor, merge_ownership_shape}
+    set_callable_result_role_spine,
+    merge_callable_ownership_descriptor, merge_ownership_shape,
+    clone_callable_transfer_levels, callable_transfer_levels_equal,
+    callable_interface_transfer_levels, set_callable_transfer_levels}
 use ast::{Program, Decl, UseDecl, UseImport, Span, TypeParam, Param,
     TypeExpr, EffectExpr, Expr, span_zero}
 use hir::{HDecl, HParam, HProgram, ModuleImplFact, ValueBindingKind,
@@ -15,6 +18,7 @@ use env::{TypeEnv, TypeScheme, SchemeBound, SigDef, ImplEntry,
     TraitDef, TraitMethodDef,
     new_type_env, add_impl, find_impl, install_method_scheme,
     new_local_callable_scheme, new_local_callable_identity_scheme,
+    new_local_callable_identity_scheme_with_transfer_levels,
     update_local_callable_scheme,
     impl_method_origin}
 use builtins::{register_builtins, register_hof_intrinsics}
@@ -252,6 +256,15 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                                         some(id) => id,
                                         none => panic("unreachable: exact prelude extern has no DefId")
                                     }
+                                    if name == "ring_slot_dealloc" {
+                                        let exact_type = updated.ty
+                                        set_callable_transfer_levels(
+                                            ctx.env.types.ownership_metadata,
+                                            exact_def_id, source,
+                                            callable_interface_transfer_levels(
+                                                ctx.env.types.ownership_metadata,
+                                                exact_type))
+                                    }
                                     set_callable_result_role(
                                         ctx.env.types.ownership_metadata,
                                         exact_def_id,
@@ -422,8 +435,28 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         rebind_assoc_provenance: map_new(),
+        impl_effect_precheck_active: false,
+        impl_effect_precheck_blocked: false,
+        discarded_fn_precheck_active: false,
+        discarded_fn_precheck_blocked: false,
+        impl_effect_precheck_undo: [],
+        pre_solve_exact_value_alias_targets: map_new(),
+        pending_inferred_const_def_ids: set_new(),
+        pending_precheck_callable_def_ids: set_new(),
+        pre_solve_const_getter_aliases: set_new(),
+        pre_solve_callable_alias_targets: map_new(),
+        pre_solve_callable_alias_arities: map_new(),
+        pre_solve_callable_alias_contracts: map_new(),
+        speculative_default_authority_def_ids: set_new(),
         fn_defaults: map_new(),
+        fn_default_var_bounds: map_new(),
         fn_min_arity: map_new(),
+        latest_value_instantiation_maps: map_new(),
+        pending_fn_default_seed_values: map_new(),
+        pending_fn_default_seed_var_bounds: map_new(),
+        pending_fn_default_seed_min_arities: map_new(),
+        default_template_live_schemes: map_new(),
+        pending_fn_default_error_rebinds: set_new(),
         mod_unsafe_allowed: false,
         project_namespace_file_key: none,
         project_namespace_root_frame: none,
@@ -524,7 +557,12 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
         assembled
     } else {
         let ownership_planned = solve_and_plan_ownership(
-            ctx.env, lower_andor(assembled), ctx.sink)
+            ctx.env, lower_andor(assembled), ctx.sink,
+            map_clone(ctx.value_binding_kinds),
+            set_clone(ctx.pre_solve_const_getter_aliases),
+            map_clone(ctx.pre_solve_callable_alias_targets),
+            map_clone(ctx.pre_solve_callable_alias_arities),
+            map_clone(ctx.pre_solve_callable_alias_contracts))
         lower_dicts(ownership_planned)
     }
     CheckResult {
@@ -777,7 +815,12 @@ pub fn check_module(
         assembled
     } else {
         let ownership_planned = solve_and_plan_ownership(
-            ctx.env, lower_andor(assembled), ctx.sink)
+            ctx.env, lower_andor(assembled), ctx.sink,
+            map_clone(ctx.value_binding_kinds),
+            set_clone(ctx.pre_solve_const_getter_aliases),
+            map_clone(ctx.pre_solve_callable_alias_targets),
+            map_clone(ctx.pre_solve_callable_alias_arities),
+            map_clone(ctx.pre_solve_callable_alias_contracts))
         lower_dicts(ownership_planned)
     }
     CheckResult {
@@ -814,14 +857,17 @@ fn localize_imported_value_scheme(
     match exports.ownership_metadata.callable_by_def_id.get(
             exported_def_id) {
         some(ownership_term) => {
-            let source = match exports.ownership_metadata
+            let imported_state = match exports.ownership_metadata
                     .callable_state_by_def_id.get(exported_def_id) {
-                some(state) => state.source,
+                some(state) => state,
                 none => panic(
                     "unreachable: imported callable value has no ownership state")
             }
-            let localized = new_local_callable_identity_scheme(
-                ctx.env, alias_scheme, ownership_term, source)
+            let localized = new_local_callable_identity_scheme_with_transfer_levels(
+                ctx.env, alias_scheme, ownership_term,
+                imported_state.source,
+                clone_callable_transfer_levels(
+                    imported_state.transfer_levels))
             let local_def_id = match localized.def_id {
                 some(id) => id,
                 none => panic(
@@ -847,6 +893,15 @@ fn localize_imported_value_scheme(
             set_returned_callable_result_role(
                 ctx.env.types.ownership_metadata, returned_role_local_def_id,
                 returned_role)
+            let imported_role_spine = match exports.ownership_metadata
+                    .callable_result_role_spine_by_def_id.get(exported_def_id) {
+                some(spine) => list_clone(spine),
+                none => panic(
+                    "unreachable: imported callable has no result role spine")
+            }
+            set_callable_result_role_spine(
+                ctx.env.types.ownership_metadata, local_def_id,
+                imported_role_spine)
             localized
         },
         none => match scheme.ty {
@@ -865,6 +920,16 @@ fn imported_int_lists_equal(a: List<Int>, b: List<Int>) -> Bool {
         index = index + 1
     }
     true
+}
+
+fn imported_optional_int_lists_equal(
+    a: List<Int>?, b: List<Int>?
+) -> Bool {
+    if a.is_some() != b.is_some() { return false }
+    if !a.is_some() { return true }
+    let left = a.unwrap()
+    let right = b.unwrap()
+    imported_int_lists_equal(left, right)
 }
 
 fn imported_scheme_bounds_equal(
@@ -918,6 +983,16 @@ fn imported_schemes_equal(
             let incoming_is_callable = incoming_metadata.callable_by_def_id
                 .contains_key(incoming_id)
             if incoming_is_callable {
+                let transfer_equal = match (
+                    local_metadata.callable_state_by_def_id.get(local_id),
+                    incoming_metadata.callable_state_by_def_id.get(
+                        incoming_id)) {
+                    (some(local_state), some(incoming_state)) =>
+                        callable_transfer_levels_equal(
+                            local_state.transfer_levels,
+                            incoming_state.transfer_levels),
+                    _ => false
+                }
                 local_metadata.callable_by_def_id.contains_key(local_id) &&
                     local_metadata.callable_result_role_by_def_id.get(
                         local_id) == incoming_metadata
@@ -925,7 +1000,12 @@ fn imported_schemes_equal(
                     local_metadata.returned_callable_result_role_by_def_id.get(
                         local_id) == incoming_metadata
                         .returned_callable_result_role_by_def_id.get(
-                            incoming_id)
+                            incoming_id) &&
+                    imported_optional_int_lists_equal(
+                        local_metadata.callable_result_role_spine_by_def_id.get(
+                            local_id),
+                        incoming_metadata.callable_result_role_spine_by_def_id.get(
+                            incoming_id)) && transfer_equal
             } else {
                 true
             }

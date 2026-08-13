@@ -6,7 +6,7 @@ use ast::{Pattern, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HForInDestructure,
     HLetDestructureBinding, HPatternBinding, ValueBindingKind, TraitDispatch,
-    hexpr_type, hexpr_effects, hexpr_span}
+    hexpr_type, hexpr_effects, hexpr_span, hexpr_callable_def_id}
 use union_find::{UnionFind, new_union_find}
 use env::{apply_subst, apply_subst_row}
 use infer_ctx::{InferCtx, value_binding_kind}
@@ -446,7 +446,16 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             }
         },
         HExpr::Call { callee, callee_def_id, callable_result_def_id, args, type_args, resolved_dicts, dict_dispatch, .. } => {
-            let result_callee_def_id = callee_def_id
+            let zonked_callee = zonk_direct_callee(ctx, callee)
+            // A ConstGetter Ident lowers here to an inner zero-argument Call.
+            // The outer source call must invoke that result identity, not the
+            // getter's Borrow/arity-0 DefId. Other direct callees retain the
+            // inference-selected identity as a fail-closed fallback.
+            let result_callee_def_id = match hexpr_callable_def_id(
+                    zonked_callee) {
+                some(def_id) => some(def_id),
+                none => callee_def_id
+            }
             let result_callable_result_def_id = callable_result_def_id
             let result_resolved_dicts = resolved_dicts
             let result_dict_dispatch = dict_dispatch
@@ -454,7 +463,7 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
                 // A syntactic Ident callee uses the direct ABI and gets its
                 // evidence from Call.resolved_dicts.  Every other recursive
                 // position is a value position and must form a real closure.
-                callee: zonk_direct_callee(ctx, callee),
+                callee: zonked_callee,
                 callee_def_id: result_callee_def_id,
                 callable_result_def_id: result_callable_result_def_id,
                 args: args.map(fn(a) { zonk_expr(ctx, a) }),

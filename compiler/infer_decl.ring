@@ -1,37 +1,45 @@
 use types::{Type, Effect, EffectRow, RecordField, OwnershipMetadata,
+    CallableOwnershipState,
     UNIT, EMPTY_ROW, type_to_string, effect_to_string,
     nominal_display_name, effects_match_kind_with_ownership,
     effect_kind_name,
     types_equal_with_ownership,
-    PARAM_OWNERSHIP_BORROW, CALLABLE_BORROW_OWNED,
-    callable_param_ownership, type_may_own, fn_meta}
+    PARAM_OWNERSHIP_BORROW, PARAM_OWNERSHIP_MOVE,
+    CALLABLE_BORROW_OWNED,
+    callable_param_ownership, callable_return_ownership,
+    type_may_own, fn_meta}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, SigMember}
 use hir::{HDecl, HParam, HExpr, HStmt, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
-    DictDispatchInfo, trait_dict_name,
+    HStringInterpPart,
+    DictDispatchInfo, ValueBindingKind, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
     collect_extern_type_names, compare_by_first, extern_abi_leaf,
-    hparam_flags, hparam_is_mutable,
+    hparam_flags, hparam_flags_with_force, hparam_is_mutable,
     hparam_mark_external_drop_owner}
-use env::{TypeScheme, SchemeBound, MethodOrigin,
-    apply_subst, apply_subst_map, apply_subst_row_map,
+use env::{TypeScheme, SchemeBound, MethodOrigin, Scope,
+    StructDef, EnumDef, TypeAliasDef, EffectDef, EffectAliasDef, SigDef, TraitDef,
+    apply_subst, apply_subst_map, apply_subst_row, apply_subst_row_map,
     find_impl, find_impl_by_origin, impl_origin, impl_decl_origin,
     impl_method_origin,
     install_method_scheme, build_type_var_map,
     trait_is_authoritative_drop}
-use union_find::{UnionFind}
+use union_find::{UnionFind, clone_union_find}
 use unify::{empty_subst}
-use diagnostics::{DiagnosticContext, DiagnosticNote}
+use diagnostics::{DiagnosticContext, DiagnosticNote, DiagnosticSink}
 use codes::{E0201, E0204, E0301, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0503, E0507, E0802, E0803}
-use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, AssocRebindEntry, CompileError,
+use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, AssocRebindEntry,
+    ImplEffectPrecheckUndo, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_dicts_from_scheme,
     pending_dict_checkpoint, drain_pending_dicts, rollback_pending_dicts,
     settle_default_pending_dicts, assert_pending_dict_owner_closed,
-    generalize, collect_free_vars, free_type_vars_in_env, resolve_mod_uses,
+    generalize, collect_free_vars, free_type_vars, free_type_vars_in_env,
+    resolve_mod_uses,
     fresh_call_result_callable_def_id,
+    promote_pre_solve_callable_aliases_for_source,
     enter_project_root_frame, enter_project_child_frame,
     exit_project_namespace_frame}
 use infer_helpers::{is_value_type}
@@ -43,10 +51,139 @@ use infer_register::{register_decls_two_phase, register_module_decls_two_phase,
     first_impl_trait_bound_span}
 use infer::{infer_block, infer_expr,
     register_bounded_callable_value_shadows,
-    register_default_bounded_callable_value_shadows}
+    register_default_bounded_callable_value_shadows,
+    default_template_var_ids, rewrite_default_template_types}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block, zonk_expr}
 use derive::{run_derive_pass}
 use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names, collect_self_method_callees}
+
+// Const initializers are declaration owners, while function/impl/test/default
+// bodies are retained only after the whole declaration tree has crossed the
+// owner barrier.  Cache the one authoritative HIR node for each const locally
+// to check_registered_body; speculative checks must never see this cache.
+struct ConstOwnerCache {
+    checked: Map<Int, HDecl>,
+    failed: Set<Int>,
+    emitted: Set<Int>
+}
+
+struct DeclOwnerSite {
+    path: List<Int>,
+    canonical_name: Str?
+}
+
+fn duplicate_decl_owner_site(site: DeclOwnerSite) -> DeclOwnerSite {
+    DeclOwnerSite {
+        path: list_clone(site.path),
+        canonical_name: duplicate_impl_precheck_trait_name(
+            site.canonical_name)
+    }
+}
+
+struct LegacyModuleOverlaySnapshot {
+    scope_variables: List<Map<Str, TypeScheme>>,
+    structs: Map<Str, StructDef>,
+    enums: Map<Str, EnumDef>,
+    type_aliases: Map<Str, TypeAliasDef>,
+    effects: Map<Str, EffectDef>,
+    effect_aliases: Map<Str, EffectAliasDef>,
+    sigs: Map<Str, SigDef>,
+    traits: Map<Str, TraitDef>,
+    variant_to_enum: Map<Str, Str>,
+    variant_ctor_origins: Map<Int, Str>,
+    use_aliases: Map<Int, Str>,
+    value_binding_kinds: Map<Int, ValueBindingKind>,
+    fn_mut_params: Map<Str, List<Bool>>
+}
+
+// A successful discarded function check may publish default-argument HIR used
+// as a template by later retained callers. Preserve only exact value/binder
+// identities reachable from that template which did not exist before the
+// check; call sites freshen those identities and the template's type variables.
+// Type-variable bounds have their own namespace and are intentionally not
+// indexed through this DefId-keyed capture.
+struct DefaultAuthorityCapture {
+    def_ids: Set<Int>,
+    callable_by_def_id: Map<Int, Int>,
+    callable_state_by_def_id: Map<Int, CallableOwnershipState>,
+    callable_result_role_by_def_id: Map<Int, Int>,
+    returned_callable_result_role_by_def_id: Map<Int, Int>,
+    callable_result_role_spine_by_def_id: Map<Int, List<Int>>,
+    use_aliases: Map<Int, Str>,
+    value_binding_kinds: Map<Int, ValueBindingKind>,
+    live_schemes_by_def_id: Map<Int, TypeScheme>,
+    variant_ctor_origins: Map<Int, Str>,
+    exact_value_alias_targets: Map<Int, Int>,
+    const_getter_aliases: Set<Int>,
+    callable_alias_targets: Map<Int, Int>,
+    callable_alias_arities: Map<Int, Int>,
+    callable_alias_contracts: Map<Int, Int>,
+    def_spans: Map<Int, Span>,
+    boxed_vars: Set<Int>,
+    var_lambda_depth: Map<Int, Int>,
+    mutable_vars: Set<Int>,
+    let_defs: Set<Int>,
+    mut_param_defs: Set<Int>
+}
+
+// Const initializers are authoritative retained owners, but any failed owner
+// must leave the checker exactly at its root-frame baseline (apart from the
+// diagnostics it intentionally emitted and monotonic ID allocation).
+struct ConstOwnerTransactionSnapshot {
+    subst: UnionFind,
+    scope_variables: List<Map<Str, TypeScheme>>,
+    callable_by_def_id: Map<Int, Int>,
+    callable_state_by_def_id: Map<Int, CallableOwnershipState>,
+    callable_result_role_by_def_id: Map<Int, Int>,
+    returned_callable_result_role_by_def_id: Map<Int, Int>,
+    callable_result_role_spine_by_def_id: Map<Int, List<Int>>,
+    callable_inference_parents: Map<Int, Int>,
+    callable_inference_solutions: Map<Int, Int>,
+    use_aliases: Map<Int, Str>,
+    value_binding_kinds: Map<Int, ValueBindingKind>,
+    structs: Map<Str, StructDef>,
+    enums: Map<Str, EnumDef>,
+    type_aliases: Map<Str, TypeAliasDef>,
+    effects: Map<Str, EffectDef>,
+    effect_aliases: Map<Str, EffectAliasDef>,
+    sigs: Map<Str, SigDef>,
+    traits: Map<Str, TraitDef>,
+    variant_to_enum: Map<Str, Str>,
+    variant_ctor_origins: Map<Int, Str>,
+    exact_value_alias_targets: Map<Int, Int>,
+    pending_inferred_const_def_ids: Set<Int>,
+    pending_precheck_callable_def_ids: Set<Int>,
+    const_getter_aliases: Set<Int>,
+    callable_alias_targets: Map<Int, Int>,
+    callable_alias_arities: Map<Int, Int>,
+    callable_alias_contracts: Map<Int, Int>,
+    speculative_default_authority_def_ids: Set<Int>,
+    boxed_vars: Set<Int>,
+    var_lambda_depth: Map<Int, Int>,
+    fn_mut_params: Map<Str, List<Bool>>,
+    fn_defaults: Map<Int, List<HExpr>>,
+    fn_default_var_bounds: Map<Int, Map<Int, Set<Str>>>,
+    fn_min_arity: Map<Int, Int>,
+    latest_value_instantiation_maps: Map<Int, Map<Int, Type>>,
+    default_template_live_schemes: Map<Int, TypeScheme>,
+    rebind_assoc_provenance: Map<Str, List<AssocRebindEntry>>,
+    type_param_scope: Map<Str, Type>,
+    qualified_assoc_scope: Map<Str, Type>,
+    current_fn_return_type: Type?,
+    current_fn_bounds: List<FnBoundsEntry>,
+    fn_bounds_stack: List<List<FnBoundsEntry>>,
+    loop_depth: Int,
+    lambda_depth: Int,
+    def_spans: Map<Int, Span>,
+    var_bounds: Map<Int, Set<Str>>,
+    mutable_vars: Set<Int>,
+    let_defs: Set<Int>,
+    mut_param_defs: Set<Int>,
+    mod_path_depth: Int,
+    project_frame_depth: Int,
+    mod_unsafe_allowed: Bool,
+    dict_checkpoint: Int
+}
 
 fn ownership_from_fn_type(ty: Type, param_count: Int) -> Int {
     match ty {
@@ -68,11 +205,12 @@ fn finish_checked_decl_firebreak(
 }
 
 fn check_decl(
-    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?
+    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?,
+    const_owners: ConstOwnerCache?
 ) -> HDecl {
     let obligation_checkpoint = pending_dict_checkpoint(ctx)
     let result = some(check_decl_inner(
-        ctx, decl, frame_decl_index)) catch { _ => none }
+        ctx, decl, frame_decl_index, const_owners)) catch { _ => none }
     match result {
         some(hdecl) => finish_checked_decl_firebreak(
             ctx, obligation_checkpoint, hdecl),
@@ -204,10 +342,64 @@ fn check_type_alias_decl_arm_firebreak(
         name, alias_type, is_pub, span)
 }
 
+fn registered_const_def_id_firebreak(ctx: InferCtx, name: Str) -> Int {
+    match ctx.env.lookup(name) {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => def_id,
+            none => panic("unreachable: registered const has no DefId")
+        },
+        none => panic("unreachable: registered const is missing")
+    }
+}
+
+fn maybe_registered_const_def_id(ctx: InferCtx, name: Str) -> Int? {
+    match ctx.env.lookup(name) {
+        some(scheme) => scheme.def_id,
+        none => none
+    }
+}
+
+fn replay_const_owner_hdecl(
+    ctx: InferCtx, name: Str, mut cache: ConstOwnerCache
+) -> HDecl {
+    let def_id = match maybe_registered_const_def_id(ctx, name) {
+        some(id) => id,
+        none => fail.raise(CompileError {})
+    }
+    if cache.failed.contains(def_id) {
+        fail.raise(CompileError {})
+    }
+    if cache.emitted.contains(def_id) {
+        fail.raise(CompileError {})
+    }
+    match cache.checked.get(def_id) {
+        some(HDecl::Const { def_id: some(cached_def_id), .. }) => {
+            if cached_def_id != def_id {
+                panic("unreachable: const owner cache DefId mismatch")
+            }
+            cache.emitted.insert(def_id)
+            match cache.checked.get(def_id) {
+                some(hdecl) => {
+                    let replayed_hdecl = hdecl
+                    replayed_hdecl
+                },
+                none => panic("unreachable: const owner cache lost HIR")
+            }
+        },
+        some(_) => panic("unreachable: const owner cache contains non-const HIR"),
+        none => panic("unreachable: final const body missed owner cache")
+    }
+}
+
 fn check_const_decl_arm_firebreak(
     mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?,
-    init: Expr, is_pub: Bool, span: Span
+    init: Expr, is_pub: Bool, span: Span,
+    const_owners: ConstOwnerCache?
 ) -> HDecl {
+    match const_owners {
+        some(cache) => return replay_const_owner_hdecl(ctx, name, cache),
+        none => {}
+    }
     let checked_name = name
     let checked_type_annotation = type_annotation
     let checked_init = init
@@ -246,7 +438,8 @@ fn checked_placeholder_decl_firebreak(name: Str, span: Span) -> HDecl {
 }
 
 fn check_decl_inner(
-    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?
+    mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?,
+    const_owners: ConstOwnerCache?
 ) -> HDecl {
     match decl {
         Decl::Struct { name, type_params, is_pub, span, .. } =>
@@ -263,7 +456,7 @@ fn check_decl_inner(
                 ctx, target_type, type_params, trait_name, methods, span),
         Decl::Fn { name, type_params, params, return_type, declared_effects, body, is_pub, span, .. } =>
             check_fn_decl(ctx, name, type_params, params, return_type,
-                declared_effects, body, is_pub, span, none, none, none),
+                declared_effects, body, is_pub, span, none, none, none, 0),
         Decl::Test { description, body, span } =>
             check_test_decl_arm_firebreak(ctx, description, body, span),
         Decl::Trait { name, type_params, methods, is_pub, span, .. } =>
@@ -280,11 +473,12 @@ fn check_decl_inner(
             check_type_alias_decl_arm_firebreak(ctx, name, is_pub, span),
         Decl::Const { name, type_annotation, init, is_pub, span } =>
             check_const_decl_arm_firebreak(
-                ctx, name, type_annotation, init, is_pub, span),
+                ctx, name, type_annotation, init, is_pub, span,
+                const_owners),
         Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
             check_mod_decl(
                 ctx, name, uses, decls, required_effects,
-                is_pub, span, frame_decl_index),
+                is_pub, span, frame_decl_index, const_owners),
         Decl::Sig { name, members, is_pub, span } =>
             check_sig_decl_arm_firebreak(ctx, name, members, is_pub, span),
         Decl::EffectAlias { name, is_pub, span, .. } =>
@@ -299,11 +493,13 @@ fn check_decl_inner(
 }
 
 fn check_indexed_decl_firebreak(
-    mut ctx: InferCtx, decl: Decl, decl_index: Int
+    mut ctx: InferCtx, decl: Decl, decl_index: Int,
+    const_owners: ConstOwnerCache?
 ) -> HDecl {
     let checked_decl = decl
     let checked_decl_index = decl_index
-    check_decl(ctx, checked_decl, some(checked_decl_index))
+    check_decl(
+        ctx, checked_decl, some(checked_decl_index), const_owners)
 }
 
 fn update_checked_fn_effects_firebreak(
@@ -345,7 +541,8 @@ fn expand_delegate_impls_firebreak(
 fn check_mod_decl_body(
     mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>,
     decls: List<Decl>, required_effects: List<EffectExpr>?,
-    is_pub: Bool, span: Span, project_frame_active: Bool
+    is_pub: Bool, span: Span, project_frame_active: Bool,
+    const_owners: ConstOwnerCache?
 ) -> HDecl {
     // Register short-name aliases for mod-internal types so that
     // type annotations like `c: Circle` resolve to `shapes::Circle`.
@@ -378,6 +575,35 @@ fn check_mod_decl_body(
         }
     }
 
+    // The outer SCC prepass enters a module before its source-ordered consts
+    // are checked. Build a direct-function SCC view that can be retried in the
+    // already-active module/project frame after each inner inferred const.
+    let mut mod_fn_decls: List<Decl> = []
+    let mut mod_fn_name_to_idx: Map<Str, Int> = map_new()
+    let mut mod_registered_fns: Set<Str> = set_new()
+    for source_decl in decls {
+        let mod_name_for_prefix = "${mod_name}"
+        let source_for_prefix = source_decl
+        let prefixed_source = prefix_decl_name(
+            mod_name_for_prefix, source_for_prefix)
+        let prefixed_for_match = prefixed_source
+        let prefixed_for_store = prefixed_source
+        match prefixed_for_match {
+            Decl::Fn { name, .. } => {
+                let name_for_index = "${name}"
+                let name_for_registered = "${name}"
+                let fn_index = mod_fn_decls.len()
+                mod_fn_decls.push(prefixed_for_store)
+                mod_fn_name_to_idx.insert(name_for_index, fn_index)
+                mod_registered_fns.insert(name_for_registered)
+            },
+            _ => {}
+        }
+    }
+    let mod_call_graph = build_call_graph(
+        mod_fn_decls, mod_registered_fns)
+    let mod_scc_groups = tarjan_scc(mod_call_graph)
+
     let mut hdecls: List<HDecl> = []
     for decl_index in 0..decls.len() {
         let decl = decls.get(decl_index).unwrap()
@@ -393,17 +619,31 @@ fn check_mod_decl_body(
         } else {
             prefix_decl_name(mod_name, decl)
         }
+        match prefixed {
+            // Direct functions are retained only after every non-function
+            // declaration in this module (including nested modules/consts)
+            // has completed, mirroring the file-root phase boundary.
+            Decl::Fn { .. } | Decl::Impl { .. } |
+            Decl::ModBlock { .. } => { continue },
+            _ => {}
+        }
         let result = some(check_indexed_decl_firebreak(
-            ctx, prefixed, decl_index)) catch { _ => none }
+            ctx, prefixed, decl_index, const_owners)) catch { _ => none }
         match result {
             some(hd) => {
                 // Update fn effects (same as check_one_decl)
                 match hd {
-                    HDecl::Fn { name, effects, .. } => {
+                    HDecl::Fn {
+                        name, params, return_type, effects, span: fn_span, ..
+                    } => {
+                        let registration_scheme = ctx.env.lookup(name)
                         if effects.effects.len() > 0 {
                             update_checked_fn_effects_firebreak(
                                 ctx, name, effects)
                         }
+                        rebind_fn_type(
+                            ctx, name, params, return_type, effects,
+                            fn_span, registration_scheme)
                     },
                     _ => {}
                 }
@@ -444,13 +684,160 @@ fn check_mod_decl_body(
             _ => {}
         }
     }
+    // Nested modules may finalize inferred consts used by this module's impls.
+    // Check them after direct data/const declarations but before impl bodies.
+    for decl_index in 0..decls.len() {
+        let decl = decls.get(decl_index).unwrap()
+        let prefixed = if project_frame_active {
+            match decl {
+                Decl::ExternType { .. } => decl,
+                _ => prefix_decl_name(mod_name, decl)
+            }
+        } else {
+            prefix_decl_name(mod_name, decl)
+        }
+        match prefixed {
+            Decl::ModBlock { .. } => {
+                let result = some(check_indexed_decl_firebreak(
+                    ctx, prefixed, decl_index,
+                    const_owners)) catch { _ => none }
+                match result {
+                    some(hd) => {
+                        match cap_row {
+                            some(cap) => check_capability(
+                                ctx, hd, cap, span),
+                            none => {}
+                        }
+                        append_checked_hdecl_firebreak(hdecls, hd)
+                    },
+                    none => {}
+                }
+            },
+            _ => {}
+        }
+    }
+
+    // Retained impl methods run only after every const in this module subtree
+    // is final, so their effect summaries cannot bind an isolated TypeVar.
+    for decl_index in 0..decls.len() {
+        let decl = decls.get(decl_index).unwrap()
+        let prefixed = if project_frame_active {
+            match decl {
+                Decl::ExternType { .. } => decl,
+                _ => prefix_decl_name(mod_name, decl)
+            }
+        } else {
+            prefix_decl_name(mod_name, decl)
+        }
+        match prefixed {
+            Decl::Impl {
+                target_type, type_params: impl_tps,
+                methods, span: impl_span, ..
+            } => {
+                let result = some(check_indexed_decl_firebreak(
+                    ctx, prefixed, decl_index,
+                    const_owners)) catch { _ => none }
+                match result {
+                    some(hd) => {
+                        match cap_row {
+                            some(cap) => check_capability(
+                                ctx, hd, cap, span),
+                            none => {}
+                        }
+                        append_checked_hdecl_firebreak(hdecls, hd)
+                    },
+                    none => {}
+                }
+                let canonical_target =
+                    resolve_checked_nominal_identity_firebreak(
+                        ctx, target_type)
+                for method in methods {
+                    match method {
+                        Decl::Delegate {
+                            field, trait_names, span: dspan
+                        } => {
+                            let delegate_impls = expand_delegate_impls_firebreak(
+                                ctx, canonical_target, impl_tps,
+                                field, trait_names, dspan)
+                            for delegated in delegate_impls {
+                                match cap_row {
+                                    some(cap) => check_capability(
+                                        ctx, delegated, cap, span),
+                                    none => {}
+                                }
+                                append_checked_hdecl_firebreak(
+                                    hdecls, delegated)
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+    // All direct/nested const owners are now final. Re-run any blocked summary
+    // SCC once more, then emit retained function HIR leaf-first. A bad final
+    // const type is diagnosed here as an ordinary type mismatch; no pending
+    // registration TypeVar can cross into the retained body.
+    for scc_group in mod_scc_groups {
+        for name in scc_group {
+            set_fn_precheck_pending(ctx, name, false)
+        }
+        for name in scc_group {
+            match mod_fn_name_to_idx.get(name) {
+                some(fn_index) => match mod_fn_decls.get(fn_index) {
+                    some(fn_decl) => {
+                        let result = some(check_indexed_decl_firebreak(
+                            ctx, fn_decl, fn_index,
+                            const_owners)) catch { _ => none }
+                        match result {
+                            some(hd) => {
+                                match hd {
+                                    HDecl::Fn {
+                                        name: checked_name,
+                                        params, return_type, effects,
+                                        span: fn_span, ..
+                                    } => {
+                                        let registration_scheme =
+                                            ctx.env.lookup(checked_name)
+                                        if effects.effects.len() > 0 {
+                                            update_checked_fn_effects_firebreak(
+                                                ctx, checked_name, effects)
+                                        }
+                                        rebind_fn_type(
+                                            ctx, checked_name, params,
+                                            return_type, effects, fn_span,
+                                            registration_scheme)
+                                    },
+                                    _ => panic(
+                                        "unreachable: inline fn SCC emitted a non-fn")
+                                }
+                                match cap_row {
+                                    some(cap) => check_capability(
+                                        ctx, hd, cap, span),
+                                    none => {}
+                                }
+                                append_checked_hdecl_firebreak(hdecls, hd)
+                            },
+                            none => {}
+                        }
+                    },
+                    none => panic(
+                        "unreachable: inline fn SCC index is missing")
+                },
+                none => {}
+            }
+        }
+    }
     HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
 }
 
 fn check_mod_decl_body_firebreak(
     mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>,
     decls: List<Decl>, required_effects: List<EffectExpr>?,
-    is_pub: Bool, span: Span, project_frame_active: Bool
+    is_pub: Bool, span: Span, project_frame_active: Bool,
+    const_owners: ConstOwnerCache?
 ) -> HDecl {
     let checked_mod_name = mod_name
     let checked_uses = uses
@@ -460,13 +847,14 @@ fn check_mod_decl_body_firebreak(
     check_mod_decl_body(
         ctx, checked_mod_name, checked_uses, checked_decls,
         checked_required_effects, is_pub, checked_span,
-        project_frame_active)
+        project_frame_active, const_owners)
 }
 
 fn check_mod_decl(
     mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>,
     decls: List<Decl>, required_effects: List<EffectExpr>?,
-    is_pub: Bool, span: Span, frame_decl_index: Int?
+    is_pub: Bool, span: Span, frame_decl_index: Int?,
+    const_owners: ConstOwnerCache?
 ) -> HDecl {
     let project_active = ctx.project_namespace_file_key.is_some()
     let mut entered_project_frame = false
@@ -487,7 +875,7 @@ fn check_mod_decl(
     let prev_unsafe_allowed = ctx.mod_unsafe_allowed
     let result = check_mod_decl_body_firebreak(
         ctx, mod_name, uses, decls, required_effects,
-        is_pub, span, project_active) catch { _ => {
+        is_pub, span, project_active, const_owners) catch { _ => {
             ctx.mod_unsafe_allowed = prev_unsafe_allowed
             let _ = ctx.mod_path_stack.pop()
             if entered_project_frame {
@@ -591,7 +979,8 @@ fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     // Retrieve the def_id assigned during registration
-    let old_def_id = match ctx.env.lookup(name) {
+    let registration_scheme = ctx.env.lookup(name)
+    let old_def_id = match registration_scheme {
         some(sc) => sc.def_id,
         none => none
     }
@@ -638,9 +1027,25 @@ fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
         ty: gen_scheme.ty, type_vars: gen_scheme.type_vars,
         bounds: gen_scheme.bounds, def_id: scheme_def_id
     }
+    // Keep the registration variable aligned with the completed owner before
+    // rebinding. Exact aliases are fail-closed at value use while this source
+    // is still a TypeVar, so no isolated consumer substitution is replayed
+    // here (which would incorrectly monomorphize a generalized const).
+    let restored_subst = match registration_scheme {
+        some(registered) => unify_at(
+            ctx.sink, ctx.env, registered.ty, resolved,
+            saved_subst, span),
+        none => saved_subst
+    }
     let rebind_name = name
-    ctx.env.rebind(rebind_name, scheme)
-    ctx.subst = saved_subst
+    rebind_scheme_with_exact_aliases(ctx, rebind_name, scheme)
+    match old_def_id {
+        some(def_id) => {
+            ctx.pending_inferred_const_def_ids.remove(def_id)
+        },
+        none => {}
+    }
+    ctx.subst = restored_subst
     HDecl::Const { name: name, def_id: old_def_id, ty: resolved, init: final_init, is_pub: is_pub, span: span }
 }
 
@@ -932,28 +1337,195 @@ fn method_origin_firebreak(
     }
 }
 
+fn duplicate_impl_precheck_str(value: Str) -> Str {
+    "${value}"
+}
+
+fn duplicate_impl_precheck_trait_name(value: Str?) -> Str? {
+    match value {
+        some(name) => some("${name}"),
+        none => none
+    }
+}
+
+fn duplicate_impl_precheck_span(value: Span) -> Span {
+    Span {
+        file: "${value.file}",
+        start: Position {
+            line: value.start.line,
+            column: value.start.column,
+            offset: value.start.offset
+        },
+        end: Position {
+            line: value.end.line,
+            column: value.end.column,
+            offset: value.end.offset
+        }
+    }
+}
+
 fn store_rebound_impl_method_scheme(
     mut ctx: InferCtx, target_type: Str, trait_name: Str?,
     origin: Str, method_name: Str, scheme: TypeScheme, span: Span
 ) {
+    let method_name_for_entry = method_name
+    let method_name_for_install = method_name
+    let scheme_for_entry = scheme
+    let scheme_for_install = scheme
+    if ctx.impl_effect_precheck_active {
+        let previous = registered_impl_method_scheme(
+            ctx,
+            duplicate_impl_precheck_str(target_type),
+            duplicate_impl_precheck_trait_name(trait_name),
+            duplicate_impl_precheck_str(origin),
+            duplicate_impl_precheck_str(method_name))
+        ctx.impl_effect_precheck_undo.push(ImplEffectPrecheckUndo {
+            target_type: duplicate_impl_precheck_str(target_type),
+            trait_name: duplicate_impl_precheck_trait_name(trait_name),
+            origin: duplicate_impl_precheck_str(origin),
+            method_name: duplicate_impl_precheck_str(method_name),
+            previous_scheme: previous,
+            span: duplicate_impl_precheck_span(span)
+        })
+    }
     match trait_name {
         some(_) => match find_impl_by_origin(
             ctx.env.trait_reg, target_type, origin) {
             some(entry) => insert_registered_impl_scheme_firebreak(
-                entry.method_schemes, method_name, scheme),
+                entry.method_schemes,
+                method_name_for_entry, scheme_for_entry),
             none => {}
         },
         none => {}
     }
 
-    let installed_method_name = method_name
-    let installed_scheme = scheme
+    let installed_method_name = method_name_for_install
+    let installed_scheme = scheme_for_install
     let installed_origin = method_origin_firebreak(
         ctx, origin, trait_name, span)
     let _ = install_method_scheme(
         ctx.env.trait_reg, ctx.sink,
         target_type, installed_method_name, installed_scheme,
         installed_origin)
+}
+
+struct ImplEffectPrecheckCommit {
+    target_type: Str,
+    trait_name: Str?,
+    origin: Str,
+    method_name: Str,
+    scheme: TypeScheme,
+    span: Span
+}
+
+fn impl_effect_precheck_projection(
+    registration: TypeScheme, rebound: TypeScheme
+) -> TypeScheme {
+    let projected_type = match (registration.ty, rebound.ty) {
+        (Type::FnType {
+            params, return_type, meta
+        }, Type::FnType { meta: rebound_meta, .. }) => Type::FnType {
+            params: params,
+            return_type: return_type,
+            meta: fn_meta(rebound_meta.effects, meta.ownership_term)
+        },
+        _ => registration.ty
+    }
+    // Keep the rebind's effect-variable ownership, but never publish the
+    // speculative parameter/return callable shape checked by this pre-pass.
+    TypeScheme {
+        ..registration,
+        ty: projected_type,
+        type_vars: rebound.type_vars,
+        bounds: rebound.bounds
+    }
+}
+
+fn rollback_impl_effect_precheck_schemes(
+    mut ctx: InferCtx, checkpoint: Int
+) {
+    if checkpoint > ctx.impl_effect_precheck_undo.len() {
+        panic("unreachable: invalid impl effect precheck checkpoint")
+    }
+    let mut index = ctx.impl_effect_precheck_undo.len()
+    while index > checkpoint {
+        index = index - 1
+        match ctx.impl_effect_precheck_undo.get(index) {
+            some(undo) => {
+                let target_type = duplicate_impl_precheck_str(undo.target_type)
+                let trait_name = duplicate_impl_precheck_trait_name(
+                    undo.trait_name)
+                let origin = duplicate_impl_precheck_str(undo.origin)
+                let method_name = duplicate_impl_precheck_str(undo.method_name)
+                let previous_scheme = undo.previous_scheme
+                let span = duplicate_impl_precheck_span(undo.span)
+                store_rebound_impl_method_scheme(
+                    ctx, target_type, trait_name, origin,
+                    method_name, previous_scheme, span)
+            },
+            none => panic("unreachable: missing impl effect precheck undo")
+        }
+    }
+    ctx.impl_effect_precheck_undo =
+        ctx.impl_effect_precheck_undo.slice(0, checkpoint)
+}
+
+fn collect_impl_effect_precheck_commits(
+    ctx: InferCtx, checkpoint: Int
+) -> List<ImplEffectPrecheckCommit> {
+    let mut result: List<ImplEffectPrecheckCommit> = []
+    let mut index = checkpoint
+    while index < ctx.impl_effect_precheck_undo.len() {
+        match ctx.impl_effect_precheck_undo.get(index) {
+            some(undo) => {
+                let lookup_target_type = duplicate_impl_precheck_str(
+                    undo.target_type)
+                let lookup_trait_name = duplicate_impl_precheck_trait_name(
+                    undo.trait_name)
+                let lookup_origin = duplicate_impl_precheck_str(undo.origin)
+                let lookup_method_name = duplicate_impl_precheck_str(
+                    undo.method_name)
+                let rebound = registered_impl_method_scheme(
+                    ctx, lookup_target_type, lookup_trait_name,
+                    lookup_origin, lookup_method_name)
+                let target_type = duplicate_impl_precheck_str(undo.target_type)
+                let trait_name = duplicate_impl_precheck_trait_name(
+                    undo.trait_name)
+                let origin = duplicate_impl_precheck_str(undo.origin)
+                let method_name = duplicate_impl_precheck_str(undo.method_name)
+                let previous_scheme = undo.previous_scheme
+                let span = duplicate_impl_precheck_span(undo.span)
+                result.push(ImplEffectPrecheckCommit {
+                    target_type: target_type,
+                    trait_name: trait_name,
+                    origin: origin,
+                    method_name: method_name,
+                    scheme: impl_effect_precheck_projection(
+                        previous_scheme, rebound),
+                    span: span
+                })
+            },
+            none => panic("unreachable: missing impl effect precheck commit")
+        }
+        index = index + 1
+    }
+    result
+}
+
+fn publish_impl_effect_precheck_commits(
+    mut ctx: InferCtx, commits: List<ImplEffectPrecheckCommit>
+) {
+    for commit in commits {
+        let target_type = duplicate_impl_precheck_str(commit.target_type)
+        let trait_name = duplicate_impl_precheck_trait_name(commit.trait_name)
+        let origin = duplicate_impl_precheck_str(commit.origin)
+        let method_name = duplicate_impl_precheck_str(commit.method_name)
+        let scheme = commit.scheme
+        let span = duplicate_impl_precheck_span(commit.span)
+        store_rebound_impl_method_scheme(
+            ctx, target_type, trait_name, origin,
+            method_name, scheme, span)
+    }
 }
 
 fn check_impl_decl_with_trait_firebreak(
@@ -1240,7 +1812,8 @@ fn check_impl_fn_method_firebreak(
     params: List<Param>, return_type: TypeExpr?,
     declared_effects: List<EffectExpr>?, body: Expr,
     is_pub: Bool, span: Span, self_type: Type,
-    registration_scheme: TypeScheme, rebind_identity: Str
+    registration_scheme: TypeScheme, rebind_identity: Str,
+    registration_type_param_offset: Int
 ) -> HDecl {
     let current_name = name
     let current_type_params = type_params
@@ -1252,11 +1825,14 @@ fn check_impl_fn_method_firebreak(
     let current_self_type = self_type
     let current_registration_scheme = registration_scheme
     let current_rebind_identity = rebind_identity
+    let current_registration_type_param_offset =
+        registration_type_param_offset
     check_fn_decl(
         ctx, current_name, current_type_params, current_params,
         current_return_type, current_declared_effects, current_body,
         is_pub, current_span, some(current_self_type),
-        some(current_registration_scheme), some(current_rebind_identity))
+        some(current_registration_scheme), some(current_rebind_identity),
+        current_registration_type_param_offset)
 }
 
 fn insert_impl_fn_mut_flags_firebreak(
@@ -1271,12 +1847,12 @@ fn store_rebound_impl_method_scheme_firebreak(
     mut ctx: InferCtx, target_type: Str, trait_name: Str?,
     origin: Str, method_name: Str, scheme: TypeScheme, span: Span
 ) {
-    let current_target_type = target_type
-    let current_trait_name = trait_name
-    let current_origin = origin
-    let current_method_name = method_name
+    let current_target_type = duplicate_impl_precheck_str(target_type)
+    let current_trait_name = duplicate_impl_precheck_trait_name(trait_name)
+    let current_origin = duplicate_impl_precheck_str(origin)
+    let current_method_name = duplicate_impl_precheck_str(method_name)
     let current_scheme = scheme
-    let current_span = span
+    let current_span = duplicate_impl_precheck_span(span)
     store_rebound_impl_method_scheme(
         ctx, current_target_type, current_trait_name, current_origin,
         current_method_name, current_scheme, current_span)
@@ -1288,6 +1864,27 @@ fn impl_trait_name_view_firebreak(trait_name: Str?) -> Str? {
 }
 
 fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
+    let target_for_pending = target_type
+    let target_for_drop_check = target_type
+    let target_for_recovery = target_type
+    let target_for_origin = target_type
+    let target_for_struct_lookup = target_type
+    let target_for_enum_lookup = target_type
+    let target_for_generic_self = target_type
+    let target_for_plain_self = target_type
+    let target_for_extern_registration = target_type
+    let target_for_fn_registration = target_type
+    let target_for_qualified_key = target_type
+    let target_for_rebound_store = target_type
+    let target_for_trait_impl_lookup = target_type
+    let target_for_drop_display = target_type
+    let target_for_clone_display = target_type
+    let target_for_result = target_type
+    if !ctx.impl_effect_precheck_active {
+        set_impl_precheck_methods_pending(
+            ctx, target_for_pending, type_params, trait_name, methods, span,
+            false)
+    }
     let trait_name_for_drop_check =
         impl_trait_name_view_firebreak(trait_name)
     let trait_name_for_recovery =
@@ -1312,16 +1909,17 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
     // deliberately publishes neither an ImplEntry nor method origins.  Do
     // not try to retrieve those absent schemes during body checking.
     if is_authoritative_drop &&
-       (!direct_drop_target_has_codegen_glue(ctx, target_type) ||
+       (!direct_drop_target_has_codegen_glue(ctx, target_for_drop_check) ||
         first_impl_trait_bound_span(type_params).is_some()) {
         return HDecl::Impl {
-            target_type: target_type, type_params: type_params,
+            target_type: target_for_recovery, type_params: type_params,
             trait_name: trait_name_for_recovery,
             methods: [], assoc_types: [], span: span
         }
     }
     let origin = impl_decl_origin(
-        target_type, trait_name_for_origin, type_params, span)
+        target_for_origin,
+        trait_name_for_origin, type_params, span)
     let saved_tp_scope = map_clone(ctx.type_param_scope)
     let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     for tp in type_params {
@@ -1338,15 +1936,15 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
                 none => impl_tp_types.push(ctx.env.fresh_var())
             }
         }
-        match ctx.env.types.structs.get(target_type) {
+        match ctx.env.types.structs.get(target_for_struct_lookup) {
             some(def) => Type::StructType { name: def.name, type_params: impl_tp_types },
-            none => match ctx.env.types.enums.get(target_type) {
+            none => match ctx.env.types.enums.get(target_for_enum_lookup) {
                 some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types },
-                none => resolve_self_type(ctx, target_type)
+                none => resolve_self_type(ctx, target_for_generic_self)
             }
         }
     } else {
-        resolve_self_type(ctx, target_type)
+        resolve_self_type(ctx, target_for_plain_self)
     }
 
     // Inject Self into type_param_scope so Self::Item resolves in impl methods
@@ -1471,7 +2069,8 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
         match method {
             Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } => {
                 let registration_scheme = registered_impl_method_scheme_firebreak(
-                    ctx, target_type, trait_name_for_extern_registration,
+                    ctx, target_for_extern_registration,
+                    trait_name_for_extern_registration,
                     origin, name)
                 hmethods.push(check_impl_extern_method_firebreak(
                     ctx, name, mtps, params, declared_effects,
@@ -1479,39 +2078,59 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
             },
             Decl::Fn { name, type_params: mtps, params, return_type, declared_effects, body, is_pub, span: mspan, .. } => {
                 let registration_scheme = registered_impl_method_scheme_firebreak(
-                    ctx, target_type, trait_name_for_fn_registration,
+                    ctx, target_for_fn_registration,
+                    trait_name_for_fn_registration,
                     origin, name)
                 let rebind_identity = impl_method_origin(origin, name)
-                let hdecl = check_impl_fn_method_firebreak(
+                let checked_method = some(check_impl_fn_method_firebreak(
                     ctx, name, mtps, params, return_type, declared_effects,
                     body, is_pub, mspan, impl_self_type,
-                    registration_scheme, rebind_identity)
-                // #210: Also register fn_mut_params with qualified key for cross-module export.
-                // check_fn_decl inserts with unqualified `name`; exports.ring looks up
-                // with "${target_type}_${mname}", so we mirror that key here.
-                let qual_key = "${target_type}_${name}"
-                match ctx.fn_mut_params.get(name) {
-                    some(flags) => insert_impl_fn_mut_flags_firebreak(
-                        ctx, qual_key, flags),
-                    none => {}
-                }
-                match hdecl {
-                    HDecl::Fn {
-                        name: mname, params: mparams,
-                        return_type: mret, effects: meffects,
-                        span: checked_span, ..
-                    } => {
-                        let rebound = rebind_checked_fn_scheme(
-                            ctx, rebind_identity, registration_scheme,
-                            mparams, mret, meffects, checked_span)
-                        store_rebound_impl_method_scheme_firebreak(
-                            ctx, target_type, trait_name_for_rebound_store,
-                            origin,
-                            mname, rebound, checked_span)
+                    registration_scheme, rebind_identity,
+                    type_params.len())) catch { _ => none }
+                match checked_method {
+                    some(hdecl) => {
+                        let hdecl_for_rebind = hdecl
+                        let hdecl_for_hir = hdecl
+                        // #210: Also register fn_mut_params with qualified key for cross-module export.
+                        // check_fn_decl inserts with unqualified `name`; exports.ring looks up
+                        // with "${target_type}_${mname}", so we mirror that key here.
+                        let qual_key = "${target_for_qualified_key}_${name}"
+                        match ctx.fn_mut_params.get(name) {
+                            some(flags) => insert_impl_fn_mut_flags_firebreak(
+                                ctx, qual_key, flags),
+                            none => {}
+                        }
+                        match hdecl_for_rebind {
+                            HDecl::Fn {
+                                name: mname, params: mparams,
+                                return_type: mret, effects: meffects,
+                                span: checked_span, ..
+                            } => {
+                                let rebound = rebind_checked_fn_scheme(
+                                    ctx, rebind_identity,
+                                    registration_scheme,
+                                    mparams, mret, meffects, checked_span)
+                                store_rebound_impl_method_scheme_firebreak(
+                                    ctx, target_for_rebound_store,
+                                    trait_name_for_rebound_store, origin,
+                                    mname, rebound, checked_span)
+                            },
+                            _ => {}
+                        }
+                        hmethods.push(hdecl_for_hir)
                     },
-                    _ => {}
+                    none => {
+                        if ctx.impl_effect_precheck_active {
+                            // Continue through the impl so later method headers
+                            // can seed an earlier peer that failed on an omitted
+                            // default.  The enclosing impl remains blocked and
+                            // commits no body/effect summaries this round.
+                            ctx.impl_effect_precheck_blocked = true
+                        } else {
+                            fail.raise(CompileError {})
+                        }
+                    }
                 }
-                hmethods.push(hdecl)
             },
             Decl::Delegate { .. } => {},  // Handled at check_one_decl level
             Decl::AssocType { .. } => {},  // Already handled above
@@ -1532,7 +2151,8 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
                 let mut has_authoritative_clone = false
                 match (
                     ctx.env.trait_reg.authoritative_clone_def_id,
-                    ctx.env.trait_reg.trait_impls.get(target_type)) {
+                    ctx.env.trait_reg.trait_impls.get(
+                        target_for_trait_impl_lookup)) {
                     (some(clone_def_id), some(impls)) => {
                         for impl_ in impls {
                             match ctx.env.trait_reg.traits.get(
@@ -1548,7 +2168,8 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
                     _ => {}
                 }
                 if has_authoritative_clone {
-                    let target_display = nominal_display_name(target_type)
+                    let target_display = nominal_display_name(
+                        target_for_drop_display)
                     let _ = type_error(ctx.sink, E0802,
                         "type '${target_display}' cannot implement both Drop and Clone",
                         span, DiagnosticContext::TraitError { detail: "Drop and Clone are mutually exclusive" })
@@ -1585,7 +2206,8 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
             if is_authoritative_clone {
                 if type_may_own(
                         ctx.env.types.ownership_metadata, impl_self_type) {
-                    let target_display = nominal_display_name(target_type)
+                    let target_display = nominal_display_name(
+                        target_for_clone_display)
                     let _ = type_error(ctx.sink, E0802,
                         "owner-bearing type '${target_display}' cannot implement Clone",
                         span, DiagnosticContext::TraitError { detail: "Clone cannot duplicate a direct or transitively contained Drop value" })
@@ -1598,7 +2220,7 @@ fn check_impl_decl_canonical(mut ctx: InferCtx, target_type: Str, type_params: L
     ctx.current_fn_bounds = saved_impl_bounds
     ctx.type_param_scope = saved_tp_scope
     ctx.qualified_assoc_scope = saved_qualified_assoc
-    HDecl::Impl { target_type: target_type, type_params: type_params,
+    HDecl::Impl { target_type: target_for_result, type_params: type_params,
         trait_name: trait_name_for_result, methods: hmethods,
         assoc_types: hassoc_types, span: span }
 }
@@ -2435,7 +3057,8 @@ fn some_trait_ast_params_firebreak(params: List<Param>) -> List<Param>? {
 
 fn append_trait_param_firebreak(
     mut hparams: List<HParam>, name: Str, ty: Type,
-    is_mutable: Bool, ownership_metadata: OwnershipMetadata,
+    is_mutable: Bool, is_move: Bool,
+    ownership_metadata: OwnershipMetadata,
     fn_ownership: Int, param_index: Int, def_id: Int
 ) {
     let current_name = name
@@ -2444,8 +3067,12 @@ fn append_trait_param_firebreak(
     hparams.push(HParam {
         name: current_name, ty: current_type,
         def_id: some(current_def_id),
-        flags: hparam_flags(is_mutable, callable_param_ownership(
-            ownership_metadata, fn_ownership, param_index))
+        flags: hparam_flags_with_force(is_mutable, if is_move {
+            PARAM_OWNERSHIP_MOVE
+        } else {
+            callable_param_ownership(
+                ownership_metadata, fn_ownership, param_index)
+        }, is_move)
     })
 }
 
@@ -2653,9 +3280,16 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
                 some(aps) => match aps.get(pi) { some(ap) => ap.is_mutable, none => false },
                 none => false
             }
+            let p_move = match ast_params {
+                some(aps) => match aps.get(pi) {
+                    some(ap) => ap.is_move,
+                    none => false
+                },
+                none => false
+            }
             let p_def_id = ctx.env.fresh_def_id()
             append_trait_param_firebreak(
-                hparams, p_name, param_type, p_mutable,
+                hparams, p_name, param_type, p_mutable, p_move,
                 ctx.env.types.ownership_metadata, fn_ownership, pi,
                 p_def_id)
             pi = pi + 1
@@ -2892,8 +3526,10 @@ fn check_extern_fn_decl(
         // forward must distinguish `mut T` from `T`.
         hparams.push(HParam {
             name: p.name, ty: ptype, def_id: none,
-            flags: hparam_flags(p.is_mutable, callable_param_ownership(
-                ctx.env.types.ownership_metadata, ownership, i))
+            flags: hparam_flags_with_force(
+                p.is_mutable, callable_param_ownership(
+                    ctx.env.types.ownership_metadata, ownership, i),
+                p.is_move)
         })
         i = i + 1
     }
@@ -3522,6 +4158,7 @@ fn check_fn_decl_transaction_firebreak(
     self_type: Type?,
     registration_override: TypeScheme?,
     rebind_identity: Str?,
+    registration_type_param_offset: Int,
     obligation_checkpoint: Int
 ) -> HDecl {
     let owner_name = name
@@ -3534,11 +4171,14 @@ fn check_fn_decl_transaction_firebreak(
     let owner_self_type = self_type
     let owner_registration = registration_override
     let owner_rebind_identity = rebind_identity
+    let owner_registration_type_param_offset =
+        registration_type_param_offset
     check_fn_decl_transaction(
         ctx, owner_name, owner_type_params, owner_params,
         owner_return_type, owner_declared_effects, owner_body,
         is_pub, owner_span, owner_self_type, owner_registration,
-        owner_rebind_identity, obligation_checkpoint)
+        owner_rebind_identity, owner_registration_type_param_offset,
+        obligation_checkpoint)
 }
 
 fn check_fn_decl(
@@ -3546,14 +4186,43 @@ fn check_fn_decl(
     params: List<Param>, return_type: TypeExpr?,
     declared_effects: List<EffectExpr>?, body: Expr,
     is_pub: Bool, span: Span, self_type: Type?,
-    registration_override: TypeScheme?, rebind_identity: Str?
+    registration_override: TypeScheme?, rebind_identity: Str?,
+    registration_type_param_offset: Int
 ) -> HDecl {
     let obligation_checkpoint = pending_dict_checkpoint(ctx)
+    let error_projection_name = name
+    let error_projection_registration = registration_override
+    let default_seed_owner_def_id = match registration_override {
+        some(scheme) => scheme.def_id,
+        none => match ctx.env.lookup(name) {
+            some(scheme) => scheme.def_id,
+            none => none
+        }
+    }
+    let default_authority_before = snapshot_default_authority_surface(ctx)
+    // A formal function body is an inference owner just like a const
+    // initializer. Any failure may occur before its local cleanup path (for
+    // example while inferring a default), so retain a complete reversible
+    // baseline while deliberately leaving emitted diagnostics intact.
+    let owner_transaction_before = snapshot_const_owner_transaction(ctx)
     let result = some(check_fn_decl_transaction_firebreak(
         ctx, name, type_params, params, return_type,
         declared_effects, body, is_pub, span, self_type,
         registration_override, rebind_identity,
+        registration_type_param_offset,
         obligation_checkpoint)) catch { _ => none }
+    let project_default_error =
+        ctx.pending_fn_default_error_rebinds.contains(
+            error_projection_name)
+    ctx.pending_fn_default_error_rebinds.remove(error_projection_name)
+    let pending_seed_authority = match default_seed_owner_def_id {
+        some(def_id) => match ctx.pending_fn_default_seed_values.get(def_id) {
+            some(defaults) => some(capture_default_authority_delta(
+                ctx, defaults, default_authority_before)),
+            none => none
+        },
+        none => none
+    }
     match result {
         some(hdecl) => {
             assert_pending_dict_owner_closed(ctx, obligation_checkpoint)
@@ -3561,6 +4230,30 @@ fn check_fn_decl(
             checked_decl
         },
         none => {
+            restore_const_owner_transaction(
+                ctx, owner_transaction_before)
+            reapply_pending_fn_default_seeds(ctx)
+            match pending_seed_authority {
+                some(capture) => merge_default_authority_capture(ctx, capture),
+                none => {}
+            }
+            if project_default_error {
+                let recovery_registration = error_projection_registration
+                let recovery_scheme = if recovery_registration.is_some() {
+                    some(recovery_registration.unwrap())
+                } else {
+                    ctx.env.lookup(error_projection_name)
+                }
+                match recovery_scheme {
+                    some(scheme) => ctx.env.rebind(
+                        error_projection_name, TypeScheme {
+                            ty: Type::ErrorType,
+                            type_vars: [], bounds: [],
+                            def_id: scheme.def_id
+                        }),
+                    none => {}
+                }
+            }
             rollback_pending_dicts(ctx, obligation_checkpoint)
             fail.raise(CompileError {})
         }
@@ -3645,17 +4338,278 @@ fn is_mut_value_param_type_firebreak(
     is_value_type(apply_subst(ctx.subst, exact_param_type))
 }
 
+fn build_default_owner_registration_mapping(
+    ctx: InferCtx, fn_name: Str, registration_scheme: TypeScheme?,
+    type_params: List<TypeParam>, checked_params: List<HParam>,
+    checked_return: Type, checked_effects: EffectRow,
+    registration_type_param_offset: Int
+) -> Map<Int, Type> {
+    let mut mapping: Map<Int, Type> = map_new()
+    let mut conflicts: Set<Int> = set_new()
+    match registration_scheme {
+        some(scheme) => {
+            // Declared owner variables have stable positional identity even
+            // when one is absent from the callable surface and appears only
+            // inside a default expression.
+            let mut type_param_index = 0
+            for type_param in type_params {
+                match (ctx.type_param_scope.get(type_param.name),
+                       scheme.type_vars.get(
+                           registration_type_param_offset +
+                           type_param_index)) {
+                    (some(checked_owner), some(registration_id)) => {
+                        let resolved_owner = apply_subst(
+                            ctx.subst, checked_owner)
+                        match resolved_owner {
+                            Type::TypeVar { id: checked_id, .. } =>
+                                record_check_registration_mapping_firebreak(
+                                    ctx.env.types.ownership_metadata,
+                                    checked_id,
+                                    Type::TypeVar {
+                                        id: registration_id, name: none
+                                    },
+                                    mapping, conflicts),
+                            _ => {}
+                        }
+                    },
+                    _ => {}
+                }
+                type_param_index = type_param_index + 1
+            }
+
+            match scheme.ty {
+                Type::FnType {
+                    params: registration_params,
+                    return_type: registration_return,
+                    meta: registration_meta
+                } => {
+                    let mut param_index = 0
+                    for checked_param in checked_params {
+                        match registration_params.get(param_index) {
+                            some(registration_param) =>
+                                build_registration_check_mapping_firebreak(
+                                    ctx.env.types.ownership_metadata,
+                                    checked_param.ty, registration_param,
+                                    mapping, conflicts),
+                            none => {}
+                        }
+                        param_index = param_index + 1
+                    }
+                    build_registration_check_mapping_firebreak(
+                        ctx.env.types.ownership_metadata,
+                        checked_return, registration_return,
+                        mapping, conflicts)
+                    build_effect_var_mapping(
+                        ctx.env.types.ownership_metadata,
+                        checked_effects, registration_meta.effects,
+                        mapping, conflicts)
+                },
+                _ => {}
+            }
+
+            // Associated-type variables may live only in SchemeBounds. Their
+            // exact owner mapping was captured while the function scope was
+            // still live by check_fn_body.
+            match ctx.rebind_assoc_provenance.get(fn_name) {
+                some(entries) => {
+                    for entry in entries {
+                        match (entry.check_type, entry.registration_type) {
+                            (Type::TypeVar { id: checked_id, .. },
+                             some(registration_type)) =>
+                                record_check_registration_mapping_firebreak(
+                                    ctx.env.types.ownership_metadata,
+                                    checked_id, registration_type,
+                                    mapping, conflicts),
+                            _ => {}
+                        }
+                    }
+                },
+                none => {}
+            }
+        },
+        none => {}
+    }
+    for conflict in conflicts { mapping.remove(conflict) }
+    mapping
+}
+
+fn collect_default_local_var_bounds(
+    ctx: InferCtx, defaults: List<HExpr>, registration_scheme: TypeScheme?
+) -> Map<Int, Set<Str>> {
+    let mut owner_vars: Set<Int> = set_new()
+    match registration_scheme {
+        some(scheme) => {
+            for var_id in scheme.type_vars { owner_vars.insert(var_id) }
+            for var_id in free_type_vars(scheme.ty, empty_subst()) {
+                owner_vars.insert(var_id)
+            }
+            for bound in scheme.bounds {
+                owner_vars.insert(bound.type_var)
+                for constraint in bound.assoc_constraints {
+                    for var_id in free_type_vars(
+                            constraint.ty, empty_subst()) {
+                        owner_vars.insert(var_id)
+                    }
+                }
+            }
+        },
+        none => {}
+    }
+    let mut result: Map<Int, Set<Str>> = map_new()
+    let template_vars = default_template_var_ids(defaults)
+    for var_id in template_vars {
+        if !owner_vars.contains(var_id) {
+            match ctx.env.scope.var_bounds.get(var_id) {
+                some(bounds) => result.insert(var_id, set_clone(bounds)),
+                none => {}
+            }
+        }
+    }
+    result
+}
+
 fn publish_fn_defaults_firebreak(
     mut ctx: InferCtx,
-    name: Str,
+    owner_def_id: Int?,
     defaults: List<HExpr>,
+    local_var_bounds: Map<Int, Set<Str>>,
     min_arity: Int
 ) {
-    let name_for_defaults = name
-    let name_for_min_arity = name
-    let exact_defaults = defaults
-    ctx.fn_defaults.insert(name_for_defaults, exact_defaults)
-    ctx.fn_min_arity.insert(name_for_min_arity, min_arity)
+    match owner_def_id {
+        some(def_id) => {
+            let id_for_defaults = def_id
+            let id_for_bounds = def_id
+            let id_for_min_arity = def_id
+            let exact_defaults = defaults
+            ctx.fn_defaults.insert(id_for_defaults, exact_defaults)
+            ctx.fn_default_var_bounds.insert(id_for_bounds, local_var_bounds)
+            ctx.fn_min_arity.insert(id_for_min_arity, min_arity)
+        },
+        none => {}
+    }
+}
+
+fn default_owner_def_id_for_name(ctx: InferCtx, name: Str) -> Int? {
+    match ctx.env.lookup(name) {
+        some(scheme) => scheme.def_id,
+        none => none
+    }
+}
+
+fn default_values_for_name(ctx: InferCtx, name: Str) -> List<HExpr>? {
+    match default_owner_def_id_for_name(ctx, name) {
+        some(def_id) => ctx.fn_defaults.get(def_id),
+        none => none
+    }
+}
+
+fn restore_fn_default_metadata_firebreak(
+    mut ctx: InferCtx,
+    defaults: Map<Int, List<HExpr>>,
+    local_var_bounds: Map<Int, Map<Int, Set<Str>>>,
+    min_arities: Map<Int, Int>
+) {
+    ctx.fn_defaults = defaults
+    ctx.fn_default_var_bounds = local_var_bounds
+    ctx.fn_min_arity = min_arities
+}
+
+fn store_pending_fn_default_seed(
+    mut ctx: InferCtx, owner_def_id: Int?
+) {
+    match owner_def_id {
+        some(def_id) => match (
+            ctx.fn_defaults.get(def_id),
+            ctx.fn_default_var_bounds.get(def_id),
+            ctx.fn_min_arity.get(def_id)
+        ) {
+            (some(values), some(bounds), some(min_arity)) => {
+                let seed_values = values
+                let seed_bounds = bounds
+                ctx.pending_fn_default_seed_values.insert(def_id, seed_values)
+                ctx.pending_fn_default_seed_var_bounds.insert(def_id, seed_bounds)
+                ctx.pending_fn_default_seed_min_arities.insert(
+                    def_id, min_arity)
+            },
+            _ => {}
+        },
+        none => {}
+    }
+}
+
+fn clear_pending_fn_default_seed(
+    mut ctx: InferCtx, owner_def_id: Int?
+) {
+    match owner_def_id {
+        some(def_id) => {
+            ctx.pending_fn_default_seed_values.remove(def_id)
+            ctx.pending_fn_default_seed_var_bounds.remove(def_id)
+            ctx.pending_fn_default_seed_min_arities.remove(def_id)
+        },
+        none => {}
+    }
+}
+
+fn reapply_pending_fn_default_seeds(mut ctx: InferCtx) {
+    for entry in ctx.pending_fn_default_seed_values.entries() {
+        let (def_id, values) = entry
+        let seed_values = values
+        match (
+            ctx.pending_fn_default_seed_var_bounds.get(def_id),
+            ctx.pending_fn_default_seed_min_arities.get(def_id)
+        ) {
+            (some(bounds), some(min_arity)) => {
+                let seed_bounds = bounds
+                ctx.fn_defaults.insert(def_id, seed_values)
+                ctx.fn_default_var_bounds.insert(def_id, seed_bounds)
+                ctx.fn_min_arity.insert(def_id, min_arity)
+            },
+            _ => panic(
+                "unreachable: pending function default seed is incomplete")
+        }
+    }
+}
+
+fn finalize_pending_fn_default_seeds(mut ctx: InferCtx) {
+    let seed_count = ctx.pending_fn_default_seed_values.entries().len()
+    if seed_count != ctx.pending_fn_default_seed_var_bounds.entries().len() ||
+       seed_count != ctx.pending_fn_default_seed_min_arities.entries().len() {
+        panic("unreachable: pending function default seed maps diverged")
+    }
+    if seed_count == 0 { return }
+    if !ctx.sink.has_errors() {
+        panic("unreachable: valid program retained pending function default seeds")
+    }
+    // Error recovery may skip an owner whose registration failed.  Its retry
+    // seed is not part of retained HIR and must not survive into freeze.
+    let mut stale_ids: List<Int> = []
+    for entry in ctx.pending_fn_default_seed_values.entries() {
+        stale_ids.push(entry.0)
+    }
+    for def_id in stale_ids {
+        ctx.fn_defaults.remove(def_id)
+        ctx.fn_default_var_bounds.remove(def_id)
+        ctx.fn_min_arity.remove(def_id)
+    }
+    ctx.pending_fn_default_seed_values.clear()
+    ctx.pending_fn_default_seed_var_bounds.clear()
+    ctx.pending_fn_default_seed_min_arities.clear()
+}
+
+fn preliminary_default_owner_effects(
+    registration_scheme: TypeScheme?,
+    declared_effects: EffectRow?
+) -> EffectRow {
+    match declared_effects {
+        some(row) => row,
+        none => match registration_scheme {
+            some(scheme) => match scheme.ty {
+                Type::FnType { meta, .. } => meta.effects,
+                _ => EMPTY_ROW
+            },
+            none => EMPTY_ROW
+        }
+    }
 }
 
 fn check_fn_decl_transaction(
@@ -3664,14 +4618,26 @@ fn check_fn_decl_transaction(
     declared_effects: List<EffectExpr>?, body: Expr,
     is_pub: Bool, span: Span, self_type: Type?,
     registration_override: TypeScheme?, rebind_identity: Str?,
+    registration_type_param_offset: Int,
     obligation_checkpoint: Int
 ) -> HDecl {
-    // This check owns the declaration's default metadata. Clear both halves
-    // before entering transient scopes so impl-method seeds or earlier SCC
-    // prechecks with the same spelling cannot leak into this owner.
-    ctx.fn_defaults.remove(name)
-    ctx.fn_min_arity.remove(name)
-
+    let name_for_registration_lookup = name
+    let name_for_provenance_key = name
+    let name_for_default_marker = name
+    let name_for_error_rebind = name
+    let name_for_main_equality = name
+    let name_for_main_suffix = name
+    let name_for_mut_params = name
+    let final_name = name
+    // This check owns the declaration's default metadata. Keep an atomic
+    // snapshot so a failed retained check cannot erase the last authoritative
+    // precheck summary. The current owner installs its own normalized triple
+    // before checking the body, which lets direct recursion use omitted
+    // defaults without observing a stale same-spelled owner.
+    let fn_defaults_before = map_clone(ctx.fn_defaults)
+    let fn_default_var_bounds_before = map_clone(
+        ctx.fn_default_var_bounds)
+    let fn_min_arity_before = map_clone(ctx.fn_min_arity)
     // Save the registration scheme before entering the parameter scope: a
     // parameter is allowed to have the same spelling as its function.
     let registration_scheme = match registration_override {
@@ -3679,7 +4645,19 @@ fn check_fn_decl_transaction(
             let exact_registration = scheme
             some(exact_registration)
         },
-        none => ctx.env.lookup(name)
+        none => ctx.env.lookup(name_for_registration_lookup)
+    }
+    let default_owner_def_id = match registration_scheme {
+        some(scheme) => scheme.def_id,
+        none => none
+    }
+    match default_owner_def_id {
+        some(def_id) => {
+            ctx.fn_defaults.remove(def_id)
+            ctx.fn_default_var_bounds.remove(def_id)
+            ctx.fn_min_arity.remove(def_id)
+        },
+        none => {}
     }
     let registration_for_ownership = registration_scheme
     let ownership_contract = match registration_for_ownership {
@@ -3687,7 +4665,6 @@ fn check_fn_decl_transaction(
         none => CALLABLE_BORROW_OWNED
     }
     let rebind_identity_for_key = rebind_identity
-    let name_for_provenance_key = name
     let provenance_key = match rebind_identity_for_key {
         some(identity) => identity,
         none => name_for_provenance_key
@@ -3809,10 +4786,13 @@ fn check_fn_decl_transaction(
         let ptype_for_hparam = ptype
         hparams.push(HParam {
             name: p.name, ty: ptype_for_hparam, def_id: param_def_id,
-            flags: hparam_flags(p.is_mutable,
+            flags: hparam_flags_with_force(p.is_mutable, if p.is_move {
+                PARAM_OWNERSHIP_MOVE
+            } else {
                 callable_param_ownership(
                     ctx.env.types.ownership_metadata,
-                    ownership_contract, ownership_param_index))
+                    ownership_contract, ownership_param_index)
+            }, p.is_move)
         })
         let ptype_for_param_types = ptype
         param_types.push(ptype_for_param_types)
@@ -3820,8 +4800,26 @@ fn check_fn_decl_transaction(
     }
 
     // B-069: Infer default value expressions and store in hparams
+    let mut has_declared_defaults = false
+    for param in params {
+        if param.default_value.is_some() { has_declared_defaults = true }
+    }
+    // Once a retained canonical owner enters default checking, any terminal
+    // failure must invalidate its preregistered callable scheme after the full
+    // owner transaction rolls back.  Otherwise later omitted calls reinterpret
+    // the same default as a required argument and cascade.  Speculative fn and
+    // impl prechecks never publish this recovery projection.
+    if has_declared_defaults && rebind_identity.is_none() &&
+       !ctx.discarded_fn_precheck_active &&
+       !ctx.impl_effect_precheck_active {
+        ctx.pending_fn_default_error_rebinds.insert(name_for_default_marker)
+    }
+    let default_authority_before = if has_declared_defaults {
+        some(snapshot_default_authority_surface(ctx))
+    } else { none }
     let mut default_hexprs: List<HExpr> = []
     let mut default_evidence_valid = true
+    let mut default_parameter_references_valid = true
     let mut min_arity = params.len()
     let mut pi = 0
     for p in params {
@@ -3850,13 +4848,46 @@ fn check_fn_decl_transaction(
                     },
                     none => {}
                 }
+                // Defaults are expanded into caller HIR.  A reference to a
+                // callee parameter would therefore be a dangling exact DefId;
+                // substituting the caller expression would also duplicate
+                // evaluation.  Keep this boundary explicit until call-site
+                // ANF can materialize preceding arguments exactly once.
+                let mut default_def_ids: Set<Int> = set_new()
+                collect_default_authority_expr(
+                    dv_result.hexpr, default_def_ids)
+                let mut references_param = false
+                for hparam in hparams {
+                    match hparam.def_id {
+                        some(param_def_id) => if default_def_ids.contains(
+                                param_def_id) {
+                            references_param = true
+                        },
+                        none => {}
+                    }
+                }
+                if references_param {
+                    let _ = type_error(ctx.sink, E0301,
+                        "Default parameter value for '${p.name}' cannot reference another parameter",
+                        p.span,
+                        DiagnosticContext::OtherContext {
+                            detail: some(
+                                "call-site defaults require independent expressions")
+                        })
+                    // Keep the owner alive until its transient function scope,
+                    // substitution and bound stacks have been restored below.
+                    default_parameter_references_valid = false
+                }
                 // Check that default value is pure (no effects)
-                let dv_effects = dv_result.effects
-                if dv_effects.effects.len() > 0 {
+                let dv_effects = apply_subst_row(
+                    ctx.subst, dv_result.effects)
+                if dv_effects.effects.len() > 0 ||
+                   dv_effects.tail.is_some() {
                     let _ = type_error(ctx.sink, E0404,
                         "Default parameter value for '${p.name}' must be a pure expression (no effects)",
                         p.span,
                         DiagnosticContext::OtherContext { detail: some("default parameter effect") })
+                    default_evidence_valid = false
                 }
                 register_default_bounded_callable_value_shadows(
                     ctx, dv_result.hexpr, ctx.subst)
@@ -3891,6 +4922,47 @@ fn check_fn_decl_transaction(
         none => none
     }
 
+    // Recursive calls in the owner body resolve defaults through the same
+    // global metadata path as every other call. Publish a provisional but
+    // registration-normalized template before entering the body; the final
+    // body substitution below replaces it atomically on success.
+    if default_hexprs.len() > 0 {
+        let preliminary_zctx = ZonkCtx {
+            subst: ctx.subst, names: map_new(),
+            dict_resolver: none,
+            ownership_metadata: some(ctx.env.types.ownership_metadata),
+            require_exact_ownership: false
+        }
+        let mut preliminary_defaults: List<HExpr> = []
+        for default in default_hexprs {
+            preliminary_defaults.push(zonk_expr(
+                preliminary_zctx, default))
+        }
+        let preliminary_effects = apply_subst_row(
+            ctx.subst,
+            preliminary_default_owner_effects(
+                registration_scheme, owner_declared_effects))
+        let preliminary_mapping =
+            build_default_owner_registration_mapping(
+                ctx, provenance_key, registration_scheme, type_params,
+                hparams, apply_subst(ctx.subst, expected_ret),
+                preliminary_effects,
+                registration_type_param_offset)
+        let mut normalized_preliminary_defaults: List<HExpr> = []
+        for default in preliminary_defaults {
+            normalized_preliminary_defaults.push(
+                rewrite_default_template_types(
+                    default, preliminary_mapping))
+        }
+        let preliminary_local_var_bounds =
+            collect_default_local_var_bounds(
+                ctx, normalized_preliminary_defaults,
+                registration_scheme)
+        publish_fn_defaults_firebreak(
+            ctx, default_owner_def_id, normalized_preliminary_defaults,
+            preliminary_local_var_bounds, min_arity)
+    }
+
     let try_result = some(
         check_fn_body_catch_firebreak(
             ctx, provenance_key, registration_scheme, type_params, hparams,
@@ -3905,8 +4977,10 @@ fn check_fn_decl_transaction(
     // types/effects here and preserve unresolved function-value provenance;
     // caller final-zonk resolves DictRefs with its substitution and bounds.
     let mut zonked_defaults: List<HExpr> = []
+    let mut default_local_var_bounds: Map<Int, Set<Str>> = map_new()
+    let mut default_authority_capture: DefaultAuthorityCapture? = none
     match try_result {
-        some(_) => {
+        some(checked_fn) => {
             let zctx_defaults = ZonkCtx {
                 subst: ctx.subst, names: map_new(),
                 dict_resolver: none,
@@ -3915,6 +4989,26 @@ fn check_fn_decl_transaction(
             }
             for dh in default_hexprs {
                 zonked_defaults.push(zonk_expr(zctx_defaults, dh))
+            }
+            let owner_mapping = build_default_owner_registration_mapping(
+                ctx, provenance_key, registration_scheme, type_params,
+                checked_fn.params, checked_fn.ret, checked_fn.eff,
+                registration_type_param_offset)
+            let mut normalized_defaults: List<HExpr> = []
+            for default in zonked_defaults {
+                normalized_defaults.push(rewrite_default_template_types(
+                    default, owner_mapping))
+            }
+            zonked_defaults = normalized_defaults
+            default_local_var_bounds = collect_default_local_var_bounds(
+                ctx, zonked_defaults, registration_scheme)
+            match default_authority_before {
+                some(before) => {
+                    default_authority_capture = some(
+                        capture_default_authority_delta(
+                            ctx, zonked_defaults, before))
+                },
+                none => {}
             }
         },
         none => {},
@@ -3939,13 +5033,47 @@ fn check_fn_decl_transaction(
 
     let fn_result = match try_result {
         some(r) => r,
-        none => fail.raise(CompileError {})
+        none => {
+            if default_parameter_references_valid &&
+               default_evidence_valid &&
+               (ctx.discarded_fn_precheck_active ||
+                ctx.impl_effect_precheck_active) {
+                store_pending_fn_default_seed(ctx, default_owner_def_id)
+            } else if !ctx.discarded_fn_precheck_active &&
+                      !ctx.impl_effect_precheck_active {
+                clear_pending_fn_default_seed(ctx, default_owner_def_id)
+            }
+            restore_fn_default_metadata_firebreak(
+                ctx, fn_defaults_before,
+                fn_default_var_bounds_before,
+                fn_min_arity_before)
+            fail.raise(CompileError {})
+        }
+    }
+    if !default_parameter_references_valid {
+        clear_pending_fn_default_seed(ctx, default_owner_def_id)
+        match default_authority_capture {
+            some(capture) => remove_default_authority_def_ids(
+                ctx, capture.def_ids),
+            none => {}
+        }
+        restore_fn_default_metadata_firebreak(
+            ctx, fn_defaults_before,
+            fn_default_var_bounds_before,
+            fn_min_arity_before)
+        fail.raise(CompileError {})
     }
     // Invalid default evidence has already produced its precise E0503.  Abort
     // only after restoring all transient owner scopes, and never publish the
     // shared fn_defaults value that carried caller-owned inference variables.
     let registration_for_error_rebind = registration_scheme
     if !default_evidence_valid {
+        clear_pending_fn_default_seed(ctx, default_owner_def_id)
+        match default_authority_capture {
+            some(capture) => remove_default_authority_def_ids(
+                ctx, capture.def_ids),
+            none => {}
+        }
         // Phase 1 has already made a top-level declaration visible to later
         // bodies.  Replace that preregistered scheme with ErrorType before
         // recovery continues: otherwise later calls reinterpret the omitted
@@ -3953,17 +5081,20 @@ fn check_fn_decl_transaction(
         // failures.  Impl methods use their origin-keyed registration path and
         // are rolled back by the enclosing impl owner, so do not rebind an
         // unrelated same-spelled global here.
-        if rebind_identity.is_none() {
+        if rebind_identity.is_none() &&
+           !ctx.discarded_fn_precheck_active {
             match registration_for_error_rebind {
-                some(scheme) => ctx.env.rebind(name, TypeScheme {
-                    ty: Type::ErrorType,
-                    type_vars: [],
-                    bounds: [],
-                    def_id: scheme.def_id
-                }),
+                some(_) => {
+                    ctx.pending_fn_default_error_rebinds.insert(
+                        name_for_error_rebind)
+                },
                 none => {}
             }
         }
+        restore_fn_default_metadata_firebreak(
+            ctx, fn_defaults_before,
+            fn_default_var_bounds_before,
+            fn_min_arity_before)
         fail.raise(CompileError {})
     }
     let final_params = fn_result.params
@@ -3975,7 +5106,8 @@ fn check_fn_decl_transaction(
     // io/fail/mut are allowed (io is implicit, fail has default handler, mut is Cell-based),
     // but CustomEffect requires an explicit handler and cannot propagate past main.
     // Exception: effects where all ops have default handlers are allowed (auto-injected evidence).
-    if name == "main" || name.ends_with("$$_main") {
+    if name_for_main_equality == "main" ||
+       name_for_main_suffix.ends_with("$$_main") {
         for eff in final_effects.effects {
             match eff {
                 Effect::CustomEffect { name: eff_name, .. } => {
@@ -4031,16 +5163,20 @@ fn check_fn_decl_transaction(
         }
         fi = fi + 1
     }
-    let name_for_mut_params = name
     ctx.fn_mut_params.insert(name_for_mut_params, mut_flags)
 
     // B-069: Register default parameter info for call-site expansion
     if zonked_defaults.len() > 0 {
+        match default_authority_capture {
+            some(capture) => merge_default_authority_capture(ctx, capture),
+            none => {}
+        }
         publish_fn_defaults_firebreak(
-            ctx, name, zonked_defaults, min_arity)
+            ctx, default_owner_def_id, zonked_defaults,
+            default_local_var_bounds, min_arity)
     }
+    clear_pending_fn_default_seed(ctx, default_owner_def_id)
 
-    let final_name = name
     let final_span = span
     HDecl::Fn {
         name: final_name, def_id: fn_def_id, type_params: type_params,
@@ -4115,9 +5251,9 @@ fn expand_checked_delegate_impls_firebreak(
 
 fn check_one_decl(
     mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?,
-    mut hdecls: List<HDecl>
+    mut hdecls: List<HDecl>, const_owners: ConstOwnerCache?
 ) {
-    let hd = check_decl(ctx, decl, frame_decl_index)
+    let hd = check_decl(ctx, decl, frame_decl_index, const_owners)
 
     // Update fn effects before push (modifies ctx.env, not hdecls)
     match hd {
@@ -4172,9 +5308,9 @@ fn check_one_decl(
 // so that subsequent callers (in SCC topological order) see correct return types.
 fn check_one_decl_with_rebind(
     mut ctx: InferCtx, decl: Decl, frame_decl_index: Int?,
-    mut hdecls: List<HDecl>
+    mut hdecls: List<HDecl>, const_owners: ConstOwnerCache?
 ) {
-    let hd = check_decl(ctx, decl, frame_decl_index)
+    let hd = check_decl(ctx, decl, frame_decl_index, const_owners)
 
     // Update fn effects and rebind resolved types
     match hd {
@@ -4245,7 +5381,7 @@ fn precheck_one_decl_with_rebind_firebreak(
     let precheck_decl = decl
     let precheck_index = decl_index
     check_one_decl_with_rebind(
-        ctx, precheck_decl, some(precheck_index), discarded)
+        ctx, precheck_decl, some(precheck_index), discarded, none)
 }
 
 fn precheck_inline_fn_in_mod_body(
@@ -4255,7 +5391,9 @@ fn precheck_inline_fn_in_mod_body(
     decls: List<Decl>,
     required_effects: List<EffectExpr>?,
     target_name: Str,
-    project_frame_active: Bool
+    project_frame_active: Bool,
+    default_authority_before: DefaultAuthorityCapture,
+    mut default_authority_captures: List<DefaultAuthorityCapture>
 ) -> Bool {
     if !project_frame_active {
         insert_mod_aliases(ctx, mod_name, decls, false)
@@ -4283,13 +5421,29 @@ fn precheck_inline_fn_in_mod_body(
                         precheck_one_decl_with_rebind_firebreak(
                             ctx, prefixed, decl_index,
                             discarded)) catch { _ => none }
-                    found = true
+                    match result {
+                        some(_) => {
+                            match default_values_for_name(ctx, target_name) {
+                                some(defaults) => {
+                                    default_authority_captures.push(
+                                        capture_default_authority_delta(
+                                            ctx, defaults,
+                                            default_authority_before))
+                                },
+                                none => {}
+                            }
+                            found = true
+                        },
+                        none => fail.raise(CompileError {})
+                    }
                 }
             },
             Decl::ModBlock { name, uses: nested_uses, decls: nested_decls, required_effects: nested_required, .. } => {
                 if !found && precheck_inline_fn_in_mod(
                     ctx, name, nested_uses, nested_decls,
-                    nested_required, target_name, decl_index) {
+                    nested_required, target_name, decl_index,
+                    default_authority_before,
+                    default_authority_captures) {
                     found = true
                 }
             },
@@ -4307,7 +5461,9 @@ fn precheck_inline_fn_in_mod(
     decls: List<Decl>,
     required_effects: List<EffectExpr>?,
     target_name: Str,
-    frame_decl_index: Int
+    frame_decl_index: Int,
+    default_authority_before: DefaultAuthorityCapture,
+    mut default_authority_captures: List<DefaultAuthorityCapture>
 ) -> Bool {
     let project_active = ctx.project_namespace_file_key.is_some()
     let mut entered_project_frame = false
@@ -4324,7 +5480,8 @@ fn precheck_inline_fn_in_mod(
     let prev_unsafe_allowed = ctx.mod_unsafe_allowed
     let result = precheck_inline_fn_in_mod_body(
         ctx, mod_name, uses, decls, required_effects,
-        target_name, project_active) catch { _ => {
+        target_name, project_active, default_authority_before,
+        default_authority_captures) catch { _ => {
             ctx.mod_unsafe_allowed = prev_unsafe_allowed
             let _ = ctx.mod_path_stack.pop()
             if entered_project_frame {
@@ -4342,7 +5499,9 @@ fn precheck_inline_fn_in_mod(
 }
 
 fn precheck_inline_fn(
-    mut ctx: InferCtx, decls: List<Decl>, target_name: Str
+    mut ctx: InferCtx, decls: List<Decl>, target_name: Str,
+    default_authority_before: DefaultAuthorityCapture,
+    mut default_authority_captures: List<DefaultAuthorityCapture>
 ) -> Bool {
     for decl_index in 0..decls.len() {
         let decl = decls.get(decl_index).unwrap()
@@ -4350,12 +5509,58 @@ fn precheck_inline_fn(
             Decl::ModBlock { name, uses, decls: mod_decls, required_effects, .. } => {
                 if precheck_inline_fn_in_mod(
                     ctx, name, uses, mod_decls, required_effects,
-                    target_name, decl_index) { return true }
+                    target_name, decl_index, default_authority_before,
+                    default_authority_captures) { return true }
             },
             _ => {}
         }
     }
     false
+}
+
+fn inline_fn_is_in_mod(
+    mod_name: Str, decls: List<Decl>, target_name: Str
+) -> Bool {
+    for decl_index in 0..decls.len() {
+        let source_decl = decls.get(decl_index)
+        if !source_decl.is_some() { continue }
+        let decl = source_decl.unwrap()
+        let mod_name_for_prefix = "${mod_name}"
+        let prefixed = prefix_decl_name(mod_name_for_prefix, decl)
+        match prefixed {
+            Decl::Fn { name, .. } => {
+                if name == target_name { return true }
+            },
+            Decl::ModBlock { name, decls: nested, .. } => {
+                let nested_name = "${name}"
+                let nested_decls = list_clone(nested)
+                let nested_target = "${target_name}"
+                if inline_fn_is_in_mod(
+                    nested_name, nested_decls, nested_target
+                ) {
+                    return true
+                }
+            },
+            _ => {}
+        }
+    }
+    false
+}
+
+fn inline_fn_owner_index(
+    decls: List<Decl>, target_name: Str
+) -> Int? {
+    for index in 0..decls.len() {
+        match decls.get(index) {
+            some(Decl::ModBlock { name, decls: nested, .. }) => {
+                if inline_fn_is_in_mod(name, nested, target_name) {
+                    return some(index)
+                }
+            },
+            _ => {}
+        }
+    }
+    none
 }
 
 fn collect_impl_scc_fn_names(
@@ -4428,9 +5633,1000 @@ fn precheck_top_level_fn_at(
         some(decl) => {
             let mut discarded: List<HDecl> = []
             let result = some(check_one_decl_with_rebind(
-                ctx, decl, none, discarded)) catch { _ => none }
+                ctx, decl, none, discarded, none)) catch { _ => none }
+            match result {
+                some(_) => {},
+                none => fail.raise(CompileError {})
+            }
         },
         none => {}
+    }
+}
+
+fn set_fn_precheck_pending(
+    mut ctx: InferCtx, name: Str, pending: Bool
+) {
+    match ctx.env.lookup(name) {
+        some(scheme) => match scheme.def_id {
+            some(def_id) => {
+                if pending {
+                    ctx.pending_precheck_callable_def_ids.insert(def_id)
+                } else {
+                    ctx.pending_precheck_callable_def_ids.remove(def_id)
+                }
+            },
+            none => {}
+        },
+        none => {}
+    }
+}
+
+fn collect_default_authority_optional_def_id(
+    def_id: Int?, mut result: Set<Int>
+) {
+    match def_id {
+        some(id) => { result.insert(id) },
+        none => {}
+    }
+}
+
+fn collect_default_authority_stmt(stmt: HStmt, mut result: Set<Int>) {
+    match stmt {
+        HStmt::Let { def_id, init, .. } |
+        HStmt::Var { def_id, init, .. } => {
+            collect_default_authority_optional_def_id(def_id, result)
+            collect_default_authority_expr(init, result)
+        },
+        HStmt::Assign { target, value, .. } => {
+            collect_default_authority_expr(target, result)
+            collect_default_authority_expr(value, result)
+        },
+        HStmt::ExprStmt { expr, .. } =>
+            collect_default_authority_expr(expr, result),
+        HStmt::Return { value, .. } => match value {
+            some(expr) => collect_default_authority_expr(expr, result),
+            none => {}
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_default_authority_expr(condition, result)
+            collect_default_authority_expr(body, result)
+        },
+        HStmt::ForIn {
+            def_id, destructure, iterable, body, ..
+        } => {
+            collect_default_authority_optional_def_id(def_id, result)
+            match destructure {
+                some(bindings) => {
+                    for binding in bindings {
+                        collect_default_authority_optional_def_id(
+                            binding.def_id, result)
+                    }
+                },
+                none => {}
+            }
+            collect_default_authority_expr(iterable, result)
+            collect_default_authority_expr(body, result)
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            for binding in bindings {
+                collect_default_authority_optional_def_id(
+                    binding.def_id, result)
+            }
+            collect_default_authority_expr(init, result)
+        },
+        HStmt::IfLet {
+            bindings, expr, then_block, else_block, ..
+        } => {
+            for binding in bindings { result.insert(binding.def_id) }
+            collect_default_authority_expr(expr, result)
+            collect_default_authority_expr(then_block, result)
+            match else_block {
+                some(block) => collect_default_authority_expr(block, result),
+                none => {}
+            }
+        },
+        HStmt::Drop { def_id, .. } => { result.insert(def_id) },
+        HStmt::Break { .. } | HStmt::Continue { .. } => {}
+    }
+}
+
+fn collect_default_authority_expr(expr: HExpr, mut result: Set<Int>) {
+    match expr {
+        HExpr::Ident { def_id, .. } =>
+            collect_default_authority_optional_def_id(def_id, result),
+        HExpr::BinOp { left, right, .. } => {
+            collect_default_authority_expr(left, result)
+            collect_default_authority_expr(right, result)
+        },
+        HExpr::UnaryOp { operand, .. } =>
+            collect_default_authority_expr(operand, result),
+        HExpr::Call {
+            callee, callee_def_id, callable_result_def_id, args, ..
+        } => {
+            collect_default_authority_optional_def_id(callee_def_id, result)
+            collect_default_authority_optional_def_id(
+                callable_result_def_id, result)
+            collect_default_authority_expr(callee, result)
+            for arg in args { collect_default_authority_expr(arg, result) }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            collect_default_authority_expr(receiver, result),
+        HExpr::StructLit { fields, spread, .. } |
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields {
+                collect_default_authority_expr(field.value, result)
+            }
+            match spread {
+                some(value) => collect_default_authority_expr(value, result),
+                none => {}
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_default_authority_expr(scrutinee, result)
+            for arm in arms {
+                for binding in arm.bindings { result.insert(binding.def_id) }
+                match arm.guard {
+                    some(guard) => collect_default_authority_expr(guard, result),
+                    none => {}
+                }
+                collect_default_authority_expr(arm.body, result)
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            collect_default_authority_expr(body, result)
+            for arm in arms {
+                for binding in arm.bindings { result.insert(binding.def_id) }
+                match arm.guard {
+                    some(guard) => collect_default_authority_expr(guard, result),
+                    none => {}
+                }
+                collect_default_authority_expr(arm.body, result)
+            }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts { collect_default_authority_stmt(stmt, result) }
+            match tail {
+                some(value) => collect_default_authority_expr(value, result),
+                none => {}
+            }
+        },
+        HExpr::IfExpr {
+            condition, then_branch, else_branch, ..
+        } => {
+            collect_default_authority_expr(condition, result)
+            collect_default_authority_expr(then_branch, result)
+            match else_branch {
+                some(branch) => collect_default_authority_expr(branch, result),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(value) =>
+                        collect_default_authority_expr(value, result),
+                    HStringInterpPart::Literal(_) => {}
+                }
+            }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            collect_default_authority_expr(body, result)
+            for handler in handlers {
+                for param in handler.params {
+                    collect_default_authority_optional_def_id(
+                        param.def_id, result)
+                }
+                match handler.resume_binding {
+                    some(binding) => { result.insert(binding.def_id) },
+                    none => {}
+                }
+                collect_default_authority_expr(handler.body, result)
+            }
+        },
+        HExpr::Lambda { def_id, params, body, .. } => {
+            result.insert(def_id)
+            for param in params {
+                collect_default_authority_optional_def_id(param.def_id, result)
+            }
+            collect_default_authority_expr(body, result)
+        },
+        HExpr::EffectOp { args, .. } => {
+            for arg in args {
+                collect_default_authority_expr(arg, result)
+            }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            collect_default_authority_expr(start, result)
+            collect_default_authority_expr(end, result)
+        },
+        HExpr::ListLit { elements, .. } |
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                collect_default_authority_expr(element, result)
+            }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_default_authority_expr(receiver, result)
+            collect_default_authority_expr(index, result)
+        },
+        HExpr::Clone { inner, .. } =>
+            collect_default_authority_expr(inner, result),
+        HExpr::Take { source_def_id, .. } => { result.insert(source_def_id) },
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(returned) => collect_default_authority_expr(returned, result),
+            none => {}
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            collect_default_authority_expr(body, result),
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
+        HExpr::DictConstruct { .. } => {}
+    }
+}
+
+fn snapshot_default_authority_surface(ctx: InferCtx) -> DefaultAuthorityCapture {
+    DefaultAuthorityCapture {
+        def_ids: set_new(),
+        callable_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata.callable_by_def_id),
+        callable_state_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata.callable_state_by_def_id),
+        callable_result_role_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata.callable_result_role_by_def_id),
+        returned_callable_result_role_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata
+                .returned_callable_result_role_by_def_id),
+        callable_result_role_spine_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata
+                .callable_result_role_spine_by_def_id),
+        use_aliases: map_clone(ctx.use_aliases),
+        value_binding_kinds: map_clone(ctx.value_binding_kinds),
+        live_schemes_by_def_id: map_clone(
+            ctx.default_template_live_schemes),
+        variant_ctor_origins: map_clone(ctx.env.types.variant_ctor_origins),
+        exact_value_alias_targets: map_clone(
+            ctx.pre_solve_exact_value_alias_targets),
+        const_getter_aliases: set_clone(ctx.pre_solve_const_getter_aliases),
+        callable_alias_targets: map_clone(ctx.pre_solve_callable_alias_targets),
+        callable_alias_arities: map_clone(ctx.pre_solve_callable_alias_arities),
+        callable_alias_contracts: map_clone(
+            ctx.pre_solve_callable_alias_contracts),
+        def_spans: map_clone(ctx.env.scope.def_spans),
+        boxed_vars: set_clone(ctx.boxed_vars),
+        var_lambda_depth: map_clone(ctx.var_lambda_depth),
+        mutable_vars: set_clone(ctx.env.scope.mutable_vars),
+        let_defs: set_clone(ctx.env.scope.let_defs),
+        mut_param_defs: set_clone(ctx.env.scope.mut_param_defs)
+    }
+}
+
+fn capture_default_authority_delta(
+    ctx: InferCtx, defaults: List<HExpr>, before: DefaultAuthorityCapture
+) -> DefaultAuthorityCapture {
+    let mut referenced: Set<Int> = set_new()
+    for default in defaults {
+        collect_default_authority_expr(default, referenced)
+    }
+    let mut pending: List<Int> = []
+    for def_id in referenced { pending.push(def_id) }
+    while pending.len() > 0 {
+        let def_id = pending.pop().unwrap()
+        match ctx.pre_solve_exact_value_alias_targets.get(def_id) {
+            some(target) => if !referenced.contains(target) {
+                referenced.insert(target)
+                pending.push(target)
+            },
+            none => {}
+        }
+        match ctx.pre_solve_callable_alias_targets.get(def_id) {
+            some(target) => if !referenced.contains(target) {
+                referenced.insert(target)
+                pending.push(target)
+            },
+            none => {}
+        }
+    }
+
+    let mut captured = DefaultAuthorityCapture {
+        def_ids: set_new(), callable_by_def_id: map_new(),
+        callable_state_by_def_id: map_new(),
+        callable_result_role_by_def_id: map_new(),
+        returned_callable_result_role_by_def_id: map_new(),
+        callable_result_role_spine_by_def_id: map_new(),
+        use_aliases: map_new(), value_binding_kinds: map_new(),
+        live_schemes_by_def_id: map_new(),
+        variant_ctor_origins: map_new(), exact_value_alias_targets: map_new(),
+        const_getter_aliases: set_new(), callable_alias_targets: map_new(),
+        callable_alias_arities: map_new(), callable_alias_contracts: map_new(),
+        def_spans: map_new(), boxed_vars: set_new(),
+        var_lambda_depth: map_new(),
+        mutable_vars: set_new(), let_defs: set_new(),
+        mut_param_defs: set_new()
+    }
+    for def_id in referenced {
+        let is_lexical_alias =
+            ctx.pre_solve_exact_value_alias_targets.contains_key(def_id) ||
+            ctx.use_aliases.contains_key(def_id)
+        if is_lexical_alias {
+            let mut live_scheme: TypeScheme? = none
+            let mut scope_index = ctx.env.scope.scopes.len() - 1
+            while scope_index >= 0 && live_scheme.is_none() {
+                match ctx.env.scope.scopes.get(scope_index) {
+                    some(scope) => {
+                        for entry in scope.variables.entries() {
+                            let entry_scheme = entry.1
+                            match entry_scheme.def_id {
+                                some(candidate_id) => if
+                                        candidate_id == def_id {
+                                    let stored_scheme = entry_scheme
+                                    live_scheme = some(stored_scheme)
+                                },
+                                none => {}
+                            }
+                            if live_scheme.is_some() { break }
+                        }
+                    },
+                    none => {}
+                }
+                scope_index = scope_index - 1
+            }
+            if live_scheme.is_none() {
+                let cached_scheme =
+                    ctx.default_template_live_schemes.get(def_id)
+                if cached_scheme.is_some() {
+                    live_scheme = some(cached_scheme.unwrap())
+                }
+            }
+            match live_scheme {
+                some(scheme) => {
+                    let stored_scheme = scheme
+                    captured.live_schemes_by_def_id.insert(
+                        def_id, stored_scheme)
+                },
+                none => {}
+            }
+        }
+        match ctx.env.types.ownership_metadata.callable_by_def_id.get(def_id) {
+            some(value) => if !before.callable_by_def_id.contains_key(def_id) {
+                captured.callable_by_def_id.insert(def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        let callable_state = ctx.env.types.ownership_metadata
+            .callable_state_by_def_id.get(def_id)
+        if callable_state.is_some() &&
+           !before.callable_state_by_def_id.contains_key(def_id) {
+                captured.callable_state_by_def_id.insert(
+                    def_id, callable_state.unwrap())
+                captured.def_ids.insert(def_id)
+        }
+        match ctx.env.types.ownership_metadata
+                .callable_result_role_by_def_id.get(def_id) {
+            some(value) => if !before.callable_result_role_by_def_id
+                    .contains_key(def_id) {
+                captured.callable_result_role_by_def_id.insert(def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        match ctx.env.types.ownership_metadata
+                .returned_callable_result_role_by_def_id.get(def_id) {
+            some(value) => if !before.returned_callable_result_role_by_def_id
+                    .contains_key(def_id) {
+                captured.returned_callable_result_role_by_def_id.insert(
+                    def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        let role_spine = ctx.env.types.ownership_metadata
+            .callable_result_role_spine_by_def_id.get(def_id)
+        if role_spine.is_some() &&
+           !before.callable_result_role_spine_by_def_id
+                .contains_key(def_id) {
+                captured.callable_result_role_spine_by_def_id.insert(
+                    def_id, role_spine.unwrap())
+                captured.def_ids.insert(def_id)
+        }
+        let use_alias = ctx.use_aliases.get(def_id)
+        if use_alias.is_some() {
+            captured.use_aliases.insert(def_id, use_alias.unwrap())
+            if !before.use_aliases.contains_key(def_id) {
+                captured.def_ids.insert(def_id)
+            }
+        }
+        let binding_kind = ctx.value_binding_kinds.get(def_id)
+        if binding_kind.is_some() {
+            captured.value_binding_kinds.insert(
+                def_id, binding_kind.unwrap())
+            if !before.value_binding_kinds.contains_key(def_id) {
+                captured.def_ids.insert(def_id)
+            }
+        }
+        let variant_origin = ctx.env.types.variant_ctor_origins.get(def_id)
+        if variant_origin.is_some() {
+            captured.variant_ctor_origins.insert(
+                def_id, variant_origin.unwrap())
+            if !before.variant_ctor_origins.contains_key(def_id) {
+                captured.def_ids.insert(def_id)
+            }
+        }
+        match ctx.pre_solve_exact_value_alias_targets.get(def_id) {
+            some(value) => if !before.exact_value_alias_targets
+                    .contains_key(def_id) {
+                captured.exact_value_alias_targets.insert(def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        if ctx.pre_solve_const_getter_aliases.contains(def_id) &&
+           !before.const_getter_aliases.contains(def_id) {
+            captured.const_getter_aliases.insert(def_id)
+            captured.def_ids.insert(def_id)
+        }
+        match ctx.pre_solve_callable_alias_targets.get(def_id) {
+            some(value) => if !before.callable_alias_targets.contains_key(def_id) {
+                captured.callable_alias_targets.insert(def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        match ctx.pre_solve_callable_alias_arities.get(def_id) {
+            some(value) => if !before.callable_alias_arities.contains_key(def_id) {
+                captured.callable_alias_arities.insert(def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        match ctx.pre_solve_callable_alias_contracts.get(def_id) {
+            some(value) => if !before.callable_alias_contracts.contains_key(def_id) {
+                captured.callable_alias_contracts.insert(def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        let def_span = ctx.env.scope.def_spans.get(def_id)
+        if def_span.is_some() && !before.def_spans.contains_key(def_id) {
+                captured.def_spans.insert(def_id, def_span.unwrap())
+                captured.def_ids.insert(def_id)
+        }
+        if ctx.boxed_vars.contains(def_id) &&
+           !before.boxed_vars.contains(def_id) {
+            captured.boxed_vars.insert(def_id)
+            captured.def_ids.insert(def_id)
+        }
+        match ctx.var_lambda_depth.get(def_id) {
+            some(value) => if !before.var_lambda_depth.contains_key(def_id) {
+                captured.var_lambda_depth.insert(def_id, value)
+                captured.def_ids.insert(def_id)
+            },
+            none => {}
+        }
+        if ctx.env.scope.mutable_vars.contains(def_id) &&
+           !before.mutable_vars.contains(def_id) {
+            captured.mutable_vars.insert(def_id)
+            captured.def_ids.insert(def_id)
+        }
+        if ctx.env.scope.let_defs.contains(def_id) &&
+           !before.let_defs.contains(def_id) {
+            captured.let_defs.insert(def_id)
+            captured.def_ids.insert(def_id)
+        }
+        if ctx.env.scope.mut_param_defs.contains(def_id) &&
+           !before.mut_param_defs.contains(def_id) {
+            captured.mut_param_defs.insert(def_id)
+            captured.def_ids.insert(def_id)
+        }
+    }
+    captured
+}
+
+fn merge_default_authority_capture(
+    mut ctx: InferCtx, capture: DefaultAuthorityCapture
+) {
+    for entry in capture.live_schemes_by_def_id.entries() {
+        let stored_scheme = entry.1
+        ctx.default_template_live_schemes.insert(entry.0, stored_scheme)
+    }
+    for entry in capture.callable_by_def_id.entries() {
+        ctx.env.types.ownership_metadata.callable_by_def_id.insert(
+            entry.0, entry.1)
+    }
+    for entry in capture.callable_state_by_def_id.entries() {
+        let stored_state = entry.1
+        ctx.env.types.ownership_metadata.callable_state_by_def_id.insert(
+            entry.0, stored_state)
+    }
+    for entry in capture.callable_result_role_by_def_id.entries() {
+        ctx.env.types.ownership_metadata.callable_result_role_by_def_id.insert(
+            entry.0, entry.1)
+    }
+    for entry in capture.returned_callable_result_role_by_def_id.entries() {
+        ctx.env.types.ownership_metadata
+            .returned_callable_result_role_by_def_id.insert(entry.0, entry.1)
+    }
+    for entry in capture.callable_result_role_spine_by_def_id.entries() {
+        let stored_spine = entry.1
+        ctx.env.types.ownership_metadata
+            .callable_result_role_spine_by_def_id.insert(entry.0, stored_spine)
+    }
+    for entry in capture.use_aliases.entries() {
+        let stored_alias = entry.1
+        ctx.use_aliases.insert(entry.0, stored_alias)
+    }
+    for entry in capture.value_binding_kinds.entries() {
+        let stored_kind = entry.1
+        ctx.value_binding_kinds.insert(entry.0, stored_kind)
+    }
+    for entry in capture.variant_ctor_origins.entries() {
+        let stored_origin = entry.1
+        ctx.env.types.variant_ctor_origins.insert(entry.0, stored_origin)
+    }
+    for entry in capture.exact_value_alias_targets.entries() {
+        ctx.pre_solve_exact_value_alias_targets.insert(entry.0, entry.1)
+    }
+    for def_id in capture.const_getter_aliases {
+        ctx.pre_solve_const_getter_aliases.insert(def_id)
+    }
+    for entry in capture.callable_alias_targets.entries() {
+        ctx.pre_solve_callable_alias_targets.insert(entry.0, entry.1)
+    }
+    for entry in capture.callable_alias_arities.entries() {
+        ctx.pre_solve_callable_alias_arities.insert(entry.0, entry.1)
+    }
+    for entry in capture.callable_alias_contracts.entries() {
+        ctx.pre_solve_callable_alias_contracts.insert(entry.0, entry.1)
+    }
+    for entry in capture.def_spans.entries() {
+        let stored_span = entry.1
+        ctx.env.scope.def_spans.insert(entry.0, stored_span)
+    }
+    for def_id in capture.boxed_vars { ctx.boxed_vars.insert(def_id) }
+    for entry in capture.var_lambda_depth.entries() {
+        ctx.var_lambda_depth.insert(entry.0, entry.1)
+    }
+    for def_id in capture.mutable_vars {
+        ctx.env.scope.mutable_vars.insert(def_id)
+    }
+    for def_id in capture.let_defs { ctx.env.scope.let_defs.insert(def_id) }
+    for def_id in capture.mut_param_defs {
+        ctx.env.scope.mut_param_defs.insert(def_id)
+    }
+    for def_id in capture.def_ids {
+        ctx.speculative_default_authority_def_ids.insert(def_id)
+    }
+}
+
+fn remove_default_authority_def_ids(mut ctx: InferCtx, def_ids: Set<Int>) {
+    for def_id in def_ids {
+        ctx.default_template_live_schemes.remove(def_id)
+        ctx.env.types.ownership_metadata.callable_by_def_id.remove(def_id)
+        ctx.env.types.ownership_metadata.callable_state_by_def_id.remove(def_id)
+        ctx.env.types.ownership_metadata
+            .callable_result_role_by_def_id.remove(def_id)
+        ctx.env.types.ownership_metadata
+            .returned_callable_result_role_by_def_id.remove(def_id)
+        ctx.env.types.ownership_metadata
+            .callable_result_role_spine_by_def_id.remove(def_id)
+        ctx.use_aliases.remove(def_id)
+        ctx.value_binding_kinds.remove(def_id)
+        ctx.env.types.variant_ctor_origins.remove(def_id)
+        ctx.pre_solve_exact_value_alias_targets.remove(def_id)
+        ctx.pre_solve_const_getter_aliases.remove(def_id)
+        ctx.pre_solve_callable_alias_targets.remove(def_id)
+        ctx.pre_solve_callable_alias_arities.remove(def_id)
+        ctx.pre_solve_callable_alias_contracts.remove(def_id)
+        ctx.env.scope.def_spans.remove(def_id)
+        ctx.boxed_vars.remove(def_id)
+        ctx.var_lambda_depth.remove(def_id)
+        ctx.env.scope.mutable_vars.remove(def_id)
+        ctx.env.scope.let_defs.remove(def_id)
+        ctx.env.scope.mut_param_defs.remove(def_id)
+        ctx.speculative_default_authority_def_ids.remove(def_id)
+    }
+}
+
+fn collect_retained_default_authority_decl(
+    decl: HDecl, mut retained: Set<Int>
+) {
+    match decl {
+        HDecl::Fn { def_id, params, body, .. } => {
+            collect_default_authority_optional_def_id(def_id, retained)
+            for param in params {
+                collect_default_authority_optional_def_id(param.def_id, retained)
+            }
+            collect_default_authority_expr(body, retained)
+        },
+        HDecl::Impl { methods, .. } => {
+            for inner in methods {
+                collect_retained_default_authority_decl(inner, retained)
+            }
+        },
+        HDecl::ModBlock { decls, .. } => {
+            for inner in decls {
+                collect_retained_default_authority_decl(inner, retained)
+            }
+        },
+        HDecl::Effect { ops, .. } => {
+            for op in ops {
+                for param in op.params {
+                    collect_default_authority_optional_def_id(
+                        param.def_id, retained)
+                }
+                match op.default_body {
+                    some(body) => collect_default_authority_expr(body, retained),
+                    none => {}
+                }
+            }
+        },
+        HDecl::Test { body, .. } =>
+            collect_default_authority_expr(body, retained),
+        HDecl::Trait { methods, .. } => {
+            for method in methods {
+                retained.insert(method.def_id)
+                for param in method.params {
+                    collect_default_authority_optional_def_id(
+                        param.def_id, retained)
+                }
+                match method.body {
+                    some(body) => collect_default_authority_expr(body, retained),
+                    none => {}
+                }
+            }
+        },
+        HDecl::ExternFn { def_id, params, .. } => {
+            collect_default_authority_optional_def_id(def_id, retained)
+            for param in params {
+                collect_default_authority_optional_def_id(param.def_id, retained)
+            }
+        },
+        HDecl::Const { def_id, init, .. } => {
+            collect_default_authority_optional_def_id(def_id, retained)
+            collect_default_authority_expr(init, retained)
+        },
+        HDecl::Struct { .. } | HDecl::Enum { .. } |
+        HDecl::ExternType { .. } | HDecl::TypeAlias { .. } |
+        HDecl::Sig { .. } => {}
+    }
+}
+
+fn prune_unretained_default_authority(
+    mut ctx: InferCtx, hdecls: List<HDecl>
+) {
+    let mut retained: Set<Int> = set_new()
+    for decl in hdecls {
+        collect_retained_default_authority_decl(decl, retained)
+    }
+    let mut pending: List<Int> = []
+    for def_id in retained { pending.push(def_id) }
+    while pending.len() > 0 {
+        let def_id = pending.pop().unwrap()
+        match ctx.pre_solve_exact_value_alias_targets.get(def_id) {
+            some(target) => if !retained.contains(target) {
+                retained.insert(target)
+                pending.push(target)
+            },
+            none => {}
+        }
+        match ctx.pre_solve_callable_alias_targets.get(def_id) {
+            some(target) => if !retained.contains(target) {
+                retained.insert(target)
+                pending.push(target)
+            },
+            none => {}
+        }
+    }
+    let mut discarded: Set<Int> = set_new()
+    for def_id in ctx.speculative_default_authority_def_ids {
+        if !retained.contains(def_id) { discarded.insert(def_id) }
+    }
+    remove_default_authority_def_ids(ctx, discarded)
+    // Durable scheme fallback is template-only cache, but its DefId may also
+    // be a pre-existing public re-export. Drop only the cache entry here;
+    // full authority removal above is reserved for checker-minted speculative
+    // identities absent from retained HIR.
+    let mut stale_live_schemes: List<Int> = []
+    for entry in ctx.default_template_live_schemes.entries() {
+        if !retained.contains(entry.0) {
+            stale_live_schemes.push(entry.0)
+        }
+    }
+    for def_id in stale_live_schemes {
+        ctx.default_template_live_schemes.remove(def_id)
+    }
+}
+
+fn precheck_fn_node_firebreak(
+    mut ctx: InferCtx, decls: List<Decl>, name: Str,
+    top_level_index: Int?
+) -> Bool {
+    let diagnostic_checkpoint = ctx.sink.save()
+    let default_authority_before = snapshot_default_authority_surface(ctx)
+    let mut default_authority_captures: List<DefaultAuthorityCapture> = []
+    let scope_variables_before = clone_scope_variable_maps(
+        ctx.env.scope.scopes)
+    let callable_by_def_id_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_by_def_id)
+    let callable_state_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_state_by_def_id)
+    let direct_roles_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_result_role_by_def_id)
+    let returned_roles_before = map_clone(
+        ctx.env.types.ownership_metadata
+            .returned_callable_result_role_by_def_id)
+    let role_spines_before = map_clone(
+        ctx.env.types.ownership_metadata
+            .callable_result_role_spine_by_def_id)
+    let inference_parents_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_inference_parents)
+    let inference_solutions_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_inference_solutions)
+    let subst_before = clone_union_find(ctx.subst)
+    let type_param_scope_before = map_clone(ctx.type_param_scope)
+    let qualified_assoc_scope_before = map_clone(ctx.qualified_assoc_scope)
+    let current_fn_return_before = ctx.current_fn_return_type
+    let current_fn_bounds_before = list_clone(ctx.current_fn_bounds)
+    let fn_bounds_stack_before = clone_impl_precheck_bounds_stack(
+        ctx.fn_bounds_stack)
+    let loop_depth_before = ctx.loop_depth
+    let lambda_depth_before = ctx.lambda_depth
+    let scope_depth_before = ctx.env.scope.scopes.len()
+    let use_aliases_before = map_clone(ctx.use_aliases)
+    let pre_solve_exact_value_alias_targets_before = map_clone(
+        ctx.pre_solve_exact_value_alias_targets)
+    let pending_inferred_const_def_ids_before = set_clone(
+        ctx.pending_inferred_const_def_ids)
+    let pre_solve_const_getter_aliases_before = set_clone(
+        ctx.pre_solve_const_getter_aliases)
+    let pre_solve_alias_targets_before = map_clone(
+        ctx.pre_solve_callable_alias_targets)
+    let pre_solve_alias_arities_before = map_clone(
+        ctx.pre_solve_callable_alias_arities)
+    let pre_solve_alias_contracts_before = map_clone(
+        ctx.pre_solve_callable_alias_contracts)
+    let value_binding_kinds_before = map_clone(ctx.value_binding_kinds)
+    let boxed_vars_before = set_clone(ctx.boxed_vars)
+    let var_lambda_depth_before = map_clone(ctx.var_lambda_depth)
+    let fn_mut_params_before = map_clone(ctx.fn_mut_params)
+    let rebind_provenance_before = map_clone(ctx.rebind_assoc_provenance)
+    let fn_defaults_before = map_clone(ctx.fn_defaults)
+    let fn_default_var_bounds_before = map_clone(
+        ctx.fn_default_var_bounds)
+    let fn_min_arity_before = map_clone(ctx.fn_min_arity)
+    let latest_value_instantiation_maps_before = map_clone(
+        ctx.latest_value_instantiation_maps)
+    let default_template_live_schemes_before = map_clone(
+        ctx.default_template_live_schemes)
+    let def_spans_before = map_clone(ctx.env.scope.def_spans)
+    let var_bounds_before = clone_impl_precheck_var_bounds(
+        ctx.env.scope.var_bounds)
+    let mutable_vars_before = set_clone(ctx.env.scope.mutable_vars)
+    let let_defs_before = set_clone(ctx.env.scope.let_defs)
+    let mut_param_defs_before = set_clone(ctx.env.scope.mut_param_defs)
+    let dict_checkpoint = pending_dict_checkpoint(ctx)
+
+    ctx.discarded_fn_precheck_blocked = false
+    ctx.discarded_fn_precheck_active = true
+    let checked = some(match top_level_index {
+        some(index) => {
+            precheck_top_level_fn_at(ctx, decls, index)
+            match default_values_for_name(ctx, name) {
+                some(defaults) => {
+                    default_authority_captures.push(
+                        capture_default_authority_delta(
+                            ctx, defaults, default_authority_before))
+                },
+                none => {}
+            }
+        },
+        none => {
+            if !precheck_inline_fn(
+                    ctx, decls, name, default_authority_before,
+                    default_authority_captures) {
+                panic("unreachable: inline precheck SCC node was not found")
+            }
+        }
+    }) catch { _ => none }
+    ctx.discarded_fn_precheck_active = false
+    let blocked = ctx.discarded_fn_precheck_blocked
+    let succeeded = checked.is_some() && !blocked
+    let scheme_after = if succeeded { ctx.env.lookup(name) } else { none }
+    ctx.discarded_fn_precheck_blocked = false
+    if !succeeded {
+        for entry in ctx.pending_fn_default_seed_values.entries() {
+            default_authority_captures.push(
+                capture_default_authority_delta(
+                    ctx, entry.1, default_authority_before))
+        }
+    }
+    // A discarded precheck is never the diagnostic owner.  Source-retained
+    // const/function/impl passes will reproduce real errors after summaries
+    // stabilize; transient arity/type errors must not become false reds.
+    ctx.sink.restore(diagnostic_checkpoint)
+    // The precheck publishes only the canonical scheme/default/mut summaries.
+    // Every DefId-indexed identity allocated by its discarded HIR is local to
+    // that check and must be removed even on success.
+    ctx.env.types.ownership_metadata.callable_by_def_id =
+        callable_by_def_id_before
+    ctx.env.types.ownership_metadata.callable_state_by_def_id =
+        callable_state_before
+    ctx.env.types.ownership_metadata.callable_result_role_by_def_id =
+        direct_roles_before
+    ctx.env.types.ownership_metadata
+        .returned_callable_result_role_by_def_id = returned_roles_before
+    ctx.env.types.ownership_metadata.callable_result_role_spine_by_def_id =
+        role_spines_before
+    if !succeeded {
+        ctx.env.types.ownership_metadata.callable_inference_parents =
+            inference_parents_before
+        ctx.env.types.ownership_metadata.callable_inference_solutions =
+            inference_solutions_before
+        ctx.fn_mut_params = fn_mut_params_before
+        ctx.fn_defaults = fn_defaults_before
+        ctx.fn_default_var_bounds = fn_default_var_bounds_before
+        ctx.fn_min_arity = fn_min_arity_before
+        reapply_pending_fn_default_seeds(ctx)
+    }
+    ctx.use_aliases = use_aliases_before
+    ctx.pre_solve_exact_value_alias_targets =
+        pre_solve_exact_value_alias_targets_before
+    ctx.pending_inferred_const_def_ids =
+        pending_inferred_const_def_ids_before
+    ctx.pre_solve_const_getter_aliases =
+        pre_solve_const_getter_aliases_before
+    ctx.pre_solve_callable_alias_targets = pre_solve_alias_targets_before
+    ctx.pre_solve_callable_alias_arities = pre_solve_alias_arities_before
+    ctx.pre_solve_callable_alias_contracts = pre_solve_alias_contracts_before
+    ctx.value_binding_kinds = value_binding_kinds_before
+    ctx.boxed_vars = boxed_vars_before
+    ctx.var_lambda_depth = var_lambda_depth_before
+    ctx.rebind_assoc_provenance = rebind_provenance_before
+    ctx.latest_value_instantiation_maps =
+        latest_value_instantiation_maps_before
+    ctx.default_template_live_schemes =
+        default_template_live_schemes_before
+    ctx.subst = subst_before
+    ctx.type_param_scope = type_param_scope_before
+    ctx.qualified_assoc_scope = qualified_assoc_scope_before
+    ctx.current_fn_return_type = current_fn_return_before
+    ctx.current_fn_bounds = current_fn_bounds_before
+    ctx.fn_bounds_stack = fn_bounds_stack_before
+    ctx.loop_depth = loop_depth_before
+    ctx.lambda_depth = lambda_depth_before
+    while ctx.env.scope.scopes.len() > scope_depth_before {
+        ctx.env.pop_scope()
+    }
+    if ctx.env.scope.scopes.len() != scope_depth_before {
+        panic("unreachable: discarded fn precheck removed an outer scope")
+    }
+    restore_scope_variable_maps(ctx, scope_variables_before)
+    ctx.env.scope.def_spans = def_spans_before
+    ctx.env.scope.var_bounds = var_bounds_before
+    ctx.env.scope.mutable_vars = mutable_vars_before
+    ctx.env.scope.let_defs = let_defs_before
+    ctx.env.scope.mut_param_defs = mut_param_defs_before
+    rollback_pending_dicts(ctx, dict_checkpoint)
+    match scheme_after {
+        some(scheme) => rebind_scheme_with_exact_aliases(
+            ctx, name, scheme),
+        none => {}
+    }
+    for capture in default_authority_captures {
+        merge_default_authority_capture(ctx, capture)
+    }
+    succeeded
+}
+
+fn precheck_fn_scc_firebreak(
+    mut ctx: InferCtx,
+    decls: List<Decl>,
+    scc_group: List<Str>,
+    precheck_nodes: Set<Str>,
+    fn_name_to_idx: Map<Str, Int>,
+    mut blocked_names: Set<Str>
+) {
+    let mut relevant: List<Str> = []
+    let mut schemes_before: Map<Str, TypeScheme> = map_new()
+    for name in scc_group {
+        if precheck_nodes.contains(name) {
+            let relevant_name = "${name}"
+            let lookup_name = "${name}"
+            let stored_name = "${name}"
+            let pending_name = "${name}"
+            relevant.push(relevant_name)
+            match ctx.env.lookup(lookup_name) {
+                some(scheme) => {
+                    let stored_scheme = scheme
+                    schemes_before.insert(stored_name, stored_scheme)
+                },
+                none => {}
+            }
+            // Mutual recursion is one transaction: no member may observe a
+            // stale pending marker owned by another member of the same SCC.
+            set_fn_precheck_pending(ctx, pending_name, false)
+        }
+    }
+    if relevant.len() == 0 { return }
+
+    let default_authority_before = snapshot_default_authority_surface(ctx)
+    let fn_defaults_before = map_clone(ctx.fn_defaults)
+    let fn_default_var_bounds_before = map_clone(
+        ctx.fn_default_var_bounds)
+    let fn_min_arity_before = map_clone(ctx.fn_min_arity)
+    let fn_mut_params_before = map_clone(ctx.fn_mut_params)
+    let inference_parents_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_inference_parents)
+    let inference_solutions_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_inference_solutions)
+    let default_authority_ids_before = set_clone(
+        ctx.speculative_default_authority_def_ids)
+    let mut blocked = false
+    for name in relevant {
+        if !precheck_fn_node_firebreak(
+            ctx, decls, name, fn_name_to_idx.get(name)) {
+            blocked = true
+        }
+    }
+
+    if blocked {
+        // Header defaults are an independently checked SCC summary.  Promote
+        // every member that reached a normalized triple, including members
+        // whose body succeeded before a peer blocked the group.  The next
+        // fixed-point round can then check every default/body against peer
+        // headers without committing any peer body scheme early.
+        for name in relevant {
+            let owner_def_id = match ctx.env.lookup(name) {
+                some(scheme) => scheme.def_id,
+                none => match schemes_before.get(name) {
+                    some(scheme) => scheme.def_id,
+                    none => none
+                }
+            }
+            store_pending_fn_default_seed(ctx, owner_def_id)
+        }
+        let mut pending_seed_captures: List<DefaultAuthorityCapture> = []
+        for entry in ctx.pending_fn_default_seed_values.entries() {
+            pending_seed_captures.push(capture_default_authority_delta(
+                ctx, entry.1, default_authority_before))
+        }
+        let mut discarded_default_authority: Set<Int> = set_new()
+        for def_id in ctx.speculative_default_authority_def_ids {
+            if !default_authority_ids_before.contains(def_id) {
+                discarded_default_authority.insert(def_id)
+            }
+        }
+        remove_default_authority_def_ids(
+            ctx, discarded_default_authority)
+        ctx.speculative_default_authority_def_ids =
+            default_authority_ids_before
+        ctx.fn_defaults = fn_defaults_before
+        ctx.fn_default_var_bounds = fn_default_var_bounds_before
+        ctx.fn_min_arity = fn_min_arity_before
+        reapply_pending_fn_default_seeds(ctx)
+        ctx.fn_mut_params = fn_mut_params_before
+        ctx.env.types.ownership_metadata.callable_inference_parents =
+            inference_parents_before
+        ctx.env.types.ownership_metadata.callable_inference_solutions =
+            inference_solutions_before
+        for capture in pending_seed_captures {
+            merge_default_authority_capture(ctx, capture)
+        }
+        for name in relevant {
+            match schemes_before.get(name) {
+                some(scheme) => rebind_scheme_with_exact_aliases(
+                    ctx, name, scheme),
+                none => {}
+            }
+            set_fn_precheck_pending(ctx, name, true)
+            let blocked_name = "${name}"
+            blocked_names.insert(blocked_name)
+        }
+    } else {
+        for name in relevant {
+            set_fn_precheck_pending(ctx, name, false)
+            blocked_names.remove(name)
+        }
     }
 }
 
@@ -4477,10 +6673,21 @@ fn insert_rebound_alias_scheme_firebreak(
     })
 }
 
-fn rebind_fn_scheme_with_alias(mut ctx: InferCtx, name: Str, scheme: TypeScheme) {
+fn rebind_scheme_with_exact_aliases(
+    mut ctx: InferCtx, name: Str, scheme: TypeScheme
+) {
     let canonical_name_for_rebind = name
     let canonical_scheme_for_rebind = scheme
+    let canonical_def_id = scheme.def_id
     ctx.env.rebind(canonical_name_for_rebind, canonical_scheme_for_rebind)
+    match (canonical_def_id, scheme.ty) {
+        (some(source_def_id), Type::FnType { .. }) =>
+            promote_pre_solve_callable_aliases_for_source(
+                ctx, source_def_id, scheme.ty),
+        (none, Type::FnType { .. }) => panic(
+            "unreachable: rebound callable source has no DefId"),
+        _ => {}
+    }
 
     // Update the map entry in its owning scope rather than calling
     // TypeEnv.rebind(alias_name): two lexical scopes may contain the same
@@ -5843,7 +8050,7 @@ fn rebind_registered_fn_type_firebreak(
     let rebound = rebind_checked_fn_scheme(
         ctx, checked_name, scheme_for_rebind,
         params, return_type, effects, span)
-    rebind_fn_scheme_with_alias(ctx, alias_name, rebound)
+    rebind_scheme_with_exact_aliases(ctx, alias_name, rebound)
 }
 
 fn rebind_fn_type(
@@ -5851,8 +8058,11 @@ fn rebind_fn_type(
     effects: EffectRow, span: Span, registration_scheme: TypeScheme?
 ) {
     match registration_scheme {
-        some(scheme) => rebind_registered_fn_type_firebreak(
-            ctx, name, scheme, params, return_type, effects, span),
+        some(scheme) => {
+            rebind_registered_fn_type_firebreak(
+                ctx, name, scheme, params, return_type, effects, span)
+            set_fn_precheck_pending(ctx, name, false)
+        },
         none => {}
     }
 }
@@ -6120,14 +8330,22 @@ fn build_effect_var_mapping(
     mut mapping: Map<Int, Type>,
     mut conflicts: Set<Int>
 ) {
-    record_optional_tail_mapping_firebreak(
-        metadata, check_row.tail, reg_row.tail, mapping, conflicts)
-
-    for check_eff in check_row.effects {
-        for reg_eff in reg_row.effects {
-            build_matching_effect_mapping_firebreak(
-                metadata, check_eff, reg_eff, mapping, conflicts)
-        }
+    let check_type = Type::EffectRowType {
+        effects: check_row.effects, tail: check_row.tail
+    }
+    let registration_type = Type::EffectRowType {
+        effects: reg_row.effects, tail: reg_row.tail
+    }
+    let check_type_for_vars = check_type
+    let check_type_for_mapping = check_type
+    let check_vars = free_type_vars(
+        check_type_for_vars, empty_subst()).to_list()
+    let exact_mapping = build_type_var_map(
+        metadata, check_type_for_mapping,
+        registration_type, check_vars)
+    for entry in exact_mapping.entries() {
+        record_check_registration_mapping_firebreak(
+            metadata, entry.0, entry.1, mapping, conflicts)
     }
 }
 
@@ -6303,7 +8521,123 @@ fn precheck_impl_target_result_firebreak(target_type: Str) -> Str {
     exact_target
 }
 
-fn precheck_impl_effects_firebreak(
+fn clone_impl_precheck_var_bounds(
+    source: Map<Int, Set<Str>>
+) -> Map<Int, Set<Str>> {
+    let mut result: Map<Int, Set<Str>> = map_new()
+    for entry in source.entries() {
+        result.insert(entry.0, set_clone(entry.1))
+    }
+    result
+}
+
+fn clone_impl_precheck_bounds_stack(
+    source: List<List<FnBoundsEntry>>
+) -> List<List<FnBoundsEntry>> {
+    let mut result: List<List<FnBoundsEntry>> = []
+    for bounds in source {
+        result.push(list_clone(bounds))
+    }
+    result
+}
+
+fn clone_scope_variable_maps(
+    scopes: List<Scope>
+) -> List<Map<Str, TypeScheme>> {
+    let mut result: List<Map<Str, TypeScheme>> = []
+    for scope in scopes {
+        result.push(map_clone(scope.variables))
+    }
+    result
+}
+
+fn restore_scope_variable_maps(
+    mut ctx: InferCtx, snapshots: List<Map<Str, TypeScheme>>
+) {
+    if ctx.env.scope.scopes.len() != snapshots.len() {
+        panic("unreachable: precheck scope depth changed before restore")
+    }
+    let mut index = 0
+    while index < snapshots.len() {
+        match (ctx.env.scope.scopes.get(index), snapshots.get(index)) {
+            (some(scope), some(variables)) => {
+                let mut restored_scope = scope
+                restored_scope.variables = variables
+                ctx.env.scope.scopes.set(index, restored_scope)
+            },
+            _ => panic("unreachable: precheck scope snapshot is missing")
+        }
+        index = index + 1
+    }
+}
+
+fn lookup_precheck_impl_method_scheme(
+    ctx: InferCtx, target_type: Str, trait_name: Str?,
+    origin: Str, method_name: Str
+) -> TypeScheme? {
+    match trait_name {
+        some(_) => match find_impl_by_origin(
+            ctx.env.trait_reg, target_type, origin) {
+            some(entry) => entry.method_schemes.get(method_name),
+            none => none
+        },
+        none => match ctx.env.trait_reg.method_origins.get(target_type) {
+            some(origins) => match origins.get(method_name) {
+                some(method_origin_) => {
+                    if method_origin_.origin == origin {
+                        match ctx.env.trait_reg.impl_methods.get(target_type) {
+                            some(registered) => registered.get(method_name),
+                            none => none
+                        }
+                    } else { none }
+                },
+                none => none
+            },
+            none => none
+        }
+    }
+}
+
+fn set_impl_precheck_methods_pending(
+    mut ctx: InferCtx,
+    target_type: Str,
+    type_params: List<TypeParam>,
+    trait_name: Str?,
+    methods: List<Decl>,
+    span: Span,
+    pending: Bool
+) {
+    let canonical_target = resolve_nominal_identity(ctx, target_type)
+    let trait_for_resolution = trait_name
+    let canonical_trait = if trait_for_resolution.is_some() {
+        some(resolve_trait_identity(ctx, trait_for_resolution.unwrap()))
+    } else {
+        none
+    }
+    let origin = impl_decl_origin(
+        canonical_target, canonical_trait, type_params, span)
+    for method in methods {
+        match method {
+            Decl::Fn { name, .. } => match lookup_precheck_impl_method_scheme(
+                ctx, canonical_target, canonical_trait, origin, name) {
+                some(scheme) => match scheme.def_id {
+                    some(def_id) => {
+                        if pending {
+                            ctx.pending_precheck_callable_def_ids.insert(def_id)
+                        } else {
+                            ctx.pending_precheck_callable_def_ids.remove(def_id)
+                        }
+                    },
+                    none => {}
+                },
+                none => {}
+            },
+            _ => {}
+        }
+    }
+}
+
+fn store_impl_precheck_default_seeds(
     mut ctx: InferCtx,
     target_type: Str,
     type_params: List<TypeParam>,
@@ -6311,21 +8645,261 @@ fn precheck_impl_effects_firebreak(
     methods: List<Decl>,
     span: Span
 ) {
-    let checked_target = target_type
+    let canonical_target = resolve_nominal_identity(ctx, target_type)
+    let trait_for_resolution = trait_name
+    let canonical_trait = if trait_for_resolution.is_some() {
+        some(resolve_trait_identity(ctx, trait_for_resolution.unwrap()))
+    } else {
+        none
+    }
+    let origin = impl_decl_origin(
+        canonical_target, canonical_trait, type_params, span)
+    for method in methods {
+        match method {
+            Decl::Fn { name, .. } => match lookup_precheck_impl_method_scheme(
+                ctx, canonical_target, canonical_trait, origin, name) {
+                some(scheme) => store_pending_fn_default_seed(
+                    ctx, scheme.def_id),
+                none => {}
+            },
+            _ => {}
+        }
+    }
+}
+
+fn precheck_impl_effects_firebreak(
+    mut ctx: InferCtx,
+    target_type: Str,
+    type_params: List<TypeParam>,
+    trait_name: Str?,
+    methods: List<Decl>,
+    span: Span
+) -> Bool {
+    let target_for_initial_pending = target_type
+    let target_for_check = target_type
+    let target_for_seed = target_type
+    let target_for_final_pending = target_type
+    let diagnostic_checkpoint = ctx.sink.save()
+    let default_authority_before = snapshot_default_authority_surface(ctx)
+    // This pass exists only to make inferred effects visible before the main
+    // declaration order. Everything else is speculative: the retained-HIR
+    // pass must own its callable DefIds, defaults, boxing facts and provenance.
+    // Ownership inference terms stay monotonic because an inferred EffectRow
+    // may legitimately contain a callable type; only DefId-indexed identities
+    // are rolled back.
+    // A retry owns these exact method summaries. Temporarily clear its own
+    // pending markers so recursive/self calls can be checked transactionally;
+    // a pending dependency will re-mark the whole owner below.
+    set_impl_precheck_methods_pending(
+        ctx, target_for_initial_pending, type_params, trait_name, methods,
+        span, false)
+    let scope_variables_before = clone_scope_variable_maps(
+        ctx.env.scope.scopes)
+    let callable_by_def_id_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_by_def_id)
+    let callable_state_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_state_by_def_id)
+    let direct_roles_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_result_role_by_def_id)
+    let returned_roles_before = map_clone(
+        ctx.env.types.ownership_metadata
+            .returned_callable_result_role_by_def_id)
+    let role_spines_before = map_clone(
+        ctx.env.types.ownership_metadata
+            .callable_result_role_spine_by_def_id)
+    let inference_parents_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_inference_parents)
+    let inference_solutions_before = map_clone(
+        ctx.env.types.ownership_metadata.callable_inference_solutions)
+
+    let subst_before = clone_union_find(ctx.subst)
+    let type_param_scope_before = map_clone(ctx.type_param_scope)
+    let qualified_assoc_scope_before = map_clone(ctx.qualified_assoc_scope)
+    let current_fn_return_before = ctx.current_fn_return_type
+    let current_fn_bounds_before = list_clone(ctx.current_fn_bounds)
+    let fn_bounds_stack_before = clone_impl_precheck_bounds_stack(
+        ctx.fn_bounds_stack)
+    let loop_depth_before = ctx.loop_depth
+    let lambda_depth_before = ctx.lambda_depth
+    let scope_depth_before = ctx.env.scope.scopes.len()
+    let use_aliases_before = map_clone(ctx.use_aliases)
+    let pre_solve_exact_value_alias_targets_before = map_clone(
+        ctx.pre_solve_exact_value_alias_targets)
+    let pending_inferred_const_def_ids_before = set_clone(
+        ctx.pending_inferred_const_def_ids)
+    let pre_solve_const_getter_aliases_before = set_clone(
+        ctx.pre_solve_const_getter_aliases)
+    let pre_solve_alias_targets_before = map_clone(
+        ctx.pre_solve_callable_alias_targets)
+    let pre_solve_alias_arities_before = map_clone(
+        ctx.pre_solve_callable_alias_arities)
+    let pre_solve_alias_contracts_before = map_clone(
+        ctx.pre_solve_callable_alias_contracts)
+    let value_binding_kinds_before = map_clone(ctx.value_binding_kinds)
+    let boxed_vars_before = set_clone(ctx.boxed_vars)
+    let var_lambda_depth_before = map_clone(ctx.var_lambda_depth)
+    let fn_mut_params_before = map_clone(ctx.fn_mut_params)
+    let rebind_provenance_before = map_clone(ctx.rebind_assoc_provenance)
+    let fn_defaults_before = map_clone(ctx.fn_defaults)
+    let fn_default_var_bounds_before = map_clone(
+        ctx.fn_default_var_bounds)
+    let fn_min_arity_before = map_clone(ctx.fn_min_arity)
+    let latest_value_instantiation_maps_before = map_clone(
+        ctx.latest_value_instantiation_maps)
+    let default_template_live_schemes_before = map_clone(
+        ctx.default_template_live_schemes)
+    let def_spans_before = map_clone(ctx.env.scope.def_spans)
+    let var_bounds_before = clone_impl_precheck_var_bounds(
+        ctx.env.scope.var_bounds)
+    let mutable_vars_before = set_clone(ctx.env.scope.mutable_vars)
+    let let_defs_before = set_clone(ctx.env.scope.let_defs)
+    let mut_param_defs_before = set_clone(ctx.env.scope.mut_param_defs)
+    let dict_checkpoint = pending_dict_checkpoint(ctx)
+    let scheme_checkpoint = ctx.impl_effect_precheck_undo.len()
+
+    let checked_target = target_for_check
     let checked_type_params = type_params
     let checked_trait = trait_name
     let checked_methods = methods
     let checked_span = span
-    let _ = some(check_impl_decl(
+    ctx.impl_effect_precheck_blocked = false
+    ctx.impl_effect_precheck_active = true
+    let checked = some(check_impl_decl(
         ctx, precheck_impl_target_result_firebreak(checked_target),
-        checked_type_params,
-        checked_trait, checked_methods, checked_span)) catch { _ => none }
+        checked_type_params, checked_trait,
+        checked_methods, checked_span)) catch { _ => none }
+    ctx.impl_effect_precheck_active = false
+    let precheck_blocked = ctx.impl_effect_precheck_blocked
+    ctx.impl_effect_precheck_blocked = false
+    // Effect-summary discovery is speculative.  The retained impl owner is the
+    // sole diagnostic authority after the alternating fixed point settles.
+    ctx.sink.restore(diagnostic_checkpoint)
+
+    let mut precheck_succeeded = false
+    let commits = match checked {
+        some(_) => {
+            if precheck_blocked {
+                []
+            } else {
+                precheck_succeeded = true
+                collect_impl_effect_precheck_commits(ctx, scheme_checkpoint)
+            }
+        },
+        none => []
+    }
+    let fn_defaults_after = if precheck_succeeded {
+        map_clone(ctx.fn_defaults)
+    } else { map_new() }
+    let fn_default_var_bounds_after = if precheck_succeeded {
+        map_clone(ctx.fn_default_var_bounds)
+    } else { map_new() }
+    let fn_min_arity_after = if precheck_succeeded {
+        map_clone(ctx.fn_min_arity)
+    } else { map_new() }
+    let mut default_authority_captures: List<DefaultAuthorityCapture> = []
+    if precheck_succeeded {
+        for entry in ctx.fn_defaults.entries() {
+            default_authority_captures.push(
+                capture_default_authority_delta(
+                    ctx, entry.1, default_authority_before))
+        }
+    } else {
+        store_impl_precheck_default_seeds(
+            ctx, target_for_seed,
+            type_params, trait_name, methods, span)
+        for entry in ctx.pending_fn_default_seed_values.entries() {
+            default_authority_captures.push(
+                capture_default_authority_delta(
+                    ctx, entry.1, default_authority_before))
+        }
+    }
+    rollback_impl_effect_precheck_schemes(ctx, scheme_checkpoint)
+
+    // Remove all speculative DefId identities. Keep successful ownership UF
+    // work because committed effect types may reference its fresh terms. On a
+    // failed precheck restore the old UF solution, but never reuse allocated
+    // term numbers: next_callable_inference_term remains monotonic.
+    ctx.env.types.ownership_metadata.callable_by_def_id =
+        callable_by_def_id_before
+    ctx.env.types.ownership_metadata.callable_state_by_def_id =
+        callable_state_before
+    ctx.env.types.ownership_metadata.callable_result_role_by_def_id =
+        direct_roles_before
+    ctx.env.types.ownership_metadata
+        .returned_callable_result_role_by_def_id = returned_roles_before
+    ctx.env.types.ownership_metadata.callable_result_role_spine_by_def_id =
+        role_spines_before
+    if !precheck_succeeded {
+        ctx.env.types.ownership_metadata.callable_inference_parents =
+            inference_parents_before
+        ctx.env.types.ownership_metadata.callable_inference_solutions =
+            inference_solutions_before
+    }
+
+    ctx.use_aliases = use_aliases_before
+    ctx.pre_solve_exact_value_alias_targets =
+        pre_solve_exact_value_alias_targets_before
+    ctx.pending_inferred_const_def_ids =
+        pending_inferred_const_def_ids_before
+    ctx.pre_solve_const_getter_aliases =
+        pre_solve_const_getter_aliases_before
+    ctx.pre_solve_callable_alias_targets = pre_solve_alias_targets_before
+    ctx.pre_solve_callable_alias_arities = pre_solve_alias_arities_before
+    ctx.pre_solve_callable_alias_contracts = pre_solve_alias_contracts_before
+    ctx.value_binding_kinds = value_binding_kinds_before
+    ctx.boxed_vars = boxed_vars_before
+    ctx.var_lambda_depth = var_lambda_depth_before
+    ctx.fn_mut_params = fn_mut_params_before
+    ctx.rebind_assoc_provenance = rebind_provenance_before
+    ctx.fn_defaults = fn_defaults_before
+    ctx.fn_default_var_bounds = fn_default_var_bounds_before
+    ctx.fn_min_arity = fn_min_arity_before
+    reapply_pending_fn_default_seeds(ctx)
+    ctx.latest_value_instantiation_maps =
+        latest_value_instantiation_maps_before
+    ctx.default_template_live_schemes =
+        default_template_live_schemes_before
+    ctx.subst = subst_before
+    ctx.type_param_scope = type_param_scope_before
+    ctx.qualified_assoc_scope = qualified_assoc_scope_before
+    ctx.current_fn_return_type = current_fn_return_before
+    ctx.current_fn_bounds = current_fn_bounds_before
+    ctx.fn_bounds_stack = fn_bounds_stack_before
+    ctx.loop_depth = loop_depth_before
+    ctx.lambda_depth = lambda_depth_before
+    while ctx.env.scope.scopes.len() > scope_depth_before {
+        ctx.env.pop_scope()
+    }
+    if ctx.env.scope.scopes.len() != scope_depth_before {
+        panic("unreachable: impl effect precheck removed an outer scope")
+    }
+    restore_scope_variable_maps(ctx, scope_variables_before)
+    ctx.env.scope.def_spans = def_spans_before
+    ctx.env.scope.var_bounds = var_bounds_before
+    ctx.env.scope.mutable_vars = mutable_vars_before
+    ctx.env.scope.let_defs = let_defs_before
+    ctx.env.scope.mut_param_defs = mut_param_defs_before
+    rollback_pending_dicts(ctx, dict_checkpoint)
+
+    if precheck_succeeded {
+        publish_impl_effect_precheck_commits(ctx, commits)
+        ctx.fn_defaults = fn_defaults_after
+        ctx.fn_default_var_bounds = fn_default_var_bounds_after
+        ctx.fn_min_arity = fn_min_arity_after
+    }
+    for capture in default_authority_captures {
+        merge_default_authority_capture(ctx, capture)
+    }
+    set_impl_precheck_methods_pending(
+        ctx, target_for_final_pending, type_params, trait_name, methods, span,
+        !precheck_succeeded)
+    precheck_succeeded
 }
 
 fn record_fn_decl_index_firebreak(
     mut fn_name_to_idx: Map<Str, Int>, name: Str, index: Int
 ) {
-    let indexed_name = name
+    let indexed_name = "${name}"
     let indexed_value = index
     fn_name_to_idx.insert(indexed_name, indexed_value)
 }
@@ -6350,20 +8924,36 @@ fn phase_decl_index_result_firebreak(index: Int) -> Int? {
     some(exact_index)
 }
 
+fn check_one_decl_with_const_owner_firebreak(
+    mut ctx: InferCtx,
+    decl: Decl,
+    frame_decl_index: Int?,
+    mut hdecls: List<HDecl>,
+    const_owners: ConstOwnerCache
+) {
+    let checked_decl = decl
+    let checked_index = frame_decl_index
+    let checked_const_owners = const_owners
+    check_one_decl_with_rebind(
+        ctx, checked_decl, checked_index,
+        hdecls, some(checked_const_owners))
+}
+
 fn check_indexed_phase_decl_firebreak(
     mut ctx: InferCtx,
     decl: Decl,
     index: Int,
     mut hdecls: List<HDecl>,
-    mut checked: Set<Int>
+    mut checked: Set<Int>,
+    const_owners: ConstOwnerCache
 ) {
     let checked_decl = decl
     let checked_index = index
     let recorded_index = index
-    let _ = some(check_one_decl_with_rebind(
+    let _ = some(check_one_decl_with_const_owner_firebreak(
         ctx, checked_decl,
         phase_decl_index_result_firebreak(checked_index),
-        hdecls)) catch { _ => none }
+        hdecls, const_owners)) catch { _ => none }
     checked.insert(recorded_index)
 }
 
@@ -6372,14 +8962,32 @@ fn check_scc_decl_index_firebreak(
     decls: List<Decl>,
     index: Int,
     mut hdecls: List<HDecl>,
-    mut checked: Set<Int>
+    mut checked: Set<Int>,
+    const_owners: ConstOwnerCache
 ) {
     let lookup_index = index
     let checked_index = index
-    match decls.get(lookup_index) {
-        some(decl) => check_indexed_phase_decl_firebreak(
-            ctx, decl, checked_index, hdecls, checked),
-        none => {}
+    let indexed_decl = decls.get(lookup_index)
+    if indexed_decl.is_some() {
+        check_indexed_phase_decl_firebreak(
+            ctx, indexed_decl.unwrap(), checked_index,
+            hdecls, checked, const_owners)
+    }
+}
+
+fn check_decl_at_index_firebreak(
+    mut ctx: InferCtx,
+    decls: List<Decl>,
+    index: Int,
+    mut hdecls: List<HDecl>,
+    mut checked: Set<Int>,
+    const_owners: ConstOwnerCache
+) {
+    let indexed_decl = decls.get(index)
+    if indexed_decl.is_some() {
+        check_indexed_phase_decl_firebreak(
+            ctx, indexed_decl.unwrap(), index,
+            hdecls, checked, const_owners)
     }
 }
 
@@ -6387,112 +8995,1272 @@ fn check_remaining_decl_firebreak(
     mut ctx: InferCtx,
     decl: Decl,
     index: Int,
-    mut hdecls: List<HDecl>
+    mut hdecls: List<HDecl>,
+    const_owners: ConstOwnerCache
 ) {
     let checked_decl = decl
     let checked_index = index
-    let _ = some(check_one_decl_with_rebind(
+    let _ = some(check_one_decl_with_const_owner_firebreak(
         ctx, checked_decl,
         phase_decl_index_result_firebreak(checked_index),
-        hdecls)) catch { _ => none }
+        hdecls, const_owners)) catch { _ => none }
+}
+
+fn snapshot_const_owner_transaction(
+    ctx: InferCtx
+) -> ConstOwnerTransactionSnapshot {
+    ConstOwnerTransactionSnapshot {
+        subst: clone_union_find(ctx.subst),
+        scope_variables: clone_scope_variable_maps(ctx.env.scope.scopes),
+        callable_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata.callable_by_def_id),
+        callable_state_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata.callable_state_by_def_id),
+        callable_result_role_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata.callable_result_role_by_def_id),
+        returned_callable_result_role_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata
+                .returned_callable_result_role_by_def_id),
+        callable_result_role_spine_by_def_id: map_clone(
+            ctx.env.types.ownership_metadata
+                .callable_result_role_spine_by_def_id),
+        callable_inference_parents: map_clone(
+            ctx.env.types.ownership_metadata.callable_inference_parents),
+        callable_inference_solutions: map_clone(
+            ctx.env.types.ownership_metadata.callable_inference_solutions),
+        use_aliases: map_clone(ctx.use_aliases),
+        value_binding_kinds: map_clone(ctx.value_binding_kinds),
+        structs: map_clone(ctx.env.types.structs),
+        enums: map_clone(ctx.env.types.enums),
+        type_aliases: map_clone(ctx.env.types.type_aliases),
+        effects: map_clone(ctx.env.types.effects),
+        effect_aliases: map_clone(ctx.env.types.effect_aliases),
+        sigs: map_clone(ctx.env.types.sigs),
+        traits: map_clone(ctx.env.trait_reg.traits),
+        variant_to_enum: map_clone(ctx.env.types.variant_to_enum),
+        variant_ctor_origins: map_clone(ctx.env.types.variant_ctor_origins),
+        exact_value_alias_targets: map_clone(
+            ctx.pre_solve_exact_value_alias_targets),
+        pending_inferred_const_def_ids: set_clone(
+            ctx.pending_inferred_const_def_ids),
+        pending_precheck_callable_def_ids: set_clone(
+            ctx.pending_precheck_callable_def_ids),
+        const_getter_aliases: set_clone(ctx.pre_solve_const_getter_aliases),
+        callable_alias_targets: map_clone(ctx.pre_solve_callable_alias_targets),
+        callable_alias_arities: map_clone(ctx.pre_solve_callable_alias_arities),
+        callable_alias_contracts: map_clone(
+            ctx.pre_solve_callable_alias_contracts),
+        speculative_default_authority_def_ids: set_clone(
+            ctx.speculative_default_authority_def_ids),
+        boxed_vars: set_clone(ctx.boxed_vars),
+        var_lambda_depth: map_clone(ctx.var_lambda_depth),
+        fn_mut_params: map_clone(ctx.fn_mut_params),
+        fn_defaults: map_clone(ctx.fn_defaults),
+        fn_default_var_bounds: map_clone(ctx.fn_default_var_bounds),
+        fn_min_arity: map_clone(ctx.fn_min_arity),
+        latest_value_instantiation_maps: map_clone(
+            ctx.latest_value_instantiation_maps),
+        default_template_live_schemes: map_clone(
+            ctx.default_template_live_schemes),
+        rebind_assoc_provenance: map_clone(ctx.rebind_assoc_provenance),
+        type_param_scope: map_clone(ctx.type_param_scope),
+        qualified_assoc_scope: map_clone(ctx.qualified_assoc_scope),
+        current_fn_return_type: ctx.current_fn_return_type,
+        current_fn_bounds: list_clone(ctx.current_fn_bounds),
+        fn_bounds_stack: clone_impl_precheck_bounds_stack(ctx.fn_bounds_stack),
+        loop_depth: ctx.loop_depth,
+        lambda_depth: ctx.lambda_depth,
+        def_spans: map_clone(ctx.env.scope.def_spans),
+        var_bounds: clone_impl_precheck_var_bounds(ctx.env.scope.var_bounds),
+        mutable_vars: set_clone(ctx.env.scope.mutable_vars),
+        let_defs: set_clone(ctx.env.scope.let_defs),
+        mut_param_defs: set_clone(ctx.env.scope.mut_param_defs),
+        mod_path_depth: ctx.mod_path_stack.len(),
+        project_frame_depth: ctx.project_namespace_frame_stack.len(),
+        mod_unsafe_allowed: ctx.mod_unsafe_allowed,
+        dict_checkpoint: pending_dict_checkpoint(ctx)
+    }
+}
+
+fn restore_const_owner_transaction(
+    mut ctx: InferCtx, snapshot: ConstOwnerTransactionSnapshot
+) {
+    while ctx.project_namespace_frame_stack.len() >
+            snapshot.project_frame_depth {
+        if !exit_project_namespace_frame(ctx) {
+            panic("unreachable: const owner transaction lost project frame")
+        }
+    }
+    if ctx.project_namespace_frame_stack.len() < snapshot.project_frame_depth {
+        panic("unreachable: const owner transaction removed an outer project frame")
+    }
+    while ctx.mod_path_stack.len() > snapshot.mod_path_depth {
+        let _ = ctx.mod_path_stack.pop()
+    }
+    if ctx.mod_path_stack.len() < snapshot.mod_path_depth {
+        panic("unreachable: const owner transaction removed an outer module path")
+    }
+    while ctx.env.scope.scopes.len() > snapshot.scope_variables.len() {
+        ctx.env.pop_scope()
+    }
+    if ctx.env.scope.scopes.len() < snapshot.scope_variables.len() {
+        panic("unreachable: const owner transaction removed an outer scope")
+    }
+    restore_scope_variable_maps(ctx, snapshot.scope_variables)
+    ctx.subst = snapshot.subst
+    ctx.env.types.ownership_metadata.callable_by_def_id =
+        snapshot.callable_by_def_id
+    ctx.env.types.ownership_metadata.callable_state_by_def_id =
+        snapshot.callable_state_by_def_id
+    ctx.env.types.ownership_metadata.callable_result_role_by_def_id =
+        snapshot.callable_result_role_by_def_id
+    ctx.env.types.ownership_metadata
+        .returned_callable_result_role_by_def_id =
+            snapshot.returned_callable_result_role_by_def_id
+    ctx.env.types.ownership_metadata.callable_result_role_spine_by_def_id =
+        snapshot.callable_result_role_spine_by_def_id
+    ctx.env.types.ownership_metadata.callable_inference_parents =
+        snapshot.callable_inference_parents
+    ctx.env.types.ownership_metadata.callable_inference_solutions =
+        snapshot.callable_inference_solutions
+    ctx.use_aliases = snapshot.use_aliases
+    ctx.value_binding_kinds = snapshot.value_binding_kinds
+    ctx.env.types.structs = snapshot.structs
+    ctx.env.types.enums = snapshot.enums
+    ctx.env.types.type_aliases = snapshot.type_aliases
+    ctx.env.types.effects = snapshot.effects
+    ctx.env.types.effect_aliases = snapshot.effect_aliases
+    ctx.env.types.sigs = snapshot.sigs
+    ctx.env.trait_reg.traits = snapshot.traits
+    ctx.env.types.variant_to_enum = snapshot.variant_to_enum
+    ctx.env.types.variant_ctor_origins = snapshot.variant_ctor_origins
+    ctx.pre_solve_exact_value_alias_targets =
+        snapshot.exact_value_alias_targets
+    ctx.pending_inferred_const_def_ids =
+        snapshot.pending_inferred_const_def_ids
+    ctx.pending_precheck_callable_def_ids =
+        snapshot.pending_precheck_callable_def_ids
+    ctx.pre_solve_const_getter_aliases = snapshot.const_getter_aliases
+    ctx.pre_solve_callable_alias_targets = snapshot.callable_alias_targets
+    ctx.pre_solve_callable_alias_arities = snapshot.callable_alias_arities
+    ctx.pre_solve_callable_alias_contracts = snapshot.callable_alias_contracts
+    ctx.speculative_default_authority_def_ids =
+        snapshot.speculative_default_authority_def_ids
+    ctx.boxed_vars = snapshot.boxed_vars
+    ctx.var_lambda_depth = snapshot.var_lambda_depth
+    ctx.fn_mut_params = snapshot.fn_mut_params
+    ctx.fn_defaults = snapshot.fn_defaults
+    ctx.fn_default_var_bounds = snapshot.fn_default_var_bounds
+    ctx.fn_min_arity = snapshot.fn_min_arity
+    ctx.latest_value_instantiation_maps =
+        snapshot.latest_value_instantiation_maps
+    ctx.default_template_live_schemes =
+        snapshot.default_template_live_schemes
+    ctx.rebind_assoc_provenance = snapshot.rebind_assoc_provenance
+    ctx.type_param_scope = snapshot.type_param_scope
+    ctx.qualified_assoc_scope = snapshot.qualified_assoc_scope
+    ctx.current_fn_return_type = snapshot.current_fn_return_type
+    ctx.current_fn_bounds = snapshot.current_fn_bounds
+    ctx.fn_bounds_stack = snapshot.fn_bounds_stack
+    ctx.loop_depth = snapshot.loop_depth
+    ctx.lambda_depth = snapshot.lambda_depth
+    ctx.env.scope.def_spans = snapshot.def_spans
+    ctx.env.scope.var_bounds = snapshot.var_bounds
+    ctx.env.scope.mutable_vars = snapshot.mutable_vars
+    ctx.env.scope.let_defs = snapshot.let_defs
+    ctx.env.scope.mut_param_defs = snapshot.mut_param_defs
+    ctx.mod_unsafe_allowed = snapshot.mod_unsafe_allowed
+    rollback_pending_dicts(ctx, snapshot.dict_checkpoint)
+}
+
+fn collect_decl_owner_sites(
+    decls: List<Decl>, path_prefix: List<Int>, parent_mod: Str?,
+    mut const_sites: List<DeclOwnerSite>,
+    mut impl_sites: List<DeclOwnerSite>
+) {
+    for decl_index in 0..decls.len() {
+        let decl = decls.get(decl_index).unwrap()
+        let mut path = list_clone(path_prefix)
+        path.push(decl_index)
+        match decl {
+            Decl::Const { name, .. } => {
+                let canonical_name = match parent_mod {
+                    some(mod_name) => "${mod_name}::${name}",
+                    none => name
+                }
+                const_sites.push(DeclOwnerSite {
+                    path: path, canonical_name: some(canonical_name)
+                })
+            },
+            Decl::Impl { .. } => {
+                impl_sites.push(DeclOwnerSite {
+                    path: path, canonical_name: none
+                })
+            },
+            Decl::ModBlock { name, decls: nested, .. } => {
+                let nested_mod = match parent_mod {
+                    some(mod_name) => "${mod_name}::${name}",
+                    none => name
+                }
+                collect_decl_owner_sites(
+                    nested, path, some(nested_mod),
+                    const_sites, impl_sites)
+            },
+            _ => {}
+        }
+    }
+}
+
+fn snapshot_legacy_module_overlay(ctx: InferCtx) -> LegacyModuleOverlaySnapshot {
+    LegacyModuleOverlaySnapshot {
+        scope_variables: clone_scope_variable_maps(ctx.env.scope.scopes),
+        structs: map_clone(ctx.env.types.structs),
+        enums: map_clone(ctx.env.types.enums),
+        type_aliases: map_clone(ctx.env.types.type_aliases),
+        effects: map_clone(ctx.env.types.effects),
+        effect_aliases: map_clone(ctx.env.types.effect_aliases),
+        sigs: map_clone(ctx.env.types.sigs),
+        traits: map_clone(ctx.env.trait_reg.traits),
+        variant_to_enum: map_clone(ctx.env.types.variant_to_enum),
+        variant_ctor_origins: map_clone(ctx.env.types.variant_ctor_origins),
+        use_aliases: map_clone(ctx.use_aliases),
+        value_binding_kinds: map_clone(ctx.value_binding_kinds),
+        fn_mut_params: map_clone(ctx.fn_mut_params)
+    }
+}
+
+fn same_optional_def_id(left: Int?, right: Int?) -> Bool {
+    match left {
+        some(a) => match right { some(b) => a == b, none => false },
+        none => right.is_none()
+    }
+}
+
+fn restore_legacy_module_overlay(
+    mut ctx: InferCtx, snapshot: LegacyModuleOverlaySnapshot
+) {
+    while ctx.env.scope.scopes.len() > snapshot.scope_variables.len() {
+        ctx.env.pop_scope()
+    }
+    if ctx.env.scope.scopes.len() < snapshot.scope_variables.len() {
+        panic("unreachable: owner-pass module changed scope depth")
+    }
+    let mut scope_index = 0
+    while scope_index < snapshot.scope_variables.len() {
+        match (ctx.env.scope.scopes.get(scope_index),
+               snapshot.scope_variables.get(scope_index)) {
+            (some(scope), some(before)) => {
+                let mut restored_scope = scope
+                let mut restored = map_clone(before)
+                // Keep authoritative rebinds to an existing declaration, but
+                // discard fresh lexical alias DefIds installed by this module.
+                for entry in restored_scope.variables.entries() {
+                    let (name, current) = entry
+                    match before.get(name) {
+                        some(previous) => if same_optional_def_id(
+                                current.def_id, previous.def_id) {
+                            let restored_name = name
+                            let restored_scheme = current
+                            restored.insert(restored_name, restored_scheme)
+                        },
+                        none => {}
+                    }
+                }
+                restored_scope.variables = restored
+                ctx.env.scope.scopes.set(scope_index, restored_scope)
+            },
+            _ => panic("unreachable: owner-pass scope snapshot is missing")
+        }
+        scope_index = scope_index + 1
+    }
+    ctx.env.types.structs = snapshot.structs
+    ctx.env.types.enums = snapshot.enums
+    ctx.env.types.type_aliases = snapshot.type_aliases
+    ctx.env.types.effects = snapshot.effects
+    ctx.env.types.effect_aliases = snapshot.effect_aliases
+    ctx.env.types.sigs = snapshot.sigs
+    ctx.env.trait_reg.traits = snapshot.traits
+    ctx.env.types.variant_to_enum = snapshot.variant_to_enum
+    ctx.env.types.variant_ctor_origins = snapshot.variant_ctor_origins
+    ctx.use_aliases = snapshot.use_aliases
+    ctx.value_binding_kinds = snapshot.value_binding_kinds
+    ctx.fn_mut_params = snapshot.fn_mut_params
+}
+
+fn enter_owner_site_module_context(
+    mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>,
+    decls: List<Decl>, required_effects: List<EffectExpr>?,
+    frame_decl_index: Int
+) -> Bool {
+    let project_active = ctx.project_namespace_file_key.is_some()
+    if project_active && !enter_project_child_frame(ctx, frame_decl_index) {
+        panic("unreachable: resolver plan missing owner-pass module frame")
+    }
+    let segments = mod_name.split("::")
+    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
+    ctx.mod_path_stack.push(simple_name)
+    if !project_active {
+        insert_mod_aliases(ctx, mod_name, decls, false)
+        resolve_mod_uses(ctx, uses, true)
+    }
+    match required_effects {
+        some(req_effs) => {
+            let cap = resolve_declared_effects(ctx, req_effs)
+            ctx.mod_unsafe_allowed = cap.effects.any(fn(e) {
+                match e { Effect::UnsafeEffect => true, _ => false }
+            })
+        },
+        none => { ctx.mod_unsafe_allowed = false }
+    }
+    project_active
+}
+
+fn restore_owner_site_module_context(
+    mut ctx: InferCtx, project_frame_depth: Int, mod_path_depth: Int,
+    previous_unsafe: Bool, legacy_snapshot: LegacyModuleOverlaySnapshot?
+) {
+    ctx.mod_unsafe_allowed = previous_unsafe
+    while ctx.mod_path_stack.len() > mod_path_depth {
+        let _ = ctx.mod_path_stack.pop()
+    }
+    while ctx.project_namespace_frame_stack.len() > project_frame_depth {
+        if !exit_project_namespace_frame(ctx) {
+            panic("unreachable: owner-pass module frame was not active")
+        }
+    }
+    if legacy_snapshot.is_some() {
+        restore_legacy_module_overlay(ctx, legacy_snapshot.unwrap())
+    }
+}
+
+fn check_const_owner_nested_path_firebreak(
+    mut ctx: InferCtx,
+    mod_name: Str,
+    uses: List<UseDecl>,
+    nested: List<Decl>,
+    required_effects: List<EffectExpr>?,
+    decl_index: Int,
+    path: List<Int>,
+    depth: Int,
+    mut cache: ConstOwnerCache
+) -> Bool {
+    let name_for_context = mod_name
+    let name_for_parent = mod_name
+    let uses_for_context = uses
+    let nested_for_context = nested
+    let nested_for_recursion = nested
+    let effects_for_context = required_effects
+    let path_for_recursion = path
+    let cache_for_recursion = cache
+    let _ = enter_owner_site_module_context(
+        ctx, name_for_context, uses_for_context, nested_for_context,
+        effects_for_context, decl_index)
+    check_const_owner_at_path(
+        ctx, nested_for_recursion, path_for_recursion,
+        depth + 1, some(name_for_parent), cache_for_recursion)
+}
+
+fn canonical_const_owner_decl_firebreak(
+    parent_mod: Str?, source_decl: Decl
+) -> Decl {
+    let parent_for_prefix = parent_mod
+    let source_for_prefix = source_decl
+    let source_without_parent = source_decl
+    if parent_for_prefix.is_some() {
+        prefix_decl_name(parent_for_prefix.unwrap(), source_for_prefix)
+    } else {
+        source_without_parent
+    }
+}
+
+fn check_const_owner_at_path(
+    mut ctx: InferCtx, decls: List<Decl>, path: List<Int>, depth: Int,
+    parent_mod: Str?, mut cache: ConstOwnerCache
+) -> Bool {
+    let decl_index = match path.get(depth) {
+        some(index) => index,
+        none => panic("unreachable: const owner site path is truncated")
+    }
+    let source_decl = decls.get(decl_index)
+    if source_decl.is_none() {
+        panic("unreachable: const owner site index is invalid")
+    }
+    let canonical = canonical_const_owner_decl_firebreak(
+        parent_mod, source_decl.unwrap())
+    let canonical_for_match = canonical
+    let canonical_for_check = canonical
+    if depth + 1 == path.len() {
+        match canonical_for_match {
+            Decl::Const { name, .. } => {
+                let def_id = match maybe_registered_const_def_id(ctx, name) {
+                    some(id) => id,
+                    none => return false
+                }
+                if cache.checked.contains_key(def_id) ||
+                   cache.failed.contains(def_id) {
+                    return false
+                }
+                let subst_before = clone_union_find(ctx.subst)
+                let checked = some(check_decl(
+                    ctx, canonical_for_check, none, none)) catch { _ => none }
+                let checked_for_shape = checked
+                let checked_for_storage = checked
+                match checked_for_shape {
+                    some(HDecl::Const {
+                        def_id: some(checked_def_id), ..
+                    }) => {
+                        if checked_def_id != def_id {
+                            panic("unreachable: checked const owner DefId mismatch")
+                        }
+                        match checked_for_storage {
+                            some(hdecl) => {
+                                let stored_hdecl = hdecl
+                                cache.checked.insert(def_id, stored_hdecl)
+                            },
+                            none => panic("unreachable: checked const owner was lost")
+                        }
+                        true
+                    },
+                    some(_) => panic(
+                        "unreachable: const owner check produced non-const HIR"),
+                    none => {
+                        ctx.subst = subst_before
+                        cache.failed.insert(def_id)
+                        false
+                    }
+                }
+            },
+            _ => panic("unreachable: const owner site does not name a const")
+        }
+    } else {
+        match canonical_for_match {
+            Decl::ModBlock {
+                name, uses, decls: nested, required_effects, ..
+            } => {
+                let previous_unsafe = ctx.mod_unsafe_allowed
+                let project_frame_depth =
+                    ctx.project_namespace_frame_stack.len()
+                let mod_path_depth = ctx.mod_path_stack.len()
+                let legacy_snapshot = if ctx.project_namespace_file_key.is_some() {
+                    none
+                } else {
+                    some(snapshot_legacy_module_overlay(ctx))
+                }
+                let result = some({
+                    check_const_owner_nested_path_firebreak(
+                        ctx, name, uses, nested, required_effects,
+                        decl_index, path, depth, cache)
+                }) catch { _ => none }
+                restore_owner_site_module_context(
+                    ctx, project_frame_depth, mod_path_depth,
+                    previous_unsafe, legacy_snapshot)
+                match result {
+                    some(ok) => ok,
+                    none => fail.raise(CompileError {})
+                }
+            },
+            _ => panic("unreachable: const owner path crossed a non-module")
+        }
+    }
+}
+
+fn check_const_owner_site_transaction(
+    mut ctx: InferCtx, decls: List<Decl>, site: DeclOwnerSite,
+    mut cache: ConstOwnerCache
+) -> Bool {
+    let snapshot = snapshot_const_owner_transaction(ctx)
+    let checked = some(check_const_owner_at_path(
+        ctx, decls, site.path, 0, none, cache)) catch { _ => none }
+    match checked {
+        some(true) => true,
+        _ => {
+            restore_const_owner_transaction(ctx, snapshot)
+            // Registration failures and duplicate sites are already diagnosed.
+            // Mark only an otherwise uncached exact owner as failed so replay
+            // cannot mistake a missing cache entry for an internal invariant.
+            match site.canonical_name {
+                some(name) => match maybe_registered_const_def_id(ctx, name) {
+                    some(def_id) => if !cache.checked.contains_key(def_id) {
+                        cache.failed.insert(def_id)
+                    },
+                    none => {}
+                },
+                none => {}
+            }
+            false
+        }
+    }
+}
+
+fn precheck_impl_nested_path_firebreak(
+    mut ctx: InferCtx,
+    mod_name: Str,
+    uses: List<UseDecl>,
+    nested: List<Decl>,
+    required_effects: List<EffectExpr>?,
+    decl_index: Int,
+    path: List<Int>,
+    depth: Int
+) -> Bool {
+    let name_for_context = mod_name
+    let name_for_parent = mod_name
+    let uses_for_context = uses
+    let nested_for_context = nested
+    let nested_for_recursion = nested
+    let effects_for_context = required_effects
+    let path_for_recursion = path
+    let _ = enter_owner_site_module_context(
+        ctx, name_for_context, uses_for_context, nested_for_context,
+        effects_for_context, decl_index)
+    precheck_impl_at_path(
+        ctx, nested_for_recursion, path_for_recursion,
+        depth + 1, some(name_for_parent))
+}
+
+fn precheck_impl_at_path(
+    mut ctx: InferCtx, decls: List<Decl>, path: List<Int>, depth: Int,
+    parent_mod: Str?
+) -> Bool {
+    let decl_index = match path.get(depth) {
+        some(index) => index,
+        none => panic("unreachable: impl precheck site path is truncated")
+    }
+    let source_decl = decls.get(decl_index)
+    if source_decl.is_none() {
+        panic("unreachable: impl precheck site index is invalid")
+    }
+    let canonical = canonical_const_owner_decl_firebreak(
+        parent_mod, source_decl.unwrap())
+    if depth + 1 == path.len() {
+        match canonical {
+            Decl::Impl {
+                target_type, type_params, trait_name, methods, span
+            } => precheck_impl_effects_firebreak(
+                ctx, target_type, type_params, trait_name, methods, span),
+            _ => panic("unreachable: impl precheck site does not name an impl")
+        }
+    } else {
+        match canonical {
+            Decl::ModBlock {
+                name, uses, decls: nested, required_effects, ..
+            } => {
+                let previous_unsafe = ctx.mod_unsafe_allowed
+                let project_frame_depth =
+                    ctx.project_namespace_frame_stack.len()
+                let mod_path_depth = ctx.mod_path_stack.len()
+                let legacy_snapshot = if ctx.project_namespace_file_key.is_some() {
+                    none
+                } else {
+                    some(snapshot_legacy_module_overlay(ctx))
+                }
+                let result = some({
+                    precheck_impl_nested_path_firebreak(
+                        ctx, name, uses, nested, required_effects,
+                        decl_index, path, depth)
+                }) catch { _ => none }
+                restore_owner_site_module_context(
+                    ctx, project_frame_depth, mod_path_depth,
+                    previous_unsafe, legacy_snapshot)
+                match result {
+                    some(ok) => ok,
+                    none => false
+                }
+            },
+            _ => panic("unreachable: impl precheck path crossed a non-module")
+        }
+    }
+}
+
+fn summary_var_fingerprint(
+    var_id: Int, mut canonical_vars: Map<Int, Int>,
+    mut next_var: List<Int>
+) -> Str {
+    match canonical_vars.get(var_id) {
+        some(index) => "v${index.to_str()}",
+        none => {
+            let index = next_var.get(0).unwrap_or(0)
+            canonical_vars.insert(var_id, index)
+            next_var.set(0, index + 1)
+            "v${index.to_str()}"
+        }
+    }
+}
+
+// Sort unordered semantic collections before assigning alpha-variable
+// ordinals. Sorting their rendered strings afterwards is too late: traversal
+// order would already have changed v0/v1 assignment across equivalent retry
+// snapshots.
+fn summary_effect_kind_order_key(eff: Effect) -> Str {
+    match eff {
+        Effect::IoEffect => "0:io",
+        Effect::FailEffect { .. } => "1:fail",
+        Effect::MutEffect { .. } => "2:mut",
+        Effect::CustomEffect { name, .. } => "3:${name}",
+        Effect::UnsafeEffect => "4:unsafe"
+    }
+}
+
+fn ordered_summary_effects(
+    metadata: OwnershipMetadata, subst: UnionFind,
+    effects: List<Effect>, canonical_vars: Map<Int, Int>,
+    next_var: List<Int>
+) -> List<Effect> {
+    let mut keyed: List<(Str, Effect)> = []
+    for eff_item in effects {
+        // Same-kind effects may carry distinct generic payloads (multiple
+        // mut<T>/mut<U> effects are legal). Render each candidate against an
+        // isolated copy of the already-established alpha namespace so row
+        // iteration order cannot decide which payload receives vN.
+        let preview_vars = map_clone(canonical_vars)
+        let preview_next = [next_var.get(0).unwrap_or(0)]
+        let effect_for_preview = eff_item
+        let effect_for_kind = eff_item
+        let effect_for_store = eff_item
+        let preview = summary_effect_fingerprint(
+            metadata, subst, effect_for_preview,
+            preview_vars, preview_next)
+        let effect_kind_key = summary_effect_kind_order_key(effect_for_kind)
+        keyed.push((
+            "${effect_kind_key}:${preview}",
+            effect_for_store))
+    }
+    keyed.sort_by(compare_by_first)
+    let mut ordered: List<Effect> = []
+    for entry in keyed {
+        let stored_effect = entry.1
+        ordered.push(stored_effect)
+    }
+    ordered
+}
+
+fn compare_summary_record_fields(
+    left: RecordField, right: RecordField
+) -> Int {
+    if left.name < right.name { -1 }
+    else if left.name > right.name { 1 }
+    else { 0 }
+}
+
+fn summary_effect_fingerprint(
+    metadata: OwnershipMetadata, subst: UnionFind, eff: Effect,
+    mut canonical_vars: Map<Int, Int>, mut next_var: List<Int>
+) -> Str {
+    match eff {
+        Effect::IoEffect => "io",
+        Effect::FailEffect { error_type } =>
+            "fail<${summary_type_fingerprint(
+                metadata, subst, error_type,
+                canonical_vars, next_var)}>",
+        Effect::MutEffect { state_type } =>
+            "mut<${summary_type_fingerprint(
+                metadata, subst, state_type,
+                canonical_vars, next_var)}>",
+        Effect::CustomEffect { name, type_args } => {
+            let mut args: List<Str> = []
+            for arg in type_args {
+                args.push(summary_type_fingerprint(
+                    metadata, subst, arg, canonical_vars, next_var))
+            }
+            "${name}<${args.join(",")}>"
+        },
+        Effect::UnsafeEffect => "unsafe"
+    }
+}
+
+fn summary_effect_row_fingerprint(
+    metadata: OwnershipMetadata, subst: UnionFind, row: EffectRow,
+    mut canonical_vars: Map<Int, Int>, mut next_var: List<Int>
+) -> Str {
+    let resolved = apply_subst_row(subst, row)
+    let mut effects: List<Str> = []
+    let ordered_effects = ordered_summary_effects(
+        metadata, subst, resolved.effects, canonical_vars, next_var)
+    for eff_item in ordered_effects {
+        effects.push(summary_effect_fingerprint(
+            metadata, subst, eff_item, canonical_vars, next_var))
+    }
+    let tail = match resolved.tail {
+        some(id) => summary_var_fingerprint(
+            id, canonical_vars, next_var),
+        none => "!"
+    }
+    "${effects.join("+")}|${tail}"
+}
+
+fn summary_type_fingerprint(
+    metadata: OwnershipMetadata, subst: UnionFind, ty: Type,
+    mut canonical_vars: Map<Int, Int>, mut next_var: List<Int>
+) -> Str {
+    let resolved = apply_subst(subst, ty)
+    match resolved {
+        Type::IntType => "Int",
+        Type::FloatType => "Float",
+        Type::StrType => "Str",
+        Type::BoolType => "Bool",
+        Type::UnitType => "Unit",
+        Type::NeverType => "Never",
+        Type::AnyType => "Any",
+        Type::TypeVar { id, .. } => summary_var_fingerprint(
+            id, canonical_vars, next_var),
+        Type::FnType { params, return_type, meta } => {
+            let mut modes: List<Str> = []
+            for param_index in 0..params.len() {
+                modes.push(callable_param_ownership(
+                    metadata, meta.ownership_term, param_index).to_str())
+            }
+            let result_mode = callable_return_ownership(
+                metadata, meta.ownership_term).to_str()
+            let mut param_types: List<Str> = []
+            for param in params {
+                param_types.push(summary_type_fingerprint(
+                    metadata, subst, param, canonical_vars, next_var))
+            }
+            let return_summary = summary_type_fingerprint(
+                metadata, subst, return_type,
+                canonical_vars, next_var)
+            let effect_summary = summary_effect_row_fingerprint(
+                metadata, subst, meta.effects,
+                canonical_vars, next_var)
+            "fn(${param_types.join(",")})->${return_summary}/${effect_summary}/${modes.join(",")}:${result_mode}"
+        },
+        Type::StructType { name, type_params } => {
+            let mut params: List<Str> = []
+            for param in type_params {
+                params.push(summary_type_fingerprint(
+                    metadata, subst, param, canonical_vars, next_var))
+            }
+            "struct:${name}<${params.join(",")}>"
+        },
+        Type::EnumType { name, type_params } => {
+            let mut params: List<Str> = []
+            for param in type_params {
+                params.push(summary_type_fingerprint(
+                    metadata, subst, param, canonical_vars, next_var))
+            }
+            "enum:${name}<${params.join(",")}>"
+        },
+        Type::GenericType { base, args } => {
+            let mut params: List<Str> = []
+            for arg in args {
+                params.push(summary_type_fingerprint(
+                    metadata, subst, arg, canonical_vars, next_var))
+            }
+            "generic:${summary_type_fingerprint(
+                metadata, subst, base,
+                canonical_vars, next_var)}<${params.join(",")}>"
+        },
+        Type::RecordType { fields, tail, .. } => {
+            let mut parts: List<Str> = []
+            let mut ordered_fields = list_clone(fields)
+            ordered_fields.sort_by(compare_summary_record_fields)
+            for field in ordered_fields {
+                parts.push("${field.name}:${summary_type_fingerprint(
+                    metadata, subst, field.ty,
+                    canonical_vars, next_var)}")
+            }
+            let tail_marker = match tail {
+                some(id) => summary_var_fingerprint(
+                    id, canonical_vars, next_var),
+                none => "!"
+            }
+            "record:${parts.join(",")}|${tail_marker}"
+        },
+        Type::EffectRowType { effects, tail } => {
+            let mut parts: List<Str> = []
+            let ordered_effects = ordered_summary_effects(
+                metadata, subst, effects, canonical_vars, next_var)
+            for eff_item in ordered_effects {
+                parts.push(summary_effect_fingerprint(
+                    metadata, subst, eff_item,
+                    canonical_vars, next_var))
+            }
+            let tail_marker = match tail {
+                some(id) => summary_var_fingerprint(
+                    id, canonical_vars, next_var),
+                none => "!"
+            }
+            "effects:${parts.join(",")}|${tail_marker}"
+        },
+        Type::TupleType { elements } => {
+            let mut parts: List<Str> = []
+            for element in elements {
+                parts.push(summary_type_fingerprint(
+                    metadata, subst, element,
+                    canonical_vars, next_var))
+            }
+            "tuple:${parts.join(",")}"
+        },
+        Type::PtrType { pointee } =>
+            "ptr:${summary_type_fingerprint(
+                metadata, subst, pointee,
+                canonical_vars, next_var)}",
+        Type::ErrorType => "error"
+    }
+}
+
+fn summary_scheme_fingerprint(
+    metadata: OwnershipMetadata, subst: UnionFind, scheme: TypeScheme,
+    mut canonical_vars: Map<Int, Int>, mut next_var: List<Int>
+) -> Str {
+    let mut quantified_order: Map<Int, Int> = map_new()
+    let mut resolved_quantified: List<Type> = []
+    let mut quantified_index = 0
+    // Quantifier order is part of the scheme's semantic identity. Seed those
+    // alpha names before walking unordered effect rows, so two same-kind
+    // payloads which mention T/U receive stable preview keys even when the row
+    // storage order changes between fixed-point retries.
+    for var_id in scheme.type_vars {
+        let resolved = apply_subst(
+            subst, Type::TypeVar { id: var_id, name: none })
+        let resolved_for_seed = resolved
+        let resolved_for_store = resolved
+        match resolved_for_seed {
+            Type::TypeVar { id, .. } => {
+                quantified_order.insert(id, quantified_index)
+                let _ = summary_var_fingerprint(
+                    id, canonical_vars, next_var)
+            },
+            _ => {}
+        }
+        resolved_quantified.push(resolved_for_store)
+        quantified_index = quantified_index + 1
+    }
+    let ty = summary_type_fingerprint(
+        metadata, subst, scheme.ty, canonical_vars, next_var)
+    let mut quantified: List<Str> = []
+    for resolved in resolved_quantified {
+        match resolved {
+            Type::TypeVar { id, .. } => quantified.push(
+                summary_var_fingerprint(id, canonical_vars, next_var)),
+            _ => quantified.push(summary_type_fingerprint(
+                metadata, subst, resolved, canonical_vars, next_var))
+        }
+    }
+    let mut bounds: List<Str> = []
+    let mut ordered_bounds: List<(Str, SchemeBound)> = []
+    for bound in scheme.bounds {
+        let bound_for_store = bound
+        let resolved_owner_for_key = apply_subst(
+            subst, Type::TypeVar { id: bound.type_var, name: none })
+        let owner_key = match resolved_owner_for_key {
+            Type::TypeVar { id, .. } => match quantified_order.get(id) {
+                some(index) => index.to_str(),
+                none => "unquantified"
+            },
+            _ => type_to_string(resolved_owner_for_key)
+        }
+        let mut assoc_names: List<Str> = []
+        for constraint in bound.assoc_constraints {
+            let assoc_name = "${constraint.name}"
+            assoc_names.push(assoc_name)
+        }
+        assoc_names.sort()
+        ordered_bounds.push((
+            "${owner_key}:${bound.trait_name}:${assoc_names.join(",")}",
+            bound_for_store))
+    }
+    ordered_bounds.sort_by(compare_by_first)
+    for bound_entry in ordered_bounds {
+        let (_, bound) = bound_entry
+        let resolved_owner = apply_subst(
+            subst, Type::TypeVar { id: bound.type_var, name: none })
+        let owner = match resolved_owner {
+            Type::TypeVar { id, .. } => summary_var_fingerprint(
+                id, canonical_vars, next_var),
+            _ => summary_type_fingerprint(
+                metadata, subst, resolved_owner,
+                canonical_vars, next_var)
+        }
+        let mut assoc: List<Str> = []
+        let mut ordered_assoc = list_clone(bound.assoc_constraints)
+        ordered_assoc.sort_by(fn(left, right) {
+            if left.name < right.name { -1 }
+            else if left.name > right.name { 1 }
+            else { 0 }
+        })
+        for constraint in ordered_assoc {
+            assoc.push("${constraint.name}=${summary_type_fingerprint(
+                metadata, subst, constraint.ty,
+                canonical_vars, next_var)}")
+        }
+        bounds.push("${owner}:${bound.trait_name}<${assoc.join(",")}>")
+    }
+    "${ty}:forall[${quantified.join(",")}]:where[${bounds.join(",")}]"
+}
+
+fn callable_def_id_summary_fingerprint(
+    metadata: OwnershipMetadata, def_id: Int?
+) -> Str {
+    match def_id {
+        none => "no-def",
+        some(id) => match metadata.callable_by_def_id.get(id) {
+            none => "def:${id.to_str()}:no-contract",
+            some(term) => {
+                let mut levels: List<Str> = []
+                match metadata.callable_state_by_def_id.get(id) {
+                    some(state) => {
+                        for level in state.transfer_levels {
+                            let mut modes: List<Str> = []
+                            for param_index in 0..level.force_params.len() {
+                                let force = level.force_params.get(
+                                    param_index).unwrap_or(false)
+                                let param_mode = callable_param_ownership(
+                                    metadata, level.ownership_term,
+                                    param_index).to_str()
+                                let force_suffix = if force { "f" } else { "n" }
+                                modes.push("${param_mode}${force_suffix}")
+                            }
+                            let return_mode = callable_return_ownership(
+                                metadata, level.ownership_term).to_str()
+                            levels.push("${modes.join(",")}:${return_mode}")
+                        }
+                        levels.push("source:${state.source.to_str()}")
+                    },
+                    none => levels.push("no-state")
+                }
+                let roles = match metadata
+                        .callable_result_role_spine_by_def_id.get(id) {
+                    some(spine) => spine.map(fn(role) {
+                        role.to_str()
+                    }).join(","),
+                    none => "no-roles"
+                }
+                let direct_mode = callable_return_ownership(
+                    metadata, term).to_str()
+                "def:${id.to_str()}:${direct_mode}:${levels.join("/")}:${roles}"
+            }
+        }
+    }
+}
+
+fn callable_summary_fingerprint(
+    ctx: InferCtx, fn_names: Set<Str>
+) -> Str {
+    let metadata = ctx.env.types.ownership_metadata
+    // One canonical variable namespace spans every scheme/default in this
+    // snapshot.  This preserves cross-summary equality while remaining stable
+    // when a retry allocates different raw checker-local variable IDs.
+    let mut canonical_vars: Map<Int, Int> = map_new()
+    let mut next_var: List<Int> = [0]
+    let mut entries: List<Str> = []
+    let mut ordered_fn_names: List<Str> = []
+    for name in fn_names {
+        let ordered_name = "${name}"
+        ordered_fn_names.push(ordered_name)
+    }
+    ordered_fn_names.sort()
+    for name in ordered_fn_names {
+        match ctx.env.lookup(name) {
+            some(scheme) => {
+                let scheme_def_id = scheme.def_id
+                let scheme_summary = summary_scheme_fingerprint(
+                    metadata, ctx.subst, scheme,
+                    canonical_vars, next_var)
+                let def_summary = callable_def_id_summary_fingerprint(
+                    metadata, scheme_def_id)
+                entries.push("fn:${name}:${scheme_summary}:${def_summary}")
+            },
+            none => {}
+        }
+        let default_owner_def_id = default_owner_def_id_for_name(ctx, name)
+        match default_owner_def_id {
+            some(owner_def_id) => match (
+                ctx.fn_min_arity.get(owner_def_id),
+                ctx.fn_defaults.get(owner_def_id),
+                ctx.fn_default_var_bounds.get(owner_def_id)
+            ) {
+            (some(min_arity), some(defaults), some(local_bounds)) => {
+                let mut default_types: List<Str> = []
+                for default in defaults {
+                    let default_type = summary_type_fingerprint(
+                        metadata, ctx.subst, hexpr_type(default),
+                        canonical_vars, next_var)
+                    let default_effects = summary_effect_row_fingerprint(
+                        metadata, ctx.subst, hexpr_effects(default),
+                        canonical_vars, next_var)
+                    default_types.push("${default_type}/${default_effects}")
+                }
+                let mut template_vars =
+                    default_template_var_ids(defaults).to_list()
+                template_vars.sort()
+                let mut template_var_parts: List<Str> = []
+                for var_id in template_vars {
+                    let mut bounds: List<Str> = match local_bounds.get(var_id) {
+                        some(set) => set.to_list(),
+                        none => []
+                    }
+                    bounds.sort()
+                    let template_var = summary_var_fingerprint(
+                        var_id, canonical_vars, next_var)
+                    template_var_parts.push(
+                        "${template_var}:${bounds.join("+")}")
+                }
+                let default_count = defaults.len().to_str()
+                let default_type_summary = default_types.join(",")
+                let template_var_summary = template_var_parts.join(",")
+                entries.push(
+                    "defaults:${name}:${min_arity.to_str()}:${default_count}:${default_type_summary}:${template_var_summary}")
+            },
+            _ => entries.push("defaults:${name}:none")
+            },
+            none => entries.push("defaults:${name}:none")
+        }
+    }
+    let mut method_schemes: Map<Str, TypeScheme> = map_new()
+    for target_entry in ctx.env.trait_reg.impl_methods.entries() {
+        let (target, methods) = target_entry
+        for method_entry in methods.entries() {
+            let (method, scheme) = method_entry
+            let stored_scheme = scheme
+            method_schemes.insert(
+                "impl:${target}:${method}", stored_scheme)
+        }
+    }
+    for impl_entry in ctx.env.trait_reg.trait_impls.entries() {
+        let (_, impls) = impl_entry
+        for impl_ in impls {
+            for method_entry in impl_.method_schemes.entries() {
+                let (method, scheme) = method_entry
+                let stored_scheme = scheme
+                method_schemes.insert(
+                    "trait:${impl_.origin}:${method}", stored_scheme)
+            }
+        }
+    }
+    let mut method_keys: List<Str> = []
+    for entry in method_schemes.entries() {
+        let method_key = entry.0
+        method_keys.push(method_key)
+    }
+    method_keys.sort()
+    for key in method_keys {
+        match method_schemes.get(key) {
+            some(scheme) => {
+                let scheme_def_id = scheme.def_id
+                let scheme_summary = summary_scheme_fingerprint(
+                    metadata, ctx.subst, scheme,
+                    canonical_vars, next_var)
+                let def_summary = callable_def_id_summary_fingerprint(
+                    metadata, scheme_def_id)
+                entries.push("${key}:${scheme_summary}:${def_summary}")
+                match scheme_def_id {
+                    some(owner_def_id) => match (
+                        ctx.fn_min_arity.get(owner_def_id),
+                        ctx.fn_defaults.get(owner_def_id),
+                        ctx.fn_default_var_bounds.get(owner_def_id)
+                    ) {
+                        (some(min_arity), some(defaults),
+                         some(local_bounds)) => {
+                            let mut default_types: List<Str> = []
+                            for default in defaults {
+                                let default_type = summary_type_fingerprint(
+                                    metadata, ctx.subst,
+                                    hexpr_type(default), canonical_vars,
+                                    next_var)
+                                let default_effects =
+                                    summary_effect_row_fingerprint(
+                                        metadata, ctx.subst,
+                                        hexpr_effects(default),
+                                        canonical_vars, next_var)
+                                default_types.push(
+                                    "${default_type}/${default_effects}")
+                            }
+                            let mut template_vars =
+                                default_template_var_ids(defaults).to_list()
+                            template_vars.sort()
+                            let mut template_var_parts: List<Str> = []
+                            for var_id in template_vars {
+                                let mut bounds: List<Str> = match
+                                        local_bounds.get(var_id) {
+                                    some(set) => set.to_list(),
+                                    none => []
+                                }
+                                bounds.sort()
+                                let template_var = summary_var_fingerprint(
+                                    var_id, canonical_vars, next_var)
+                                template_var_parts.push(
+                                    "${template_var}:${bounds.join("+")}")
+                            }
+                            let default_count = defaults.len().to_str()
+                            let default_type_summary = default_types.join(",")
+                            let template_var_summary =
+                                template_var_parts.join(",")
+                            entries.push(
+                                "defaults:${key}:${min_arity.to_str()}:${default_count}:${default_type_summary}:${template_var_summary}")
+                        },
+                        _ => entries.push("defaults:${key}:none")
+                    },
+                    none => entries.push("defaults:${key}:none")
+                }
+            },
+            none => panic(
+                "unreachable: callable summary method key disappeared")
+        }
+    }
+    let mut pending: List<Str> = []
+    for def_id in ctx.pending_precheck_callable_def_ids {
+        pending.push(def_id.to_str())
+    }
+    pending.sort()
+    entries.push("pending:${pending.join(",")}")
+    entries.sort()
+    entries.join(";")
+}
+
+fn precheck_callable_summaries_to_fixed_point(
+    mut ctx: InferCtx, decls: List<Decl>,
+    impl_sites: List<DeclOwnerSite>,
+    scc_groups: List<List<Str>>, precheck_nodes: Set<Str>,
+    fn_name_to_idx: Map<Str, Int>,
+    mut blocked_impl_prechecks: Set<Int>,
+    mut blocked_fn_prechecks: Set<Str>
+) {
+    let mut previous = callable_summary_fingerprint(ctx, precheck_nodes)
+    let mut round = 0
+    let fuel = precheck_nodes.len() + impl_sites.len() + 2
+    while round < fuel {
+        // A validated default header is usable independently from its blocked
+        // body summary.  Clear all such method/function markers together for
+        // the round so mutually dependent impl owners do not alternate between
+        // hiding headers that are already exact and available.
+        for entry in ctx.pending_fn_default_seed_values.entries() {
+            let seeded_def_id = entry.0
+            ctx.pending_precheck_callable_def_ids.remove(seeded_def_id)
+        }
+        // Run functions first so a direct pending-const dependency marks its
+        // DefId before any impl caller can consume the registration placeholder.
+        // The next round propagates the inverse Function -> MethodCall edge.
+        for scc_group in scc_groups {
+            precheck_fn_scc_firebreak(
+                ctx, decls, scc_group, precheck_nodes,
+                fn_name_to_idx, blocked_fn_prechecks)
+        }
+        for impl_site_index in 0..impl_sites.len() {
+            let site = impl_sites.get(impl_site_index).unwrap()
+            if precheck_impl_at_path(
+                    ctx, decls, site.path, 0, none) {
+                blocked_impl_prechecks.remove(impl_site_index)
+            } else {
+                blocked_impl_prechecks.insert(impl_site_index)
+            }
+        }
+        let current = callable_summary_fingerprint(ctx, precheck_nodes)
+        if current == previous { return }
+        previous = current
+        round = round + 1
+    }
+    panic("unreachable: callable summary precheck did not converge")
 }
 
 fn check_registered_body(
     mut ctx: InferCtx, program: Program,
     derived_impls: List<DerivedImpl>
 ) -> HProgram {
-    // Effect pre-pass: check impl blocks to populate impl_methods with inferred effects.
-    // Without this, callers defined before impl blocks see EMPTY_ROW effects from Pass 1.
-    // The main pass re-checks with correct effects visible.
-    // DiagnosticSink deduplication (by code+span) prevents double error reporting.
-    for decl in program.decls {
-        match decl {
-            Decl::Impl { target_type, type_params, trait_name, methods, span } => {
-                precheck_impl_effects_firebreak(
-                    ctx, target_type, type_params, trait_name, methods, span)
-            },
-            _ => {}
-        }
-    }
-
-    // B-122: Build SCC for fn/impl declaration ordering.
-    // Callees are checked before callers so that rebinding makes resolved
-    // return types visible to callers (fixing the #149 unsound ret-var hole).
+    // Build one whole-file callable plan. Function and impl summaries alternate
+    // to a fixed point because MethodCall edges are resolved by inference, not
+    // by the syntactic direct-call SCC graph.
     let registered_fns = collect_registered_fn_names(program.decls)
     let call_graph = build_call_graph(program.decls, registered_fns)
     let scc_groups = tarjan_scc(call_graph)
-
-    // Build lookup before the inline pre-pass. Besides driving Phase 2b, this
-    // distinguishes top-level SCC nodes that are already checked exactly once
-    // below from inline nodes that need module-context prechecking.
     let mut fn_name_to_idx: Map<Str, Int> = map_new()
-    let mut impl_node_to_idx: Map<Str, Int> = map_new()
     let mut idx = 0
     for decl in program.decls {
         let current_idx = idx
-        let next_idx = idx + 1
         match decl {
             Decl::Fn { name, .. } => {
                 record_fn_decl_index_firebreak(
                     fn_name_to_idx, name, current_idx)
             },
-            Decl::Impl { target_type, trait_name, .. } => {
-                let inode = match trait_name {
-                    some(tn) => "impl::${target_type}::${tn}",
-                    none => "impl::${target_type}"
-                }
-                record_impl_decl_index_firebreak(
-                    impl_node_to_idx, inode, current_idx)
-            },
             _ => {}
         }
-        idx = next_idx
+        idx = idx + 1
     }
-
-    // Inline functions are emitted inside HDecl::ModBlock and therefore have
-    // no direct program.decls index for Phase 2b below. Starting from those
-    // nodes, follow caller -> callee edges and pre-check only that dependency
-    // closure leaf-first. This includes file-root callees reached via super::,
-    // while ordinary file modules with no inline functions do no extra work.
     let mut impl_fn_names: Set<Str> = set_new()
     collect_impl_scc_fn_names(program.decls, none, impl_fn_names)
-    let mut inline_roots: Set<Str> = set_new()
+    let mut precheck_nodes: Set<Str> = set_new()
     for name in registered_fns {
-        if !fn_name_to_idx.contains_key(name) && !impl_fn_names.contains(name) {
-            record_inline_root_firebreak(inline_roots, name)
+        if !impl_fn_names.contains(name) {
+            let precheck_name = "${name}"
+            precheck_nodes.insert(precheck_name)
         }
     }
-    let precheck_nodes = inline_dependency_closure(call_graph, inline_roots, impl_fn_names)
-    for scc_group in scc_groups {
-        for name in scc_group {
-            if precheck_nodes.contains(name) {
-                match fn_name_to_idx.get(name) {
-                    some(i) => precheck_top_level_fn_at(ctx, program.decls, i),
-                    none => { let _ = precheck_inline_fn(ctx, program.decls, name) }
-                }
+
+    let mut const_sites: List<DeclOwnerSite> = []
+    let mut impl_sites: List<DeclOwnerSite> = []
+    collect_decl_owner_sites(
+        program.decls, [], none, const_sites, impl_sites)
+    let mut const_owners = ConstOwnerCache {
+        checked: map_new(), failed: set_new(), emitted: set_new()
+    }
+    let mut blocked_impl_prechecks: Set<Int> = set_new()
+    let mut blocked_fn_prechecks: Set<Str> = set_new()
+
+    precheck_callable_summaries_to_fixed_point(
+        ctx, program.decls, impl_sites, scc_groups, precheck_nodes,
+        fn_name_to_idx, blocked_impl_prechecks, blocked_fn_prechecks)
+    for site in const_sites {
+        let site_for_check = duplicate_decl_owner_site(site)
+        let site_for_rebind = duplicate_decl_owner_site(site)
+        let _ = check_const_owner_site_transaction(
+            ctx, program.decls, site_for_check, const_owners)
+        let canonical_name = site_for_rebind.canonical_name
+        if canonical_name.is_some() {
+            let name = canonical_name.unwrap()
+            let name_for_lookup = "${name}"
+            let name_for_rebind = "${name}"
+            let final_scheme = ctx.env.lookup(name_for_lookup)
+            if final_scheme.is_some() {
+                rebind_scheme_with_exact_aliases(
+                    ctx, name_for_rebind, final_scheme.unwrap())
             }
+        } else {
+            panic("unreachable: const owner site has no identity")
         }
+        // A completed const can unblock either side of an alternating
+        // Fn/Impl dependency chain. Always retry from the root frame.
+        precheck_callable_summaries_to_fixed_point(
+            ctx, program.decls, impl_sites, scc_groups, precheck_nodes,
+            fn_name_to_idx, blocked_impl_prechecks,
+            blocked_fn_prechecks)
     }
 
     let mut hdecls: List<HDecl> = []
     let mut checked: Set<Int> = set_new()
 
-    // Phase 1: Check non-fn/non-impl declarations in source order.
-    // These (struct, enum, effect, trait, extern, const, type-alias, sig, test, mod)
-    // do not participate in the fn call graph.
+    // Retained body pass. Every const below replays its owner-pass HIR; body
+    // declarations can therefore cross ancestor module boundaries without
+    // observing a registration-time const placeholder.
     let mut di = 0
-    for decl in program.decls {
+    while di < program.decls.len() {
         let current_di = di
-        let next_di = di + 1
-        match decl {
-            Decl::Fn { .. } => {},
-            Decl::Impl { .. } => {},
-            _ => {
-                check_indexed_phase_decl_firebreak(
-                    ctx, decl, current_di, hdecls, checked)
-            }
+        let is_deferred = match program.decls.get(current_di) {
+            some(Decl::Fn { .. }) => true,
+            some(Decl::Impl { .. }) => true,
+            some(Decl::ModBlock { .. }) => true,
+            _ => false
         }
-        di = next_di
+        if !is_deferred {
+            check_decl_at_index_firebreak(
+                ctx, program.decls, current_di,
+                hdecls, checked, const_owners)
+        }
+        di = di + 1
+    }
+
+    // Nested modules now only replay cached owners and emit retained bodies.
+    let mut mi = 0
+    while mi < program.decls.len() {
+        let current_mi = mi
+        let is_module = match program.decls.get(current_mi) {
+            some(Decl::ModBlock { .. }) => true,
+            _ => false
+        }
+        if is_module && !checked.contains(current_mi) {
+            check_decl_at_index_firebreak(
+                ctx, program.decls, current_mi,
+                hdecls, checked, const_owners)
+        }
+        mi = mi + 1
     }
 
     // Phase 2a: Check impl blocks in source order (before top-level fns).
@@ -6500,17 +10268,17 @@ fn check_registered_body(
     // Must happen before top-level fns so that method effects are visible
     // to callers (method calls are invisible to the call graph).
     let mut ii = 0
-    for decl in program.decls {
+    while ii < program.decls.len() {
         let current_ii = ii
         let next_ii = ii + 1
-        match decl {
-            Decl::Impl { .. } => {
-                if !checked.contains(current_ii) {
-                    check_indexed_phase_decl_firebreak(
-                        ctx, decl, current_ii, hdecls, checked)
-                }
-            },
-            _ => {}
+        let is_impl = match program.decls.get(current_ii) {
+            some(Decl::Impl { .. }) => true,
+            _ => false
+        }
+        if is_impl && !checked.contains(current_ii) {
+            check_decl_at_index_firebreak(
+                ctx, program.decls, current_ii,
+                hdecls, checked, const_owners)
         }
         ii = next_ii
     }
@@ -6521,11 +10289,15 @@ fn check_registered_body(
     // makes the resolved return type visible to subsequent callers.
     for scc_group in scc_groups {
         for name in scc_group {
+            set_fn_precheck_pending(ctx, name, false)
+        }
+        for name in scc_group {
             match fn_name_to_idx.get(name) {
                 some(i) => {
                     if !checked.contains(i) {
                         check_scc_decl_index_firebreak(
-                            ctx, program.decls, i, hdecls, checked)
+                            ctx, program.decls, i, hdecls, checked,
+                            const_owners)
                     }
                 },
                 none => {}
@@ -6536,18 +10308,26 @@ fn check_registered_body(
     // Phase 3: Check any remaining unchecked decls (safety net for decls
     // not reached by SCC — e.g., dead code or decls with no call graph edges).
     let mut ri = 0
-    for decl in program.decls {
+    while ri < program.decls.len() {
         let current_ri = ri
         let next_ri = ri + 1
         if !checked.contains(current_ri) {
-            check_remaining_decl_firebreak(
-                ctx, decl, current_ri, hdecls)
+            check_decl_at_index_firebreak(
+                ctx, program.decls, current_ri,
+                hdecls, checked, const_owners)
         }
         ri = next_ri
     }
 
     // Check for cyclic dependencies in default effect handlers
     check_default_effect_cycles(ctx, program.decls)
+
+    finalize_pending_fn_default_seeds(ctx)
+
+    // A default HIR template may carry exact lexical identities. Keep only
+    // identities that actually reached retained HIR through call-site
+    // expansion; otherwise its provisional transfer state would cross freeze.
+    prune_unretained_default_authority(ctx, hdecls)
 
     // static_dicts is populated by dict_lower (checker pipeline) — empty here.
     // B-144/B-145: declarations contribute directly. In project mode the root
@@ -6560,7 +10340,8 @@ fn check_registered_body(
         for entry in ctx.env.types.structs.entries() {
             let (_, def) = entry
             if def.is_extern {
-                extern_names.insert(def.name)
+                let extern_name = "${def.name}"
+                extern_names.insert(extern_name)
             }
         }
     }
@@ -6581,7 +10362,7 @@ pub fn check_prelude_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
     // where cross-module effect propagation doesn't work (effects registered as
     // EMPTY_ROW in Pass 1), we must explicitly surface the fail effect here so
     // callers pass the __ring_ev_fail evidence.
-    let result = check_decl(ctx, decl, none)
+    let result = check_decl(ctx, decl, none, none)
     if false { fail.raise(CompileError {}) }
     result
 }

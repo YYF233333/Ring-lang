@@ -19,17 +19,18 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     trait_bound_param_name,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     hexpr_type, hexpr_effects, hexpr_span, hexpr_callable_def_id,
+    expr_has_reachable_value,
     map_index_helper_identity,
-    hparam_flags}
+    hparam_flags, hparam_flags_with_force}
 use diagnostics::{DiagnosticContext, DiagnosticNote, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0206, E0301, E0303, E0304, E0305, E0306,
     E0307, E0308, E0309, E0402, E0411, E0503, E0601, E0705,
     E0801, W0001}
-use union_find::{UnionFind}
+use union_find::{UnionFind, new_union_find, uf_insert}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
     BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map,
-    build_scheme_var_map, find_impl, lookup_variant,
+    build_scheme_var_map, build_type_var_map, find_impl, lookup_variant,
     trait_is_authoritative_drop}
 use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
@@ -50,9 +51,11 @@ use infer_helpers::{MethodLookupResult, StmtResult,
     infer_ident, infer_numeric_op, is_primitive_ord,
     resolve_trait_dispatch, resolve_eq_dispatch,
     is_bounded_direct_callable_ident, resolve_callee_metadata,
+    guard_pending_precheck_callable_summary,
     check_expr_is_let_def, get_expr_def_id, is_mut_method_call, check_receiver_mutability,
-    lookup_impl_method, lookup_trait_method,
+    lookup_impl_method, lookup_trait_method, callable_defaults_by_def_id,
     rewrite_bare_enum_bindings}
+use zonk::{ZonkCtx, zonk_expr}
 
 // ============================================================
 // Block inference (from infer-stmt.ts)
@@ -491,6 +494,7 @@ fn for_protocol_method_scheme(
 struct MethodCallSelection {
     method_type: Type?,
     method_scheme: TypeScheme?,
+    instantiation_map: Map<Int, Type>,
     dict_dispatch: DictDispatchInfo?,
     is_authoritative_drop: Bool
 }
@@ -503,10 +507,11 @@ fn select_for_protocol_method(
     mut ctx: InferCtx, impl_entry: ImplEntry, method: Str, span: Span
 ) -> MethodCallSelection {
     let impl_scheme = for_protocol_method_scheme(ctx, impl_entry, method, span)
-    let registered_method = ctx.env.instantiate(impl_scheme)
+    let instantiation = ctx.env.instantiate_with_map(impl_scheme)
     MethodCallSelection {
-        method_type: some(registered_method),
+        method_type: some(instantiation.ty),
         method_scheme: some(impl_scheme),
+        instantiation_map: instantiation.var_map,
         dict_dispatch: none,
         is_authoritative_drop: impl_entry.is_authoritative_drop
     }
@@ -1977,10 +1982,908 @@ fn infer_unary_op(mut ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, sub
 // infer_call
 // ============================================================
 
+// Default arguments are retained HIR templates.  Every omitted-argument use
+// is a distinct evaluation, so definition identities inside the template must
+// be fresh just as if the expression had been inferred at that call site.
+// References to declarations outside the template deliberately keep their
+// exact DefIds.
+fn collect_default_template_type(ty: Type, mut result: Set<Int>) {
+    for var_id in free_type_vars(ty, new_union_find()) {
+        result.insert(var_id)
+    }
+}
+
+fn collect_default_template_row(row: EffectRow, mut result: Set<Int>) {
+    collect_default_template_type(Type::EffectRowType {
+        effects: row.effects, tail: row.tail
+    }, result)
+}
+
+fn collect_default_template_param(param: HParam, mut result: Set<Int>) {
+    collect_default_template_type(param.ty, result)
+}
+
+fn collect_default_template_pattern_binding(
+    binding: HPatternBinding, mut result: Set<Int>
+) {
+    collect_default_template_type(binding.ty, result)
+}
+
+fn collect_default_template_dispatch_value(
+    dispatch: TraitDispatch, mut result: Set<Int>
+) {
+    match dispatch {
+        TraitDispatch::Tuple { element_types, elements } => {
+            for element_type in element_types {
+                collect_default_template_type(element_type, result)
+            }
+            for element in elements {
+                collect_default_template_dispatch_value(element, result)
+            }
+        },
+        _ => {}
+    }
+}
+
+fn collect_default_template_dispatch(
+    dispatch: TraitDispatch?, mut result: Set<Int>
+) {
+    match dispatch {
+        some(exact) => collect_default_template_dispatch_value(exact, result),
+        none => {}
+    }
+}
+
+fn collect_default_template_match_arm(
+    arm: HMatchArm, mut result: Set<Int>
+) {
+    for binding in arm.bindings {
+        collect_default_template_pattern_binding(binding, result)
+    }
+    match arm.guard {
+        some(guard) => collect_default_template_expr(guard, result),
+        none => {}
+    }
+    collect_default_template_expr(arm.body, result)
+}
+
+fn collect_default_template_stmt(stmt: HStmt, mut result: Set<Int>) {
+    match stmt {
+        HStmt::Let { ty, init, .. } | HStmt::Var { ty, init, .. } => {
+            collect_default_template_type(ty, result)
+            collect_default_template_expr(init, result)
+        },
+        HStmt::Assign { target, value, .. } => {
+            collect_default_template_expr(target, result)
+            collect_default_template_expr(value, result)
+        },
+        HStmt::ExprStmt { expr, .. } =>
+            collect_default_template_expr(expr, result),
+        HStmt::Return { value, .. } => match value {
+            some(expr) => collect_default_template_expr(expr, result),
+            none => {}
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_default_template_expr(condition, result)
+            collect_default_template_expr(body, result)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_default_template_expr(iterable, result)
+            collect_default_template_expr(body, result)
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            for binding in bindings {
+                collect_default_template_type(binding.ty, result)
+            }
+            collect_default_template_expr(init, result)
+        },
+        HStmt::IfLet {
+            bindings, expr, then_block, else_block, ..
+        } => {
+            for binding in bindings {
+                collect_default_template_pattern_binding(binding, result)
+            }
+            collect_default_template_expr(expr, result)
+            collect_default_template_expr(then_block, result)
+            match else_block {
+                some(block) => collect_default_template_expr(block, result),
+                none => {}
+            }
+        },
+        HStmt::Drop { ty, .. } =>
+            collect_default_template_type(ty, result),
+        HStmt::Break { .. } | HStmt::Continue { .. } => {}
+    }
+}
+
+fn collect_default_template_expr(expr: HExpr, mut result: Set<Int>) {
+    collect_default_template_type(hexpr_type(expr), result)
+    collect_default_template_row(hexpr_effects(expr), result)
+    match expr {
+        HExpr::BinOp {
+            left, right, eq_dispatch, ord_dispatch, ..
+        } => {
+            collect_default_template_expr(left, result)
+            collect_default_template_expr(right, result)
+            collect_default_template_dispatch(eq_dispatch, result)
+            collect_default_template_dispatch(ord_dispatch, result)
+        },
+        HExpr::UnaryOp { operand, .. } =>
+            collect_default_template_expr(operand, result),
+        HExpr::Call { callee, args, type_args, .. } => {
+            collect_default_template_expr(callee, result)
+            for arg in args { collect_default_template_expr(arg, result) }
+            for type_arg in type_args {
+                collect_default_template_type(type_arg, result)
+            }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            collect_default_template_expr(receiver, result),
+        HExpr::StructLit { type_args, fields, spread, .. } => {
+            for type_arg in type_args {
+                collect_default_template_type(type_arg, result)
+            }
+            for field in fields {
+                collect_default_template_expr(field.value, result)
+            }
+            match spread {
+                some(value) => collect_default_template_expr(value, result),
+                none => {}
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields {
+                collect_default_template_expr(field.value, result)
+            }
+            match spread {
+                some(value) => collect_default_template_expr(value, result),
+                none => {}
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_default_template_expr(scrutinee, result)
+            for arm in arms {
+                collect_default_template_match_arm(arm, result)
+            }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts { collect_default_template_stmt(stmt, result) }
+            match tail {
+                some(value) => collect_default_template_expr(value, result),
+                none => {}
+            }
+        },
+        HExpr::IfExpr {
+            condition, then_branch, else_branch, ..
+        } => {
+            collect_default_template_expr(condition, result)
+            collect_default_template_expr(then_branch, result)
+            match else_branch {
+                some(value) => collect_default_template_expr(value, result),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Literal(_) => {},
+                    HStringInterpPart::Expression(value) =>
+                        collect_default_template_expr(value, result)
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            collect_default_template_expr(body, result)
+            for arm in arms {
+                collect_default_template_match_arm(arm, result)
+            }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            collect_default_template_expr(body, result)
+            for handler in handlers {
+                for param in handler.params {
+                    collect_default_template_param(param, result)
+                }
+                match handler.resume_binding {
+                    some(binding) =>
+                        collect_default_template_pattern_binding(
+                            binding, result),
+                    none => {}
+                }
+                collect_default_template_expr(handler.body, result)
+            }
+        },
+        HExpr::Lambda { params, return_type, body, .. } => {
+            for param in params {
+                collect_default_template_param(param, result)
+            }
+            collect_default_template_type(return_type, result)
+            collect_default_template_expr(body, result)
+        },
+        HExpr::EffectOp { args, .. } => {
+            for arg in args { collect_default_template_expr(arg, result) }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            collect_default_template_expr(start, result)
+            collect_default_template_expr(end, result)
+        },
+        HExpr::ListLit { elements, .. } |
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                collect_default_template_expr(element, result)
+            }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_default_template_expr(receiver, result)
+            collect_default_template_expr(index, result)
+        },
+        HExpr::Clone { inner, .. } =>
+            collect_default_template_expr(inner, result),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(inner) => collect_default_template_expr(inner, result),
+            none => {}
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            collect_default_template_expr(body, result),
+        HExpr::Ident { .. } | HExpr::IntLit { .. } |
+        HExpr::FloatLit { .. } | HExpr::StrLit { .. } |
+        HExpr::BoolLit { .. } | HExpr::DictConstruct { .. } |
+        HExpr::Take { .. } => {}
+    }
+}
+
+pub fn default_template_var_ids(defaults: List<HExpr>) -> Set<Int> {
+    let mut result: Set<Int> = set_new()
+    for default in defaults {
+        collect_default_template_expr(default, result)
+    }
+    result
+}
+
+fn default_type_mapping_subst(mapping: Map<Int, Type>) -> UnionFind {
+    let mut subst = new_union_find()
+    for entry in mapping.entries() {
+        let (source_id, target_type) = entry
+        let target_for_storage = target_type
+        match target_type {
+            Type::TypeVar { id: target_id, .. } => {
+                if target_id != source_id {
+                    uf_insert(subst, source_id, target_for_storage)
+                }
+            },
+            _ => uf_insert(subst, source_id, target_for_storage)
+        }
+    }
+    subst
+}
+
+pub fn rewrite_default_template_types(
+    template: HExpr, mapping: Map<Int, Type>
+) -> HExpr {
+    zonk_expr(ZonkCtx {
+        subst: default_type_mapping_subst(mapping),
+        names: map_new(), dict_resolver: none,
+        ownership_metadata: none, require_exact_ownership: false
+    }, template)
+}
+
+fn fresh_default_binder_def_id(
+    mut ctx: InferCtx, old_def_id: Int, mut remap: Map<Int, Int>
+) -> Int {
+    match remap.get(old_def_id) {
+        some(existing) => existing,
+        none => {
+            let fresh = ctx.env.fresh_def_id()
+            remap.insert(old_def_id, fresh)
+            fresh
+        }
+    }
+}
+
+fn remap_default_def_id(def_id: Int, remap: Map<Int, Int>) -> Int {
+    match remap.get(def_id) {
+        some(fresh) => fresh,
+        none => def_id
+    }
+}
+
+fn remap_default_optional_def_id(
+    def_id: Int?, remap: Map<Int, Int>
+) -> Int? {
+    match def_id {
+        some(id) => some(remap_default_def_id(id, remap)),
+        none => none
+    }
+}
+
+fn freshen_default_param(
+    mut ctx: InferCtx, param: HParam, mut remap: Map<Int, Int>
+) -> HParam {
+    let fresh_def_id = match param.def_id {
+        some(id) => some(fresh_default_binder_def_id(ctx, id, remap)),
+        none => none
+    }
+    HParam { ..param, def_id: fresh_def_id }
+}
+
+fn freshen_default_pattern_binding(
+    mut ctx: InferCtx, binding: HPatternBinding,
+    mut remap: Map<Int, Int>
+) -> HPatternBinding {
+    let fresh = fresh_default_binder_def_id(ctx, binding.def_id, remap)
+    HPatternBinding { ..binding, def_id: fresh }
+}
+
+fn freshen_default_match_arm(
+    mut ctx: InferCtx, arm: HMatchArm, mut remap: Map<Int, Int>
+) -> HMatchArm {
+    let mut bindings: List<HPatternBinding> = []
+    for binding in arm.bindings {
+        bindings.push(freshen_default_pattern_binding(ctx, binding, remap))
+    }
+    let guard = match arm.guard {
+        some(value) => some(freshen_default_expr_inner(ctx, value, remap)),
+        none => none
+    }
+    let body = freshen_default_expr_inner(ctx, arm.body, remap)
+    HMatchArm { ..arm, bindings: bindings, guard: guard, body: body }
+}
+
+fn freshen_default_stmt(
+    mut ctx: InferCtx, stmt: HStmt, mut remap: Map<Int, Int>
+) -> HStmt {
+    match stmt {
+        HStmt::Let { def_id, init, .. } => {
+            let fresh_init = freshen_default_expr_inner(ctx, init, remap)
+            let fresh_def_id = match def_id {
+                some(id) => some(fresh_default_binder_def_id(ctx, id, remap)),
+                none => none
+            }
+            HStmt::Let { ..stmt, def_id: fresh_def_id, init: fresh_init }
+        },
+        HStmt::Var { def_id, init, .. } => {
+            let fresh_init = freshen_default_expr_inner(ctx, init, remap)
+            let fresh_def_id = match def_id {
+                some(id) => some(fresh_default_binder_def_id(ctx, id, remap)),
+                none => none
+            }
+            HStmt::Var { ..stmt, def_id: fresh_def_id, init: fresh_init }
+        },
+        HStmt::Assign { target, value, .. } =>
+            HStmt::Assign { ..stmt,
+                target: freshen_default_expr_inner(ctx, target, remap),
+                value: freshen_default_expr_inner(ctx, value, remap) },
+        HStmt::ExprStmt { expr, .. } =>
+            HStmt::ExprStmt { ..stmt,
+                expr: freshen_default_expr_inner(ctx, expr, remap) },
+        HStmt::Return { value, .. } => {
+            let fresh_value = match value {
+                some(expr) => some(freshen_default_expr_inner(
+                    ctx, expr, remap)),
+                none => none
+            }
+            HStmt::Return { ..stmt, value: fresh_value }
+        },
+        HStmt::While { condition, body, .. } =>
+            HStmt::While { ..stmt,
+                condition: freshen_default_expr_inner(ctx, condition, remap),
+                body: freshen_default_expr_inner(ctx, body, remap) },
+        HStmt::ForIn { def_id, destructure, iterable, body, .. } => {
+            let fresh_iterable = freshen_default_expr_inner(
+                ctx, iterable, remap)
+            let fresh_def_id = match def_id {
+                some(id) => some(fresh_default_binder_def_id(ctx, id, remap)),
+                none => none
+            }
+            let fresh_destructure = match destructure {
+                some(bindings) => {
+                    let mut result: List<HForInDestructure> = []
+                    for binding in bindings {
+                        let binding_def_id = match binding.def_id {
+                            some(id) => some(fresh_default_binder_def_id(
+                                ctx, id, remap)),
+                            none => none
+                        }
+                        result.push(HForInDestructure {
+                            ..binding, def_id: binding_def_id })
+                    }
+                    some(result)
+                },
+                none => none
+            }
+            let fresh_body = freshen_default_expr_inner(ctx, body, remap)
+            HStmt::ForIn { ..stmt, def_id: fresh_def_id,
+                destructure: fresh_destructure, iterable: fresh_iterable,
+                body: fresh_body }
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            let fresh_init = freshen_default_expr_inner(ctx, init, remap)
+            let mut fresh_bindings: List<HLetDestructureBinding> = []
+            for binding in bindings {
+                let fresh_def_id = match binding.def_id {
+                    some(id) => some(fresh_default_binder_def_id(
+                        ctx, id, remap)),
+                    none => none
+                }
+                fresh_bindings.push(HLetDestructureBinding {
+                    ..binding, def_id: fresh_def_id })
+            }
+            HStmt::LetDestructure { ..stmt, bindings: fresh_bindings,
+                init: fresh_init }
+        },
+        HStmt::IfLet { bindings, expr, then_block, else_block, .. } => {
+            let fresh_expr = freshen_default_expr_inner(ctx, expr, remap)
+            let mut fresh_bindings: List<HPatternBinding> = []
+            for binding in bindings {
+                fresh_bindings.push(freshen_default_pattern_binding(
+                    ctx, binding, remap))
+            }
+            let fresh_then = freshen_default_expr_inner(
+                ctx, then_block, remap)
+            let fresh_else = match else_block {
+                some(value) => some(freshen_default_expr_inner(
+                    ctx, value, remap)),
+                none => none
+            }
+            HStmt::IfLet { ..stmt, bindings: fresh_bindings,
+                expr: fresh_expr, then_block: fresh_then,
+                else_block: fresh_else }
+        },
+        HStmt::Drop { def_id, .. } => HStmt::Drop { ..stmt,
+            def_id: remap_default_def_id(def_id, remap) },
+        HStmt::Break { span } => {
+            let result_span = span
+            HStmt::Break { span: result_span }
+        },
+        HStmt::Continue { span } => {
+            let result_span = span
+            HStmt::Continue { span: result_span }
+        }
+    }
+}
+
+fn freshen_default_expr_inner(
+    mut ctx: InferCtx, expr: HExpr, mut remap: Map<Int, Int>
+) -> HExpr {
+    match expr {
+        HExpr::Ident { def_id, .. } => HExpr::Ident { ..expr,
+            def_id: remap_default_optional_def_id(def_id, remap) },
+        HExpr::BinOp { left, right, .. } => HExpr::BinOp { ..expr,
+            left: freshen_default_expr_inner(ctx, left, remap),
+            right: freshen_default_expr_inner(ctx, right, remap) },
+        HExpr::UnaryOp { operand, .. } => HExpr::UnaryOp { ..expr,
+            operand: freshen_default_expr_inner(ctx, operand, remap) },
+        HExpr::Call {
+            callee, callee_def_id, callable_result_def_id, args, ..
+        } => {
+            let fresh_callee = freshen_default_expr_inner(ctx, callee, remap)
+            let fresh_callee_def_id = remap_default_optional_def_id(
+                callee_def_id, remap)
+            let fresh_result_def_id = match callable_result_def_id {
+                some(id) => some(fresh_default_binder_def_id(ctx, id, remap)),
+                none => none
+            }
+            let mut fresh_args: List<HExpr> = []
+            for arg in args {
+                fresh_args.push(freshen_default_expr_inner(ctx, arg, remap))
+            }
+            HExpr::Call { ..expr, callee: fresh_callee,
+                callee_def_id: fresh_callee_def_id,
+                callable_result_def_id: fresh_result_def_id,
+                args: fresh_args }
+        },
+        HExpr::FieldAccess { receiver, .. } => HExpr::FieldAccess { ..expr,
+            receiver: freshen_default_expr_inner(ctx, receiver, remap) },
+        HExpr::StructLit { fields, spread, .. } => {
+            let mut fresh_fields: List<HStructFieldInit> = []
+            for field in fields {
+                fresh_fields.push(HStructFieldInit { ..field,
+                    value: freshen_default_expr_inner(
+                        ctx, field.value, remap) })
+            }
+            let fresh_spread = match spread {
+                some(value) => some(freshen_default_expr_inner(
+                    ctx, value, remap)),
+                none => none
+            }
+            HExpr::StructLit { ..expr, fields: fresh_fields,
+                spread: fresh_spread }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            let mut fresh_fields: List<HStructFieldInit> = []
+            for field in fields {
+                fresh_fields.push(HStructFieldInit { ..field,
+                    value: freshen_default_expr_inner(
+                        ctx, field.value, remap) })
+            }
+            let fresh_spread = match spread {
+                some(value) => some(freshen_default_expr_inner(
+                    ctx, value, remap)),
+                none => none
+            }
+            HExpr::NamedVariantConstruct { ..expr, fields: fresh_fields,
+                spread: fresh_spread }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            let fresh_scrutinee = freshen_default_expr_inner(
+                ctx, scrutinee, remap)
+            let mut fresh_arms: List<HMatchArm> = []
+            for arm in arms {
+                fresh_arms.push(freshen_default_match_arm(ctx, arm, remap))
+            }
+            HExpr::MatchExpr { ..expr, scrutinee: fresh_scrutinee,
+                arms: fresh_arms }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            let fresh_body = freshen_default_expr_inner(ctx, body, remap)
+            let mut fresh_arms: List<HMatchArm> = []
+            for arm in arms {
+                fresh_arms.push(freshen_default_match_arm(ctx, arm, remap))
+            }
+            HExpr::TryCatch { ..expr, body: fresh_body, arms: fresh_arms }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            let mut fresh_stmts: List<HStmt> = []
+            for stmt in stmts {
+                fresh_stmts.push(freshen_default_stmt(ctx, stmt, remap))
+            }
+            let fresh_tail = match tail {
+                some(value) => some(freshen_default_expr_inner(
+                    ctx, value, remap)),
+                none => none
+            }
+            HExpr::Block { ..expr, stmts: fresh_stmts, tail: fresh_tail }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            let fresh_else = match else_branch {
+                some(value) => some(freshen_default_expr_inner(
+                    ctx, value, remap)),
+                none => none
+            }
+            HExpr::IfExpr { ..expr,
+                condition: freshen_default_expr_inner(ctx, condition, remap),
+                then_branch: freshen_default_expr_inner(
+                    ctx, then_branch, remap),
+                else_branch: fresh_else }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            let mut fresh_parts: List<HStringInterpPart> = []
+            for part in parts {
+                match part {
+                    HStringInterpPart::Literal(value) => {
+                        let literal_text = value
+                        fresh_parts.push(HStringInterpPart::Literal(
+                            literal_text))
+                    },
+                    HStringInterpPart::Expression(value) => {
+                        let expression_for_freshen = value
+                        let fresh_expression = freshen_default_expr_inner(
+                            ctx, expression_for_freshen, remap)
+                        fresh_parts.push(HStringInterpPart::Expression(
+                            fresh_expression))
+                    }
+                }
+            }
+            HExpr::StringInterp { ..expr, parts: fresh_parts }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            let fresh_body = freshen_default_expr_inner(ctx, body, remap)
+            let mut fresh_handlers: List<HEffectHandler> = []
+            for handler in handlers {
+                let mut fresh_params: List<HParam> = []
+                for param in handler.params {
+                    fresh_params.push(freshen_default_param(ctx, param, remap))
+                }
+                let fresh_resume = match handler.resume_binding {
+                    some(binding) => some(freshen_default_pattern_binding(
+                        ctx, binding, remap)),
+                    none => none
+                }
+                let fresh_handler_body = freshen_default_expr_inner(
+                    ctx, handler.body, remap)
+                fresh_handlers.push(HEffectHandler { ..handler,
+                    params: fresh_params, resume_binding: fresh_resume,
+                    body: fresh_handler_body })
+            }
+            HExpr::HandleExpr { ..expr, body: fresh_body,
+                handlers: fresh_handlers }
+        },
+        HExpr::Lambda { def_id, params, body, .. } => {
+            let fresh_def_id = fresh_default_binder_def_id(
+                ctx, def_id, remap)
+            let mut fresh_params: List<HParam> = []
+            for param in params {
+                fresh_params.push(freshen_default_param(ctx, param, remap))
+            }
+            let fresh_body = freshen_default_expr_inner(ctx, body, remap)
+            HExpr::Lambda { ..expr, def_id: fresh_def_id,
+                params: fresh_params, body: fresh_body }
+        },
+        HExpr::EffectOp { args, .. } => {
+            let mut fresh_args: List<HExpr> = []
+            for arg in args {
+                fresh_args.push(freshen_default_expr_inner(ctx, arg, remap))
+            }
+            HExpr::EffectOp { ..expr, args: fresh_args }
+        },
+        HExpr::RangeExpr { start, end, .. } => HExpr::RangeExpr { ..expr,
+            start: freshen_default_expr_inner(ctx, start, remap),
+            end: freshen_default_expr_inner(ctx, end, remap) },
+        HExpr::ListLit { elements, .. } => {
+            let mut fresh_elements: List<HExpr> = []
+            for element in elements {
+                fresh_elements.push(freshen_default_expr_inner(
+                    ctx, element, remap))
+            }
+            HExpr::ListLit { ..expr, elements: fresh_elements }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            let mut fresh_elements: List<HExpr> = []
+            for element in elements {
+                fresh_elements.push(freshen_default_expr_inner(
+                    ctx, element, remap))
+            }
+            HExpr::TupleLit { ..expr, elements: fresh_elements }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => HExpr::IndexExpr { ..expr,
+            receiver: freshen_default_expr_inner(ctx, receiver, remap),
+            index: freshen_default_expr_inner(ctx, index, remap) },
+        HExpr::Clone { inner, .. } => HExpr::Clone { ..expr,
+            inner: freshen_default_expr_inner(ctx, inner, remap) },
+        HExpr::Take { source_def_id, .. } => HExpr::Take { ..expr,
+            source_def_id: remap_default_def_id(source_def_id, remap) },
+        HExpr::ReturnExpr { value, .. } => {
+            let fresh_value = match value {
+                some(inner) => some(freshen_default_expr_inner(
+                    ctx, inner, remap)),
+                none => none
+            }
+            HExpr::ReturnExpr { ..expr, value: fresh_value }
+        },
+        HExpr::UnsafeBlock { body, .. } => HExpr::UnsafeBlock { ..expr,
+            body: freshen_default_expr_inner(ctx, body, remap) },
+        HExpr::IntLit { value, ty, effects, span } => {
+            let result_ty = ty
+            let result_effects = effects
+            let result_span = span
+            HExpr::IntLit { value: value, ty: result_ty,
+                effects: result_effects, span: result_span }
+        },
+        HExpr::FloatLit { value, ty, effects, span } => {
+            let result_ty = ty
+            let result_effects = effects
+            let result_span = span
+            HExpr::FloatLit { value: value, ty: result_ty,
+                effects: result_effects, span: result_span }
+        },
+        HExpr::StrLit { value, ty, effects, span } => {
+            let result_value = value
+            let result_ty = ty
+            let result_effects = effects
+            let result_span = span
+            HExpr::StrLit { value: result_value, ty: result_ty,
+                effects: result_effects, span: result_span }
+        },
+        HExpr::BoolLit { value, ty, effects, span } => {
+            let result_ty = ty
+            let result_effects = effects
+            let result_span = span
+            HExpr::BoolLit { value: value, ty: result_ty,
+                effects: result_effects, span: result_span }
+        },
+        HExpr::DictConstruct {
+            base_dict, trait_name, inner, ty, effects, span
+        } => {
+            let result_base_dict = base_dict
+            let result_trait_name = trait_name
+            let result_inner = inner
+            let result_ty = ty
+            let result_effects = effects
+            let result_span = span
+            HExpr::DictConstruct {
+                base_dict: result_base_dict,
+                trait_name: result_trait_name,
+                inner: result_inner, ty: result_ty,
+                effects: result_effects, span: result_span }
+        }
+    }
+}
+
+fn clone_default_authority_for_remap(
+    mut ctx: InferCtx, remap: Map<Int, Int>
+) {
+    for entry in remap.entries() {
+        let (old_def_id, fresh_def_id) = entry
+        match ctx.env.types.ownership_metadata.callable_by_def_id.get(old_def_id) {
+            some(value) => {
+                ctx.env.types.ownership_metadata.callable_by_def_id.insert(
+                    fresh_def_id, value)
+            },
+            none => {}
+        }
+        let callable_state = ctx.env.types.ownership_metadata
+            .callable_state_by_def_id.get(old_def_id)
+        if callable_state.is_some() {
+            ctx.env.types.ownership_metadata.callable_state_by_def_id.insert(
+                fresh_def_id, callable_state.unwrap())
+        }
+        match ctx.env.types.ownership_metadata.callable_result_role_by_def_id
+                .get(old_def_id) {
+            some(value) => {
+                ctx.env.types.ownership_metadata.callable_result_role_by_def_id
+                    .insert(fresh_def_id, value)
+            },
+            none => {}
+        }
+        match ctx.env.types.ownership_metadata
+                .returned_callable_result_role_by_def_id.get(old_def_id) {
+            some(value) => {
+                ctx.env.types.ownership_metadata
+                    .returned_callable_result_role_by_def_id.insert(
+                        fresh_def_id, value)
+            },
+            none => {}
+        }
+        let role_spine = ctx.env.types.ownership_metadata
+            .callable_result_role_spine_by_def_id.get(old_def_id)
+        if role_spine.is_some() {
+            ctx.env.types.ownership_metadata
+                .callable_result_role_spine_by_def_id.insert(
+                    fresh_def_id, role_spine.unwrap())
+        }
+        let use_alias = ctx.use_aliases.get(old_def_id)
+        if use_alias.is_some() {
+            ctx.use_aliases.insert(fresh_def_id, use_alias.unwrap())
+        }
+        let binding_kind = ctx.value_binding_kinds.get(old_def_id)
+        if binding_kind.is_some() {
+            ctx.value_binding_kinds.insert(
+                fresh_def_id, binding_kind.unwrap())
+        }
+        let variant_origin = ctx.env.types.variant_ctor_origins.get(old_def_id)
+        if variant_origin.is_some() {
+            ctx.env.types.variant_ctor_origins.insert(
+                fresh_def_id, variant_origin.unwrap())
+        }
+        match ctx.pre_solve_exact_value_alias_targets.get(old_def_id) {
+            some(target) => {
+                ctx.pre_solve_exact_value_alias_targets.insert(
+                    fresh_def_id, remap_default_def_id(target, remap))
+            },
+            none => {}
+        }
+        if ctx.pre_solve_const_getter_aliases.contains(old_def_id) {
+            ctx.pre_solve_const_getter_aliases.insert(fresh_def_id)
+        }
+        match ctx.pre_solve_callable_alias_targets.get(old_def_id) {
+            some(target) => {
+                ctx.pre_solve_callable_alias_targets.insert(
+                    fresh_def_id, remap_default_def_id(target, remap))
+            },
+            none => {}
+        }
+        match ctx.pre_solve_callable_alias_arities.get(old_def_id) {
+            some(value) => {
+                ctx.pre_solve_callable_alias_arities.insert(
+                    fresh_def_id, value)
+            },
+            none => {}
+        }
+        match ctx.pre_solve_callable_alias_contracts.get(old_def_id) {
+            some(value) => {
+                ctx.pre_solve_callable_alias_contracts.insert(
+                    fresh_def_id, value)
+            },
+            none => {}
+        }
+        let def_span = ctx.env.scope.def_spans.get(old_def_id)
+        if def_span.is_some() {
+            ctx.env.scope.def_spans.insert(fresh_def_id, def_span.unwrap())
+        }
+        if ctx.boxed_vars.contains(old_def_id) {
+            ctx.boxed_vars.insert(fresh_def_id)
+        }
+        let lambda_depth = ctx.var_lambda_depth.get(old_def_id)
+        if lambda_depth.is_some() {
+            ctx.var_lambda_depth.insert(fresh_def_id, lambda_depth.unwrap())
+        }
+        if ctx.env.scope.mutable_vars.contains(old_def_id) {
+            ctx.env.scope.mutable_vars.insert(fresh_def_id)
+        }
+        if ctx.env.scope.let_defs.contains(old_def_id) {
+            ctx.env.scope.let_defs.insert(fresh_def_id)
+        }
+        if ctx.env.scope.mut_param_defs.contains(old_def_id) {
+            ctx.env.scope.mut_param_defs.insert(fresh_def_id)
+        }
+    }
+}
+
+fn merge_default_type_var_bounds(
+    mut ctx: InferCtx, fresh_type: Type, bounds: Set<Str>
+) {
+    match fresh_type {
+        Type::TypeVar { id, .. } => {
+            let mut merged = match ctx.env.scope.var_bounds.get(id) {
+                some(existing) => set_clone(existing),
+                none => set_new()
+            }
+            for bound in bounds {
+                let bound_for_insert = bound
+                merged.insert(bound_for_insert)
+            }
+            if merged.len() > 0 {
+                ctx.env.scope.var_bounds.insert(id, merged)
+            }
+        },
+        _ => {}
+    }
+}
+
+fn fresh_default_template_type_mapping(
+    mut ctx: InferCtx, template: HExpr,
+    live_scheme: TypeScheme, owner_instantiation_map: Map<Int, Type>,
+    local_var_bounds: Map<Int, Set<Str>>
+) -> Map<Int, Type> {
+    // Owner variables follow this exact call's scheme instantiation. Any
+    // remaining variable belongs only to the retained default template and
+    // receives a fresh call-local identity.
+    let mut mapping = map_clone(owner_instantiation_map)
+    let template_vars = default_template_var_ids([template])
+    let mut sorted_vars = template_vars.to_list()
+    sorted_vars.sort()
+    for template_var in sorted_vars {
+        if !mapping.contains_key(template_var) {
+            let fresh = ctx.env.fresh_var()
+            let fresh_for_mapping = fresh
+            mapping.insert(template_var, fresh_for_mapping)
+
+            let mut bounds: Set<Str> = match local_var_bounds.get(
+                    template_var) {
+                some(local_bounds) => set_clone(local_bounds),
+                none => set_new()
+            }
+            for scheme_bound in live_scheme.bounds {
+                if scheme_bound.type_var == template_var {
+                    let bound_trait_name = scheme_bound.trait_name
+                    bounds.insert(bound_trait_name)
+                }
+            }
+            merge_default_type_var_bounds(ctx, fresh, bounds)
+        }
+    }
+    mapping
+}
+
+fn freshen_default_argument_hir(
+    mut ctx: InferCtx, template: HExpr,
+    live_scheme: TypeScheme, owner_instantiation_map: Map<Int, Type>,
+    local_var_bounds: Map<Int, Set<Str>>
+) -> HExpr {
+    let template_for_mapping = template
+    let template_for_rewrite = template
+    let type_mapping = fresh_default_template_type_mapping(
+        ctx, template_for_mapping, live_scheme, owner_instantiation_map,
+        local_var_bounds)
+    let typed_template = rewrite_default_template_types(
+        template_for_rewrite, type_mapping)
+    let mut remap: Map<Int, Int> = map_new()
+    let fresh = freshen_default_expr_inner(ctx, typed_template, remap)
+    clone_default_authority_for_remap(ctx, remap)
+    fresh
+}
+
 fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     let callee_subst = subst
     let callee_r = infer_expr(ctx, callee, callee_subst)
     let callee_metadata = resolve_callee_metadata(ctx, callee_r.hexpr)
+    let pending_callee_name = match callee {
+        Expr::Ident { name, .. } => name,
+        _ => "<expression>"
+    }
+    let _ = guard_pending_precheck_callable_summary(
+        ctx, hexpr_callable_def_id(callee_r.hexpr),
+        pending_callee_name, span)
     let mut s = callee_r.subst
     let mut effects = callee_r.effects
 
@@ -2048,9 +2951,13 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
                     while di < defaults.values.len() {
                         match defaults.values.get(di) {
                             some(dh) => {
-                                let default_arg = dh
+                                let default_arg = freshen_default_argument_hir(
+                                    ctx, dh, metadata.live_scheme,
+                                    metadata.instantiation_map,
+                                    defaults.local_var_bounds)
+                                let default_arg_type = hexpr_type(default_arg)
                                 hargs.push(default_arg)
-                                arg_types.push(hexpr_type(dh))
+                                arg_types.push(default_arg_type)
                             },
                             none => {}
                         }
@@ -2254,6 +3161,7 @@ fn infer_method_call_from_receiver(
 
     let mut method_type: Type? = none
     let mut method_scheme: TypeScheme? = none
+    let mut method_instantiation_map: Map<Int, Type> = map_new()
     let mut dict_dispatch: DictDispatchInfo? = none
     let mut is_authoritative_drop = false
 
@@ -2261,6 +3169,7 @@ fn infer_method_call_from_receiver(
         some(selected) => {
             method_type = selected.method_type
             method_scheme = selected.method_scheme
+            method_instantiation_map = selected.instantiation_map
             dict_dispatch = selected.dict_dispatch
             is_authoritative_drop = selected.is_authoritative_drop
         },
@@ -2274,12 +3183,14 @@ fn infer_method_call_from_receiver(
                 let r = lookup_impl_method(ctx, name, method)
                 method_type = r.method_type
                 method_scheme = r.method_scheme
+                method_instantiation_map = r.instantiation_map
                 is_authoritative_drop = r.is_authoritative_drop
             },
             Type::EnumType { name, .. } => {
                 let r = lookup_impl_method(ctx, name, method)
                 method_type = r.method_type
                 method_scheme = r.method_scheme
+                method_instantiation_map = r.instantiation_map
                 is_authoritative_drop = r.is_authoritative_drop
             },
             _ => {}
@@ -2293,6 +3204,7 @@ fn infer_method_call_from_receiver(
                 let r = lookup_impl_method(ctx, prim_name, method)
                 method_type = r.method_type
                 method_scheme = r.method_scheme
+                method_instantiation_map = r.instantiation_map
                 is_authoritative_drop = r.is_authoritative_drop
             },
             none => {}
@@ -2306,6 +3218,7 @@ fn infer_method_call_from_receiver(
                 let r = lookup_trait_method(ctx, type_name, method, span)
                 method_type = r.method_type
                 method_scheme = r.method_scheme
+                method_instantiation_map = r.instantiation_map
                 is_authoritative_drop = r.is_authoritative_drop
             },
             none => {}
@@ -2334,8 +3247,12 @@ fn infer_method_call_from_receiver(
                                             bounds: [],
                                             def_id: some(found_method.def_id)
                                         }
-                                        method_type = some(ctx.env.instantiate(
-                                            exact_scheme))
+                                        let instantiation =
+                                            ctx.env.instantiate_with_map(
+                                                exact_scheme)
+                                        method_type = some(instantiation.ty)
+                                        method_instantiation_map =
+                                            instantiation.var_map
                                         method_scheme = some(exact_scheme)
                                         is_authoritative_drop =
                                             trait_is_authoritative_drop(
@@ -2359,6 +3276,14 @@ fn infer_method_call_from_receiver(
             },
             none => {}
         }
+    }
+
+    match method_scheme {
+        some(scheme) => {
+            let _ = guard_pending_precheck_callable_summary(
+                ctx, scheme.def_id, method, span)
+        },
+        none => {}
     }
 
     // Early receiver-method unification for bidirectional type checking
@@ -2422,6 +3347,45 @@ fn infer_method_call_from_receiver(
         s = me.1
         hargs.push(ar.hexpr)
         ai = ai + 1
+    }
+
+    // Methods use the same default-template pipeline as direct functions, but
+    // the receiver occupies parameter slot zero and is already evaluated.
+    // Resolve metadata by the selected method DefId, never by its spelling.
+    match method_scheme {
+        some(scheme) => match scheme.def_id {
+            some(method_def_id) => match callable_defaults_by_def_id(
+                    ctx, method_def_id) {
+                some(defaults) => {
+                    let required_args = if defaults.min_arity > 0 {
+                        defaults.min_arity - 1
+                    } else { 0 }
+                    let total_args = required_args + defaults.values.len()
+                    if args.len() < total_args &&
+                       args.len() >= required_args {
+                        let defaults_start = args.len() - required_args
+                        let mut di = defaults_start
+                        while di < defaults.values.len() {
+                            match defaults.values.get(di) {
+                                some(template) => {
+                                    let default_arg =
+                                        freshen_default_argument_hir(
+                                            ctx, template, scheme,
+                                            method_instantiation_map,
+                                            defaults.local_var_bounds)
+                                    hargs.push(default_arg)
+                                },
+                                none => {}
+                            }
+                            di = di + 1
+                        }
+                    }
+                },
+                none => {}
+            },
+            none => {}
+        },
+        none => {}
     }
 
     let mut result_type: Type = ctx.env.fresh_var()
@@ -3187,6 +4151,7 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
     // Track whether any value-producing arm contributed to result_type so an
     // all-diverging match can still be typed Never after every arm is checked.
     let mut has_non_never_arm = false
+    let scrutinee_reaches_value = expr_has_reachable_value(scrut_r.hexpr)
 
     for arm in arms {
         ctx.env.push_scope()
@@ -3199,33 +4164,48 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
                 ctx.env, match_pattern)
 
             let mut guard_hexpr: HExpr? = none
+            let mut guard_reaches_value = true
             match arm.guard {
                 some(g) => {
                     let guard_subst = s
                     let gr = infer_expr(ctx, g, guard_subst)
                     s = gr.subst
-                    s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL, s, arm.span)
-                    let me = merge_effects(ctx.sink, ctx.env, effects, gr.effects, s, arm.span)
-                    effects = me.0
-                    s = me.1
+                    guard_reaches_value = expr_has_reachable_value(gr.hexpr)
+                    if guard_reaches_value {
+                        s = unify_at(ctx.sink, ctx.env,
+                            hexpr_type(gr.hexpr), BOOL, s, arm.span)
+                    }
+                    if scrutinee_reaches_value {
+                        let me = merge_effects(ctx.sink, ctx.env,
+                            effects, gr.effects, s, arm.span)
+                        effects = me.0
+                        s = me.1
+                    }
                     guard_hexpr = some(gr.hexpr)
                 },
                 none => {}
             }
 
             let body_subst = s
+            let body_is_unreachable = !scrutinee_reaches_value ||
+                !guard_reaches_value
+            // The child is still checked internally. Exact callable contracts
+            // inside it remain diagnostics; only its result edge is neutral
+            // when the scrutinee/guard proves that no value can escape.
             let body_r = infer_expr(ctx, arm.body, body_subst)
             s = body_r.subst
-            let me = merge_effects(ctx.sink, ctx.env, effects, body_r.effects, s, arm.span)
-            effects = me.0
-            s = me.1
+            if !body_is_unreachable {
+                let me = merge_effects(ctx.sink, ctx.env,
+                    effects, body_r.effects, s, arm.span)
+                effects = me.0
+                s = me.1
+            }
             // Never arms must never bind result_type, including when the first
             // source arm diverges.  Binding the fresh result variable here
             // permanently poisons a later value-producing arm as Never and lets
             // ANF prune every following statement as unreachable.
-            let arm_body_resolved = apply_subst(s, hexpr_type(body_r.hexpr))
-            let arm_is_never = match arm_body_resolved { Type::NeverType => true, _ => false }
-            if !arm_is_never {
+            if !body_is_unreachable &&
+               expr_has_reachable_value(body_r.hexpr) {
                 let match_notes: List<DiagnosticNote> = [
                     DiagnosticNote { message: "match arms must all have the same type", span: some(arm.span) },
                     DiagnosticNote { message: "this arm has type '${type_to_string(apply_subst(s, hexpr_type(body_r.hexpr)))}'", span: some(hexpr_span(body_r.hexpr)) }
@@ -3282,32 +4262,61 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
     let initial_subst = subst
     let cond_r = infer_expr(ctx, condition, initial_subst)
     let mut s = cond_r.subst
-    s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL, s, span)
     let mut effects = cond_r.effects
+    let condition_reaches_value = expr_has_reachable_value(cond_r.hexpr)
+    if condition_reaches_value {
+        s = unify_at(ctx.sink, ctx.env,
+            hexpr_type(cond_r.hexpr), BOOL, s, span)
+    }
 
     let then_r = infer_block(ctx, then_branch, some(s))
     s = then_r.subst
-    let me = merge_effects(ctx.sink, ctx.env, effects, then_r.effects, s, span)
-    effects = me.0
-    s = me.1
+    if condition_reaches_value {
+        let me = merge_effects(
+            ctx.sink, ctx.env, effects, then_r.effects, s, span)
+        effects = me.0
+        s = me.1
+    }
 
     let mut else_hexpr: HExpr? = none
-    let mut result_type: Type = UNIT
+    let mut result_type: Type = if condition_reaches_value { UNIT } else { NEVER }
 
     match else_branch {
         some(eb) => match eb {
             Expr::Block { .. } => {
                 let else_r = infer_block(ctx, eb, some(s))
                 s = else_r.subst
-                let me2 = merge_effects(ctx.sink, ctx.env, effects, else_r.effects, s, span)
-                effects = me2.0
-                s = me2.1
-                let if_notes: List<DiagnosticNote> = [
-                    DiagnosticNote { message: "then branch has type '${type_to_string(apply_subst(s, hexpr_type(then_r.hexpr)))}'", span: some(hexpr_span(then_r.hexpr)) },
-                    DiagnosticNote { message: "else branch has type '${type_to_string(apply_subst(s, hexpr_type(else_r.hexpr)))}'", span: some(hexpr_span(else_r.hexpr)) }
-                ]
-                s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_r.hexpr), s, span, if_notes)
-                result_type = apply_subst(s, hexpr_type(then_r.hexpr))
+                if condition_reaches_value {
+                    let me2 = merge_effects(
+                        ctx.sink, ctx.env, effects, else_r.effects, s, span)
+                    effects = me2.0
+                    s = me2.1
+                    let then_type = apply_subst(
+                        s, hexpr_type(then_r.hexpr))
+                    let else_type = apply_subst(
+                        s, hexpr_type(else_r.hexpr))
+                    let then_reaches_value =
+                        expr_has_reachable_value(then_r.hexpr)
+                    let else_reaches_value =
+                        expr_has_reachable_value(else_r.hexpr)
+                    if !then_reaches_value && else_reaches_value {
+                        result_type = else_type
+                    } else if then_reaches_value && !else_reaches_value {
+                        result_type = then_type
+                    } else if then_reaches_value && else_reaches_value {
+                        let if_notes: List<DiagnosticNote> = [
+                            DiagnosticNote { message: "then branch has type '${type_to_string(then_type)}'", span: some(hexpr_span(then_r.hexpr)) },
+                            DiagnosticNote { message: "else branch has type '${type_to_string(else_type)}'", span: some(hexpr_span(else_r.hexpr)) }
+                        ]
+                        s = unify_at_noted(ctx.sink, ctx.env,
+                            hexpr_type(then_r.hexpr),
+                            hexpr_type(else_r.hexpr), s, span, if_notes)
+                        result_type = apply_subst(
+                            s, hexpr_type(then_r.hexpr))
+                    } else {
+                        result_type = NEVER
+                    }
+                }
                 else_hexpr = some(else_r.hexpr)
             },
             Expr::IfExpr { condition: ec, then_branch: etb, else_branch: eeb, span: espan } => {
@@ -3315,15 +4324,38 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
                 let else_block_span = espan
                 let else_if_r = infer_if(ctx, ec, etb, eeb, else_if_span, s)
                 s = else_if_r.subst
-                let me2 = merge_effects(ctx.sink, ctx.env, effects, else_if_r.effects, s, span)
-                effects = me2.0
-                s = me2.1
-                let elif_notes: List<DiagnosticNote> = [
-                    DiagnosticNote { message: "then branch has type '${type_to_string(apply_subst(s, hexpr_type(then_r.hexpr)))}'", span: some(hexpr_span(then_r.hexpr)) },
-                    DiagnosticNote { message: "else branch has type '${type_to_string(apply_subst(s, hexpr_type(else_if_r.hexpr)))}'", span: some(hexpr_span(else_if_r.hexpr)) }
-                ]
-                s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_if_r.hexpr), s, span, elif_notes)
-                result_type = apply_subst(s, hexpr_type(then_r.hexpr))
+                if condition_reaches_value {
+                    let me2 = merge_effects(ctx.sink, ctx.env,
+                        effects, else_if_r.effects, s, span)
+                    effects = me2.0
+                    s = me2.1
+                    let then_type = apply_subst(
+                        s, hexpr_type(then_r.hexpr))
+                    let else_type = apply_subst(
+                        s, hexpr_type(else_if_r.hexpr))
+                    let then_reaches_value =
+                        expr_has_reachable_value(then_r.hexpr)
+                    let else_reaches_value =
+                        expr_has_reachable_value(else_if_r.hexpr)
+                    if !then_reaches_value && else_reaches_value {
+                        result_type = else_type
+                    } else if then_reaches_value && !else_reaches_value {
+                        result_type = then_type
+                    } else if then_reaches_value && else_reaches_value {
+                        let elif_notes: List<DiagnosticNote> = [
+                            DiagnosticNote { message: "then branch has type '${type_to_string(then_type)}'", span: some(hexpr_span(then_r.hexpr)) },
+                            DiagnosticNote { message: "else branch has type '${type_to_string(else_type)}'", span: some(hexpr_span(else_if_r.hexpr)) }
+                        ]
+                        s = unify_at_noted(ctx.sink, ctx.env,
+                            hexpr_type(then_r.hexpr),
+                            hexpr_type(else_if_r.hexpr), s, span,
+                            elif_notes)
+                        result_type = apply_subst(
+                            s, hexpr_type(then_r.hexpr))
+                    } else {
+                        result_type = NEVER
+                    }
+                }
                 else_hexpr = some(HExpr::Block {
                     stmts: [], tail: some(else_if_r.hexpr),
                     ty: hexpr_type(else_if_r.hexpr), effects: else_if_r.effects,
@@ -3447,7 +4479,12 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
     }
 
     let result_type = ctx.env.fresh_var()
-    s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), result_type, s, span)
+    let mut has_non_never_result = false
+    if expr_has_reachable_value(expr_r.hexpr) {
+        s = unify_at(ctx.sink, ctx.env,
+            hexpr_type(expr_r.hexpr), result_type, s, span)
+        has_non_never_result = true
+    }
     let mut harms: List<HMatchArm> = []
 
     for arm in arms {
@@ -3460,12 +4497,18 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
                 ctx.env, catch_pattern)
 
             let mut guard_hexpr: HExpr? = none
+            let mut guard_reaches_value = true
             match arm.guard {
                 some(g) => {
                     let guard_subst = s
                     let gr = infer_expr(ctx, g, guard_subst)
                     s = gr.subst
-                    s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL, s, arm.span)
+                    guard_reaches_value =
+                        expr_has_reachable_value(gr.hexpr)
+                    if guard_reaches_value {
+                        s = unify_at(ctx.sink, ctx.env,
+                            hexpr_type(gr.hexpr), BOOL, s, arm.span)
+                    }
                     let me = merge_effects(ctx.sink, ctx.env, effects, gr.effects, s, arm.span)
                     effects = me.0
                     s = me.1
@@ -3475,12 +4518,22 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
             }
 
             let body_subst = s
+            // Keep the dependent child fully typechecked, but a diverging
+            // guard has no edge that can contribute its effects or result to
+            // the enclosing Catch expression.
             let body_r = infer_expr(ctx, arm.body, body_subst)
             s = body_r.subst
-            let me = merge_effects(ctx.sink, ctx.env, effects, body_r.effects, s, arm.span)
-            effects = me.0
-            s = me.1
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
+            if guard_reaches_value {
+                let me = merge_effects(ctx.sink, ctx.env,
+                    effects, body_r.effects, s, arm.span)
+                effects = me.0
+                s = me.1
+                if expr_has_reachable_value(body_r.hexpr) {
+                    s = unify_at(ctx.sink, ctx.env,
+                        hexpr_type(body_r.hexpr), result_type, s, arm.span)
+                    has_non_never_result = true
+                }
+            }
 
             harms.push(HMatchArm { pattern: catch_pattern,
                 bindings: pattern_bindings, guard: guard_hexpr,
@@ -3514,7 +4567,11 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
     // catch always fully consumes the fail effect
     effects = remove_fail_effect(effects)
 
-    let final_type = apply_subst(s, result_type)
+    let final_type = if has_non_never_result {
+        apply_subst(s, result_type)
+    } else {
+        NEVER
+    }
     let catch_effects = effects
     InferResult {
         hexpr: HExpr::TryCatch { body: expr_r.hexpr, arms: harms, ty: final_type, effects: catch_effects, span: span },
@@ -4067,7 +5124,8 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
                 let hparam_type = pt
                 hparams.push(HParam {
                     name: p.name, ty: hparam_type, def_id: ls.def_id,
-                    flags: hparam_flags(p.is_mutable, ownership_mode)
+                    flags: hparam_flags_with_force(
+                        p.is_mutable, ownership_mode, p.is_move)
                 })
             },
             none => {
@@ -4081,7 +5139,8 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
                 let hparam_type = pt
                 hparams.push(HParam {
                     name: p.name, ty: hparam_type, def_id: none,
-                    flags: hparam_flags(p.is_mutable, ownership_mode)
+                    flags: hparam_flags_with_force(
+                        p.is_mutable, ownership_mode, p.is_move)
                 })
             }
         }

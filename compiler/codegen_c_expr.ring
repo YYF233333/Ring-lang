@@ -3513,69 +3513,45 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
                 nfields, exact_bindings)
         },
         Pattern::OrPattern { patterns, .. } => {
-            // Match if ANY alternative matches: non-last alternatives jump to
-            // the shared body label on match; the last uses a fail test so an
-            // all-miss falls to the next arm.  Alternatives are ctor tags or
-            // literals (#181); field bindings across alternatives unsupported.
+            // Match if ANY alternative matches.  Every successful edge must
+            // materialize that alternative's payload into the arm's shared
+            // exact-DefId slots before entering the common guard/body.  Merely
+            // sharing the body label leaves payload binders uninitialized (and
+            // used to emit an undefined C symbol for `A(x) | B(x) => ...`).
             let body_lbl = fresh_label(ctx, "mor")
             let mut body_used = false
             let nalts = patterns.len()
+            if nalts == 0 {
+                panic("C codegen: empty or-pattern reached match lowering")
+            }
             for k in 0..nalts {
                 match patterns.get(k) {
                     some(alt) => {
                         if k == nalts - 1 {
                             // Last alternative: fail edge — a failed check falls
                             // to the next arm; a full pass falls through to the
-                            // body label emitted right below.
-                            match alt {
-                                Pattern::Constructor { .. } => {
-                                    // #245: full pattern check (tag + nested
-                                    // literal/ctor fields), not just the tag.
-                                    if check_c_nested_ctor_tags(ctx, scrut, alt, next_lbl) {
-                                        next_used = true
-                                    }
-                                },
-                                Pattern::NamedConstructor { .. } => {
-                                    if check_c_nested_ctor_tags(ctx, scrut, alt, next_lbl) {
-                                        next_used = true
-                                    }
-                                },
-                                Pattern::Literal { value, .. } => {
-                                    emit_c_literal_fail_test(ctx, scrut, value, next_lbl)
-                                    next_used = true
-                                },
-                                _ => {},
+                            // body label emitted right below.  Binding/wildcard
+                            // alternatives are irrefutable, so the shared helper
+                            // intentionally reports that no fail edge was used.
+                            if check_c_nested_ctor_tags(ctx, scrut, alt, next_lbl) {
+                                next_used = true
                             }
+                            bind_c_root_pattern_after_success(
+                                ctx, scrut, alt, exact_bindings)
                         } else {
-                            match alt {
-                                Pattern::Constructor { .. } => {
-                                    // #245: full pattern check; a failed check
-                                    // falls to the next alternative, a full pass
-                                    // jumps to the shared body.  No test emitted
-                                    // (unresolvable ctor) = unconditional match
-                                    // (LLVM best-effort parity).
-                                    let alt_miss = fresh_label(ctx, "morfail")
-                                    let tested = check_c_nested_ctor_tags(ctx, scrut, alt, alt_miss)
-                                    c_emit(ctx, "goto ${body_lbl};")
-                                    body_used = true
-                                    if tested {
-                                        c_raw(ctx, "${alt_miss}:;")
-                                    }
-                                },
-                                Pattern::NamedConstructor { .. } => {
-                                    let alt_miss = fresh_label(ctx, "morfail")
-                                    let tested = check_c_nested_ctor_tags(ctx, scrut, alt, alt_miss)
-                                    c_emit(ctx, "goto ${body_lbl};")
-                                    body_used = true
-                                    if tested {
-                                        c_raw(ctx, "${alt_miss}:;")
-                                    }
-                                },
-                                Pattern::Literal { value, .. } => {
-                                    emit_c_literal_match_test(ctx, scrut, value, body_lbl)
-                                    body_used = true
-                                },
-                                _ => {},
+                            // A refutable miss continues at the next alternative;
+                            // success binds first, then jumps to the shared body.
+                            // An irrefutable alternative emits no miss edge and
+                            // therefore becomes an unconditional bind + jump.
+                            let alt_miss = fresh_label(ctx, "morfail")
+                            let tested = check_c_nested_ctor_tags(
+                                ctx, scrut, alt, alt_miss)
+                            bind_c_root_pattern_after_success(
+                                ctx, scrut, alt, exact_bindings)
+                            c_emit(ctx, "goto ${body_lbl};")
+                            body_used = true
+                            if tested {
+                                c_raw(ctx, "${alt_miss}:;")
                             }
                         }
                     },
@@ -3898,6 +3874,26 @@ fn check_c_named_fields_nested_tags(mut ctx: CCtx, scrut: Str, field_names: List
 // Pattern binding helpers (ports of bind_nested_pattern /
 // bind_constructor_fields / bind_named_constructor_fields).
 // ============================================================
+
+// Bind one already-matched arm root.  Top-level positional constructors need
+// the same enum-vs-struct slot authority as ordinary match arms; nested binding
+// alone deliberately has no positional-struct fallback.
+fn bind_c_root_pattern_after_success(
+    mut ctx: CCtx, scrut: Str, pattern: Pattern,
+    bindings: List<HPatternBinding>
+) {
+    match pattern {
+        Pattern::Constructor {
+            name, qualifier, fields, ..
+        } => bind_c_constructor_fields(
+            ctx, scrut, name, qualifier, fields, bindings),
+        Pattern::NamedConstructor {
+            name, qualifier, fields, ..
+        } => bind_c_named_constructor_fields(
+            ctx, scrut, name, qualifier, fields, bindings),
+        other => bind_c_nested_pattern(ctx, scrut, other, bindings),
+    }
+}
 
 fn exact_pattern_def_id(
     bindings: List<HPatternBinding>, name: Str

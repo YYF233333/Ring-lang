@@ -1,0 +1,5 @@
+E0801
+use of moved value: 'factory_source'
+print(factory_source)
+!internal compiler error
+!ring panic

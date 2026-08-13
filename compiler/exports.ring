@@ -1,7 +1,9 @@
-use types::{Type, EnumVariant, OwnershipMetadata, EMPTY_ROW,
-    CALLABLE_MOVE_OWNED, fn_meta, freeze_callable_ownership_type,
+use types::{Type, EnumVariant, OwnershipMetadata, CallableTransferLevel, EMPTY_ROW,
+    CALLABLE_BORROW_OWNED, CALLABLE_MOVE_OWNED, fn_meta,
+    freeze_callable_ownership_type,
     validate_callable_ownership_metadata,
-    require_exact_callable_ownership_term}
+    require_exact_callable_ownership_term,
+    CALLABLE_SOURCE_ERROR_RECOVERY}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use hir::{HProgram, HDecl, ValueBindingKind, ModuleImplFact, compare_by_first,
     variant_ctor_name}
@@ -53,27 +55,76 @@ pub enum TypeDef {
     EnumDef_(EnumDef)
 }
 
+fn validate_export_callable_transfer_spine_at(
+    metadata: OwnershipMetadata, levels: List<CallableTransferLevel>,
+    ty: Type, level_index: Int
+) {
+    match ty {
+        Type::FnType { params, return_type, meta } => {
+            let level = match levels.get(level_index) {
+                some(value) => value,
+                none => panic(
+                    "unreachable: exported callable transfer state is missing a returned-callable level")
+            }
+            let by_level = require_exact_callable_ownership_term(
+                metadata, level.ownership_term)
+            let by_type = require_exact_callable_ownership_term(
+                metadata, meta.ownership_term)
+            if by_level != by_type {
+                panic(
+                    "unreachable: exported callable transfer level disagrees with its FnType return spine")
+            }
+            if level.force_params.len() != params.len() {
+                panic(
+                    "unreachable: exported callable transfer vector has the wrong arity")
+            }
+            validate_export_callable_transfer_spine_at(
+                metadata, levels, return_type, level_index + 1)
+        },
+        _ => if level_index != levels.len() {
+            panic(
+                "unreachable: exported callable transfer state exceeds its FnType return spine")
+        }
+    }
+}
+
 fn validate_export_callable_identity(
     metadata: OwnershipMetadata, def_id: Int?, ty: Type
 ) {
     match (def_id, ty) {
-        (some(id), Type::FnType { meta, .. }) => {
+        (some(id), Type::FnType { params, return_type, meta }) => {
+            let type_ownership_term = meta.ownership_term
+            let type_for_transfer_spine = Type::FnType {
+                params: params, return_type: return_type, meta: meta
+            }
             let by_def = match metadata.callable_by_def_id.get(id) {
                 some(term) => require_exact_callable_ownership_term(
                     metadata, term),
                 none => panic(
                     "unreachable: exported callable has no DefId ownership contract")
             }
-            if !metadata.callable_state_by_def_id.contains_key(id) {
-                panic(
+            let state = match metadata.callable_state_by_def_id.get(id) {
+                some(value) => value,
+                none => panic(
                     "unreachable: exported callable has no DefId ownership source")
             }
+            if state.source == CALLABLE_SOURCE_ERROR_RECOVERY {
+                    panic(
+                        "unreachable: recovery callable cannot cross a module export boundary")
+            }
             let by_type = require_exact_callable_ownership_term(
-                metadata, meta.ownership_term)
+                metadata, type_ownership_term)
             if by_def != by_type {
                 panic(
                     "unreachable: exported callable DefId/type ownership contract mismatch")
             }
+            // The public FnType carries only Borrow/MutBorrow/Move.  The exact
+            // producer-specific FORCE/OWNING authority travels beside it and
+            // must cover the complete direct-return callable spine.  Never
+            // reconstruct FORCE from a Move type here: Move+false is a valid
+            // body-inferred/storage OWNING edge.
+            validate_export_callable_transfer_spine_at(
+                metadata, state.transfer_levels, type_for_transfer_spine, 0)
         },
         (none, Type::FnType { .. }) => panic(
             "unreachable: exported callable has no exact DefId"),
@@ -82,36 +133,87 @@ fn validate_export_callable_identity(
 }
 
 fn validate_export_const_getter_identity(
-    metadata: OwnershipMetadata, def_id: Int?
+    metadata: OwnershipMetadata, def_id: Int?, stored_ty: Type
 ) {
     let id = match def_id {
         some(value) => value,
         none => panic(
             "unreachable: exported const getter has no exact DefId")
     }
-    match metadata.callable_by_def_id.get(id) {
+    let getter_term = match metadata.callable_by_def_id.get(id) {
         some(term) => {
-            let _ = require_exact_callable_ownership_term(metadata, term)
+            let exact = require_exact_callable_ownership_term(metadata, term)
+            if exact != CALLABLE_BORROW_OWNED {
+                panic(
+                    "unreachable: exported const getter is not zero-argument Borrow")
+            }
+            exact
         },
         none => panic(
             "unreachable: exported const getter has no DefId ownership contract")
     }
-    if !metadata.callable_state_by_def_id.contains_key(id) {
-        panic(
+    let state = match metadata.callable_state_by_def_id.get(id) {
+        some(value) => {
+            if value.source == CALLABLE_SOURCE_ERROR_RECOVERY {
+            panic(
+                "unreachable: recovery const getter cannot cross a module export boundary")
+            }
+            value
+        },
+        none => panic(
             "unreachable: exported const getter has no DefId ownership source")
+    }
+    let getter_level = match state.transfer_levels.get(0) {
+        some(level) => level,
+        none => panic(
+            "unreachable: exported const getter has no direct transfer level")
+    }
+    if require_exact_callable_ownership_term(
+            metadata, getter_level.ownership_term) != getter_term ||
+       getter_level.force_params.len() != 0 {
+        panic(
+            "unreachable: exported const getter direct transfer authority is malformed")
+    }
+    let role_spine = match metadata.callable_result_role_spine_by_def_id.get(id) {
+        some(spine) => spine,
+        none => panic(
+            "unreachable: exported const getter has no result role spine")
+    }
+    match stored_ty {
+        Type::FnType { .. } => {
+            if state.transfer_levels.len() < 2 {
+                panic(
+                    "unreachable: exported callable const has no stored-callable transfer spine")
+            }
+            if role_spine.len() != state.transfer_levels.len() {
+                panic(
+                    "unreachable: exported callable const role/transfer spine depth mismatch")
+            }
+            validate_export_callable_transfer_spine_at(
+                metadata, state.transfer_levels, stored_ty, 1)
+        },
+        _ => {
+            if state.transfer_levels.len() != 1 {
+                panic(
+                    "unreachable: non-callable const getter carries a callable return spine")
+            }
+            if role_spine.len() != 2 {
+                panic(
+                    "unreachable: non-callable const getter role summary is malformed")
+            }
+        }
     }
 }
 
 fn validate_module_exports_callable_identities(exports: ModuleExports) {
     let metadata = exports.ownership_metadata
     for entry in exports.values.entries() {
-        validate_export_callable_identity(
-            metadata, entry.1.def_id, entry.1.ty)
         match exports.value_binding_kinds.get(entry.0) {
             some(ValueBindingKind::ConstGetter) =>
                 validate_export_const_getter_identity(
-                    metadata, entry.1.def_id),
-            _ => {}
+                    metadata, entry.1.def_id, entry.1.ty),
+            _ => validate_export_callable_identity(
+                metadata, entry.1.def_id, entry.1.ty)
         }
     }
     for target in exports.impl_methods.entries() {
@@ -1410,7 +1512,11 @@ pub fn extract_exports(
         extern_values: extern_values,
         mut_methods: mut_methods,
         fn_mut_params: fn_mut_params,
-        ownership_metadata: env.types.ownership_metadata
+        // Ownership solving returns its frozen producer authority on HProgram.
+        // TypeEnv remains the source of schemes/registries, but its registration
+        // snapshot predates returned-callable fixed-point publication and must
+        // not be exported as the module's semantic ownership bundle.
+        ownership_metadata: hprogram.ownership_metadata
     })
 }
 

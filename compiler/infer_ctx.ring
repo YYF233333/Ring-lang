@@ -6,7 +6,8 @@ use types::{Type, Effect, EffectRow, RecordField, StructField,
     CALLABLE_BORROW_OWNED, fn_meta,
     CALLABLE_SOURCE_CALL_CONSTRAINT, record_callable_ownership, BUILTIN_PTR,
     PARAM_OWNERSHIP_BORROW, PARAM_OWNERSHIP_MUT_BORROW,
-    PARAM_OWNERSHIP_MOVE, intern_callable_param_modes}
+    PARAM_OWNERSHIP_MOVE, intern_callable_param_modes,
+    clone_callable_transfer_levels}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, FnTypeParam,
     CallableParamMode, NamedPatternField, span_zero, EffectExpr,
     UseDecl, UseImport}
@@ -22,6 +23,7 @@ use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry,
     apply_subst, apply_subst_row, apply_subst_map, find_impl, lookup_variant,
     exact_scheme_value_origin, build_scheme_var_map,
     new_local_callable_identity_scheme,
+    new_local_callable_identity_scheme_with_transfer_levels,
     instantiate_impl_dict_requirements}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 use resolver::{ResolvedNamespacePlan, ModuleFramePlan, ResolvedNamespaceBinding,
@@ -56,6 +58,18 @@ pub struct AssocRebindEntry {
     pub owner_name: Str,
     pub trait_name: Str,
     pub assoc_name: Str
+}
+
+// One reversible registry update made by the impl effect pre-pass. That pass
+// may expose only its inferred EffectRow to declaration-order consumers; the
+// main retained-HIR pass remains the owner of callable shapes and DefIds.
+pub struct ImplEffectPrecheckUndo {
+    pub target_type: Str,
+    pub trait_name: Str?,
+    pub origin: Str,
+    pub method_name: Str,
+    pub previous_scheme: TypeScheme,
+    pub span: Span
 }
 
 // Checker-only deferred trait evidence.  The callee type retains the exact
@@ -167,11 +181,70 @@ pub struct InferCtx {
     // Function identity -> owner-qualified associated-type provenance captured
     // before check_fn_decl restores its transient scopes.
     pub rebind_assoc_provenance: Map<Str, List<AssocRebindEntry>>,
+    pub impl_effect_precheck_active: Bool,
+    pub impl_effect_precheck_blocked: Bool,
+    pub discarded_fn_precheck_active: Bool,
+    pub discarded_fn_precheck_blocked: Bool,
+    pub impl_effect_precheck_undo: List<ImplEffectPrecheckUndo>,
+    // Project namespace overlays allocate a fresh lexical DefId before body
+    // ownership reaches its fixed point. Keep the exact producer edge instead
+    // of freezing the provisional callable state copied at overlay time.
+    // These maps are monotonic retained-HIR provenance, not lexical bindings;
+    // exiting the namespace frame must not remove an edge already embedded in
+    // HIR. Speculative impl-effect prechecks snapshot and restore them.
+    pub pre_solve_exact_value_alias_targets: Map<Int, Int>,
+    // Registration-time unannotated const getters remain here until their
+    // initializer owner has published a final generalized scheme. Value reads
+    // resolve exact aliases through this set and fail closed across isolated
+    // function substitutions.
+    pub pending_inferred_const_def_ids: Set<Int>,
+    // A discarded function/impl precheck that touched a pending inferred const
+    // is not authority. Early Phase-1 consumers fail closed by exact callable
+    // DefId until a source-position retry publishes the completed summary.
+    pub pending_precheck_callable_def_ids: Set<Int>,
+    // Project namespace exit removes lexical binding-kind entries, but a
+    // retained exact alias of a const still denotes that const's implicit
+    // zero-argument getter. Keep this classification beside the durable edge.
+    pub pre_solve_const_getter_aliases: Set<Int>,
+    pub pre_solve_callable_alias_targets: Map<Int, Int>,
+    pub pre_solve_callable_alias_arities: Map<Int, Int>,
+    pub pre_solve_callable_alias_contracts: Map<Int, Int>,
+    // Checker-minted identities retained solely by a default-argument HIR
+    // template (from either precheck or formal checking). The final retained
+    // HIR pass prunes members that were never copied into an actual caller.
+    pub speculative_default_authority_def_ids: Set<Int>,
     // B-069: Default parameter support
-    // fn_defaults: function name -> list of default-value HExprs (one per default param, in order)
-    pub fn_defaults: Map<Str, List<HExpr>>,
-    // fn_min_arity: function name -> minimum number of required (non-default) params
-    pub fn_min_arity: Map<Str, Int>,
+    // Default metadata is keyed by the callable declaration DefId.  A spelling
+    // is not an identity: unrelated impls may define the same method name and
+    // import aliases may expose one callable under several names.
+    pub fn_defaults: Map<Int, List<HExpr>>,
+    // Unresolved variables owned only by a default HIR template are freshened
+    // for every omitted-argument expansion.  This map carries their trait
+    // bounds independently from DefId-keyed value authority.
+    pub fn_default_var_bounds: Map<Int, Map<Int, Set<Str>>>,
+    // callable DefId -> minimum number of required (non-default) params
+    pub fn_min_arity: Map<Int, Int>,
+    // Most recent exact TypeScheme instantiation for a lexical value DefId.
+    // Direct-call metadata is resolved immediately after infer_ident, so this
+    // preserves even quantified variables that do not occur in the surface
+    // FnType (for example associated-constraint-only default variables).
+    pub latest_value_instantiation_maps: Map<Int, Map<Int, Type>>,
+    // A discarded body may be blocked after its independently validated
+    // default header was normalized.  Keep that header as an exact-DefId
+    // retry seed; body schemes/effects and diagnostics remain transactional.
+    pub pending_fn_default_seed_values: Map<Int, List<HExpr>>,
+    pub pending_fn_default_seed_var_bounds: Map<Int, Map<Int, Set<Str>>>,
+    pub pending_fn_default_seed_min_arities: Map<Int, Int>,
+    // A retained default template can refer to a lexical import/project alias
+    // after its namespace frame has exited. Preserve that exact lexical DefId
+    // and scheme; canonicalizing the HIR reference would violate binder
+    // identity and can change generic instantiation.
+    pub default_template_live_schemes: Map<Int, TypeScheme>,
+    // A retained top-level default owner may intentionally project ErrorType
+    // after its complete inference transaction rolls back. This marker is
+    // consumed by check_fn_decl outside that transaction; speculative
+    // function/impl prechecks never publish it.
+    pub pending_fn_default_error_rebinds: Set<Str>,
     // B-125: whether the current module context allows unsafe blocks
     pub mod_unsafe_allowed: Bool,
     // B-107 Unit3B: one installed resolver plan, pre-indexed by exact AST
@@ -207,8 +280,28 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         effect_default_deps: map_new(),
         qualified_assoc_scope: map_new(),
         rebind_assoc_provenance: map_new(),
+        impl_effect_precheck_active: false,
+        impl_effect_precheck_blocked: false,
+        discarded_fn_precheck_active: false,
+        discarded_fn_precheck_blocked: false,
+        impl_effect_precheck_undo: [],
+        pre_solve_exact_value_alias_targets: map_new(),
+        pending_inferred_const_def_ids: set_new(),
+        pending_precheck_callable_def_ids: set_new(),
+        pre_solve_const_getter_aliases: set_new(),
+        pre_solve_callable_alias_targets: map_new(),
+        pre_solve_callable_alias_arities: map_new(),
+        pre_solve_callable_alias_contracts: map_new(),
+        speculative_default_authority_def_ids: set_new(),
         fn_defaults: map_new(),
+        fn_default_var_bounds: map_new(),
         fn_min_arity: map_new(),
+        latest_value_instantiation_maps: map_new(),
+        pending_fn_default_seed_values: map_new(),
+        pending_fn_default_seed_var_bounds: map_new(),
+        pending_fn_default_seed_min_arities: map_new(),
+        default_template_live_schemes: map_new(),
+        pending_fn_default_error_rebinds: set_new(),
         mod_unsafe_allowed: false,
         project_namespace_file_key: none,
         project_namespace_root_frame: none,
@@ -280,6 +373,90 @@ fn remove_current_scope_value(mut ctx: InferCtx, name: Str) {
     }
 }
 
+fn record_pre_solve_exact_value_alias(
+    mut ctx: InferCtx, alias_def_id: Int, source_def_id: Int
+) {
+    if alias_def_id == source_def_id {
+        panic("unreachable: project value alias reused canonical DefId")
+    }
+    match ctx.pre_solve_exact_value_alias_targets.get(alias_def_id) {
+        some(existing) => if existing != source_def_id {
+            panic("unreachable: project value alias changed producer DefId")
+        },
+        none => {
+            ctx.pre_solve_exact_value_alias_targets.insert(
+                alias_def_id, source_def_id)
+        }
+    }
+    match value_binding_kind(ctx, some(source_def_id)) {
+        ValueBindingKind::ConstGetter => {
+            let getter_alias_def_id = alias_def_id
+            ctx.pre_solve_const_getter_aliases.insert(getter_alias_def_id)
+        },
+        _ => {}
+    }
+}
+
+fn record_pre_solve_callable_alias(
+    mut ctx: InferCtx, alias_def_id: Int, source_def_id: Int,
+    arity: Int, ownership_term: Int
+) {
+    if alias_def_id == source_def_id {
+        panic("unreachable: project callable alias reused canonical DefId")
+    }
+    match ctx.pre_solve_callable_alias_targets.get(alias_def_id) {
+        some(existing) => if existing != source_def_id {
+            panic("unreachable: project callable alias changed producer DefId")
+        },
+        none => {
+            ctx.pre_solve_callable_alias_targets.insert(
+                alias_def_id, source_def_id)
+        }
+    }
+    match ctx.pre_solve_callable_alias_arities.get(alias_def_id) {
+        some(existing) => if existing != arity {
+            panic("unreachable: project callable alias changed arity")
+        },
+        none => {
+            ctx.pre_solve_callable_alias_arities.insert(alias_def_id, arity)
+        }
+    }
+    match ctx.pre_solve_callable_alias_contracts.get(alias_def_id) {
+        // A checked declaration may replace its registration-time inference
+        // term with the canonical rebound term.  The producer DefId and arity
+        // stay fixed; the latest surface term is the one retained HIR shares.
+        some(_) => {
+            ctx.pre_solve_callable_alias_contracts.insert(
+                alias_def_id, ownership_term)
+        },
+        none => {
+            ctx.pre_solve_callable_alias_contracts.insert(
+                alias_def_id, ownership_term)
+        }
+    }
+}
+
+pub fn promote_pre_solve_callable_aliases_for_source(
+    mut ctx: InferCtx, source_def_id: Int, source_ty: Type
+) {
+    let (arity, ownership_term) = match source_ty {
+        Type::FnType { params, meta, .. } =>
+            (params.len(), meta.ownership_term),
+        _ => return
+    }
+    // Namespace frames can disappear before an unannotated const is checked,
+    // but their lexical DefIds remain in retained HIR.  Promote from the
+    // durable DefId relation rather than rescanning live scopes/use aliases.
+    for entry in ctx.pre_solve_exact_value_alias_targets.entries() {
+        let (alias_def_id, exact_source_def_id) = entry
+        if exact_source_def_id == source_def_id {
+            record_pre_solve_callable_alias(
+                ctx, alias_def_id, exact_source_def_id,
+                arity, ownership_term)
+        }
+    }
+}
+
 fn apply_project_value_binding(
     mut ctx: InferCtx,
     binding: ResolvedNamespaceBinding,
@@ -305,6 +482,20 @@ fn apply_project_value_binding(
                 some(def_id) => def_id,
                 none => panic(
                     "unreachable: project namespace value has no exact DefId")
+            }
+            match (source_scheme.def_id, source_scheme.ty) {
+                (some(source_def_id), Type::FnType { .. }) => {
+                    record_pre_solve_exact_value_alias(
+                        ctx, new_def_id, source_def_id)
+                    promote_pre_solve_callable_aliases_for_source(
+                        ctx, source_def_id, source_scheme.ty)
+                },
+                (some(source_def_id), _) =>
+                    record_pre_solve_exact_value_alias(
+                        ctx, new_def_id, source_def_id),
+                (none, Type::FnType { .. }) => panic(
+                    "unreachable: project callable source has no exact DefId"),
+                _ => {}
             }
             let journal_def_id = new_def_id
             state.journal.push(ProjectNamespaceUndo::Value {
@@ -2615,6 +2806,74 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
 // Pattern binding
 // ============================================================
 
+struct OrPatternBindingAuthority {
+    name: Str,
+    scheme: TypeScheme
+}
+
+fn collect_or_pattern_binding_names(
+    pattern: Pattern, mut names: List<Str>, mut duplicates: List<Str>
+) {
+    match pattern {
+        Pattern::Binding { name, .. } => if name != "_" {
+            if names.contains(name) {
+                if !duplicates.contains(name) {
+                    duplicates.push("${name}")
+                }
+            } else {
+                names.push("${name}")
+            }
+        },
+        Pattern::Constructor { fields, .. } => {
+            for field in fields {
+                collect_or_pattern_binding_names(field, names, duplicates)
+            }
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            for field in fields {
+                collect_or_pattern_binding_names(
+                    field.pattern, names, duplicates)
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for element in elements {
+                collect_or_pattern_binding_names(element, names, duplicates)
+            }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            for alternative in patterns {
+                collect_or_pattern_binding_names(
+                    alternative, names, duplicates)
+            }
+        },
+        Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
+    }
+}
+
+fn same_or_pattern_binding_names(
+    left: List<Str>, right: List<Str>
+) -> Bool {
+    if left.len() != right.len() { return false }
+    for name in left {
+        if !right.contains(name) { return false }
+    }
+    true
+}
+
+fn report_duplicate_pattern_bindings(
+    sink: CollectingSink, duplicates: List<Str>, span: Span
+) -> Bool {
+    let found = duplicates.len() > 0
+    for duplicate in duplicates {
+        let _ = type_error(sink, E0301,
+            "Pattern repeats binding '${duplicate}'",
+            span, DiagnosticContext::OtherContext {
+                detail: some("duplicate pattern binding")
+            })
+    }
+    found
+}
+
 // Error recovery must preserve lexical scope without attempting any further
 // type or constructor resolution. In particular, nested constructor syntax in
 // an already-invalid pattern must not emit secondary diagnostics.
@@ -2690,12 +2949,40 @@ pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, su
             }
             subst
         },
-        Pattern::Constructor { name, qualifier, fields, span } =>
-            bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span),
+        Pattern::Constructor { name, qualifier, fields, span } => {
+            let mut names: List<Str> = []
+            let mut duplicates: List<Str> = []
+            for field in fields {
+                collect_or_pattern_binding_names(field, names, duplicates)
+            }
+            let _ = report_duplicate_pattern_bindings(
+                ctx.sink, duplicates, span)
+            bind_constructor_pattern(
+                ctx, name, qualifier, fields, expected_type, subst, span)
+        },
         Pattern::Literal { .. } => subst,
-        Pattern::NamedConstructor { name, qualifier, fields, span, .. } =>
-            bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span),
+        Pattern::NamedConstructor {
+            name, qualifier, fields, span, ..
+        } => {
+            let mut names: List<Str> = []
+            let mut duplicates: List<Str> = []
+            for field in fields {
+                collect_or_pattern_binding_names(
+                    field.pattern, names, duplicates)
+            }
+            let _ = report_duplicate_pattern_bindings(
+                ctx.sink, duplicates, span)
+            bind_named_constructor_pattern(
+                ctx, name, qualifier, fields, expected_type, subst, span)
+        },
         Pattern::TuplePattern { elements, span } => {
+            let mut names: List<Str> = []
+            let mut duplicates: List<Str> = []
+            for element in elements {
+                collect_or_pattern_binding_names(element, names, duplicates)
+            }
+            let _ = report_duplicate_pattern_bindings(
+                ctx.sink, duplicates, span)
             let resolved = apply_subst(subst, expected_type)
             match resolved {
                 Type::TupleType { elements: type_elems } => {
@@ -2762,12 +3049,93 @@ pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, su
             }
         },
         Pattern::OrPattern { patterns, span } => {
-            // Bind each sub-pattern against the same expected type.
-            // For or-patterns without bindings, this just validates each alternative.
-            // For or-patterns with bindings, each sub-pattern introduces the same names.
+            // Every alternative publishes one shared lexical binding contract:
+            // the same names exactly once, compatible types, and one canonical
+            // DefId per name for HIR/ownership/backend consumers.
+            let mut expected_names: List<Str> = []
+            let mut has_expected_names = false
+            let mut binding_sets_valid = true
+            for alternative in patterns {
+                let mut names: List<Str> = []
+                let mut duplicates: List<Str> = []
+                collect_or_pattern_binding_names(
+                    alternative, names, duplicates)
+                // Recovery below re-enters each alternative and emits the
+                // duplicate diagnostic at that alternative's own pattern span.
+                if duplicates.len() > 0 {
+                    binding_sets_valid = false
+                }
+                if !has_expected_names {
+                    for name in names { expected_names.push("${name}") }
+                    has_expected_names = true
+                } else if !same_or_pattern_binding_names(
+                    expected_names, names) {
+                    let _ = type_error(ctx.sink, E0301,
+                        "Or-pattern alternatives must bind the same variables",
+                        span, DiagnosticContext::OtherContext {
+                            detail: some("or-pattern binding set mismatch")
+                        })
+                    binding_sets_valid = false
+                }
+            }
+
+            if !has_expected_names {
+                let _ = type_error(ctx.sink, E0301,
+                    "Or-pattern must contain at least one alternative",
+                    span, DiagnosticContext::OtherContext {
+                        detail: some("empty or-pattern")
+                    })
+                return subst
+            }
+
+            // Invalid sources still infer every alternative for ordinary error
+            // recovery, but never proceed to codegen because the diagnostic is
+            // already committed.
+            if !binding_sets_valid {
+                let mut recovery_subst = subst
+                for alternative in patterns {
+                    recovery_subst = bind_pattern(
+                        ctx, alternative, expected_type, recovery_subst)
+                }
+                return recovery_subst
+            }
+
             let mut s = subst
-            for pat in patterns {
-                s = bind_pattern(ctx, pat, expected_type, s)
+            let mut authorities: List<OrPatternBindingAuthority> = []
+            let mut alternative_index = 0
+            for alternative in patterns {
+                s = bind_pattern(ctx, alternative, expected_type, s)
+                if alternative_index == 0 {
+                    for name in expected_names {
+                        match ctx.env.lookup(name) {
+                            some(scheme) => authorities.push(
+                                OrPatternBindingAuthority {
+                                    name: "${name}", scheme: scheme
+                                }),
+                            none => panic(
+                                "unreachable: inferred or-pattern binding is absent from its lexical scope")
+                        }
+                    }
+                } else {
+                    // The just-bound alternative temporarily owns fresh DefIds.
+                    // Unify its types with the first alternative, then restore
+                    // the first alternative's schemes so the arm body and every
+                    // backend success edge share one exact identity.
+                    for authority in authorities {
+                        match ctx.env.lookup(authority.name) {
+                            some(candidate) => {
+                                s = unify_at(ctx.sink, ctx.env,
+                                    authority.scheme.ty, candidate.ty, s, span)
+                            },
+                            none => panic(
+                                "unreachable: validated or-pattern binding is absent from an alternative")
+                        }
+                    }
+                    for authority in authorities {
+                        ctx.env.bind(authority.name, authority.scheme)
+                    }
+                }
+                alternative_index = alternative_index + 1
             }
             s
         }
@@ -3296,23 +3664,57 @@ fn localize_exact_import_alias_scheme(
             _ => return alias_scheme
         }
     }
+    // A const scheme describes the stored value while its DefId denotes the
+    // implicit zero-argument getter. Preserve that getter identity here. Once
+    // the const owner is solved its transfer spine is `[getter, stored ...]`;
+    // pending local aliases initially copy the one-level getter placeholder
+    // and are refreshed from their exact getter edge before freeze.
     match ctx.env.types.ownership_metadata.callable_by_def_id.get(
             source_def_id) {
         some(ownership_term) => {
-            let source = match ctx.env.types.ownership_metadata
+            let source_state = match ctx.env.types.ownership_metadata
                     .callable_state_by_def_id.get(source_def_id) {
-                some(state) => state.source,
+                some(state) => state,
                 none => panic(
                     "unreachable: imported callable source has no ownership state")
             }
-            new_local_callable_identity_scheme(
-                ctx.env, alias_scheme, ownership_term, source)
+            new_local_callable_identity_scheme_with_transfer_levels(
+                ctx.env, alias_scheme, ownership_term, source_state.source,
+                clone_callable_transfer_levels(
+                    source_state.transfer_levels))
         },
         none => match source_scheme.ty {
             Type::FnType { .. } => panic(
                 "unreachable: imported callable source has no ownership contract"),
             _ => alias_scheme
         }
+    }
+}
+
+fn record_bound_pre_solve_exact_value_alias(
+    mut ctx: InferCtx, alias_name: Str, source_name: Str
+) {
+    match (ctx.env.lookup(alias_name), ctx.env.lookup(source_name)) {
+        (some(alias_scheme), some(source_scheme)) =>
+            match (alias_scheme.def_id, source_scheme.def_id,
+                   source_scheme.ty) {
+                (some(alias_def_id), some(source_def_id),
+                 Type::FnType { .. }) => {
+                    record_pre_solve_exact_value_alias(
+                        ctx, alias_def_id, source_def_id)
+                    promote_pre_solve_callable_aliases_for_source(
+                        ctx, source_def_id, source_scheme.ty)
+                },
+                (some(alias_def_id), some(source_def_id), _) =>
+                    record_pre_solve_exact_value_alias(
+                        ctx, alias_def_id, source_def_id),
+                (none, _, Type::FnType { .. }) => panic(
+                    "unreachable: exact callable alias has no lexical DefId"),
+                (_, none, Type::FnType { .. }) => panic(
+                    "unreachable: exact callable alias source has no DefId"),
+                _ => {}
+            },
+        _ => {}
     }
 }
 
@@ -3348,6 +3750,10 @@ pub fn bind_exact_import_alias(
                     let bound_alias_name = alias_name
                     ctx.env.bind(bound_alias_name,
                         localize_exact_import_alias_scheme(ctx, live_scheme))
+                    let producer_alias_name = "${alias_name}"
+                    let producer_source_name = "${exact_origin}"
+                    record_bound_pre_solve_exact_value_alias(
+                        ctx, producer_alias_name, producer_source_name)
                     let origin_alias_name = alias_name
                     record_value_origin(
                         ctx, origin_alias_name, exact_origin)

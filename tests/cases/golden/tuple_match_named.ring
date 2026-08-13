@@ -16,13 +16,31 @@ fn classify(a: Ty, b: Ty) -> Str {
     }
 }
 
+fn classify_nested(value: Ty) -> Int {
+    match ((value, value), (value, value)) {
+        ((Ty::V { id: left }, _), (_, Ty::V { id: right })) => left + right,
+        _ => 0
+    }
+}
+
 fn main() {
+    // The exact callable type makes the intended borrow-only contract explicit:
+    // matching the direct tuple view in classify must not strengthen either
+    // parameter to Move.
+    let classifier: fn(Ty, Ty) -> Str = classify
     let a = Ty::Str2 { name: "X", tparams: [Ty::V { id: 1 }] }
     let b = Ty::Str2 { name: "Y", tparams: [Ty::V { id: 2 }] }
-    print(classify(a, b))   // expect: both Str2 X/Y (nt=1/1)
+    print(classifier(a, b))   // expect: both Str2 X/Y (nt=1/1)
 
     let f = Ty::Fn { params: [Ty::V { id: 3 }], ret: Ty::V { id: 4 } }
-    print(classify(f, f))   // expect: both Fn (np=1/1)
+    print(classifier(f, f))   // expect: both Fn (np=1/1)
 
-    print(classify(a, f))   // expect: other
+    print(classifier(a, f))   // expect: other
+
+    // Nested direct tuple views must share the same borrow-only rule, while the
+    // ordinary tuple constructor path remains owning outside Match.
+    let nested_classifier: fn(Ty) -> Int = classify_nested
+    let value = Ty::V { id: 7 }
+    print(nested_classifier(value))
+    print(nested_classifier(value))
 }

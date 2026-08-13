@@ -1,10 +1,10 @@
 // Ownership-planner/Perceus verifier boundary: Move applies to every type.
 // The live planner enforces logical Move for Str, extern H, and Ptr<Int> even
 // though those types do not all carry physical RC cleanup.  The tracked-value
-// self-reassignment below also provides one inferred post-RC Move edge: under
-// --rc-mutate=missing-take, verify_rc must reject exactly that fixture-local
-// bare binding.  Explicit non-RC Move is enforced by the ownership planner and
-// is intentionally not used as the verifier mutation oracle.
+// self-reassignment below provides one inferred post-RC Move edge.  Under
+// --rc-mutate=missing-take, verify_rc must reject that edge plus every explicit
+// logical Move edge below, including non-RC Str/extern/Ptr values: all six must
+// materialize exact Takes even when only some carry physical RC cleanup.
 
 fn consume(move value: Str) -> Int {
     value.len()

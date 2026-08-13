@@ -1,5 +1,5 @@
-// Frontend-positive check-only coverage. Keep this fixture companion-free until
-// shared OR-pattern binders are safe to execute through the C/native lane.
+// Frontend-positive check-only coverage isolates callable descriptor/path solving.
+// C/native shared OR-pattern binding is exercised by the dedicated runtime fixtures.
 struct Resource { id: Int }
 
 impl Drop for Resource {
@@ -7,23 +7,23 @@ impl Drop for Resource {
 }
 
 enum SamePathChoice {
-    SamePath(fn(Resource) -> Int),
-    OtherPath(fn(Resource) -> Int),
+    SamePath(fn(move Resource) -> Int),
+    OtherPath(fn(move Resource) -> Int),
 }
 
 enum DisjointChoice {
-    DisjointLeft(fn(Resource) -> Int),
-    DisjointRight(fn(Resource) -> Int),
+    DisjointLeft(fn(move Resource) -> Int),
+    DisjointRight(fn(move Resource) -> Int),
 }
 
 enum TupleChoice {
-    TupleLeft((fn(Resource) -> Int, Int)),
-    TupleRight((fn(Resource) -> Int, Int)),
+    TupleLeft((fn(move Resource) -> Int, Int)),
+    TupleRight((fn(move Resource) -> Int, Int)),
 }
 
 enum NamedChoice {
-    NamedLeft { callback: fn(Resource) -> Int, marker: Int },
-    NamedRight { callback: fn(Resource) -> Int, marker: Int },
+    NamedLeft { callback: fn(move Resource) -> Int, marker: Int },
+    NamedRight { callback: fn(move Resource) -> Int, marker: Int },
 }
 
 enum DeadGuardChoice {
@@ -41,8 +41,9 @@ fn consume_right(value: Resource) -> Int {
     owned.id
 }
 
-fn consume(move value: Resource) -> Int {
-    value.id
+fn consume(value: Resource) -> Int {
+    let owned = value
+    owned.id
 }
 
 fn borrow_value(value: Resource) -> Int {
@@ -50,13 +51,14 @@ fn borrow_value(value: Resource) -> Int {
 }
 
 fn dead_guard_or_projection(selector: Int) -> Int {
-    let choice = match selector {
+    let callback = match selector {
         0 if {
             return 0
             false
-        } => Left(consume),
-        _ => Right(borrow_value),
+        } => consume,
+        _ => borrow_value,
     }
+    let choice = Right(callback)
     let source = Resource { id: 7 }
     let result = match choice {
         Left(callback) | Right(callback) => callback(source),

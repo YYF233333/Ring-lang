@@ -52,6 +52,13 @@ pub const CALLABLE_SOURCE_CONSERVATIVE_INTERFACE: Int = 3
 pub const CALLABLE_SOURCE_CALL_CONSTRAINT: Int = 4
 pub const CALLABLE_SOURCE_SYNTHETIC_ANF: Int = 5
 pub const CALLABLE_SOURCE_SYNTHETIC_RC: Int = 6
+// A retained, structurally typed HIR callable whose producer has no reachable
+// identity proof still needs total metadata through retained-HIR validation and
+// ownership planning. The planner then removes dependent dead children before
+// RC/codegen. This source is deterministic recovery only;
+// it must never authorize a callable factory result or another provenance
+// proof.
+pub const CALLABLE_SOURCE_ERROR_RECOVERY: Int = 7
 
 // Exact semantic result role for a callable DefId.  This is deliberately
 // independent from the ordinary Owned/Borrowed return bit: the low-level slot
@@ -92,8 +99,20 @@ pub struct CallableOwnershipDescriptor {
     pub result: Int
 }
 
+// Caller-side logical invalidation strength is deliberately not a fourth
+// callable type mode.  Borrow/MutBorrow/Move remain the public type identity;
+// each exact DefId additionally transports whether a Move parameter is a
+// programmer/interface FORCE edge or a body/storage-inferred OWNING edge.
+// A level describes the callable at one return-spine depth: level 0 is the
+// callable itself, level 1 its directly returned callable, and so on.
+pub struct CallableTransferLevel {
+    pub ownership_term: Int,
+    pub force_params: List<Bool>
+}
+
 pub struct CallableOwnershipState {
-    pub source: Int
+    pub source: Int,
+    pub transfer_levels: List<CallableTransferLevel>
 }
 
 pub struct FnMeta {
@@ -131,6 +150,10 @@ pub struct OwnershipMetadata {
     // factory can instantiate the same role on a fresh call-result DefId.
     pub callable_result_role_by_def_id: Map<Int, Int>,
     pub returned_callable_result_role_by_def_id: Map<Int, Int>,
+    // Complete invocation-result role spine. Index 0 mirrors the direct map,
+    // index 1 mirrors the returned map, and later indices preserve nested
+    // callable factories across bodyless/module boundaries.
+    pub callable_result_role_spine_by_def_id: Map<Int, List<Int>>,
     // Checker-private ownership union-find.  These maps are emptied by the
     // atomic freeze barrier before HIR/export/backend consumption.
     pub callable_inference_parents: Map<Int, Int>,
@@ -191,6 +214,90 @@ pub fn fn_meta(effects: EffectRow, ownership_term: Int) -> FnMeta {
     FnMeta { effects: effects, ownership_term: ownership_term }
 }
 
+pub fn callable_transfer_level(
+    ownership_term: Int, force_params: List<Bool>
+) -> CallableTransferLevel {
+    CallableTransferLevel {
+        ownership_term: ownership_term, force_params: force_params
+    }
+}
+
+pub fn clone_callable_transfer_levels(
+    levels: List<CallableTransferLevel>
+) -> List<CallableTransferLevel> {
+    let mut result: List<CallableTransferLevel> = []
+    for level in levels {
+        let mut force_params: List<Bool> = []
+        for force in level.force_params {
+            let copied_force = force
+            force_params.push(copied_force)
+        }
+        result.push(CallableTransferLevel {
+            ownership_term: level.ownership_term,
+            force_params: force_params
+        })
+    }
+    result
+}
+
+fn callable_type_transfer_levels(
+    metadata: OwnershipMetadata, ty: Type, force_move_params: Bool
+) -> List<CallableTransferLevel> {
+    match ty {
+        Type::FnType { params, return_type, meta } => {
+            let mut force_params: List<Bool> = []
+            let mut index = 0
+            for _param in params {
+                force_params.push(force_move_params &&
+                    callable_param_ownership(
+                        metadata, meta.ownership_term, index) ==
+                        PARAM_OWNERSHIP_MOVE)
+                index = index + 1
+            }
+            let mut result: List<CallableTransferLevel> = [
+                CallableTransferLevel {
+                    ownership_term: meta.ownership_term,
+                    force_params: force_params
+                }
+            ]
+            let returned_type = return_type
+            for level in callable_type_transfer_levels(
+                    metadata, returned_type, force_move_params) {
+                let mut returned_forces: List<Bool> = []
+                for force in level.force_params {
+                    let copied_force = force
+                    returned_forces.push(copied_force)
+                }
+                result.push(CallableTransferLevel {
+                    ownership_term: level.ownership_term,
+                    force_params: returned_forces
+                })
+            }
+            result
+        },
+        _ => []
+    }
+}
+
+// Bodyless/source-level callable interfaces interpret every written Move as a
+// logical FORCE edge.  This is an internal call-view strength; it does not
+// participate in FnType equality, so ordinary OWNING constructors such as
+// `some` remain compatible with `fn(move T)` higher-order parameters.
+pub fn callable_interface_transfer_levels(
+    metadata: OwnershipMetadata, ty: Type
+) -> List<CallableTransferLevel> {
+    callable_type_transfer_levels(metadata, ty, true)
+}
+
+// Builtin storage/constructor producers and provisional body-inferred schemes
+// use the same public Move modes but do not force scalar/direct-foreign source
+// bindings to become unavailable.
+pub fn callable_owning_transfer_levels(
+    metadata: OwnershipMetadata, ty: Type
+) -> List<CallableTransferLevel> {
+    callable_type_transfer_levels(metadata, ty, false)
+}
+
 pub fn new_ownership_metadata() -> OwnershipMetadata {
     OwnershipMetadata {
         // Canonical 0..10 descriptors are decoded without Map/List allocation.
@@ -200,6 +307,7 @@ pub fn new_ownership_metadata() -> OwnershipMetadata {
         callable_state_by_def_id: map_new(),
         callable_result_role_by_def_id: map_new(),
         returned_callable_result_role_by_def_id: map_new(),
+        callable_result_role_spine_by_def_id: map_new(),
         callable_inference_parents: map_new(),
         callable_inference_solutions: map_new(),
         next_callable_inference_term: CALLABLE_SLOT_MOVE_OWNED + 1,
@@ -945,10 +1053,70 @@ pub fn validate_callable_ownership_metadata(metadata: OwnershipMetadata) {
             none => panic(
                 "unreachable: final callable ownership has no returned result role")
         }
+        match metadata.callable_result_role_spine_by_def_id.get(def_id) {
+            some(spine) => {
+                if spine.len() < 2 {
+                    panic("unreachable: final callable result role spine is incomplete")
+                }
+                for role in spine {
+                    if !callable_result_role_is_valid(role) {
+                        panic("unreachable: invalid callable result role spine crossed final metadata barrier")
+                    }
+                }
+                if spine.get(0) != metadata.callable_result_role_by_def_id.get(def_id) ||
+                   spine.get(1) != metadata.returned_callable_result_role_by_def_id.get(def_id) {
+                    panic("unreachable: callable result role spine disagrees with compatibility maps")
+                }
+            },
+            none => panic(
+                "unreachable: final callable ownership has no result role spine")
+        }
     }
     for entry in metadata.callable_state_by_def_id.entries() {
         if !metadata.callable_by_def_id.contains_key(entry.0) {
             panic("unreachable: final callable ownership source has no DefId contract")
+        }
+        let state = entry.1
+        if state.transfer_levels.len() == 0 {
+            panic("unreachable: final callable ownership has no transfer authority")
+        }
+        let expected_role_depth = if state.transfer_levels.len() < 2 {
+            2
+        } else {
+            state.transfer_levels.len()
+        }
+        match metadata.callable_result_role_spine_by_def_id.get(entry.0) {
+            some(spine) => if spine.len() != expected_role_depth {
+                panic("unreachable: callable result role/transfer spine depth mismatch")
+            },
+            none => panic(
+                "unreachable: callable transfer state has no result role spine")
+        }
+        let mut level_index = 0
+        for level in state.transfer_levels {
+            let exact_level_term = require_exact_callable_ownership_term(
+                metadata, level.ownership_term)
+            if level_index == 0 {
+                let direct_term = require_exact_callable_ownership_term(
+                    metadata, metadata.callable_by_def_id.get(entry.0).unwrap_or(
+                        CALLABLE_UNKNOWN))
+                if exact_level_term != direct_term {
+                    panic("unreachable: callable direct transfer level disagrees with DefId contract")
+                }
+            }
+            let mut param_index = 0
+            for force in level.force_params {
+                let param_mode = callable_param_ownership(
+                    metadata, exact_level_term, param_index)
+                if param_mode == PARAM_OWNERSHIP_UNKNOWN {
+                    panic("unreachable: callable transfer vector exceeds its exact descriptor")
+                }
+                if force && param_mode != PARAM_OWNERSHIP_MOVE {
+                    panic("unreachable: callable FORCE parameter is not Move")
+                }
+                param_index = param_index + 1
+            }
+            level_index = level_index + 1
         }
     }
     for entry in metadata.callable_result_role_by_def_id.entries() {
@@ -959,6 +1127,11 @@ pub fn validate_callable_ownership_metadata(metadata: OwnershipMetadata) {
     for entry in metadata.returned_callable_result_role_by_def_id.entries() {
         if !metadata.callable_by_def_id.contains_key(entry.0) {
             panic("unreachable: returned callable result role has no DefId contract")
+        }
+    }
+    for entry in metadata.callable_result_role_spine_by_def_id.entries() {
+        if !metadata.callable_by_def_id.contains_key(entry.0) {
+            panic("unreachable: callable result role spine has no DefId contract")
         }
     }
 }
@@ -977,8 +1150,24 @@ pub fn freeze_callable_ownership_metadata(
             some(state) => {
                 let state_def_id = def_id
                 let state_source = state.source
+                let mut exact_levels: List<CallableTransferLevel> = []
+                for level in state.transfer_levels {
+                    let mut exact_forces: List<Bool> = []
+                    for force in level.force_params {
+                        let copied_force = force
+                        exact_forces.push(copied_force)
+                    }
+                    exact_levels.push(CallableTransferLevel {
+                        ownership_term: require_exact_callable_ownership_term(
+                            metadata, level.ownership_term),
+                        force_params: exact_forces
+                    })
+                }
                 exact_states.insert(state_def_id,
-                    CallableOwnershipState { source: state_source })
+                    CallableOwnershipState {
+                        source: state_source,
+                        transfer_levels: exact_levels
+                    })
             },
             none => panic(
                 "unreachable: callable ownership state is missing at freeze")
@@ -992,6 +1181,8 @@ pub fn freeze_callable_ownership_metadata(
             map_clone(metadata.callable_result_role_by_def_id),
         returned_callable_result_role_by_def_id:
             map_clone(metadata.returned_callable_result_role_by_def_id),
+        callable_result_role_spine_by_def_id:
+            map_clone(metadata.callable_result_role_spine_by_def_id),
         callable_inference_parents: map_new(),
         callable_inference_solutions: map_new(),
         next_callable_inference_term: CALLABLE_SLOT_MOVE_OWNED + 1,
@@ -1100,9 +1291,85 @@ pub fn type_may_own(metadata: OwnershipMetadata, ty: Type) -> Bool {
     }
 }
 
-pub fn record_callable_ownership(
+fn transfer_force_lists_equal(a: List<Bool>, b: List<Bool>) -> Bool {
+    if a.len() != b.len() { return false }
+    let mut index = 0
+    while index < a.len() {
+        if a.get(index) != b.get(index) { return false }
+        index = index + 1
+    }
+    true
+}
+
+pub fn callable_transfer_levels_equal(
+    a: List<CallableTransferLevel>, b: List<CallableTransferLevel>
+) -> Bool {
+    if a.len() != b.len() { return false }
+    let mut index = 0
+    while index < a.len() {
+        match (a.get(index), b.get(index)) {
+            (some(left), some(right)) => {
+                if left.ownership_term != right.ownership_term ||
+                   !transfer_force_lists_equal(
+                       left.force_params, right.force_params) {
+                    return false
+                }
+            },
+            _ => return false
+        }
+        index = index + 1
+    }
+    true
+}
+
+// Same-mode multi-source joins are legal public callable types.  Internally,
+// caller invalidation is the conservative commutative join: FORCE dominates
+// OWNING at every parameter and every returned-callable depth.
+pub fn join_callable_transfer_levels(
+    metadata: OwnershipMetadata,
+    left: List<CallableTransferLevel>, right: List<CallableTransferLevel>
+) -> List<CallableTransferLevel> {
+    if left.len() != right.len() {
+        panic("unreachable: callable transfer return-spine depth mismatch")
+    }
+    let mut result: List<CallableTransferLevel> = []
+    let mut level_index = 0
+    while level_index < left.len() {
+        let left_level = match left.get(level_index) {
+            some(value) => value,
+            none => panic("unreachable: missing left callable transfer level")
+        }
+        let right_level = match right.get(level_index) {
+            some(value) => value,
+            none => panic("unreachable: missing right callable transfer level")
+        }
+        let left_term = require_exact_callable_ownership_term(
+            metadata, left_level.ownership_term)
+        let right_term = require_exact_callable_ownership_term(
+            metadata, right_level.ownership_term)
+        if left_term != right_term ||
+           left_level.force_params.len() != right_level.force_params.len() {
+            panic("unreachable: callable transfer levels disagree with exact callable type")
+        }
+        let mut forces: List<Bool> = []
+        let mut param_index = 0
+        while param_index < left_level.force_params.len() {
+            forces.push(
+                left_level.force_params.get(param_index).unwrap_or(false) ||
+                right_level.force_params.get(param_index).unwrap_or(false))
+            param_index = param_index + 1
+        }
+        result.push(CallableTransferLevel {
+            ownership_term: left_term, force_params: forces
+        })
+        level_index = level_index + 1
+    }
+    result
+}
+
+pub fn record_callable_ownership_with_transfer_levels(
     mut metadata: OwnershipMetadata, def_id: Int, ownership_term: Int,
-    source: Int
+    source: Int, transfer_levels: List<CallableTransferLevel>
 ) {
     if !is_callable_ownership_term(ownership_term) {
         panic("unreachable: invalid callable ownership tagged term")
@@ -1124,7 +1391,8 @@ pub fn record_callable_ownership(
     metadata.callable_by_def_id.insert(contract_def_id, contract_term)
     let state_source = source
     metadata.callable_state_by_def_id.insert(state_def_id, CallableOwnershipState {
-        source: state_source
+        source: state_source,
+        transfer_levels: clone_callable_transfer_levels(transfer_levels)
     })
     // Registration makes both semantic role maps total.  Specialized builtin,
     // alias and factory proofs overwrite these NONE seeds by exact DefId.
@@ -1137,6 +1405,57 @@ pub fn record_callable_ownership(
             returned_role_lookup_def_id) {
         metadata.returned_callable_result_role_by_def_id.insert(
             returned_role_insert_def_id, CALLABLE_RESULT_ROLE_NONE)
+    }
+    if !metadata.callable_result_role_spine_by_def_id.contains_key(def_id) {
+        metadata.callable_result_role_spine_by_def_id.insert(
+            def_id, [CALLABLE_RESULT_ROLE_NONE, CALLABLE_RESULT_ROLE_NONE])
+    }
+}
+
+// Provisional checker registrations deliberately carry no strength authority.
+// Body solving, builtin/interface registration, import localization or
+// deterministic recovery must replace this state before a successful frozen
+// program may consume it.
+pub fn record_callable_ownership(
+    mut metadata: OwnershipMetadata, def_id: Int, ownership_term: Int,
+    source: Int
+) {
+    record_callable_ownership_with_transfer_levels(
+        metadata, def_id, ownership_term, source, [])
+}
+
+pub fn set_callable_transfer_levels(
+    mut metadata: OwnershipMetadata, def_id: Int,
+    source: Int, transfer_levels: List<CallableTransferLevel>
+) {
+    let ownership_term = match metadata.callable_by_def_id.get(def_id) {
+        some(term) => term,
+        none => panic(
+            "unreachable: callable transfer state has no DefId contract")
+    }
+    record_callable_ownership_with_transfer_levels(
+        metadata, def_id, ownership_term, source, transfer_levels)
+}
+
+pub fn callable_param_requires_force(
+    metadata: OwnershipMetadata, def_id: Int, index: Int
+) -> Bool? {
+    match metadata.callable_state_by_def_id.get(def_id) {
+        some(state) => match state.transfer_levels.get(0) {
+            some(level) => level.force_params.get(index),
+            none => none
+        },
+        none => none
+    }
+}
+
+pub fn callable_transfer_levels_for_def_id(
+    metadata: OwnershipMetadata, def_id: Int
+) -> List<CallableTransferLevel>? {
+    match metadata.callable_state_by_def_id.get(def_id) {
+        some(state) => some(clone_callable_transfer_levels(
+            state.transfer_levels)),
+        none => none
     }
 }
 
@@ -1156,6 +1475,12 @@ pub fn set_callable_result_role(
         panic("unreachable: invalid callable result role")
     }
     metadata.callable_result_role_by_def_id.insert(def_id, role)
+    let mut spine = metadata.callable_result_role_spine_by_def_id.get(
+        def_id).unwrap_or([CALLABLE_RESULT_ROLE_NONE,
+                          CALLABLE_RESULT_ROLE_NONE])
+    while spine.len() < 2 { spine.push(CALLABLE_RESULT_ROLE_NONE) }
+    spine.set(0, role)
+    metadata.callable_result_role_spine_by_def_id.insert(def_id, spine)
 }
 
 pub fn set_returned_callable_result_role(
@@ -1168,6 +1493,43 @@ pub fn set_returned_callable_result_role(
         panic("unreachable: invalid returned callable result role")
     }
     metadata.returned_callable_result_role_by_def_id.insert(def_id, role)
+    let mut spine = metadata.callable_result_role_spine_by_def_id.get(
+        def_id).unwrap_or([CALLABLE_RESULT_ROLE_NONE,
+                          CALLABLE_RESULT_ROLE_NONE])
+    while spine.len() < 2 { spine.push(CALLABLE_RESULT_ROLE_NONE) }
+    spine.set(1, role)
+    metadata.callable_result_role_spine_by_def_id.insert(def_id, spine)
+}
+
+pub fn set_callable_result_role_spine(
+    mut metadata: OwnershipMetadata, def_id: Int, roles: List<Int>
+) {
+    if !metadata.callable_by_def_id.contains_key(def_id) {
+        panic("unreachable: callable result role spine has no exact DefId contract")
+    }
+    let mut normalized = list_clone(roles)
+    while normalized.len() < 2 {
+        normalized.push(CALLABLE_RESULT_ROLE_NONE)
+    }
+    let mut role_index = 0
+    while role_index < normalized.len() {
+        let role = normalized.get(role_index).unwrap_or(
+            CALLABLE_RESULT_ROLE_UNKNOWN)
+        if !callable_result_role_is_valid(role) {
+            panic("unreachable: invalid callable result role spine")
+        }
+        role_index = role_index + 1
+    }
+    let direct_role = normalized.get(0).unwrap_or(
+        CALLABLE_RESULT_ROLE_NONE)
+    let returned_role = normalized.get(1).unwrap_or(
+        CALLABLE_RESULT_ROLE_NONE)
+    metadata.callable_result_role_spine_by_def_id.insert(
+        def_id, normalized)
+    metadata.callable_result_role_by_def_id.insert(
+        def_id, direct_role)
+    metadata.returned_callable_result_role_by_def_id.insert(
+        def_id, returned_role)
 }
 
 // Publish the complete ownership truth for one post-freeze synthetic callable
@@ -1207,6 +1569,8 @@ fn project_synthetic_callable_metadata(
     let mut first = true
     let mut direct_role = CALLABLE_RESULT_ROLE_UNKNOWN
     let mut returned_role = CALLABLE_RESULT_ROLE_UNKNOWN
+    let mut merged_role_spine: List<Int>? = none
+    let mut merged_transfer_levels: List<CallableTransferLevel>? = none
     for source_def_id in source_def_ids {
         if seen.contains(source_def_id) {
             panic("unreachable: synthetic callable repeats a source DefId")
@@ -1229,6 +1593,14 @@ fn project_synthetic_callable_metadata(
                    (!allow_rc_sources ||
                     state.source != CALLABLE_SOURCE_SYNTHETIC_RC) {
                     panic("unreachable: synthetic callable source uses a foreign synthetic provenance")
+                }
+                let source_levels = clone_callable_transfer_levels(
+                    state.transfer_levels)
+                merged_transfer_levels = match merged_transfer_levels {
+                    some(existing_levels) => some(
+                        join_callable_transfer_levels(
+                            metadata, existing_levels, source_levels)),
+                    none => some(source_levels)
                 }
             },
             none => panic(
@@ -1254,6 +1626,35 @@ fn project_synthetic_callable_metadata(
             none => panic(
                 "unreachable: synthetic callable source has no returned result role")
         }
+        let source_spine = match metadata
+                .callable_result_role_spine_by_def_id.get(source_def_id) {
+            some(spine) => list_clone(spine),
+            none => panic(
+                "unreachable: synthetic callable source has no result role spine")
+        }
+        merged_role_spine = match merged_role_spine {
+            some(existing_spine) => {
+                if existing_spine.len() != source_spine.len() {
+                    panic("unreachable: synthetic callable source role spine depth mismatch")
+                }
+                let mut joined: List<Int> = []
+                let mut role_index = 0
+                while role_index < existing_spine.len() {
+                    let left_role = existing_spine.get(role_index).unwrap_or(
+                        CALLABLE_RESULT_ROLE_UNKNOWN)
+                    let right_role = source_spine.get(role_index).unwrap_or(
+                        CALLABLE_RESULT_ROLE_UNKNOWN)
+                    joined.push(if left_role == right_role {
+                        left_role
+                    } else {
+                        CALLABLE_RESULT_ROLE_UNKNOWN
+                    })
+                    role_index = role_index + 1
+                }
+                some(joined)
+            },
+            none => some(source_spine)
+        }
         if first {
             direct_role = source_direct
             returned_role = source_returned
@@ -1269,13 +1670,19 @@ fn project_synthetic_callable_metadata(
     }
 
     let direct_role_target_def_id = target_def_id
-    let returned_role_target_def_id = target_def_id
-    record_callable_ownership(metadata, target_def_id, expected,
-        target_source)
-    set_callable_result_role(
-        metadata, direct_role_target_def_id, direct_role)
-    set_returned_callable_result_role(
-        metadata, returned_role_target_def_id, returned_role)
+    let projected_levels = match merged_transfer_levels {
+        some(levels) => levels,
+        none => panic(
+            "unreachable: synthetic callable sources have no transfer state")
+    }
+    record_callable_ownership_with_transfer_levels(
+        metadata, target_def_id, expected, target_source, projected_levels)
+    let projected_role_spine = match merged_role_spine {
+        some(spine) => spine,
+        none => [direct_role, returned_role]
+    }
+    set_callable_result_role_spine(
+        metadata, direct_role_target_def_id, projected_role_spine)
 }
 
 pub fn project_synthetic_anf_callable_metadata(

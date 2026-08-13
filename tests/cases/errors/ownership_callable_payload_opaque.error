@@ -1,3 +1,4 @@
 E0801
-callable value has no exact ownership identity
+callable call target has no exact ownership source
+!callable ownership contract mismatch
 !internal compiler error

@@ -173,17 +173,27 @@ pub struct HParam {
     pub ty: Type,
     pub def_id: Int?,
     // Bit 0 is local binding mutability, bits 1..2 are the independent
-    // caller/callee ownership mode, and bit 3 marks the checker-verified
+    // caller/callee ownership mode, bit 3 marks the checker-verified
     // external owner passed to the authoritative Drop destructor.  The latter
     // remains Move at the ABI edge but is borrowed inside the user body because
     // the runtime glue alone owns and destroys the complete allocation.
+    // Bit 4 independently records that Move is a declared logical FORCE edge;
+    // body inference may later publish the same Move mode without setting it.
     pub flags: Int
 }
 
 const HPARAM_EXTERNAL_DROP_OWNER: Int = 8
+const HPARAM_DECLARED_FORCE: Int = 16
 
 pub fn hparam_flags(is_mutable: Bool, ownership: Int) -> Int {
     ownership * 2 + if is_mutable { 1 } else { 0 }
+}
+
+pub fn hparam_flags_with_force(
+    is_mutable: Bool, ownership: Int, declared_force: Bool
+) -> Int {
+    hparam_flags(is_mutable, ownership) +
+        if declared_force { HPARAM_DECLARED_FORCE } else { 0 }
 }
 
 pub fn hparam_is_mutable(param: HParam) -> Bool {
@@ -203,17 +213,25 @@ pub fn hparam_is_external_drop_owner(param: HParam) -> Bool {
     (param.flags / HPARAM_EXTERNAL_DROP_OWNER) % 2 == 1
 }
 
+pub fn hparam_is_declared_force(param: HParam) -> Bool {
+    (param.flags / HPARAM_DECLARED_FORCE) % 2 == 1
+}
+
 pub fn hparam_mark_external_drop_owner(param: HParam) -> HParam {
     if hparam_is_external_drop_owner(param) { return param }
     HParam { ..param, flags: param.flags + HPARAM_EXTERNAL_DROP_OWNER }
 }
 
 pub fn hparam_replace_ownership(param: HParam, ownership: Int) -> HParam {
-    let role = if hparam_is_external_drop_owner(param) {
+    let external_role = if hparam_is_external_drop_owner(param) {
         HPARAM_EXTERNAL_DROP_OWNER
     } else { 0 }
+    let force_role = if hparam_is_declared_force(param) {
+        HPARAM_DECLARED_FORCE
+    } else { 0 }
     HParam { ..param,
-        flags: hparam_flags(hparam_is_mutable(param), ownership) + role }
+        flags: hparam_flags(hparam_is_mutable(param), ownership) +
+            external_role + force_role }
 }
 
 // B-104 D4 (#151): dict evidence is FIRST-CLASS in HIR.  Three reference forms:
@@ -986,6 +1004,16 @@ pub fn is_materialized_fn_value(expr: HExpr) -> Bool {
     }
 }
 
+// A pattern can match without running its dependent body when its guard
+// diverges. Match and Catch share this exact boundary in ownership, capture
+// discovery, RC verification, and backend pruning.
+pub fn hmatch_arm_body_is_reachable(arm: HMatchArm) -> Bool {
+    match arm.guard {
+        some(guard) => expr_has_reachable_value(guard),
+        none => true
+    }
+}
+
 // Whether evaluating an expression can reach a normal value-producing edge.
 // This is deliberately structural as well as type-aware: a Block can retain
 // its ordinary result type even when an earlier ReturnExpr/Never statement
@@ -1035,11 +1063,8 @@ pub fn expr_has_reachable_value(expr: HExpr) -> Bool {
         HExpr::MatchExpr { scrutinee, arms, .. } => {
             if !expr_has_reachable_value(scrutinee) { return false }
             for arm in arms {
-                let guard_reaches = match arm.guard {
-                    some(guard) => expr_has_reachable_value(guard),
-                    none => true
-                }
-                if guard_reaches && expr_has_reachable_value(arm.body) {
+                if hmatch_arm_body_is_reachable(arm) &&
+                   expr_has_reachable_value(arm.body) {
                     return true
                 }
             }
@@ -1075,11 +1100,8 @@ pub fn expr_has_reachable_value(expr: HExpr) -> Bool {
         HExpr::TryCatch { body, arms, .. } => {
             if expr_has_reachable_value(body) { return true }
             for arm in arms {
-                let guard_reaches = match arm.guard {
-                    some(guard) => expr_has_reachable_value(guard),
-                    none => true
-                }
-                if guard_reaches && expr_has_reachable_value(arm.body) {
+                if hmatch_arm_body_is_reachable(arm) &&
+                   expr_has_reachable_value(arm.body) {
                     return true
                 }
             }
@@ -1217,11 +1239,8 @@ pub fn move_edge_has_reachable_bare_binding(
         },
         HExpr::MatchExpr { arms, .. } => {
             for arm in arms {
-                let guard_reaches = match arm.guard {
-                    some(guard) => expr_has_reachable_value(guard),
-                    none => true
-                }
-                if guard_reaches && move_edge_has_reachable_bare_binding(
+                if hmatch_arm_body_is_reachable(arm) &&
+                   move_edge_has_reachable_bare_binding(
                         arm.body, through_clone) {
                     return true
                 }
@@ -1233,11 +1252,8 @@ pub fn move_edge_has_reachable_bare_binding(
                 return true
             }
             for arm in arms {
-                let guard_reaches = match arm.guard {
-                    some(guard) => expr_has_reachable_value(guard),
-                    none => true
-                }
-                if guard_reaches && move_edge_has_reachable_bare_binding(
+                if hmatch_arm_body_is_reachable(arm) &&
+                   move_edge_has_reachable_bare_binding(
                         arm.body, through_clone) {
                     return true
                 }
@@ -1350,14 +1366,20 @@ fn collect_exact_free_binding_expr(
         HExpr::MatchExpr { scrutinee, arms, .. } => {
             collect_exact_free_binding_expr(
                 scrutinee, candidates, seen, result)
-            for arm in arms {
-                match arm.guard {
-                    some(guard) => collect_exact_free_binding_expr(
-                        guard, candidates, seen, result),
-                    none => {}
+            if expr_has_reachable_value(scrutinee) {
+                for arm in arms {
+                    let guard_reaches_value =
+                        hmatch_arm_body_is_reachable(arm)
+                    match arm.guard {
+                        some(guard) => collect_exact_free_binding_expr(
+                            guard, candidates, seen, result),
+                        none => {}
+                    }
+                    if guard_reaches_value {
+                        collect_exact_free_binding_expr(
+                            arm.body, candidates, seen, result)
+                    }
                 }
-                collect_exact_free_binding_expr(
-                    arm.body, candidates, seen, result)
             }
         },
         HExpr::Block { stmts, tail, .. } => {
@@ -1378,12 +1400,14 @@ fn collect_exact_free_binding_expr(
         HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
             collect_exact_free_binding_expr(
                 condition, candidates, seen, result)
-            collect_exact_free_binding_expr(
-                then_branch, candidates, seen, result)
-            match else_branch {
-                some(branch) => collect_exact_free_binding_expr(
-                    branch, candidates, seen, result),
-                none => {}
+            if expr_has_reachable_value(condition) {
+                collect_exact_free_binding_expr(
+                    then_branch, candidates, seen, result)
+                match else_branch {
+                    some(branch) => collect_exact_free_binding_expr(
+                        branch, candidates, seen, result),
+                    none => {}
+                }
             }
         },
         HExpr::StringInterp { parts, .. } => {
@@ -1399,13 +1423,17 @@ fn collect_exact_free_binding_expr(
         HExpr::TryCatch { body, arms, .. } => {
             collect_exact_free_binding_expr(body, candidates, seen, result)
             for arm in arms {
+                let guard_reaches_value =
+                    hmatch_arm_body_is_reachable(arm)
                 match arm.guard {
                     some(guard) => collect_exact_free_binding_expr(
                         guard, candidates, seen, result),
                     none => {}
                 }
-                collect_exact_free_binding_expr(
-                    arm.body, candidates, seen, result)
+                if guard_reaches_value {
+                    collect_exact_free_binding_expr(
+                        arm.body, candidates, seen, result)
+                }
             }
         },
         HExpr::HandleExpr { body, handlers, .. } => {
@@ -1484,21 +1512,29 @@ fn collect_exact_free_binding_stmt(
         HStmt::While { condition, body, .. } => {
             collect_exact_free_binding_expr(
                 condition, candidates, seen, result)
-            collect_exact_free_binding_expr(body, candidates, seen, result)
+            if expr_has_reachable_value(condition) {
+                collect_exact_free_binding_expr(
+                    body, candidates, seen, result)
+            }
         },
         HStmt::ForIn { iterable, body, .. } => {
             collect_exact_free_binding_expr(
                 iterable, candidates, seen, result)
-            collect_exact_free_binding_expr(body, candidates, seen, result)
+            if expr_has_reachable_value(iterable) {
+                collect_exact_free_binding_expr(
+                    body, candidates, seen, result)
+            }
         },
         HStmt::IfLet { expr, then_block, else_block, .. } => {
             collect_exact_free_binding_expr(expr, candidates, seen, result)
-            collect_exact_free_binding_expr(
-                then_block, candidates, seen, result)
-            match else_block {
-                some(branch) => collect_exact_free_binding_expr(
-                    branch, candidates, seen, result),
-                none => {}
+            if expr_has_reachable_value(expr) {
+                collect_exact_free_binding_expr(
+                    then_block, candidates, seen, result)
+                match else_block {
+                    some(branch) => collect_exact_free_binding_expr(
+                        branch, candidates, seen, result),
+                    none => {}
+                }
             }
         },
         HStmt::Drop { name, def_id, ty, span } =>
@@ -1721,11 +1757,8 @@ pub fn hexpr_callable_def_id(expr: HExpr) -> Int? {
         HExpr::MatchExpr { arms, .. } => {
             let mut result: Int? = none
             for arm in arms {
-                let guard_reaches = match arm.guard {
-                    some(guard) => expr_has_reachable_value(guard),
-                    none => true
-                }
-                if guard_reaches && expr_has_reachable_value(arm.body) {
+                if hmatch_arm_body_is_reachable(arm) &&
+                   expr_has_reachable_value(arm.body) {
                     match hexpr_callable_def_id(arm.body) {
                         some(id) => match result {
                             some(expected) => if expected != id { return none },
@@ -1806,11 +1839,8 @@ fn collect_hexpr_callable_source_def_ids(
         HExpr::MatchExpr { arms, .. } => {
             let mut any = false
             for arm in arms {
-                let guard_reaches = match arm.guard {
-                    some(guard) => expr_has_reachable_value(guard),
-                    none => true
-                }
-                if guard_reaches && expr_has_reachable_value(arm.body) {
+                if hmatch_arm_body_is_reachable(arm) &&
+                   expr_has_reachable_value(arm.body) {
                     if !collect_hexpr_callable_source_def_ids(
                             arm.body, sources) {
                         return false
@@ -2064,6 +2094,38 @@ pub fn type_is_physical_rc_eligible(
 ) -> Bool {
     !is_rc_excluded_type(ty, externs) &&
     !type_contains_extern_handle(ty, externs)
+}
+
+// Logical binding invalidation is deliberately separate from physical RC.
+// FORCE uses the first predicate: even scalar, Ptr and direct-extern bindings
+// are source-language values and become unavailable.  OWNING uses the second:
+// scalar/Ptr/direct-extern values copy by value, while aggregates (including a
+// List<extern>) still cross an owning edge and require an exact Take.
+pub fn type_has_logical_transfer_value(ty: Type) -> Bool {
+    match ty {
+        Type::UnitType | Type::NeverType |
+        Type::EffectRowType { .. } | Type::ErrorType => false,
+        Type::IntType | Type::FloatType | Type::BoolType |
+        Type::StrType | Type::AnyType | Type::TypeVar { .. } |
+        Type::FnType { .. } | Type::StructType { .. } |
+        Type::EnumType { .. } | Type::GenericType { .. } |
+        Type::RecordType { .. } | Type::TupleType { .. } |
+        Type::PtrType { .. } => true
+    }
+}
+
+pub fn type_crosses_logical_owning_edge_by_value(
+    ty: Type, externs: Set<Str>
+) -> Bool {
+    if !type_has_logical_transfer_value(ty) { return false }
+    match ty {
+        Type::IntType | Type::FloatType | Type::BoolType |
+        Type::PtrType { .. } => false,
+        Type::StructType { name, .. } => !externs.contains(name),
+        Type::GenericType { base, .. } =>
+            type_crosses_logical_owning_edge_by_value(base, externs),
+        _ => true
+    }
 }
 
 fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) -> Bool {

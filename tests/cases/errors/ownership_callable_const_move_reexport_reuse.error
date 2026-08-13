@@ -1,0 +1,6 @@
+E0801
+use of moved value: 'source'
+print(source)
+!callable ownership contract mismatch
+!internal compiler error
+!ring panic

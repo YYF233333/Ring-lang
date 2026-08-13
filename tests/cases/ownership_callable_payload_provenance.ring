@@ -5,17 +5,17 @@ impl Drop for Resource {
 }
 
 struct CallbackHolder {
-    callback: fn(Resource) -> Int
+    callback: fn(move Resource) -> Int
 }
 
 enum CallbackState {
-    Ready { callback: fn(Resource) -> Int },
+    Ready { callback: fn(move Resource) -> Int },
     Empty,
 }
 
 enum CallbackChoice {
-    Left(fn(Resource) -> Int),
-    Right(fn(Resource) -> Int),
+    Left(fn(move Resource) -> Int),
+    Right(fn(move Resource) -> Int),
 }
 
 fn consume_resource(value: Resource) -> Int {
@@ -60,5 +60,11 @@ fn main() {
     match choice {
         Left(callback) | Right(callback) =>
             print(callback(Resource { id: 6 })),
+    }
+
+    let right_choice = Right(consume_resource)
+    match right_choice {
+        Left(callback) | Right(callback) =>
+            print(callback(Resource { id: 7 })),
     }
 }

@@ -1,0 +1,5 @@
+E0801
+use of moved value: 'source'
+print(source.id)
+!internal compiler error
+!ring panic

@@ -1,3 +1,4 @@
-E0801
-callable pattern binding has no exact payload ownership contract
+E0301
+Or-pattern alternatives must bind the same variables
 !internal compiler error
+!callable pattern binding has no exact payload ownership contract

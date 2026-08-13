@@ -1,0 +1,5 @@
+E0801
+ownership transfer may repeat on a loop back-edge
+while keep_running(source)
+!internal compiler error
+!ring panic

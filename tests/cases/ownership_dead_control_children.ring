@@ -5,7 +5,10 @@
 struct Resource { id: Int }
 impl Drop for Resource { fn drop(self) {} }
 
-fn consume(move value: Resource) -> Int { value.id }
+fn consume(value: Resource) -> Int {
+    let owned = value
+    owned.id
+}
 fn borrow_value(value: Resource) -> Int { value.id }
 
 fn dead_guard_factory(selector: Int) -> fn(Resource) -> Int {

@@ -1,0 +1,5 @@
+E0801
+callable alias has no exact ownership source
+let callback = factory()
+!internal compiler error
+!ring panic

@@ -1,0 +1,5 @@
+E0801
+callable constant has no exact ownership source
+const HIDDEN_CALLBACK
+!internal compiler error
+!ring panic

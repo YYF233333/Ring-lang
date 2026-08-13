@@ -13,7 +13,8 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant, OwnershipShape,
     CALLABLE_RESULT_ROLE_NONE, CALLABLE_RESULT_ROLE_FRESH_OWNED_SLOT,
     PARAM_OWNERSHIP_BORROW, PARAM_OWNERSHIP_MUT_BORROW,
     PARAM_OWNERSHIP_MOVE, intern_callable_param_modes,
-    record_callable_ownership,
+    record_callable_ownership_with_transfer_levels, callable_transfer_level,
+    callable_transfer_levels_for_def_id,
     fresh_callable_ownership_inference_term}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember,
@@ -23,7 +24,9 @@ use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, Enu
     EffectAliasDef, AssocTypeDef, MethodOrigin, mono, apply_subst, apply_subst_effect_map,
     apply_subst_map, add_impl, has_impl, find_impl, impl_origin, impl_decl_origin,
     install_method_scheme, specialize_trait_method_scheme, build_type_var_map,
-    new_local_callable_scheme, trait_is_authoritative_drop}
+    new_local_callable_scheme, new_local_callable_owning_scheme,
+    new_local_callable_identity_scheme_with_transfer_levels,
+    trait_is_authoritative_drop}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0501, E0502, E0503, E0504, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514, E0801}
 use hir::{compare_by_first, module_item_identity, variant_ctor_name, ValueBindingKind}
@@ -2092,7 +2095,7 @@ fn bind_payload_variant_constructor_firebreak(
         meta: fn_meta(EMPTY_ROW, CALLABLE_MOVE_OWNED)
     }
     let current_tv_ids = tv_ids
-    let local_scheme = new_local_callable_scheme(ctx.env,
+    let local_scheme = new_local_callable_owning_scheme(ctx.env,
         TypeScheme {
             ty: fn_type, type_vars: current_tv_ids,
             bounds: [], def_id: none
@@ -2247,7 +2250,7 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                             }
                             let local_scheme = match scheme.ty {
                                 Type::FnType { .. } =>
-                                    new_local_callable_scheme(
+                                    new_local_callable_owning_scheme(
                                         ctx.env, alias_scheme,
                                         CALLABLE_SOURCE_DECLARED),
                                 _ => alias_scheme
@@ -2870,8 +2873,10 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                 let trait_method_type_params = method_tps
                 let mut param_types: List<Type> = []
                 let mut param_muts: List<Bool> = []
+                let mut param_forces: List<Bool> = []
                 for p in params {
                     param_muts.push(p.is_mutable)
+                    param_forces.push(p.is_move)
                     if p.name == "self" {
                         append_trait_self_param_type_firebreak(
                             param_types, self_var)
@@ -2901,10 +2906,22 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                     params: param_types, return_type: ret,
                     meta: fn_meta(method_effects, ownership)
                 }
-                let method_scheme = new_local_callable_scheme(ctx.env,
-                    TypeScheme {
-                        ty: fn_type, type_vars: [], bounds: [], def_id: none
-                    }, CALLABLE_SOURCE_DECLARED)
+                let raw_method_scheme = TypeScheme {
+                    ty: fn_type, type_vars: [], bounds: [], def_id: none
+                }
+                let method_scheme = if is_abstract {
+                    new_local_callable_scheme(ctx.env, raw_method_scheme,
+                        CALLABLE_SOURCE_DECLARED)
+                } else {
+                    // A default body owns a fresh inference term, so its Move
+                    // modes are not resolved yet. Preserve source-spelled
+                    // FORCE independently; body inference may raise modes but
+                    // must never manufacture this authority.
+                    new_local_callable_identity_scheme_with_transfer_levels(
+                        ctx.env, raw_method_scheme, ownership,
+                        CALLABLE_SOURCE_DECLARED,
+                        [callable_transfer_level(ownership, param_forces)])
+                }
                 let method_def_id = match method_scheme.def_id {
                     some(id) => id,
                     none => panic("unreachable: trait method has no local DefId")
@@ -3360,11 +3377,26 @@ fn register_impl_canonical(mut ctx: InferCtx, target_type: Str, type_params: Lis
                                 trait_type_args, impl_tv_ids,
                                 assoc_type_map,
                                 impl_bounds.scheme_bounds)
+                            let source_levels = match
+                                    callable_transfer_levels_for_def_id(
+                                        ctx.env.types.ownership_metadata,
+                                        trait_method.def_id) {
+                                some(levels) => levels,
+                                none => panic(
+                                    "unreachable: trait default source has no transfer authority")
+                            }
+                            let specialized_ownership = match specialized.ty {
+                                Type::FnType { meta, .. } => meta.ownership_term,
+                                _ => panic(
+                                    "unreachable: specialized trait default is not callable")
+                            }
                             exact_method_schemes.insert(
                                 trait_method.name,
-                                new_local_callable_scheme(
+                                new_local_callable_identity_scheme_with_transfer_levels(
                                     ctx.env, specialized,
-                                    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE))
+                                    specialized_ownership,
+                                    CALLABLE_SOURCE_CONSERVATIVE_INTERFACE,
+                                    source_levels))
                         }
                     }
 
@@ -3454,6 +3486,7 @@ fn register_impl_method(
     impl_type_params: List<TypeParam>, is_extern: Bool
 ) -> TypeScheme {
     let saved_method = map_clone(ctx.type_param_scope)
+    let saved_method_qualified = map_clone(ctx.qualified_assoc_scope)
     let mut method_tv_ids: List<Int> = []
     for mtp in mtps {
         let tv = ctx.env.fresh_var()
@@ -3465,6 +3498,96 @@ fn register_impl_method(
             _ => {}
         }
         ctx.type_param_scope.insert(mtp.name, tv)
+    }
+
+    // Method-local generic bounds are part of the callable scheme just like
+    // impl-level bounds.  Register their associated type variables before
+    // resolving the method surface so T::Item has the same identity in the
+    // signature and in the evidence carried by the scheme.
+    inject_assoc_types_from_bounds(ctx, mtps)
+
+    // Dictionary ABI order follows the scheme's quantified-variable order:
+    // impl variables/bounds first, then method-local variables/bounds.
+    let mut method_scheme_bounds = list_clone(impl_scheme_bounds)
+    for mtp in mtps {
+        let method_tv = ctx.type_param_scope.get(mtp.name)
+        for b in mtp.bounds {
+            let bound_trait = resolve_trait_identity(ctx, b.trait_name)
+            if !ctx.env.trait_reg.traits.contains_key(bound_trait) {
+                let trait_display = nominal_display_name(bound_trait)
+                let _ = type_error(ctx.sink, E0501,
+                    "Unknown trait: ${trait_display}", mtp.span,
+                    DiagnosticContext::TraitError {
+                        detail: "unknown trait '${trait_display}'"
+                    })
+            }
+
+            let mut assoc_entries: List<AssocConstraintEntry> = []
+            for ac in b.assoc_constraints {
+                let concrete_ty = resolve_type_expr(ctx, ac.ty)
+                assoc_entries.push(AssocConstraintEntry {
+                    name: ac.name, ty: concrete_ty
+                })
+            }
+            let associated_type_trait = bound_trait
+            match ctx.env.trait_reg.traits.get(associated_type_trait) {
+                some(tdef) => {
+                    for atdef in tdef.assoc_types {
+                        let already = assoc_entries.any(fn(entry) {
+                            entry.name == atdef.name
+                        })
+                        if !already {
+                            let qualified_key = "${mtp.name}::${atdef.name}"
+                            match ctx.qualified_assoc_scope.get(qualified_key) {
+                                some(at_var) => {
+                                    let associated_type_var = at_var
+                                    assoc_entries.push(AssocConstraintEntry {
+                                        name: atdef.name,
+                                        ty: associated_type_var
+                                    })
+                                },
+                                none => {},
+                            }
+                        }
+                    }
+                },
+                none => {},
+            }
+
+            match method_tv {
+                some(t) => match t {
+                    Type::TypeVar { id, .. } => {
+                        let method_bound_trait = bound_trait
+                        method_scheme_bounds.push(SchemeBound {
+                            type_var: id,
+                            trait_name: method_bound_trait,
+                            assoc_constraints: assoc_entries
+                        })
+                    },
+                    _ => {}
+                },
+                none => {}
+            }
+
+            let supertrait_source = bound_trait
+            let supers = collect_all_supertraits(ctx, supertrait_source)
+            for supertrait_name in supers {
+                match method_tv {
+                    some(t) => match t {
+                        Type::TypeVar { id, .. } => {
+                            let method_supertrait = supertrait_name
+                            method_scheme_bounds.push(SchemeBound {
+                                type_var: id,
+                                trait_name: method_supertrait,
+                                assoc_constraints: []
+                            })
+                        },
+                        _ => {}
+                    },
+                    none => {}
+                }
+            }
+        }
     }
 
     let self_type = resolve_impl_self_type(ctx, target_type, impl_type_params)
@@ -3530,7 +3653,7 @@ fn register_impl_method(
     collect_effect_tail_vars(fn_type, all_tvs)
     let scheme = new_local_callable_scheme(ctx.env, TypeScheme {
         ty: fn_type, type_vars: all_tvs,
-        bounds: impl_scheme_bounds, def_id: none
+        bounds: method_scheme_bounds, def_id: none
     }, CALLABLE_SOURCE_DECLARED)
 
     // Track mut self methods
@@ -3557,6 +3680,7 @@ fn register_impl_method(
     }
 
     ctx.type_param_scope = saved_method
+    ctx.qualified_assoc_scope = saved_method_qualified
     scheme
 }
 
@@ -4701,6 +4825,19 @@ fn register_const(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span
             let tv = ctx.env.fresh_var()
             let inferred_const_name = name
             ctx.env.bind_mono(inferred_const_name, tv)
+            match ctx.env.lookup(name) {
+                some(scheme) => match scheme.def_id {
+                    some(def_id) => {
+                        let pending_const_def_id = def_id
+                        ctx.pending_inferred_const_def_ids.insert(
+                            pending_const_def_id)
+                    },
+                    none => panic(
+                        "unreachable: inferred const registration has no DefId")
+                },
+                none => panic(
+                    "unreachable: inferred const registration disappeared")
+            }
         }
     }
     let const_lookup_name = name
@@ -4713,9 +4850,10 @@ fn register_const(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span
                 // The getter itself always returns an owned value: scalar
                 // consts are rebuilt, callable consts build a fresh wrapper,
                 // and memoised Str/enum consts are immortal runtime values.
-                record_callable_ownership(
+                record_callable_ownership_with_transfer_levels(
                     ctx.env.types.ownership_metadata, did,
-                    CALLABLE_BORROW_OWNED, CALLABLE_SOURCE_DECLARED)
+                    CALLABLE_BORROW_OWNED, CALLABLE_SOURCE_DECLARED,
+                    [callable_transfer_level(CALLABLE_BORROW_OWNED, [])])
             },
             none => {}
         },
