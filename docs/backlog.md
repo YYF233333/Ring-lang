@@ -442,7 +442,7 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [doing] [before: B-180]
+### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [done] [before: B-180]
 
 > **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
 
@@ -467,7 +467,9 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 **验收**：形成可在 clean worktree 重放的最小 baseline、主要等待构成与 B-180 第一刀的证据；能区分“compiler 内部算法”“每进程初始化/重复 parse-check”“runner/clang 调度”即可，不要求逐项百分比预算或成品化报告。测量入口关闭时近零；本项以一个 bounded measurement wave 收口。
 
-### B-180 开发反馈回路吞吐专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-183]
+> **2026-08-14 bounded wave：COMPLETE。** `bench/check` 已强制 12 GiB aggregate commit、最多 5 个 active process（含 root）、全机单 formal/probe/prep fail-fast 锁，并保留 stdout/stderr、wall/CPU/RSS/phase 原始证据。一次 `compiler/main.ring` cold lane 超时且采样期间 source provenance 被污染，故只保留为失败、不重跑也不进入比较；Samply 的自然完成 `types.ring` 样本把主等待定位到 callable-summary fixed point 与 speculative map/list/RC churn。两项 runtime 猜测经 whole-command 测量无收益而淘汰。replay index 与原始路径见 `docs/performance-baseline.md`；该粒度已经足够选择 B-180 第一刀。
+
+### B-180 开发反馈回路吞吐专项 [refactor] [P0] [XL] [judgment] [doing] [after: B-176] [before: B-183]
 
 **进入门**：B-176 的 developer-unblock checkpoint 与正式同快照 baseline 已成立；不再要求 #268、#269 的非开发阻塞长尾预先全部关闭。执行期间若新增 critical 会破坏严格自举、baseline 可比性、当前优化触及的 ownership/RC authority 或生成结果正确性，立即回到 critical 修复；否则保留为显式尾项，不阻塞 runner/测量基础设施和已证明独立的热点优化。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
 
@@ -479,6 +481,8 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 2. 若 compiler 内部可能占主导，可在独立 worktree 先实现一个有边界、可回滚的热点猜测，再用 phase profile 与端到端命令决定去留；真实候选可做 memoization、减少重复 canonicalization/clone/sort 或更正数据结构。禁止没有明确假设、文件边界和淘汰门的无界横扫；
 3. 若进程启动/重复初始化主导，比较 bounded worker-process/batch-check 与普通进程池；任何复用方案必须以随机 case 顺序、重复运行和进程隔离对照证明无 global state 泄漏。daemon、常驻服务和新公共协议不作为首轮默认；
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
+
+> **2026-08-14 第一项 retained candidate。** Windows runner 只缓存 controlled recipe 下 tracked `main.c` 的 ThinLTO anchor object；key 绑定 source snapshot、实际 header/macro closure、三段 recipe、target、sanitized environment 与 clang/clang++/lld 内容身份。每轮仍 fresh runtime compile/link 与隔离 run dir；dependency closure 前后各扫一次。artifact/receipt 采用 immutable CAS，同 key divergence 先转为有界 durable poison tombstone，畸形 receipt、大小谎报、hardlink/flush/closure 漂移均 fail loud。focused `bool_ops` e2e 在同一 12 GiB/5-process 门下 fresh miss 与 warm hit 均 1 pass/0 fail，warm whole loop 约 3.2 s；原始 trace 见 replay index。该结果只关闭 runner construction 第一刀，不代表 B-180 或 release acceptance 完成。
 
 **整体验收**：以 B-176 同机、同代表命令集的配对原始样本为证据，常用 edit→check→focused validation 与提交前完整门的端到端等待应持续缩短到不再拖住 agent 开发节奏；不设置单一百分比、单阶段配额或“每个部分都要优化”的门槛。短文件、模块与失败诊断不得出现明显体感回退；串行 oracle 与任何并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。保留 cold/warm wall、CPU、peak aggregate/per-worker RSS 与明确内存/并发上限；任何用更多并发换 wall time 的方案都必须有低内存退化路径。**B-180 只有在全部 critical（含暂缓长尾）关闭、完整 C/RC/ASan/self-host/double-bootstrap 门通过后才能标记完成或作为 release-accepted 结果合入；任何原始失败都必须 fail loud。**
 
