@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import socket
 import sys
@@ -86,9 +87,31 @@ class ElevatedLaunchTests(unittest.TestCase):
             "broker_python": {"path": "C:\\Python\\python.exe"},
             "repo_root": "C:\\repo",
         }
-        with mock.patch.object(broker.ctypes, "WinDLL", return_value=shell32):
+        with (
+            mock.patch.object(broker.ctypes, "WinDLL", return_value=shell32),
+            mock.patch.object(Path, "is_file", return_value=True),
+        ):
             broker._launch_elevated(config, "a" * 64)
-        self.assertEqual(shell32.ShellExecuteW.call_args.args[-1], broker.SW_SHOWNORMAL)
+        call = shell32.ShellExecuteW.call_args.args
+        self.assertEqual(Path(call[2]).name.casefold(), "powershell.exe")
+        self.assertEqual(call[-1], broker.SW_SHOWNORMAL)
+        decoded = base64.b64decode(call[3].split()[-1]).decode("utf-16le")
+        self.assertIn("C:\\Python\\python.exe", decoded)
+        self.assertIn("C:\\repo\\bootstrap.json", decoded)
+        self.assertIn("a" * 64, decoded)
+        self.assertIn("'_serve'", decoded)
+
+    def test_uac_inherited_path_is_replaced_by_pinned_snapshot(self) -> None:
+        pinned = "C:\\pinned\\bin;C:\\Windows\\System32"
+        config = {
+            "path_value": pinned,
+            "path_sha256": core.path_env_sha256(pinned),
+        }
+        with mock.patch.dict(os.environ, {"PATH": "C:\\elevated\\different"}):
+            broker._activate_pinned_path(config)
+            self.assertEqual(os.environ["PATH"], pinned)
+        with self.assertRaisesRegex(core.BrokerError, "does not match"):
+            broker._activate_pinned_path({**config, "path_value": pinned + "-drift"})
 
 
 class AllowlistTests(unittest.TestCase):

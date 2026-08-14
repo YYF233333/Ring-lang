@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import ctypes
 import datetime as dt
 import importlib.util
@@ -175,6 +176,7 @@ def _build_bootstrap(args: argparse.Namespace) -> dict[str, Any]:
         "authority_files": _authority_file_records(repo),
         "executable_allowlist": executable_allowlist,
         "python_script_roots": python_script_roots,
+        "path_value": os.environ.get("PATH", ""),
         "path_sha256": core.path_env_sha256(),
         "limits": limits,
     }
@@ -196,20 +198,32 @@ def _launch_elevated(config: Mapping[str, Any], bootstrap_hash: str) -> None:
         ctypes.c_int,
     ]
     shell32.ShellExecuteW.restype = ctypes.c_void_p
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve()
+    launcher = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not launcher.is_file():
+        raise core.BrokerError(f"system Windows PowerShell is unavailable: {launcher}")
+
+    def ps_literal(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    # ShellExecute establishes the elevated token for the system launcher.
+    # It then invokes only the hash-pinned Python broker. Authenticated broker
+    # requests themselves never pass through a shell.
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        f"& {ps_literal(config['broker_python']['path'])} "
+        f"{ps_literal(SCRIPT_PATH)} '_serve' '--bootstrap' "
+        f"{ps_literal(config['bootstrap_path'])} '--bootstrap-sha256' "
+        f"{ps_literal(bootstrap_hash)}; exit $LASTEXITCODE"
+    )
+    encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
     parameters = subprocess.list2cmdline(
-        [
-            str(SCRIPT_PATH),
-            "_serve",
-            "--bootstrap",
-            config["bootstrap_path"],
-            "--bootstrap-sha256",
-            bootstrap_hash,
-        ]
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
     )
     result = shell32.ShellExecuteW(
         None,
         "runas",
-        config["broker_python"]["path"],
+        str(launcher),
         parameters,
         config["repo_root"],
         SW_SHOWNORMAL,
@@ -453,6 +467,7 @@ def _validate_bootstrap(config: Any, bootstrap_path: Path) -> dict[str, Any]:
         "authority_files",
         "executable_allowlist",
         "python_script_roots",
+        "path_value",
         "path_sha256",
         "limits",
     }
@@ -488,8 +503,7 @@ def _validate_bootstrap(config: Any, bootstrap_path: Path) -> dict[str, Any]:
     core.ensure_git_ignored(repo, results)
     core.ensure_git_ignored(repo, control)
     core.validate_limits(**config["limits"])
-    if core.path_env_sha256() != config["path_sha256"]:
-        raise core.BrokerError("PATH changed across the UAC boundary")
+    _activate_pinned_path(config)
     for field in ("authkey_sha256", "path_sha256"):
         value = config[field]
         if (
@@ -533,6 +547,21 @@ def _validate_bootstrap(config: Any, bootstrap_path: Path) -> dict[str, Any]:
         config["executable_allowlist"], config["python_script_roots"]
     )
     return config
+
+
+def _activate_pinned_path(config: Mapping[str, Any]) -> None:
+    """Replace the UAC-inherited PATH with the hash-pinned caller snapshot."""
+
+    value = config.get("path_value")
+    if (
+        not isinstance(value, str)
+        or "\x00" in value
+        or len(value) > 32_767
+    ):
+        raise core.BrokerError("bootstrap PATH snapshot is not a valid Windows value")
+    if core.path_env_sha256(value) != config.get("path_sha256"):
+        raise core.BrokerError("bootstrap PATH snapshot does not match its SHA-256")
+    os.environ["PATH"] = value
 
 
 def _load_bootstrap(path: Path, expected_hash: str) -> dict[str, Any]:

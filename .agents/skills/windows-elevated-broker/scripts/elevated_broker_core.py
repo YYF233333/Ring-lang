@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
-BOOTSTRAP_SCHEMA = "ring.windows-elevated-broker.bootstrap.v1"
+BOOTSTRAP_SCHEMA = "ring.windows-elevated-broker.bootstrap.v2"
 REQUEST_SCHEMA = "ring.windows-elevated-broker.request.v1"
 STATE_SCHEMA = "ring.windows-elevated-broker.state.v1"
 ACTIVE_SCHEMA = "ring.windows-elevated-broker.active.v1"
