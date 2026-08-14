@@ -30,6 +30,8 @@ AUTH_OK = b"\x01"
 AUTH_DENIED = b"\x00"
 SOCKET_TIMEOUT_SECONDS = 5.0
 ACCEPT_POLL_SECONDS = 0.5
+SW_HIDE = 0
+SW_SHOWNORMAL = 1
 
 
 def _utc_now() -> str:
@@ -210,7 +212,7 @@ def _launch_elevated(config: Mapping[str, Any], bootstrap_hash: str) -> None:
         config["broker_python"]["path"],
         parameters,
         config["repo_root"],
-        0,
+        SW_SHOWNORMAL,
     )
     code = int(result or 0)
     if code <= 32:
@@ -596,6 +598,22 @@ def _administrator_identity() -> dict[str, Any]:
     return {"username": buffer.value, "is_admin": True}
 
 
+def _hide_console_window() -> None:
+    """Hide only the broker console after UAC and durable startup state."""
+
+    if os.name != "nt":
+        return
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32.GetConsoleWindow.argtypes = []
+    kernel32.GetConsoleWindow.restype = ctypes.c_void_p
+    user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    user32.ShowWindow.restype = ctypes.c_bool
+    window = kernel32.GetConsoleWindow()
+    if window:
+        user32.ShowWindow(window, SW_HIDE)
+
+
 def _state_from_config(
     config: Mapping[str, Any],
     *,
@@ -890,6 +908,7 @@ def _run_server(config: Mapping[str, Any]) -> int:
         created_at_epoch=created_at_epoch,
     )
     _write_start_state(config, state)
+    _hide_console_window()
 
     reason = "ttl_expired"
     fatal: BaseException | None = None

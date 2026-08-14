@@ -77,6 +77,20 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIsInstance(errors[0], core.AuthenticationError)
 
 
+class ElevatedLaunchTests(unittest.TestCase):
+    def test_uac_launch_is_visible_until_broker_hides_its_console(self) -> None:
+        shell32 = mock.MagicMock()
+        shell32.ShellExecuteW.return_value = 33
+        config = {
+            "bootstrap_path": "C:\\repo\\bootstrap.json",
+            "broker_python": {"path": "C:\\Python\\python.exe"},
+            "repo_root": "C:\\repo",
+        }
+        with mock.patch.object(broker.ctypes, "WinDLL", return_value=shell32):
+            broker._launch_elevated(config, "a" * 64)
+        self.assertEqual(shell32.ShellExecuteW.call_args.args[-1], broker.SW_SHOWNORMAL)
+
+
 class AllowlistTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
