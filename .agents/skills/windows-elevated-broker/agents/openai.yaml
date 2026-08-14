@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows Elevated Broker"
+  short_description: "Run bounded admin commands after one UAC prompt"
+  default_prompt: "Use $windows-elevated-broker to start a time-limited broker and run bounded Windows administrator commands."
