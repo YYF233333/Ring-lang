@@ -331,6 +331,29 @@ class TimingAndSchemaTests(unittest.TestCase):
 
 
 class FailLoudExecutionTests(unittest.TestCase):
+    def test_authority_loader_registers_dataclass_module(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job_path = root / "windows_job.py"
+            run_path = root / "run.py"
+            job_path.write_text("AUTHORITY = 'job'\n", encoding="utf-8")
+            run_path.write_text(
+                "from dataclasses import dataclass\n"
+                "@dataclass(frozen=True)\n"
+                "class LockAuthority:\n"
+                "    name: str\n",
+                encoding="utf-8",
+            )
+            config = {
+                "authority_files": [
+                    {"path": str(run_path), "sha256": core.sha256_file(run_path)},
+                    {"path": str(job_path), "sha256": core.sha256_file(job_path)},
+                ]
+            }
+            loaded_run, loaded_job = broker._load_authority(config)
+            self.assertEqual(loaded_run.LockAuthority("lock").name, "lock")
+            self.assertEqual(loaded_job.AUTHORITY, "job")
+
     def test_spawn_failure_preserves_streams_and_writes_failure_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary) / "repo"

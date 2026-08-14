@@ -567,6 +567,7 @@ def _load_authority(config: Mapping[str, Any]) -> tuple[Any, Any]:
     if run_spec is None or run_spec.loader is None:
         raise core.BrokerError("cannot load run.py measurement lock authority")
     run_module = importlib.util.module_from_spec(run_spec)
+    sys.modules[run_spec.name] = run_module
     run_spec.loader.exec_module(run_module)
     return run_module, job_module
 
