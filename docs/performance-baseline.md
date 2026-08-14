@@ -89,3 +89,39 @@ needed here is which whole-loop candidate was kept or rejected.
   warm trace still performs both dependency scans, runtime compile, link,
   Ring build, generated-program link and execution; only the tracked anchor
   compile is reused. This is directional developer-loop evidence, not a KPI.
+- `bench/check/results/b180-primitive-const-retry-20260814/` retains the next
+  profile-guided compiler candidate. A bounded generated-C probe showed that
+  eliminating redundant post-const callable retries for exact primitive
+  literals removes the dominant fixed-point wait on `compiler/types.ring`.
+  The Ring source implementation is independently source-reviewed and remains
+  isolated at `8931ad0dafb0c55b00f12b6e0b769831f0b80a11`; it is not integrated.
+  Exact A7 source validation did not complete: the focused source check hit its
+  300 s boundary, and a capped A7-to-A8 generation hit 1500 s with no emitted
+  artifact. A separate 15-minute stage-0 attempt from the measurement-only C
+  probe also timed out without an artifact; it used much less memory, which is
+  useful directional evidence but not a trusted bootstrap. All failures are
+  retained verbatim and are not retried merely to obtain a passing sample.
+  Until a real generated candidate passes focused behavior and bootstrap gates,
+  the probe is optimization guidance only.
+- `bench/check/results/b180-exhaustive-span-locator-20260814/` and
+  `bench/check/results/b180-exhaustive-matrix-locator-20260814/` retain the
+  bounded generated-C locator evidence for the next compiler prefix. The first
+  locator stopped at `compiler/hir.ring:1886`: its 28-arm match exceeded
+  100,000 recursive matrix calls. The reviewed irrefutable-row base reduced
+  that same query to 28 calls and allowed the bounded run to progress through
+  501 exhaustiveness queries before a later timeout. The timeout is retained;
+  this is evidence that the earlier hotspot moved, not a claim that the whole
+  command completed.
+- `bench/check/results/b180-exhaustive-matrix-xperf-20260814/` is the fresh
+  60-second Xperf prefix from the matrix locator executable
+  (`SHA256 A9CB6F640D5D97EC1CE98D5DB56801C7A666467219EE0C108E02DC5B8D6F21A7`).
+  Raw ETL is under `compiler-main-60s-capture/`; the authenticated elevated Job
+  receipt is under `compiler-main-60s-request/`. The wrapper completed without
+  measurement errors (about 57.4 s user CPU, 4.84 GB peak job commit, 4.66 GB
+  sampled tree RSS); the target was deliberately terminated at the capture
+  boundary, so its nonzero exit is not a compiler diagnostic result. Local-PDB
+  stack analysis attributes about 90% of samples to callable-summary fixed
+  point replay and about 67% to the `for`-protocol/unification chain ending in
+  recursive nominal-to-callable reachability. The earlier `check_matrix`
+  hotspot is absent from the leading stacks. Percentages are only routing
+  evidence, not a performance KPI.

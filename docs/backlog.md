@@ -442,33 +442,6 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [done] [before: B-180]
-
-> **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
-
-> **2026-08-13 用户目标裁决**：本性能主线的直接驱动是开发常用命令慢于 agent 产出节奏，目标是缩短完整开发反馈回路，而不是追逐某个 pass、某个阶段或某个百分比。精确百分比、逐阶段 KPI 与完整性能报告都不是交付物或完成门；测量只保留到足以定位整体等待、证明没有明显回退并指导下一刀的程度。正确性、覆盖、原始失败、可重放身份与资源上限不因此降低。
-
-> **2026-08-13 投机执行授权**：profile 只需达到 Steward 能判断下一处候选的粒度，不要求整理为面向用户的精细报告。允许先提出有界性能猜测，在独立 worktree 实现并用代表性开发命令做前后对照；只有整体等待真实下降、正确性与覆盖不退化的候选才合并。无收益候选不得进入主线。实现、短测量与 review 可并行补位，资源密集测量仍按内存/并发上限串行，不能冻结 root 的其他推进。
-
-> **2026-08-12 用户细化**：正式基线不再等待全部 critical 长尾清零，但必须等待 developer-unblock checkpoint：当前 compiler source 可严格 `check/build compiler/main.ring` 且无 panic/ICE；compiler/std/benchmark manifest 所需的聚焦 ownership/RC 矩阵稳定、fail loud；compiler source、tracked anchor、toolchain 与测量 manifest 精确钉住；至少有一次由该精确快照建立的 strict native bootstrap 或等价的 exact-generation 证据。checkpoint 之后可完成 B-176 并进入 B-180；后续 correctness 修复若改变 workload、通过集合或 phase 工作量，必须刷新同快照配对基线，禁止混用前后数字。
-
-> **2026-08-13 developer-unblock checkpoint：ACHIEVED。** 用户验收并关闭 `ownership-reachable-dispatch` item：final A7 对 current source 完成 clean C generation 与 O3+ThinLTO native link，tracked `compiler/dist-c/main.c` 与该 generation byte-identical（SHA256 `D7BB015B32EF8F4A438093509C794C82B60C13548808B0A1093AEFEAB0DF7F2E`），focused ownership/default/const-reexport/transaction/effect-mapping 正负矩阵无新增 ICE/panic。A7→A8 byte fixed point 与 final full-suite 明确保留为 B-180 完成认定/release 门，不再阻塞 B-176 baseline 或性能实现；不得把本 checkpoint 写成完整 release acceptance。
-
-当前测量完整性框架已合入，developer-unblock checkpoint 已成立；下一独立 session 在本提交快照上只选择代表真实开发等待的最小命令集，记录足以识别主要瓶颈的 cold/warm 原始样本后收口，不把既有完整 lane 矩阵本身当成必须消费的工作量。
-
-本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。developer-unblock checkpoint 前可以准备采样/只读 instrumentation；checkpoint 成立后形成正式 baseline，并允许 B-180 开始改变 compiler/runner 行为。剩余 critical 不从 manifest 消失；若其修复改变测量工作量，baseline 与候选必须在修复后的同一语义快照上成对重测。
-
-**测量面 / 文件**：复用 `bench/check/` 的单一入口与原始结果格式，新增简短的 `docs/performance-baseline.md` 重放索引（身份、代表命令、原始样本路径与选路结论即可）；检查 `tests/run_tests.py`、`compiler/scripts/build_native.ps1` 与已有 opt-in phase timing。默认 CLI 输出与产物不得变化，不为生成精细报告继续扩张 telemetry/schema。
-
-1. direct feedback：`compiler/main.ring` 的普通 `check`、`--verify-rc`，以及一个能显露启动/固定开销的短 `check` 对照；
-2. runner feedback：一个日常 focused case/suite 与一次完整本地标准门；只有 profile 指向 compiler construction、clang/link 或 Python orchestration 时才继续细分；
-3. 资源与调用：保留 wall/CPU、peak RSS、进程数、cold/warm、toolchain/source/anchor/manifest 指纹与原始 stdout/stderr；不得把并行 wall-time 收益混报成 CPU-time 收益；
-4. 短命令保留少量重复以排除偶然噪声；长命令每个 cache 状态一次即可作为方向证据，不声称精密分布。所有 invalid/失败样本原样保留，不挑最好值、不自动重试。
-
-**验收**：形成可在 clean worktree 重放的最小 baseline、主要等待构成与 B-180 第一刀的证据；能区分“compiler 内部算法”“每进程初始化/重复 parse-check”“runner/clang 调度”即可，不要求逐项百分比预算或成品化报告。测量入口关闭时近零；本项以一个 bounded measurement wave 收口。
-
-> **2026-08-14 bounded wave：COMPLETE。** `bench/check` 已强制 12 GiB aggregate commit、最多 5 个 active process（含 root）、全机单 formal/probe/prep fail-fast 锁，并保留 stdout/stderr、wall/CPU/RSS/phase 原始证据。一次 `compiler/main.ring` cold lane 超时且采样期间 source provenance 被污染，故只保留为失败、不重跑也不进入比较；Samply 的自然完成 `types.ring` 样本把主等待定位到 callable-summary fixed point 与 speculative map/list/RC churn。两项 runtime 猜测经 whole-command 测量无收益而淘汰。replay index 与原始路径见 `docs/performance-baseline.md`；该粒度已经足够选择 B-180 第一刀。
-
 ### B-180 开发反馈回路吞吐专项 [refactor] [P0] [XL] [judgment] [doing] [after: B-176] [before: B-183]
 
 **进入门**：B-176 的 developer-unblock checkpoint 与正式同快照 baseline 已成立；不再要求 #268、#269 的非开发阻塞长尾预先全部关闭。执行期间若新增 critical 会破坏严格自举、baseline 可比性、当前优化触及的 ownership/RC authority 或生成结果正确性，立即回到 critical 修复；否则保留为显式尾项，不阻塞 runner/测量基础设施和已证明独立的热点优化。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
@@ -483,6 +456,14 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
 
 > **2026-08-14 第一项 retained candidate。** Windows runner 只缓存 controlled recipe 下 tracked `main.c` 的 ThinLTO anchor object；key 绑定 source snapshot、实际 header/macro closure、三段 recipe、target、sanitized environment 与 clang/clang++/lld 内容身份。每轮仍 fresh runtime compile/link 与隔离 run dir；dependency closure 前后各扫一次。artifact/receipt 采用 immutable CAS，同 key divergence 先转为有界 durable poison tombstone，畸形 receipt、大小谎报、hardlink/flush/closure 漂移均 fail loud。focused `bool_ops` e2e 在同一 12 GiB/5-process 门下 fresh miss 与 warm hit 均 1 pass/0 fail，warm whole loop 约 3.2 s；原始 trace 见 replay index。该结果只关闭 runner construction 第一刀，不代表 B-180 或 release acceptance 完成。
+
+> **2026-08-14 第二项 profile-guided checkpoint，尚未合入。** Samply 将 `compiler/types.ring` 的主要等待定位到 callable-summary fixed point；一个有界 generated-C probe 表明，只有在 const owner transaction 与 exact alias rebind 均完成、blocked/pending/default-seed authority 全空，且 source annotation、literal 与 rebound scheme 三方同为相同的 `Int/Float/Str/Bool` primitive 时，省略该 const 后的重复 callable retry 能显著缩短整条命令。Ring source 候选 `8931ad0dafb0c55b00f12b6e0b769831f0b80a11` 已通过独立 source/mutation review，并把新增 helper 从 4 个收敛到 2 个；alias、nonliteral、inferred/callable/nominal const 与任何 pending/failed path 均保留旧 retry。但 exact A7 source check 在 300 s 超时，12 GiB/5-process、1500 s 的 bounded A7→A8 generation 也超时且未产出 C；随后 measurement-only C probe 作为 stage0 的独立 900 s attempt 同样无产物。后者显著降低 CPU/内存轨迹，但不是可信 bootstrap。原始失败见 replay index；不得据 generated-C probe 合入源码，也不得为漂亮结果自动重跑。下一步需要 materially different 的 bootstrap construction 或更深的 fixed-point 优化，不重复相同生成命令。
+
+> **2026-08-14 分段 profile 裁决。** 用户明确允许把慢命令只运行到一个有界前缀：先修复该前缀中已经由 profile 定位的瓶颈，再让后续瓶颈自然暴露；不要求一个候选先完成整条 `compiler/main.ring check` 才能继续，也不要求一次 profile 找出所有问题。每一刀仍须有原始样本、精确候选身份、资源上限、fail-loud 失败与独立正确性 authority；“后段仍超时”不否定已经从同一前段移除的真实热点。
+
+> **2026-08-14 exhaustiveness checkpoint，尚未合入。** 两个相互独立的 source 候选均已获独立 CLEAR：`2af820bc932acecda20d098fdc28fbef0fcb8a7e` 只在 discarded fn/impl precheck 中延后 E0601 exhaustiveness 诊断，并在 retained pass 原样重算；`b627b8becec292d52465287fce004c0275be481b` 在 Maranget pattern matrix 的 zero-column base 后加入等价的 irrefutable-row base，保留 malformed-row panic 路径与所有诊断/type/effect/ownership authority。measurement-only locator 表明原 `compiler/hir.ring:1886` 这一 28-arm match 从超过 100,000 次递归 matrix call 降至 28 次，随后编译继续推进到更多查询；这只证明前段热点消除，尚不是 bootstrap/合入验收。
+
+> **2026-08-14 下一热点，暂停点。** 对上述 matrix locator 的 60 s capped Xperf 前缀显示：旧 `check_matrix` 已退出顶部；约 90% sampled stacks 位于 `precheck_callable_summaries_to_fixed_point`，其中约 67% 沿 `lower_protocol_for_in → unify → unification_pair_reaches_callable → type_may_hide_callable → type_reaches_callable_through_nominals`。下一刀因此是 discarded callable precheck 中反复进行的 nominal-to-callable reachability traversal/分配，不是继续修改 pattern matrix。用户要求定位后暂停；恢复前不得实现或启动新 profile。原始 ETL 与 Job receipt 见 replay index。
 
 **整体验收**：以 B-176 同机、同代表命令集的配对原始样本为证据，常用 edit→check→focused validation 与提交前完整门的端到端等待应持续缩短到不再拖住 agent 开发节奏；不设置单一百分比、单阶段配额或“每个部分都要优化”的门槛。短文件、模块与失败诊断不得出现明显体感回退；串行 oracle 与任何并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。保留 cold/warm wall、CPU、peak aggregate/per-worker RSS 与明确内存/并发上限；任何用更多并发换 wall time 的方案都必须有低内存退化路径。**B-180 只有在全部 critical（含暂缓长尾）关闭、完整 C/RC/ASan/self-host/double-bootstrap 门通过后才能标记完成或作为 release-accepted 结果合入；任何原始失败都必须 fail loud。**
 
