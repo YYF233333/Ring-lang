@@ -201,3 +201,21 @@ needed here is which whole-loop candidate was kept or rejected.
   already returned normally and no next `check_exhaustive` entry is visible;
   the next bounded probe must locate that caller-to-next-query phase gap before
   any exact-root memo experiment or nominal SCC summary.
+- `bench/check/results/b180-post501-phase-locator-20260818/coarse-locator/`
+  retains that bounded phase probe. Its insertion-only C SHA-256 is
+  `3B7A3FAA3D028130E304DB57C9A74EE5703C862E6F195D350D8808C6176B0309`;
+  executable SHA-256 is
+  `5AA0563BE70BC7A729834BD6D779FB6F539F3C64A0D8E6C4A5E9BFFB2848DF46`.
+  The diff is 295 insertions and no deletions against the exact old locator C;
+  independent review verified unchanged calls, RC, failure and cleanup paths.
+  The 120-second receipt has no measurement error, reaches query 501, and
+  records its normal return from the catch caller before a new fixed-point
+  invocation begins. It emitted 224 budgeted phase events without exhaustion;
+  the only unmatched dynamic boundary is function precheck
+  `perceus$$_ownership_metadata_with_role_maps` inside one SCC. Sampled tree
+  RSS was 9,925,169,152 bytes and peak job commit was 10,300,665,856 bytes;
+  these resource values describe the instrumented locator, not a candidate.
+  The named function at `compiler/perceus.ring:418` contains one for-in at line
+  424, so the permitted second locator is limited to that function's for-in
+  caller and its three direct outer unify steps. No global memo, SCC summary or
+  traversal change follows from the coarse receipt alone.

@@ -60,3 +60,25 @@
    exact-root probe both show repeated nominal-graph expansion that a scoped
    memo cannot cover. Do not reopen the discarded binder fast paths merely for
    their memory improvement.
+
+## Coarse locator result
+
+- The reviewed insertion-only locator is C SHA-256
+  `3B7A3FAA3D028130E304DB57C9A74EE5703C862E6F195D350D8808C6176B0309`
+  and executable SHA-256
+  `5AA0563BE70BC7A729834BD6D779FB6F539F3C64A0D8E6C4A5E9BFFB2848DF46`.
+  Its compile and ThinLTO link completed under the normal Job cap with empty
+  stderr and no measurement errors.
+- The single 120-second prefix reached `B180_EXH_END id=501`, emitted its live
+  parent snapshot, and then emitted `MATCH_EXH_RETURN callsite=2`. The snapshot
+  had no active fixed-point parent; a new fixed-point invocation and round then
+  began. The trace contains 224 events, no budget-exhaustion marker and one
+  coherent unmatched stack: SCC 2726 → function precheck 2824,
+  `perceus$$_ownership_metadata_with_role_maps`. Dynamic IDs are receipt-local;
+  the function name and source are the durable identity.
+- `compiler/perceus.ring:418-449` contains exactly one for-in in that function,
+  at line 424 over `callable_by_def_id.keys()`. One second-wave C locator may
+  gate on the active exact function name and bracket only the generic for-in
+  caller plus the three direct `unify_at_noted` steps in
+  `lower_protocol_for_in`. Its first missing normal-return marker decides the
+  next phase. It must not instrument global unify or the callable walker.
