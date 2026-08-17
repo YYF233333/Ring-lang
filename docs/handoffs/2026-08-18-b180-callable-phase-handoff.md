@@ -42,17 +42,20 @@
    `check_matrix` have returned and stderr was flushed. No next query BEGIN is
    present. Existing evidence cannot distinguish caller cleanup, the current
    function/impl precheck tail, SCC/round transition or a later for-in/unify.
-2. Build one measurement-only generated-C phase locator with low-frequency,
-   paired markers at: the match caller return; fixed-point round; SCC group;
-   function and impl precheck call sites; `lower_protocol_for_in`; and each of
-   its direct outer `unify` calls. Each BEGIN precedes the original single call,
-   each END follows only a normal return, and every marker flushes stderr.
-   Do not install a failure handler, retry, or log recursive unify/walker calls.
+2. Build one measurement-only generated-C coarse locator. Before query 501 it
+   may update only allocation-free active-context latches; query 501 emits one
+   parent snapshot. At and after that boundary, use paired markers only for the
+   match caller return, fixed-point round/body/convergence, SCC group, and
+   function/impl precheck call sites. Give dynamic calls monotonic IDs, flush
+   every event, and enforce a fixed event budget with an explicit
+   `TRACE_BUDGET_EXHAUSTED` marker. Do not install a failure handler or retry,
+   and do not log for-in, recursive unify or walker calls in this first wave.
 3. Run one capped prefix with the unchanged command and exact executable
-   identity. If the last boundary is outside callable nominal reachability,
-   stop the memo/SCC line and follow that phase. Only if the boundary still
-   encloses the nominal detector may the next unit measure expensive exact-root
-   repetition within one selector-safe scope.
+   identity. If it locks a single function/impl site, one later targeted wave
+   may add its `lower_protocol_for_in` caller edge and direct outer `unify`
+   edge. If the last coarse boundary is outside callable nominal reachability,
+   stop the memo/SCC line and follow that phase. A missing END is not a normal
+   return; budget exhaustion or incoherent nesting invalidates the receipt.
 4. Do not start a nominal SCC summary unless the phase locator and a later
    exact-root probe both show repeated nominal-graph expansion that a scoped
    memo cannot cover. Do not reopen the discarded binder fast paths merely for
