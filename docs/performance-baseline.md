@@ -147,3 +147,19 @@ needed here is which whole-loop candidate was kept or rejected.
   candidate is therefore rejected without bootstrap, source integration or a
   repeat ETW capture. The next traversal candidate must preserve the existing
   selector decision set and prove progress in the same bounded prefix.
+- The same raw directory also retains the exact-decision hidden-only follow-up.
+  Source commit `15895ab7797d797d4aa658072150499f135081b8` kept every
+  pair-sensitive helper and Struct/Enum actual rule unchanged, removed only
+  descendant surface-scan replay, and passed independent review plus its
+  source/mutation authority. The measurement-only source SHA-256 is
+  `54243F74B45A3CF877713013E0B9F237722DA4EA026F29E273A35C91CF57DBD2`;
+  executable SHA-256 is
+  `81A5631484D3773AB6042A13399B8EA312EF6993B40E95CA48E73CC3D4B730DC`.
+  Both E0301 anchors were unchanged and `compiler/types.ring` completed in
+  about 2.29 s, but the 120-second main prefix stopped at the same 501 queries
+  as the old target while peak job commit / sampled RSS rose to 10.68/10.29
+  GiB. It is rejected without integration or bootstrap. The useful conclusion
+  is that replaying the surface scan inside one nominal walk is not sufficient
+  to move the whole loop; the remaining detector-local Map construction and
+  `apply_subst_map` materialization require a separate authority audit before
+  any further candidate.
