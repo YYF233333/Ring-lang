@@ -317,3 +317,25 @@ needed here is which whole-loop candidate was kept or rejected.
   defaults, diagnostics, rollback or ABA. The next bounded unit is a read-only
   retention/rollback audit of the real fresh-ID and ownership rebuild in those
   130 rounds, not another skip experiment.
+- That audit closes the rebuild/rollback branch. In the four observed modules,
+  which have no default parameters, all 42,648 fresh DefIds belong to discarded
+  HIR and become unreachable after cleanup. Rolling back their monotonic counter
+  would not reclaim construction work or objects, while the general operation is
+  unsafe because default HIR may retain fresh DefIds. Fresh TypeVars and callable
+  ownership terms cannot be treated the same way: successful function and impl
+  prechecks deliberately keep ownership parents/solutions and may publish a
+  scheme or EffectRow that references the new identities. Stable callable-summary
+  text therefore is not raw-state equality, and no suffix rollback, compaction or
+  generation-based reuse is authorized.
+- No additional profile was captured. Offline stack aggregation of the already
+  retained 2026-08-14 ETL (`AE1422F56CD978A4C4A2C6787730DBDB15A1FF590CA94864445FB848F68B324E`)
+  bounds the remaining snapshot-dedup opportunity: out of 15,036 samples,
+  `precheck_callable_summaries_to_fixed_point` has 13,554 inclusive samples
+  (90.14%), while `infer_decl::map_clone` has 209 (1.39%),
+  `callable_summary_fingerprint` 186 (1.24%),
+  `snapshot_const_owner_transaction` 94 (0.63%), and
+  `snapshot_default_authority_surface` 61 (0.41%). These inclusive counts may
+  overlap; they nevertheless put repeated snapshot construction far below the
+  whole-loop stall. Do not build a new snapshot-volume probe or retain a local
+  snapshot refactor from this evidence. The next candidate audit returns to the
+  isolated irrefutable matrix base at `b627b8becec292d52465287fce004c0275be481b`.

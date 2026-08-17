@@ -128,19 +128,22 @@
 
 ## Next safe step
 
-1. Pause now. On resume, first repair and short-test the broker client's result
-   timeout; verify PID/state or start a new broker only if the old TTL expired.
-2. Keep all three compiler candidates isolated. Do not cherry-pick them or update
-   tracked `compiler/dist-c/main.c` without a real generated candidate and
-   focused behavior/bootstrap evidence.
-3. Use the retained Xperf chain to inspect repeated nominal-to-callable
-   reachability in discarded fixed-point prechecks. Start with a source-bounded,
-   independently reviewed candidate; do not start another profile merely to
-   rediscover the same chain.
-4. If a bounded real candidate becomes available, run only the planned focused
-   primitive/alias/nonliteral, default-seed, blocked-callable, nested-path and
-   failure-cleanup cases, followed by the required bootstrap gates. Preserve
-   any first failure and stop that candidate.
-5. Do not rerun the already-passing runner-cache `bool_ops` samples, reopen the
-   completed ownership item, resurrect the rejected prelude/runtime candidates,
-   or use the old unsafe broad const shortcut.
+1. The broker timeout recovery unit is complete; do not request another UAC for
+   this work. The callable locator, binder fast paths, invocation skip/worklist,
+   fresh-ID/UF rollback and snapshot-dedup branches are also closed. Do not add a
+   third locator, rerun the 2026-08-14 profile, or build another transition/root-
+   liveness/snapshot-volume probe.
+2. Keep the primitive-const, diagnostic-defer and matrix candidates isolated.
+   The next executable unit is a fresh read-only readiness audit of
+   `b627b8becec292d52465287fce004c0275be481b`, followed only by the shortest
+   source/mutation and Ring behavior gates authorized by that audit. The existing
+   28-call locator result is performance evidence, not bootstrap acceptance.
+3. Preserve the candidate's malformed-row panic, Or-pattern, diagnostic,
+   type/effect and ownership authority. Any focused failure, changed original
+   diagnostic, source/mutation authority gap, or inability to integrate by normal
+   history coordination stops the candidate; do not combine it with
+   `2af820bc932acecda20d098fdc28fbef0fcb8a7e` merely to improve a result.
+4. Do not rerun the already-passing runner-cache `bool_ops` samples, the three
+   known primitive-candidate timeouts, or any unbounded self-compile/full gate.
+   Continue to use the 12 GiB/5-process fail-fast lane and preserve every first
+   failure receipt.
