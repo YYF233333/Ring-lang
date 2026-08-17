@@ -125,3 +125,25 @@ needed here is which whole-loop candidate was kept or rejected.
   recursive nominal-to-callable reachability. The earlier `check_matrix`
   hotspot is absent from the leading stacks. Percentages are only routing
   evidence, not a performance KPI.
+- `bench/check/results/b180-callable-reachability-20260817/` retains the first
+  bounded response to that Xperf chain. The Argument rejected any cache that
+  outlives one selector call because neither the nominal registry nor the
+  mutable substitution has a generation/transaction identity. An isolated
+  complete-walk source candidate remains at
+  `d5ffad63e72ade9b94b19d29a4d870448acb6081`; it is not integrated. Its
+  behavior-preserving generated-C probe is identified by source SHA-256
+  `B70C083C6DCE2347B6DA2D1E0F6473F9DBCFA95A8C3FA50D5068E6DC0E3F52D5`
+  and executable SHA-256
+  `19BED451A7224FC21F0D9DD13035D6653743EBBFFFD98727D389AD2354BB8AD5`.
+  The recursive-generic and hidden-record-tail ownership anchors both retained
+  the original E0301 callable-contract diagnostic, and `compiler/types.ring`
+  completed in about 2.30 s. The decisive 120-second `compiler/main.ring`
+  prefix nevertheless completed only 196 locator queries with 11.41 GiB peak
+  job commit and 10.99 GiB sampled tree RSS; the unchanged old locator target
+  had completed 501 queries under the same wall boundary with 8.39/8.08 GiB.
+  A pair-collapse-only mutation still reached 501 queries but changed the
+  recursive-generic authority to a later rebind error, so removing the
+  pair-sensitive recursion is not an admissible shortcut. The complete-walk
+  candidate is therefore rejected without bootstrap, source integration or a
+  repeat ETW capture. The next traversal candidate must preserve the existing
+  selector decision set and prove progress in the same bounded prefix.
