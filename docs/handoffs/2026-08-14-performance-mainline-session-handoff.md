@@ -90,6 +90,17 @@
   the zero-column base and before constructor expansion; malformed row widths,
   Or-pattern semantics and unified runner authority are fail-closed.
   Independent review is CLEAR; no Ring/bootstrap gate ran.
+- The narrowed current-base checkpoint is isolated at
+  `e757487802489deea42b4f05d2b4f9d17b66fd5c`. It retains only the
+  Wildcard/Binding base, keeps Or on the old path, and has independent source
+  review plus a passing targeted source/mutation receipt. It is nevertheless
+  performance-rejected: its one exact 120 s mirror run still closes only 501
+  queries and raises sampled RSS / peak commit from the old locator's
+  8,680,701,952 / 9,006,792,704 bytes to
+  10,715,787,264 / 11,132,325,888 bytes. Do not merge, bootstrap, combine or
+  rerun it. Raw source-gate failures, focused checks, build artifacts and the
+  timeout receipt are preserved under
+  `bench/check/results/b180-exhaustive-matrix-narrow-20260818/`.
 
 ## Latest bounded profile
 
@@ -128,22 +139,27 @@
 
 ## Next safe step
 
-1. The broker timeout recovery unit is complete; do not request another UAC for
-   this work. The callable locator, binder fast paths, invocation skip/worklist,
-   fresh-ID/UF rollback and snapshot-dedup branches are also closed. Do not add a
-   third locator, rerun the 2026-08-14 profile, or build another transition/root-
-   liveness/snapshot-volume probe.
-2. Keep the primitive-const, diagnostic-defer and matrix candidates isolated.
-   The next executable unit is a fresh read-only readiness audit of
-   `b627b8becec292d52465287fce004c0275be481b`, followed only by the shortest
-   source/mutation and Ring behavior gates authorized by that audit. The existing
-   28-call locator result is performance evidence, not bootstrap acceptance.
-3. Preserve the candidate's malformed-row panic, Or-pattern, diagnostic,
-   type/effect and ownership authority. Any focused failure, changed original
-   diagnostic, source/mutation authority gap, or inability to integrate by normal
-   history coordination stops the candidate; do not combine it with
-   `2af820bc932acecda20d098fdc28fbef0fcb8a7e` merely to improve a result.
-4. Do not rerun the already-passing runner-cache `bool_ops` samples, the three
+1. The callable locator, binder fast paths, invocation skip/worklist,
+   fresh-ID/UF rollback, snapshot-dedup and narrow-matrix branches are closed. Do
+   not add a third locator, rerun the 2026-08-14 profile or narrow 120 s receipt,
+   or build another transition/root-liveness/snapshot-volume probe.
+2. Keep primitive-const and every matrix candidate isolated. The next and final
+   independently supported B-180 compiler candidate is defer-only: create a
+   fresh worktree from the current root and transfer only
+   `2af820bc932acecda20d098fdc28fbef0fcb8a7e`, never its rejected primitive
+   ancestors and never either matrix candidate.
+3. First lock the defer-only diff and reuse its already-CLEAR source/mutation
+   authority. Add only the missing focused behavior receipts: retained passes
+   must publish the original exhaustiveness diagnostic, discarded/speculative
+   passes must not publish it early, and original Fail/catch cleanup must remain
+   visible. Then compare one serial 120 s clean-base/defer-only prefix under the
+   existing 12 GiB/5-process cap. No Xperf or unbounded bootstrap is authorized.
+4. Stop defer-only on any focused behavior failure, dependency on a mixed C
+   topology, unchanged q501 without absolute resource benefit, or resource
+   regression. If it is rejected, record that B-180 has no remaining supported
+   compiler candidate and close technical exploration rather than opening a new
+   speculative knife.
+5. Do not rerun the already-passing runner-cache `bool_ops` samples, the three
    known primitive-candidate timeouts, or any unbounded self-compile/full gate.
    Continue to use the 12 GiB/5-process fail-fast lane and preserve every first
    failure receipt.

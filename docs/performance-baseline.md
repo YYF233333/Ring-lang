@@ -339,3 +339,39 @@ needed here is which whole-loop candidate was kept or rejected.
   whole-loop stall. Do not build a new snapshot-volume probe or retain a local
   snapshot refactor from this evidence. The next candidate audit returns to the
   isolated irrefutable matrix base at `b627b8becec292d52465287fce004c0275be481b`.
+- `bench/check/results/b180-exhaustive-matrix-narrow-20260818/` retains the
+  follow-up narrow matrix checkpoint. The isolated Ring source candidate is
+  `e757487802489deea42b4f05d2b4f9d17b66fd5c`; it admits only direct
+  Wildcard/Binding cells, keeps Or and every other Pattern on the old path, scans
+  all row widths before the shortcut, and leaves the zero-column base first.
+  Two independent source reviews are CLEAR. The content-bound targeted
+  source/mutation wrapper (`DF214EE2E4B2BD28B654B1E6DF5B5AF666E0D02C6E1669B7802E520B1277419E`)
+  passed in 0.36 s; the receipt SHA-256 is
+  `F306576803FDB5216F1C7242C5A288444276C79196FE25EB8676344EAD11AA89`.
+  The unified structural lane is not a passing receipt: its first attempt failed
+  before the gate because a 261-character cache artifact path exceeded the
+  Windows hard-link boundary, the corrected short-TEMP attempt hit its mistaken
+  60 s compiler-preparation cap, and the cached 180 s attempt exposed three
+  unrelated pre-existing ownership/const/alias authority failures. All three raw
+  failures remain under `gates/` and were not retried for a prettier result.
+- The measurement-only narrow C mirror is
+  `83D352A835D475BA79E09803340DC0C89BAE2FBCCADE77BA454BC2B2F4A11CCC`;
+  its invariant manifest is
+  `4AAA996E8504ED2F38F2660C6EF692BFFF1C453D926641D1D8C3ED64BE626CC4`.
+  The exact O3/ThinLTO/debug build produced executable
+  `0C32AA9EF9AF5B2753892E68C16473DA1D06168E81C7A3F21C88C99848D6AD96`.
+  Five non-primitive focused checks preserved both E0601 negatives and three
+  positive programs. In the single 120 s `compiler/main.ring` prefix, query 202
+  at `compiler/hir.ring:1886` remained exactly 28 matrix calls / 28 base hits;
+  all 501 BEGIN/END pairs closed and no 20,000-call abort fired. This confirms
+  the local hotspot movement, but not whole-loop progress: the old and narrow
+  locators both stop after query 501. The narrow run sampled
+  10,715,787,264 bytes tree RSS and 11,132,325,888 bytes peak job commit versus
+  the old same-topology locator's 8,680,701,952 / 9,006,792,704 bytes. A 0.67 s
+  timeout-boundary difference prevents a causal memory-regression claim, but the
+  required positive resource/progress evidence is absent. The candidate is
+  performance-rejected: do not merge it, bootstrap it, rerun the locator, or
+  combine it with primitive/defer experiments. Retain the local 28-call and
+  source-correct evidence only. The next and final independently supported
+  B-180 candidate is an isolated defer-only validation of
+  `2af820bc932acecda20d098fdc28fbef0fcb8a7e` from the clean current base.
