@@ -78,6 +78,107 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIsInstance(errors[0], core.AuthenticationError)
 
 
+class RpcTimeoutTests(unittest.TestCase):
+    def test_run_extends_only_result_wait_without_resending_request(self) -> None:
+        key = b"k" * core.AUTHKEY_BYTES
+
+        class RecordingConnection:
+            def __init__(self) -> None:
+                self.timeout: float | None = None
+                self.timeouts: list[float] = []
+                self.closed = False
+
+            def __enter__(self) -> RecordingConnection:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                self.closed = True
+
+            def settimeout(self, timeout: float) -> None:
+                self.timeout = timeout
+                self.timeouts.append(timeout)
+
+        request = {
+            "schema": core.REQUEST_SCHEMA,
+            "operation": "run",
+            "request_id": "one-long-request",
+            "argv": [str(Path("C:/tools/profile.exe"))],
+            "cwd": "C:/repo",
+            "output_dir": "C:/repo/results/request-1",
+            "timeout_seconds": 0.5,
+        }
+        connection = RecordingConnection()
+        phases: list[tuple[str, float | None]] = []
+        sent: list[dict[str, object]] = []
+
+        def authenticate(actual: RecordingConnection, _key: bytes) -> None:
+            phases.append(("authenticate", actual.timeout))
+
+        def send(actual: RecordingConnection, payload: bytes) -> None:
+            phases.append(("send", actual.timeout))
+            sent.append(core.strict_json_loads(payload, "test broker request"))
+
+        def receive(actual: RecordingConnection) -> bytes:
+            phases.append(("receive", actual.timeout))
+            return core.canonical_json_bytes({"ok": True, "command_success": True})
+
+        with tempfile.TemporaryDirectory() as temporary:
+            authkey_path = Path(temporary) / "broker.authkey"
+            authkey_path.write_text(core.encode_authkey(key), encoding="ascii")
+            state = {
+                "authkey_path": str(authkey_path),
+                "authkey_sha256": core.sha256_bytes(key),
+                "address": {"host": "127.0.0.1", "port": 4242},
+                "expires_at_epoch": time.time() + 100,
+                "resource_caps": {"request_timeout_max_seconds": 1},
+            }
+            with (
+                mock.patch.object(broker, "SOCKET_TIMEOUT_SECONDS", 0.1),
+                mock.patch.object(
+                    broker.socket, "create_connection", return_value=connection
+                ) as create_connection,
+                mock.patch.object(broker, "_client_authenticate", side_effect=authenticate),
+                mock.patch.object(broker, "_send_frame", side_effect=send) as send_frame,
+                mock.patch.object(broker, "_recv_frame", side_effect=receive),
+            ):
+                response = broker._rpc_to_state(state, request)
+
+        create_connection.assert_called_once_with(
+            ("127.0.0.1", 4242), timeout=0.1
+        )
+        send_frame.assert_called_once()
+        self.assertTrue(connection.closed)
+        self.assertEqual(connection.timeouts, [0.1, 6.5])
+        self.assertEqual(
+            phases,
+            [("authenticate", 0.1), ("send", 0.1), ("receive", 6.5)],
+        )
+        self.assertEqual(response, {"ok": True, "command_success": True})
+        self.assertEqual(sent, [core.validate_request_schema(request)])
+
+    def test_run_timeout_is_bounded_before_connecting(self) -> None:
+        request = {
+            "schema": core.REQUEST_SCHEMA,
+            "operation": "run",
+            "request_id": "bounded-request",
+            "argv": [str(Path("C:/tools/profile.exe"))],
+            "cwd": "C:/repo",
+            "output_dir": "C:/repo/results/request-1",
+            "timeout_seconds": 1.5,
+        }
+        state = {
+            "expires_at_epoch": time.time() + 100,
+            "resource_caps": {"request_timeout_max_seconds": 1},
+        }
+        for timeout in (1.5, 1e300):
+            with self.subTest(timeout=timeout):
+                request["timeout_seconds"] = timeout
+                with mock.patch.object(broker.socket, "create_connection") as connect:
+                    with self.assertRaisesRegex(core.RequestError, "exceeds fixed maximum"):
+                        broker._rpc_to_state(state, request)
+                connect.assert_not_called()
+
+
 class ElevatedLaunchTests(unittest.TestCase):
     def test_uac_launch_is_visible_until_broker_hides_its_console(self) -> None:
         shell32 = mock.MagicMock()

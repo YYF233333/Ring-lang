@@ -296,7 +296,39 @@ def _client_authenticate(connection: socket.socket, authkey: bytes) -> None:
     core.verify_proof(actual, core.server_proof(authkey, nonce))
 
 
+def _client_response_timeout_seconds(
+    state: Mapping[str, Any], request: Mapping[str, Any]
+) -> float:
+    if request["operation"] != "run":
+        return SOCKET_TIMEOUT_SECONDS
+    resource_caps = state.get("resource_caps")
+    if not isinstance(resource_caps, dict):
+        raise core.BrokerError("broker state has malformed resource caps")
+    request_timeout_max = resource_caps.get("request_timeout_max_seconds")
+    if (
+        isinstance(request_timeout_max, bool)
+        or not isinstance(request_timeout_max, int)
+        or not 1 <= request_timeout_max <= core.MAX_REQUEST_TIMEOUT_SECONDS
+    ):
+        raise core.BrokerError("broker state has malformed request timeout cap")
+    expires_at_epoch = state.get("expires_at_epoch")
+    if (
+        isinstance(expires_at_epoch, bool)
+        or not isinstance(expires_at_epoch, (int, float))
+        or not math.isfinite(float(expires_at_epoch))
+    ):
+        raise core.BrokerError("broker state has malformed expiry")
+    core.validate_request_timing(
+        request,
+        remaining_ttl_seconds=float(expires_at_epoch) - time.time(),
+        request_timeout_max_seconds=request_timeout_max,
+    )
+    return float(request["timeout_seconds"]) + core.JOB_TIMEOUT_GRACE_SECONDS
+
+
 def _rpc_to_state(state: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
+    validated_request = core.validate_request_schema(dict(request))
+    response_timeout = _client_response_timeout_seconds(state, validated_request)
     authkey = _load_authkey(
         Path(state["authkey_path"]), state.get("authkey_sha256")
     )
@@ -311,7 +343,8 @@ def _rpc_to_state(state: Mapping[str, Any], request: Mapping[str, Any]) -> dict[
         ) as connection:
             connection.settimeout(SOCKET_TIMEOUT_SECONDS)
             _client_authenticate(connection, authkey)
-            _send_frame(connection, core.canonical_json_bytes(request))
+            _send_frame(connection, core.canonical_json_bytes(validated_request))
+            connection.settimeout(response_timeout)
             response = core.strict_json_loads(_recv_frame(connection), "broker response")
     except (OSError, TimeoutError) as exc:
         raise core.BrokerError(f"cannot reach elevated broker: {exc}") from exc
