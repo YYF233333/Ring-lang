@@ -108,19 +108,59 @@
   final line, instrument global unify/walker, build an exact-root memo, or
   start nominal SCC summaries from these receipts.
 
+## Fixed-point replay counter result
+
+- The reviewed measurement-only mirror is C SHA-256
+  `E8382854DC11CF9DFE7505B9FFBABBF372A834320A1A4A1B9D6F553D53C6F5E7`,
+  invariance-manifest SHA-256
+  `A487B8DA205782C46E63CEF8EDCB940F24B89F5979515460FEA5D21BFD726663`,
+  and executable SHA-256
+  `1BE03E65C89A2338B9858CA06E4C149DF391C0A0C2DA2B0E8143369C07B58D56`.
+  Raw results are under
+  `bench/check/results/b180-fixedpoint-replay-counter-20260818/replay-counter/`;
+  only `main-prefix-120s-exact/` launched the target. Its stderr SHA-256 is
+  `C526DC8BD4B93DCC410AAD325FB53A7B005CD26E533CC14294134AA378E6AF01`.
+- Query 501 has balanced exhaustive, fixed-point, round, SCC, function and impl
+  counters with `invalid=0`. Fourteen initial invocations consumed 27 rounds
+  and account for all 13 changed rounds. In contrast, 101 post-const
+  invocations are all ordinal-zero stable with no changed round, while replaying
+  1,944 SCC, 2,043 function and 7 impl attempts. Every observed function/impl
+  result is true; seed clear/store and pending insert are zero.
+- The executable inherits the earlier exact-types guard and therefore excludes
+  the first 42 `compiler/types.ring` post-const retries. The 101 observed
+  invocations establish a large opportunity in this topology, not blanket
+  authority for every const owner.
+- `pending_remove=8489` means only that the original `Set.remove` call executed;
+  it is not a state-transition or unique-key count. Nonzero seed/pending totals
+  would need a more specific measurement before attribution. This receipt is
+  sufficient to reject immediate dirty-worklist/SCC scheduling and select an
+  invocation-level post-const preflight as the next Argument target.
+
 ## Next bounded unit
 
-1. Audit `precheck_callable_summaries_to_fixed_point` as a replay scheduler,
-   not as a nominal-walker cache site. Lock the authority for summary changes,
-   blocked/default seeds, function SCC order, impl replay, speculative rollback
-   and const-owner retries.
-2. Compare at least two real designs: a narrow dirty/worklist replay driven by
-   callable-summary dependencies, and a generation/fingerprint skip that still
-   runs every authority-required blocked or newly reachable site. Include
-   counterexamples for summary removal, effect/callable alias rebind, impl
-   dependencies, cycles and rollback ABA. Do not implement until an independent
-   rebuttal identifies a proof boundary and a cheap measurement discriminator.
-3. Any probe must count absolute replay work and changed dependencies at coarse
-   round/SCC/site boundaries without per-unify I/O. A source candidate survives
-   only if the same bounded whole-loop advances materially while correctness
-   gates and raw failure behavior remain unchanged.
+1. Build only a behavior-preserving shadow decision; the original fixed point
+   must always execute. Prove the smallest complete post-const authority token
+   across last-stable→owner-before, transaction/rebind, and after→next-stable
+   intervals. The existing callable fingerprint is insufficient on its own
+   because pending/default
+   seed identity, exact alias contracts, const finalization and rollback state
+   can change without an encoded fingerprint difference. Compare a strict
+   empty-state guard plus auxiliary commit epoch against a complete
+   commit-generation token; failed speculative writes must not leak a bump or
+   permit rollback ABA.
+2. The shadow must distinguish no-op pending removal from actual membership
+   transition and expose owner/incarnation check commit, forward plus reverse
+   exact-alias membership, default/impl and node-universe change,
+   diagnostic/Fail/fresh-state delta, and rollback. Keep the existing
+   fixed-point source order and all initial/post-const invocations; do not
+   introduce a per-site dirty graph, local SCC convergence, persistent callable
+   cache or third locator.
+3. Only if every shadow would-skip is followed by the original FP returning
+   stable with zero observable delta may a later candidate skip that entire
+   post-const retry. Source/mutation authority must kill omitted pending removal,
+   default-seed publication, exact alias/default identity changes, successful const
+   nominal/substitution commits and failed-transaction token leakage. Run the
+   focused fixed-point/default/const rollback fixtures before any bootstrap.
+   Retain only if the same bounded main loop moves beyond the prior phase with
+   no diagnostic/coverage/resource regression; internal skip counts alone are
+   not acceptance.

@@ -240,3 +240,45 @@ needed here is which whole-loop candidate was kept or rejected.
   callable/for-in hotspot. This closes the allowed locator descent: do not add
   a third locator layer, exact-root memo or nominal SCC summary from this
   evidence. The next evidence unit is the fixed-point replay/worklist model.
+- `bench/check/results/b180-fixedpoint-replay-counter-20260818/replay-counter/`
+  retains that next measurement unit. The independently reviewed C mirror
+  SHA-256 is
+  `E8382854DC11CF9DFE7505B9FFBABBF372A834320A1A4A1B9D6F553D53C6F5E7`,
+  its invariance manifest SHA-256 is
+  `A487B8DA205782C46E63CEF8EDCB940F24B89F5979515460FEA5D21BFD726663`,
+  and executable SHA-256 is
+  `1BE03E65C89A2338B9858CA06E4C149DF391C0A0C2DA2B0E8143369C07B58D56`.
+  Compile and ThinLTO link completed under the normal Job cap in about 10.10 s
+  and 108.81 s. The only real 120-second run is
+  `main-prefix-120s-exact/`; it timed out as expected with no measurement
+  error, 10,335,952,896 bytes sampled tree RSS and 10,727,804,928 bytes peak
+  Job commit. Stderr SHA-256 is
+  `C526DC8BD4B93DCC410AAD325FB53A7B005CD26E533CC14294134AA378E6AF01`.
+  A preceding `main-prefix-120s/` launcher attempt failed before creating the
+  target process because its Python executable was not absolute; it is kept
+  as raw setup-failure evidence and did not duplicate the workload. Its plain
+  failure receipt SHA-256 is
+  `999E335BC896FD163F99DCF876BF768DE382F9AF0683A1598A31E7A64CFAD04E`.
+- At query 501 the replay receipt is internally closed: `invalid=0`, all
+  invocation/round/SCC/function/impl opens are zero, and all 501 exhaustive
+  queries have matching BEGIN/END. Fourteen initial fixed-point invocations
+  used 27 rounds, with 13 changed rounds. All 101 post-const invocations used
+  exactly one round, were stable at ordinal zero, and had zero changed rounds.
+  Those provably stable post-const rounds nevertheless executed 1,944 SCC,
+  2,043 function-node and 7 impl attempts; all observed function/impl results
+  were true. Seed clear/store and pending insert counts were zero. The 8,489
+  pending-remove count records calls to the original remove operation, not
+  unique keys or actual set transitions. This is strong evidence for a narrow
+  post-const invocation preflight, not for changing fixed-point order or
+  building a worklist. The existing callable fingerprint omits authority that
+  can change across const commit/rollback, so it cannot by itself authorize a
+  skip. This exact executable retains the earlier 50-const measurement guard,
+  which intentionally skips the first 42 `compiler/types.ring` post-const
+  retries; the 101 observed invocations therefore do not cover every const
+  shape and cannot alone justify a general shortcut.
+  Independent rebuttal therefore requires the next unit to remain shadow-only:
+  the original fixed point must still run while a proposed preflight records
+  authority changes from the last stable return through the const transaction
+  and next stable return. No skip is authorized until every would-skip also has
+  zero diagnostic/Fail/fresh-state, alias/default/impl, pending/seed and
+  rollback-visible delta.
