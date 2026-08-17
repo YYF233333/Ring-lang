@@ -136,31 +136,52 @@
   sufficient to reject immediate dirty-worklist/SCC scheduling and select an
   invocation-level post-const preflight as the next Argument target.
 
+## Post-const fingerprint shadow result
+
+- The full-replay measurement mirror is C SHA-256
+  `905583B0E9FD7AD0783C0DBD684F96B6EEE152B359E35ABD14C37E216D3CACB8`,
+  invariance-manifest SHA-256
+  `447BCD539F49D1B6BA40F0D2531BAB0CF924B8F2458892BD6F00C1C0E6C9E79F`,
+  and executable SHA-256
+  `A5ED537EAA91E9887CA4CFF4E5BB0F30D1B0FA954AB17887F10123B5A0678F10`.
+  Raw evidence is under
+  `bench/check/results/b180-postconst-fingerprint-shadow-20260818/shadow-fullfp/`.
+  The old primitive retry guard is completely absent; the original post-const
+  fixed point runs unconditionally. The retained matrix/defer/locator topology
+  is measurement reachability only and does not authorize source integration.
+- The only 120-second run reaches query 501 with `invalid=0`, no event-budget
+  exhaustion, no inflight call and all 143 post-const ENTRY/END pairs balanced.
+  All 143 transactions are true, all entry global-fingerprint signatures equal
+  the previous stable signature, and every original fixed point is stable in
+  round zero. Stderr SHA-256 is
+  `77F5659F87B4A4677AE9EC8BB75B37826171F779BCA4E6D9C57494BEF08AE728`.
+- Only session 2 const ordinals 0 through 12 are scalar-clean. Their identities
+  are exactly the 13 `compiler/builtin_methods.ring` top-level `*_METHODS`
+  constants. That file has no function or impl work, so these rounds contain
+  empty scheduler loops and two 34,467-byte fingerprints; a preflight that has
+  already computed the entry fingerprint could save at most the second one,
+  448,071 bytes total.
+- Every other invocation advances fresh type-variable and DefId state; 71 also
+  advance callable ownership term/parent/solution state. A stable summary
+  signature therefore does not imply an observationally empty replay. Zero
+  length delta likewise does not prove UF/Map contents, alias/default state,
+  rollback or path compression unchanged. Both independent Argument roles say
+  STOP: no invocation skip, owner/dependency token, transition shadow, worklist
+  or local SCC is authorized.
+
 ## Next bounded unit
 
-1. Build only a behavior-preserving shadow decision; the original fixed point
-   must always execute. Prove the smallest complete post-const authority token
-   across last-stable→owner-before, transaction/rebind, and after→next-stable
-   intervals. The existing callable fingerprint is insufficient on its own
-   because pending/default
-   seed identity, exact alias contracts, const finalization and rollback state
-   can change without an encoded fingerprint difference. Compare a strict
-   empty-state guard plus auxiliary commit epoch against a complete
-   commit-generation token; failed speculative writes must not leak a bump or
-   permit rollback ABA.
-2. The shadow must distinguish no-op pending removal from actual membership
-   transition and expose owner/incarnation check commit, forward plus reverse
-   exact-alias membership, default/impl and node-universe change,
-   diagnostic/Fail/fresh-state delta, and rollback. Keep the existing
-   fixed-point source order and all initial/post-const invocations; do not
-   introduce a per-site dirty graph, local SCC convergence, persistent callable
-   cache or third locator.
-3. Only if every shadow would-skip is followed by the original FP returning
-   stable with zero observable delta may a later candidate skip that entire
-   post-const retry. Source/mutation authority must kill omitted pending removal,
-   default-seed publication, exact alias/default identity changes, successful const
-   nominal/substitution commits and failed-transaction token leakage. Run the
-   focused fixed-point/default/const rollback fixtures before any bootstrap.
-   Retain only if the same bounded main loop moves beyond the prior phase with
-   no diagnostic/coverage/resource regression; internal skip counts alone are
-   not acceptance.
+1. Audit the 130 non-clean round-zero replays at their source authority: trace
+   which fresh type/DefId and ownership term/parent/solution mutations are
+   retained by published summaries versus discarded speculative churn. Keep
+   transaction, rollback, diagnostic and callable ownership totality as the
+   governing invariants; do not infer deadness from a stable fingerprint.
+2. Compare at least two real designs before implementation: transaction-local
+   scratch/rollback of provably unreferenced fresh state versus eliminating the
+   repeated construction at its source. A generation cache or blanket ID
+   fast-forward is not a substitute for reachability/retention proof.
+3. Only a narrow candidate with source/mutation authority and real bounded
+   prefix or whole-loop progress may enter correctness/bootstrap gates. If all
+   observed fresh/ownership state is retained authority, stop this branch and
+   return to the strongest independently measured B-180 candidate rather than
+   adding another locator or skip heuristic.

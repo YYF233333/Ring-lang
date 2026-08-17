@@ -282,3 +282,38 @@ needed here is which whole-loop candidate was kept or rejected.
   and next stable return. No skip is authorized until every would-skip also has
   zero diagnostic/Fail/fresh-state, alias/default/impl, pending/seed and
   rollback-visible delta.
+- `bench/check/results/b180-postconst-fingerprint-shadow-20260818/shadow-fullfp/`
+  retains the full-replay preflight shadow. The independently reviewed C
+  SHA-256 is
+  `905583B0E9FD7AD0783C0DBD684F96B6EEE152B359E35ABD14C37E216D3CACB8`,
+  its invariance-manifest SHA-256 is
+  `447BCD539F49D1B6BA40F0D2531BAB0CF924B8F2458892BD6F00C1C0E6C9E79F`,
+  and the linked executable SHA-256 is
+  `A5ED537EAA91E9887CA4CFF4E5BB0F30D1B0FA954AB17887F10123B5A0678F10`.
+  This measurement topology keeps the reviewed matrix/defer locator but fully
+  removes the old 50-const primitive guard, so every original post-const fixed
+  point runs. Compile and ThinLTO link completed under the normal Job cap in
+  about 9.67 s and 107.13 s, with no measurement errors.
+- The only 120-second main-prefix run timed out as expected with no measurement
+  error, 9,893,416,960 bytes sampled tree RSS and 10,250,764,288 bytes peak Job
+  commit. Stderr SHA-256 is
+  `77F5659F87B4A4677AE9EC8BB75B37826171F779BCA4E6D9C57494BEF08AE728`;
+  measurement-receipt SHA-256 is
+  `4C8F83C5321C1F3742BEE7F5D0EA8E64D29193EFBF44FE6719F74479819606A7`.
+  Query 501 is valid and closed: all 143 post-const ENTRY/END pairs match,
+  trace budget is not exhausted, and every invocation is transaction-true,
+  entry-signature-equal and ordinal-zero stable.
+- Only 13 of those 143 invocations have zero delta in next type-variable ID,
+  next DefId, next callable-ownership term, ownership parent/solution Map
+  lengths and diagnostics. They are exactly the 13 top-level `*_METHODS`
+  constants in `compiler/builtin_methods.ring`; that module has no function or
+  impl scheduler work, so an entry-signature preflight could save at most one
+  additional 34,467-byte fingerprint per const, or 448,071 bytes of output
+  construction. The other 130 invocations all advance fresh IDs, and 71 also
+  advance ownership terms/maps, even though their output signature is stable.
+  This rejects invocation-level skip, transition/deep-owner shadow, dirty
+  worklists and local-SCC scheduling from this evidence. Length/hash equality
+  and zero length deltas are not authority for UF/Map contents, aliases,
+  defaults, diagnostics, rollback or ABA. The next bounded unit is a read-only
+  retention/rollback audit of the real fresh-ID and ownership rebuild in those
+  130 rounds, not another skip experiment.
