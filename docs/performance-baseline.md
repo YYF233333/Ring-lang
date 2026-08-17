@@ -163,3 +163,41 @@ needed here is which whole-loop candidate was kept or rejected.
   to move the whole loop; the remaining detector-local Map construction and
   `apply_subst_map` materialization require a separate authority audit before
   any further candidate.
+- The `binder-fastpath-distribution/main-prefix-120s/` receipt in that raw
+  directory records the next measurement-only split. The generated C SHA-256
+  is `3E2E6B17220D0345CC10F1B568ED6ED51B61DFA5FAEAB8B71E12F1E18B6AC286`;
+  executable SHA-256 is
+  `1B5480CE5F6844F29D9973B9388BF9AFEFEC36BF46206C15B605E26D685C0FD8`.
+  At the flushed query-501 boundary it had observed 34,764,600 Struct-hidden
+  substitutions (23,162,798 raw-safe, 11,601,802 fallback), 15,215,813
+  Enum-hidden substitutions (all safe root-binder direct), and zero calls at
+  either Struct/Record pair site. These are cumulative shape counts, not a
+  timing result; they justified one bounded source candidate rather than a
+  persistent cache.
+- `binder-fastpath-source-candidate/main-prefix-120s/` retains the reviewed
+  Struct+Enum implementation at source commit
+  `6bd4bd95abfc2a9204362306f6d31a961bbbb393`. Its behavior-preserving C mirror
+  SHA-256 is `0593AED25A58ABE3610955D56CDD0705B7C4A871DECB60435DA463C69325FF02`;
+  executable SHA-256 is
+  `AB91D70F98EE36AE802DFD48E956356EA47C26B04FCEE324BE3DC0ECBB3EADE0`.
+  Independent source/mutation and C-mirror reviews were CLEAR; both ownership
+  anchors retained E0301 and `compiler/types.ring` passed. The 120-second main
+  prefix nevertheless stopped at exactly 501 queries. Sampled tree RSS was
+  5,638,926,336 bytes and peak job commit was 5,837,950,976 bytes, versus the
+  old target's 8,680,701,952 / 9,006,792,704 bytes. The resource reduction did
+  not move the visible feedback-loop boundary, so the candidate is rejected
+  without integration or bootstrap.
+- `enum-direct-source-candidate/main-prefix-120s/` retains the final narrower
+  test of this path. Source commit
+  `e018b12f44f2728de70df6fb75f1cff73a07b7f1` changes only the observed
+  Enum root-binder case; Struct and pair paths are byte-identical to the base.
+  Its reviewed C mirror SHA-256 is
+  `AD944D4CB0BA514EA30126E15ADEF5B3F901A39C8817C021422EA116EA4958A9`;
+  executable SHA-256 is
+  `E7B6671D0F55DBEEF5C7B9F651D9DB4EC2B54B7D653433CA4B319C222407BFAD`.
+  The same short correctness gates passed, but the 120-second main prefix again
+  stopped at exactly 501 queries, with 5,550,366,720 bytes sampled tree RSS and
+  5,746,233,344 bytes peak job commit. It is also rejected. Query 501 has
+  already returned normally and no next `check_exhaustive` entry is visible;
+  the next bounded probe must locate that caller-to-next-query phase gap before
+  any exact-root memo experiment or nominal SCC summary.
