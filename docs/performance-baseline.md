@@ -219,3 +219,24 @@ needed here is which whole-loop candidate was kept or rejected.
   424, so the permitted second locator is limited to that function's for-in
   caller and its three direct outer unify steps. No global memo, SCC summary or
   traversal change follows from the coarse receipt alone.
+- `bench/check/results/b180-post501-phase-locator-20260818/targeted-forin-locator/`
+  retains the one allowed second-wave locator. Its reviewed C SHA-256 is
+  `E82D062B3A959798E3F45DD42D64E31BD93BC7F37BB62889C114CAE30250F225`,
+  invariance-manifest SHA-256 is
+  `F98768970FE097C71C2F7873D46A96BF86F757DF769805AE959768B92A15E9D4`,
+  and executable SHA-256 is
+  `7588696C38F2FB191808DCC839F967FFD2C5749839C45758EE16D5AE5E46EA2D`.
+  Compile and ThinLTO link completed under the 12 GiB Job cap without errors.
+  The single 120-second receipt timed out as expected with no measurement
+  errors, no trace-budget exhaustion and no nesting-invalid marker; sampled
+  tree RSS was 10,215,104,512 bytes and peak job commit was 10,602,455,040
+  bytes. Raw stderr SHA-256 is
+  `E6B40C265C015B351B40821B1B4346361611DE38F59772C2E4569747752C2A7B`.
+  Query 501 and its caller returned normally. The exact target then emitted one
+  paired for-in, three paired direct outer-unify steps, a paired function
+  precheck and a paired SCC; nine later function prechecks also completed
+  before the final unmatched entry moved to `perceus$$_rc_stmt`. The coarse
+  unmatched function was therefore a run-local progress boundary, not a
+  callable/for-in hotspot. This closes the allowed locator descent: do not add
+  a third locator layer, exact-root memo or nominal SCC summary from this
+  evidence. The next evidence unit is the fixed-point replay/worklist model.

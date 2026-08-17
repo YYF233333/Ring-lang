@@ -36,7 +36,7 @@
   integration, bootstrap or rerun. Raw receipts and identities are indexed in
   `docs/performance-baseline.md`.
 
-## Next bounded unit
+## Completed locator plan
 
 1. Treat `B180_EXH_END id=501` as a completed query: `check_patterns` and
    `check_matrix` have returned and stderr was flushed. No next query BEGIN is
@@ -82,3 +82,45 @@
   caller plus the three direct `unify_at_noted` steps in
   `lower_protocol_for_in`. Its first missing normal-return marker decides the
   next phase. It must not instrument global unify or the callable walker.
+
+## Targeted locator result
+
+- The reviewed second-wave C SHA-256 is
+  `E82D062B3A959798E3F45DD42D64E31BD93BC7F37BB62889C114CAE30250F225`;
+  its invariance manifest SHA-256 is
+  `F98768970FE097C71C2F7873D46A96BF86F757DF769805AE959768B92A15E9D4`,
+  and the linked executable SHA-256 is
+  `7588696C38F2FB191808DCC839F967FFD2C5749839C45758EE16D5AE5E46EA2D`.
+  The raw receipt is under
+  `bench/check/results/b180-post501-phase-locator-20260818/targeted-forin-locator/`;
+  stderr SHA-256 is
+  `E6B40C265C015B351B40821B1B4346361611DE38F59772C2E4569747752C2A7B`.
+- The only 120-second run reached and returned query 501 with an all-zero
+  second-wave snapshot. It emitted 268 phase events, no budget-exhaustion or
+  nesting-invalid marker, one paired target for-in, and all three paired
+  direct outer-unify steps. The target function and SCC then returned normally.
+  Nine later function prechecks also completed; the final unmatched entry was
+  `perceus$$_rc_stmt`. Sampled tree RSS / peak job commit were
+  10,215,104,512 / 10,602,455,040 bytes; these describe instrumentation, not a
+  candidate.
+- This refutes the coarse unmatched boundary as a target-local
+  callable/for-in hotspot. Stop the locator tree here: do not chase the new
+  final line, instrument global unify/walker, build an exact-root memo, or
+  start nominal SCC summaries from these receipts.
+
+## Next bounded unit
+
+1. Audit `precheck_callable_summaries_to_fixed_point` as a replay scheduler,
+   not as a nominal-walker cache site. Lock the authority for summary changes,
+   blocked/default seeds, function SCC order, impl replay, speculative rollback
+   and const-owner retries.
+2. Compare at least two real designs: a narrow dirty/worklist replay driven by
+   callable-summary dependencies, and a generation/fingerprint skip that still
+   runs every authority-required blocked or newly reachable site. Include
+   counterexamples for summary removal, effect/callable alias rebind, impl
+   dependencies, cycles and rollback ABA. Do not implement until an independent
+   rebuttal identifies a proof boundary and a cheap measurement discriminator.
+3. Any probe must count absolute replay work and changed dependencies at coarse
+   round/SCC/site boundaries without per-unify I/O. A source candidate survives
+   only if the same bounded whole-loop advances materially while correctness
+   gates and raw failure behavior remain unchanged.
