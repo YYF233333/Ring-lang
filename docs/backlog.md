@@ -768,6 +768,14 @@ FieldAccess overwrite 不消费旧 boxed scalar，造成线性泄漏。优先在
 
 **验收**：FieldAccess/嵌套 lvalue 对旧值恰好消费一次，Ident 不回归；verifier 可见，循环不线性增长；完整 C e2e/RC/ASan/self-host/fixed point 通过。
 
+### B-185 raw buffer grow/move 与用户 raw alloc 的边界语义收口 [bugfix] [P2] [M] [judgment] [queued]
+
+B-164 已把 `ring_slot_alloc`、`ring_buf_alloc`、`ring_buf_alloc_zeroed` 的空句柄、请求范围与分配失败收口，但同族入口仍有独立缺口：`ring_buf_grow` 直接把新容量转为 `size_t` 且不检查返回值；`ring_slot_move` 的正数 `count * sizeof(void*)` 未验证可表示；用户面的 `ring_raw_alloc` 对 zero/negative 仍继承平台差异。三者不得因“相邻”就共享未经设计的 fallback，尤其 `ring_raw_alloc` 属于显式 raw-pointer API，先核对现行 unsafe/Ptr 语义与公开 break 边界。
+
+**范围**：`ring_runtime.cpp`、相关 `std/*.ring` extern 契约与 native-only/ASan 回归。保留 B-164 的 zero empty-handle 与 owner 无条件 dealloc 真值；增长/搬移只接受已验证的非负长度和可表示字节数，失败在产生无效 `Ptr` 前响应该入口的稳定诊断。`ring_raw_alloc(0)` 是返回空句柄、最小物理块还是显式拒绝，必须先由既有 Ptr 设计唯一推导；若会改变公开 unsafe API，转 decision dossier，不猜。
+
+**验收**：zero/边界/正常增长与搬移的可证伪矩阵；请求范围与分配失败不延迟成后续 null/越界；Windows native + ASan gating、Linux C runtime 编译门、完整 e2e/structural/self-host fixed point 通过。
+
 ### B-160 rebind_fn_type / update_fn_effects 不查 impl_methods [bugfix] [P2] [M] [judgment] [queued]
 
 > 2026-06-30 立项（B-159 修复过程中发现的残留问题）。
