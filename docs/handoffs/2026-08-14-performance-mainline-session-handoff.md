@@ -5,14 +5,16 @@
 - `ownership-reachable-dispatch` remains COMPLETE; none of its focused checks
   were reopened or rerun.
 - B-176 is closed by the bounded measurement wave recorded in
-  `docs/performance-baseline.md`. B-180 is active, not complete.
+  `docs/performance-baseline.md`. B-180 compiler-candidate exploration is now
+  closed; B-180 is not complete because #268/#269 critical long tails and the
+  final acceptance matrix remain open.
 - Formal/probe/preparation work is serialized and capped at 12 GiB aggregate
   commit and 5 active processes including the root. One bounded A7-to-A8
   attempt ran and timed out without artifacts; no self-compile or full gate
   ran.
-- The user requested another movement pause after the next bottleneck was
-  identified. No new implementation, test or profile may start until the user
-  resumes the session.
+- The user resumed the session on 2026-08-18. The final defer-only candidate was
+  measured and rejected; no further compiler-performance probe is authorized by
+  the retained evidence.
 
 ## Retained implementation
 
@@ -80,11 +82,17 @@
   `probe-seed-generation-a8-job/measurement.json`. This lighter trajectory is
   directional evidence only, not a trusted bootstrap, and no third generation
   attempt was started.
-- `.worktrees/b180-exhaustive-precheck-defer` is clean at
-  `2af820bc932acecda20d098fdc28fbef0fcb8a7e`. It skips only the discarded
-  E0601 computation under the two exact precheck flags and preserves retained
-  recomputation, resolved types, HIR and catch cleanup. Independent source and
-  mutation review is CLEAR; no Ring/bootstrap gate ran.
+- The final current-base defer-only checkpoint is isolated at
+  `d8fe4ded621b832caadcfee920b721b54e68e3a6`. It skips only discarded
+  function/impl-effect precheck E0601 computation and preserves retained
+  recomputation, resolved types, HIR/subst/effects and catch cleanup. Independent
+  source review plus source/mutation and A0/B0 focused behavior gates are CLEAR,
+  but the uninstrumented 120-second performance pair rejected it: both sides
+  timed out, while B0 peak commit / sampled RSS rose to
+  6,926,209,024 / 6,690,410,496 bytes versus A0
+  2,097,664,000 / 2,043,904,000 bytes. Do not merge, bootstrap, profile, combine
+  or rerun it. Evidence is archived under
+  `bench/check/results/b180-exhaustive-precheck-defer-20260818/`.
 - `.worktrees/b180-exhaustive-matrix-base` is clean at
   `b627b8becec292d52465287fce004c0275be481b`. Its irrefutable-row base is after
   the zero-column base and before constructor expansion; malformed row widths,
@@ -125,11 +133,12 @@
 
 ## Profiler broker
 
-- Repository skill `.agents/skills/windows-elevated-broker/` now starts a
-  fixed-TTL administrator broker through one visible UAC. PID 11904 listens on
-  authenticated loopback, reports `administrator=true`, enforces 12 GiB/5
-  processes and expires at 17:58 JST. Recheck `status` after movement/sleep;
-  do not request another UAC while it remains live.
+- Repository skill `.agents/skills/windows-elevated-broker/` starts a fixed-TTL
+  administrator broker through one visible UAC. The 2026-08-18 session opened
+  broker `f47c46ecb9b043f5870d96c3474179ab` (PID 22240), which reports
+  `administrator=true`, enforces 12 GiB/5 processes, permits only xperf plus the
+  exact A0/B0 executables, and expires automatically at 15:41 JST. No elevated
+  request or ETW capture was needed for the final decision.
 - The first long `run` exposed a client bug: the client retained the 5 s socket
   authentication timeout while waiting for the result, reported timeout, but
   the server correctly finished the sole request and wrote its success receipt.
@@ -139,27 +148,19 @@
 
 ## Next safe step
 
-1. The callable locator, binder fast paths, invocation skip/worklist,
-   fresh-ID/UF rollback, snapshot-dedup and narrow-matrix branches are closed. Do
-   not add a third locator, rerun the 2026-08-14 profile or narrow 120 s receipt,
-   or build another transition/root-liveness/snapshot-volume probe.
-2. Keep primitive-const and every matrix candidate isolated. The next and final
-   independently supported B-180 compiler candidate is defer-only: create a
-   fresh worktree from the current root and transfer only
-   `2af820bc932acecda20d098fdc28fbef0fcb8a7e`, never its rejected primitive
-   ancestors and never either matrix candidate.
-3. First lock the defer-only diff and reuse its already-CLEAR source/mutation
-   authority. Add only the missing focused behavior receipts: retained passes
-   must publish the original exhaustiveness diagnostic, discarded/speculative
-   passes must not publish it early, and original Fail/catch cleanup must remain
-   visible. Then compare one serial 120 s clean-base/defer-only prefix under the
-   existing 12 GiB/5-process cap. No Xperf or unbounded bootstrap is authorized.
-4. Stop defer-only on any focused behavior failure, dependency on a mixed C
-   topology, unchanged q501 without absolute resource benefit, or resource
-   regression. If it is rejected, record that B-180 has no remaining supported
-   compiler candidate and close technical exploration rather than opening a new
-   speculative knife.
-5. Do not rerun the already-passing runner-cache `bool_ops` samples, the three
-   known primitive-candidate timeouts, or any unbounded self-compile/full gate.
-   Continue to use the 12 GiB/5-process fail-fast lane and preserve every first
-   failure receipt.
+1. Callable locator, binder fast paths, invocation skip/worklist, fresh-ID/UF
+   rollback, snapshot dedup, both matrix variants and defer-only are closed. Do
+   not add another locator, transition/root-liveness probe, Xperf capture,
+   bootstrap attempt or combined candidate, and do not rerun any 120-second
+   receipt merely to improve its appearance.
+2. The only retained B-180 implementation is the runner anchor-object cache.
+   All compiler candidates stay isolated as source-correct or rejected evidence;
+   none is eligible for merge.
+3. Return the mainline to #268/#269 critical ownership long-tail closure, which
+   is the explicit blocker for B-180 completion recognition and the final
+   C/RC/ASan/self-host/double-bootstrap acceptance matrix. This is correctness
+   work, not permission to reopen compiler-performance exploration.
+4. Continue to use the 12 GiB/5-process fail-fast lane and preserve every first
+   failure receipt. When the critical blockers are genuinely closed, run the
+   B-180 completion matrix against the retained mainline; do not substitute any
+   rejected generated-C mirror for that authority.

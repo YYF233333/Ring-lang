@@ -375,3 +375,22 @@ needed here is which whole-loop candidate was kept or rejected.
   source-correct evidence only. The next and final independently supported
   B-180 candidate is an isolated defer-only validation of
   `2af820bc932acecda20d098fdc28fbef0fcb8a7e` from the clean current base.
+- `bench/check/results/b180-exhaustive-precheck-defer-20260818/` closes that
+  final candidate. The isolated source checkpoint is
+  `d8fe4ded621b832caadcfee920b721b54e68e3a6`; its raw source/mutation authority
+  and both A0/B0 focused retained-diagnostic, catch-consumption and recovery
+  gates passed once. The formal performance pair was strictly uninstrumented:
+  A0 generated C / executable are
+  `D7BB015B32EF8F4A438093509C794C82B60C13548808B0A1093AEFEAB0DF7F2E` /
+  `1AAC8A782EF8C892F74ED676B116EECB28B9E31AABBF65BEE064B56320CE0B25`,
+  and B0 are
+  `E855D11A68DAED20362B45E4E12FD72BA991D38EADC049C2D643DC916B7ADC51` /
+  `3470425C054B6D9B949D9C8860A3B2F3E5EAAD7E00AD2439F8B9A6AD75E00E0E`.
+  Both `check compiler/main.ring` runs timed out at the single 120-second cap,
+  so B0 did not establish whole-loop progress. A0 sampled 2,043,904,000 bytes
+  tree RSS and 2,097,664,000 bytes peak job commit; B0 sampled
+  6,690,410,496 / 6,926,209,024 bytes, about 3.27x / 3.30x A0. The candidate is
+  performance-rejected without bootstrap, ETW or retry. The symmetric locator
+  mirrors are archived only as local topology evidence: their executed I/O is
+  asymmetric on skipped work and cannot decide performance. No independently
+  supported B-180 compiler candidate remains.
