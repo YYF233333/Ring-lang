@@ -762,7 +762,7 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 - 新增 golden 用例锁定（catch body 写外层 mut：捕获路径 + 正常路径 + 嵌套 catch）
 - 全部 E2E + golden + rc 通过；动 RC 相关（box dup/drop）→ golden ×3
 
-### B-164 alloc 原语 size=0 语义未定义（heap corruption 风险）[bugfix] [P1] [S] [judgment] [planning]
+### B-164 alloc 原语 size=0 语义未定义（heap corruption 风险）[bugfix] [P1] [S] [judgment] [doing]
 
 > 2026-07-10 立项（Discussion，B-152 P3 worker_feedback 通知触发）。
 
