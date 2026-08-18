@@ -78,9 +78,7 @@ impl<T> List {
             if self.len > 0 {
                 ring_slot_move(self.buf, 0, new_buf, 0, self.len)
             }
-            if self.cap > 0 {
-                ring_slot_dealloc(self.buf, self.cap)
-            }
+            ring_slot_dealloc(self.buf, self.cap)
             self.buf = new_buf
             self.cap = new_cap
         }

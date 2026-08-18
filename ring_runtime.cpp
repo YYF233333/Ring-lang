@@ -1004,9 +1004,29 @@ extern "C" void* ring_bool_to_str(int64_t val) {
 // B-152 P2: slot bridge functions for Ring List RIIR
 // ============================================================================
 
+[[noreturn]] static void ring_raw_request_panic(const char* function,
+                                                 const char* reason,
+                                                 int64_t request) {
+    fprintf(stderr, "ring panic: %s %s (request=%lld)\n",
+            function, reason, (long long)request);
+    fflush(stderr);
+    exit(1);
+}
+
 extern "C" void* ring_slot_alloc(void* count_tagged) {
     int64_t count = ring_unbox_int(count_tagged);
-    return calloc((size_t)count, sizeof(void*));
+    if (count < 0) {
+        ring_raw_request_panic("ring_slot_alloc", "negative allocation request", count);
+    }
+    if (count == 0) return nullptr;
+    if ((uint64_t)count > (uint64_t)(SIZE_MAX / sizeof(void*))) {
+        ring_raw_request_panic("ring_slot_alloc", "slot byte-size overflow", count);
+    }
+    void* slots = calloc((size_t)count, sizeof(void*));
+    if (!slots) {
+        ring_raw_request_panic("ring_slot_alloc", "allocation failed", count);
+    }
+    return slots;
 }
 
 extern "C" void* ring_slot_dealloc(void* buf, void* count_tagged) {
@@ -1056,9 +1076,13 @@ extern "C" void* ring_slot_swap(void* buf, void* i_tagged, void* j_tagged) {
 }
 
 extern "C" void* ring_slot_move(void* src, void* src_off_tagged, void* dst, void* dst_off_tagged, void* count_tagged) {
+    int64_t count = ring_unbox_int(count_tagged);
+    if (count < 0) {
+        ring_raw_request_panic("ring_slot_move", "negative count", count);
+    }
+    if (count == 0) return nullptr;
     int64_t src_off = ring_unbox_int(src_off_tagged);
     int64_t dst_off = ring_unbox_int(dst_off_tagged);
-    int64_t count = ring_unbox_int(count_tagged);
     memmove((void**)dst + dst_off, (void**)src + src_off, (size_t)count * sizeof(void*));
     return nullptr;
 }
@@ -2158,12 +2182,28 @@ extern "C" void* ring_str_from_ptr(void* ptr, void* len_tagged) {
 
 extern "C" void* ring_buf_alloc(void* cap_tagged) {
     int64_t cap = ring_unbox_int(cap_tagged);
-    return malloc((size_t)cap);
+    if (cap < 0) {
+        ring_raw_request_panic("ring_buf_alloc", "negative allocation request", cap);
+    }
+    if (cap == 0) return nullptr;
+    void* buffer = malloc((size_t)cap);
+    if (!buffer) {
+        ring_raw_request_panic("ring_buf_alloc", "allocation failed", cap);
+    }
+    return buffer;
 }
 
 extern "C" void* ring_buf_alloc_zeroed(void* cap_tagged) {
     int64_t cap = ring_unbox_int(cap_tagged);
-    return calloc((size_t)cap, 1);
+    if (cap < 0) {
+        ring_raw_request_panic("ring_buf_alloc_zeroed", "negative allocation request", cap);
+    }
+    if (cap == 0) return nullptr;
+    void* buffer = calloc((size_t)cap, 1);
+    if (!buffer) {
+        ring_raw_request_panic("ring_buf_alloc_zeroed", "allocation failed", cap);
+    }
+    return buffer;
 }
 
 extern "C" void* ring_buf_dealloc(void* p) {
@@ -2480,7 +2520,9 @@ static void drop_map(void* data) {
             ring_drop(m->values[i]);
         }
     }
-    if (cap > 0) { free(meta); free(m->keys); free(m->values); }
+    free(meta);
+    free(m->keys);
+    free(m->values);
 }
 
 static void drop_closure(void* data) {
