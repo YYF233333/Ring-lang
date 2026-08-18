@@ -292,6 +292,41 @@ receipts remain under ignored `tmp-ownership-critical-acceptance/`.
   and its holdout majority is not closed. Verdict: `insufficient-evidence`.
   Do not turn this result into a source workaround, cache/drop guess, new sample
   grouping, or another run on the same snapshot.
+- A genuinely new abstraction-level fixture is preserved under ignored
+  `bench/check/results/ownership-option-cleanup-20260819/direct-evidence/`.
+  It uses the exact source-built gen1 compiler SHA256
+  `688DDC2B8244EA7A9086AEC33DF396C0453285C7C0CC81331D15CE783D3D83E7`.
+  Direct Map early return, direct `some(Resource)`, and direct `some(Map)` normal
+  and early-return controls print exactly one `drop 10/20/30/40`. Three assigned
+  forms—`Option<Map>` early, `Option<Map>` normal, and `Option<Resource>`
+  normal—return true but print no `drop 50/60/70`. A live `--verify-rc` build
+  exits 0, proving the old verifier shares the blind spot.
+- Fixed generated C makes the transition exact: `created` is moved into Some
+  and nulled; pattern payloads remain borrows; the assigned wrapper has no Drop
+  on either fallthrough or Return. Perceus classifies a Var only from its
+  initial producer, so exact immortal `none` never enters the cleanup set;
+  subsequent Assign therefore receives neither W4 old-value Drop nor final
+  scope/return cleanup. The ownership planner's exact DefId/Take state is not
+  the failing layer, and codegen only reflects the missing post-RC HIR Drop.
+- Independent Argument rejected the direct-none promotion: existing `owned`
+  membership also forces `tail_escape`, so a never-assigned neutral Var would
+  add an unconsumed Clone to unrelated borrowed tails or panic on a move-only
+  borrowed tail. The larger post-RC `{none, owned, empty}` prototype is durable
+  only as rejected commit `56a3c95e3dca08de39bd2804d3a794b66b13a91e`
+  (`REJECTED EXPERIMENT — DO NOT MERGE`). It exceeded 1,000 lines of duplicate
+  HIR traversal, left If/Match/Block tail provenance unknown, polluted
+  Lambda/handler gensym/projection state during loop probes, and failed focused
+  source check with 12 E0208 diagnostics. No point fixes are authorized on that
+  branch.
+- The only active implementation candidate is the bounded S-prime subset. An
+  exact-none, physical-RC, nonboxed Var may enter cleanup only when every
+  reachable block-tail value proves—by existing expression ownership facts,
+  not type or spelling—that switching the tail to escape mode inserts no Clone,
+  changes no Take, and cannot hit a may-own escape panic. Fresh values are
+  eligible; Ident/Field/Index/borrow-return Call and opaque effect/control
+  shapes are fail-closed. A dedicated verifier kind must independently reject
+  missing first/rearmed W4 and exit Drops. This is a correct, reversible subset,
+  not closure of the general owner-bearing-tail finding.
 
 First failures remain evidence and must not be rewritten as passes:
 
@@ -331,15 +366,14 @@ First failures remain evidence and must not be rewritten as passes:
    that has direct authority for the peak; another unmeasured retained-container
    projection is not authorized. Do not rerun either command, raise the cap, or
    describe the absence of gen2 output as a correctness failure.
-3. The fixed-object Map/Option call-site attribution is complete and recorded
-   as `insufficient-evidence`. It validly narrows growth to two sibling
-   Struct/Enum constructions in `type_reaches_callable_through_nominals`, but
-   no single preregistered full signature dominates or passes both holdout
-   lanes. This route authorizes no source candidate. Do not rerun, regroup the
-   observed top sites, disable ICF, raise the sample rate, or implement an
-   explicit drop/cache/source workaround to force a fixed point. A future route
-   requires genuinely new direct authority for the ownership-plan abstraction,
-   not another locator or retained-container hypothesis on this snapshot.
+3. The fixed-object allocation route remains closed as `insufficient-evidence`:
+   do not rerun, regroup, disable ICF, or patch `unify.ring`. The new minimal
+   fixture now supplies direct physical-cleanup authority and permits only the
+   bounded S-prime Perceus/verifier subset described above. It is not accepted
+   until focused mutations, runtime Drop output, source-built gen1 and a
+   materially different gen2/fixed-point attempt all pass. If S-prime needs one
+   more tail/exit special case, stop and lift borrow-source provenance into
+   ownership-planned shared HIR rather than resuming downstream traversal.
 4. Do not replace `compiler/dist-c/main.c` with gen1 yet. The generated file is
    not fixed-point proven and differs broadly from the tracked anchor; review
    and a successful gen2 byte comparison are prerequisites.
