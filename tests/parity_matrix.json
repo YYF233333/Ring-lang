@@ -540,6 +540,14 @@
       "reason": "Generated-C function bodies require Never/Return and exact Borrowed-return spread sources before destination allocation, forbid borrowed-result cleanup Drops, and a RING_ALLOC_STATS executable requires 256-loop struct/variant alloc/free balance."
     },
     {
+      "feature_id": "backend.ownership_option_cleanup_structural",
+      "evidence": ["tests/cases/structural/ownership_option_map_exit.ring"],
+      "oracle": "generated-c-option-cleanup-exit-structural",
+      "lane": ["c-structural"],
+      "status": "covered",
+      "reason": "Generated-C inspection requires W4 plus exactly one wrapper Drop per reachable exit for safe-tail Option::none vars, rejects cleanup-induced hoists for borrowed tails, and keeps borrowed payload projections un-dropped and uncleared."
+    },
+    {
       "feature_id": "backend.frontend_check_only",
       "evidence": ["tests/cases/error_occurs_check.ring"],
       "oracle": "diagnostic-substring",

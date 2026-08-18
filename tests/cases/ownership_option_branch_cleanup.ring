@@ -54,6 +54,110 @@ fn early_return(flag: Bool) {
     print(chosen.is_none())
 }
 
+fn option_none_var_only() {
+    let mut wrapped: Resource? = none
+    print(wrapped.is_none())
+}
+
+// The first two cleanup-active W4 sites in declaration order deliberately
+// target this same exact slot. Mutation ordinal 1 removes the Some overwrite
+// Drop; ordinal 2 removes the re-armed reset-to-none Drop.
+fn option_reset_none() {
+    let mut wrapped: Resource? = none
+    wrapped = some(Resource { id: 90 })
+    wrapped = none
+    print(wrapped.is_none())
+}
+
+fn option_resource_normal() {
+    let mut wrapped: Resource? = none
+    wrapped = some(Resource { id: 50 })
+    print(wrapped.is_some())
+}
+
+fn option_resource_early() {
+    let mut wrapped: Resource? = none
+    wrapped = some(Resource { id: 51 })
+    print("resource early")
+    return
+}
+
+fn resource_map(id: Int) -> Map<Int, Resource> {
+    let mut values: Map<Int, Resource> = map_new()
+    values.insert(id, Resource { id: id })
+    values
+}
+
+fn option_map_normal() {
+    let mut wrapped: Map<Int, Resource>? = none
+    wrapped = some(resource_map(60))
+    print(wrapped.is_some())
+}
+
+fn option_map_early() {
+    let mut wrapped: Map<Int, Resource>? = none
+    wrapped = some(resource_map(61))
+    print("map early")
+    return
+}
+
+fn option_conditional(flag: Bool) {
+    let mut wrapped: Resource? = none
+    if flag {
+        wrapped = some(Resource { id: 70 })
+    }
+    print(wrapped.is_some())
+}
+
+fn option_loop(count: Int) {
+    let mut wrapped: Resource? = none
+    let mut i = 0
+    while i < count {
+        wrapped = some(Resource { id: 80 + i })
+        i = i + 1
+    }
+    print(wrapped.is_some())
+}
+
+fn option_fresh_bool_tail() -> Bool {
+    let mut wrapped: Resource? = none
+    wrapped = some(Resource { id: 100 })
+    true
+}
+
+fn option_nested_fresh_tail() -> Bool {
+    let mut wrapped: Resource? = none
+    wrapped = some(Resource { id: 101 })
+    {
+        let local = "nested"
+        true
+    }
+}
+
+fn option_shadow() {
+    let mut wrapped: Resource? = none
+    wrapped = some(Resource { id: 110 })
+    {
+        let mut wrapped: Resource? = none
+        wrapped = some(Resource { id: 111 })
+        print(wrapped.is_some())
+    }
+    print(wrapped.is_some())
+}
+
+fn direct_some_control() {
+    let wrapped = some(Resource { id: 120 })
+    print(wrapped.is_some())
+}
+
+fn borrowed_str_block(value: Str) {
+    {
+        let mut wrapped: Resource? = none
+        value
+    }
+    print(value)
+}
+
 fn main() {
     if_choice(true)
     if_choice(false)
@@ -64,5 +168,21 @@ fn main() {
     diverge_or_owned(true)
     early_return(true)
     early_return(false)
+    option_none_var_only()
+    option_resource_normal()
+    option_resource_early()
+    option_map_normal()
+    option_map_early()
+    option_conditional(true)
+    option_conditional(false)
+    option_loop(0)
+    option_loop(1)
+    option_loop(3)
+    option_reset_none()
+    print(option_fresh_bool_tail())
+    print(option_nested_fresh_tail())
+    option_shadow()
+    direct_some_control()
+    borrowed_str_block("borrowed str")
     print("done")
 }

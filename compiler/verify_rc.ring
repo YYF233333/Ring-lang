@@ -123,7 +123,7 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     expr_has_reachable_value, hmatch_arm_body_is_reachable,
     stmt_reaches_next, hparam_ownership,
     hparam_is_external_drop_owner, collect_exact_free_bindings,
-    BUILTIN_RANGE}
+    is_synthetic_rc_def_id, BUILTIN_RANGE}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
     expr_diverges, stmt_diverges,
     is_scalar_type, is_materializable_fn_value}
@@ -144,6 +144,7 @@ const K_OWNED: Int = 0       // droppable owned local — exactly-once consumpti
 const K_BORROW: Int = 1      // param / pattern projection / destructure
 const K_NONOWNED: Int = 2    // local the pass deliberately does not drop
 const K_LOOP_FRESH: Int = 3  // Range iteration value; backend cleanup owns slot
+const K_OPTION_CLEANUP: Int = 4 // exact `var Option = none`; S′ cleanup account
 
 // Binding states (owned bindings)
 const S_LIVE: Int = 0
@@ -154,6 +155,13 @@ const S_MOVED: Int = 2
 // clears its slot to null, so a single unconditional Drop safely consumes this
 // state; every other operation remains invalid until that Drop.
 const S_MAYBE_MOVED: Int = 3
+// Dedicated state domain for K_OPTION_CLEANUP. The initial immortal `none` and
+// every later assignment both require the same explicit wrapper-slot Drop;
+// Take clears the native slot but exit cleanup remains structurally mandatory.
+const S_OPTION_PENDING: Int = 4
+const S_OPTION_DROPPED: Int = 5
+const S_OPTION_MOVED: Int = 6
+const S_OPTION_MAYBE_MOVED: Int = 7
 
 pub struct RcFinding {
     pub class: Str,
@@ -747,7 +755,9 @@ fn v_states_equal(a: List<Int>, b: List<Int>, upto: Int) -> Bool {
 
 fn v_state_is_known(state: Int) -> Bool {
     state == S_LIVE || state == S_DROPPED || state == S_MOVED ||
-    state == S_MAYBE_MOVED
+    state == S_MAYBE_MOVED || state == S_OPTION_PENDING ||
+    state == S_OPTION_DROPPED || state == S_OPTION_MOVED ||
+    state == S_OPTION_MAYBE_MOVED
 }
 
 // Join one exact logical slot across reachable forward edges.  Only an owned
@@ -758,6 +768,17 @@ fn v_state_is_known(state: Int) -> Bool {
 fn v_join_binding_state(kind: Int, left: Int, right: Int) -> (Int, Bool) {
     if !v_state_is_known(left) || !v_state_is_known(right) {
         panic("unreachable: RC verifier encountered an unknown binding state")
+    }
+    if kind == K_OPTION_CLEANUP {
+        if left == right { return ((left, true)) }
+        let left_pending = left == S_OPTION_PENDING ||
+            left == S_OPTION_MOVED || left == S_OPTION_MAYBE_MOVED
+        let right_pending = right == S_OPTION_PENDING ||
+            right == S_OPTION_MOVED || right == S_OPTION_MAYBE_MOVED
+        if left_pending && right_pending {
+            return ((S_OPTION_MAYBE_MOVED, true))
+        }
+        return ((S_OPTION_MAYBE_MOVED, false))
     }
     if kind != K_OWNED &&
        (left == S_MAYBE_MOVED || right == S_MAYBE_MOVED) {
@@ -877,7 +898,12 @@ fn v_check_exact_capture_reads(body: HExpr, mut ctx: VCtx) {
             if !v_state_is_known(state) {
                 panic("unreachable: RC verifier capture read saw unknown state")
             }
-            if state != S_LIVE {
+            let readable = if ctx.kinds[index] == K_OPTION_CLEANUP {
+                state == S_OPTION_PENDING
+            } else {
+                state == S_LIVE
+            }
+            if !readable {
                 let capture_span = capture.span
                 v_report(ctx, "uaf-use-after-drop", true,
                     "capture of '${capture.name}' reads an owned slot that is not live on every reachable path",
@@ -1209,6 +1235,148 @@ fn v_block_local_init(stmts: List<HStmt>, def_id: Int) -> HExpr? {
     found
 }
 
+// Recover the value producer that preceded Perceus's synthetic tail hoist. The
+// verifier does not trust membership in Perceus's cleanup list: it independently
+// follows the exact synthetic DefId back to its direct Let initializer; the
+// verifier-side predicate below then re-derives the no-op proof independently.
+fn v_original_block_tail(stmts: List<HStmt>, tail: HExpr?) -> HExpr? {
+    match tail {
+        some(value) => {
+            let tail_def_id = match value {
+                HExpr::Ident { def_id, .. } => def_id,
+                HExpr::Take { source_def_id, .. } => some(source_def_id),
+                _ => none
+            }
+            match tail_def_id {
+                some(def_id) => if is_synthetic_rc_def_id(def_id) {
+                    match v_block_local_init(stmts, def_id) {
+                        some(init) => some(init),
+                        none => some(value)
+                    }
+                } else { some(value) },
+                none => some(value)
+            }
+        },
+        none => none
+    }
+}
+
+fn v_block_tail_is_synthetic(stmts: List<HStmt>, tail: HExpr?) -> Bool {
+    match tail {
+        some(value) => {
+            let tail_def_id = match value {
+                HExpr::Ident { def_id, .. } => def_id,
+                HExpr::Take { source_def_id, .. } => some(source_def_id),
+                _ => none
+            }
+            match tail_def_id {
+                some(def_id) => is_synthetic_rc_def_id(def_id) &&
+                    v_block_local_init(stmts, def_id).is_some(),
+                none => false
+            }
+        },
+        none => false
+    }
+}
+
+// Independent verifier-side owner-bearing decision. Unknown call authority is
+// fail-closed instead of invoking Perceus's panic-only production predicate.
+fn v_tail_is_owner_bearing(
+    expr: HExpr, ownership: OwnershipMetadata
+) -> Bool {
+    let nullary_variant_ctor = is_nullary_variant_ctor_ident(expr)
+    let option_none_ctor = is_option_none_ctor_ident(expr)
+    let materialized_fn_value = is_materialized_fn_value(expr)
+    match expr {
+        HExpr::Ident { .. } => !nullary_variant_ctor &&
+            !option_none_ctor && !materialized_fn_value,
+        HExpr::FieldAccess { .. } => true,
+        HExpr::IndexExpr { receiver, .. } => !is_str_index(receiver),
+        HExpr::Call { callee_def_id, .. } =>
+            v_exact_call_return_ownership(ownership, callee_def_id) !=
+                RETURN_OWNERSHIP_OWNED,
+        _ => false
+    }
+}
+
+// Recompute the no-op escape proof from post-RC HIR without trusting Perceus's
+// cleanup decision. In a borrowed parent, a Clone found only after following a
+// synthetic cleanup hoist may have been inserted by the very decision under
+// audit, so inspect its inner producer instead of accepting it circularly.
+fn v_escape_is_noop_on_reachable_tail(
+    expr: HExpr, ownership: OwnershipMetadata,
+    reject_synthetic_clone: Bool
+) -> Bool {
+    if !expr_has_reachable_value(expr) { return true }
+    match expr {
+        HExpr::Clone { inner, .. } => if reject_synthetic_clone {
+            v_escape_is_noop_on_reachable_tail(
+                inner, ownership, reject_synthetic_clone)
+        } else { true },
+        HExpr::Take { .. } => true,
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            if !v_escape_is_noop_on_reachable_tail(
+                    then_branch, ownership, reject_synthetic_clone) {
+                return false
+            }
+            match else_branch {
+                some(other) => v_escape_is_noop_on_reachable_tail(
+                    other, ownership, reject_synthetic_clone),
+                none => true
+            }
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            for arm in arms {
+                if expr_has_reachable_value(arm.body) &&
+                   !v_escape_is_noop_on_reachable_tail(
+                        arm.body, ownership, reject_synthetic_clone) {
+                    return false
+                }
+            }
+            true
+        },
+        HExpr::Block { stmts, tail, .. } =>
+            match v_original_block_tail(stmts, tail) {
+            some(value) => v_escape_is_noop_on_reachable_tail(
+                value, ownership, reject_synthetic_clone),
+            none => true
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            v_escape_is_noop_on_reachable_tail(
+                body, ownership, reject_synthetic_clone),
+        HExpr::TryCatch { .. } | HExpr::HandleExpr { .. } |
+        HExpr::EffectOp { .. } => false,
+        _ => !v_tail_is_owner_bearing(expr, ownership)
+    }
+}
+
+fn v_block_option_cleanup_eligible(
+    stmts: List<HStmt>, tail: HExpr?, mode: Int,
+    ownership: OwnershipMetadata
+) -> Bool {
+    let synthetic = v_block_tail_is_synthetic(stmts, tail)
+    match v_original_block_tail(stmts, tail) {
+        some(value) => v_escape_is_noop_on_reachable_tail(
+            value, ownership, synthetic && mode == M_BORROWED),
+        none => true
+    }
+}
+
+fn v_is_option_cleanup_var(
+    name: Str, def_id: Int?, ty: Type, init: HExpr, block_eligible: Bool,
+    boxed: Set<Int>, externs: Set<Str>
+) -> Bool {
+    if rc_name_skippable(name) || !block_eligible ||
+       !type_is_physical_rc_eligible(ty, externs) ||
+       !is_option_none_ctor_ident(init) {
+        return false
+    }
+    match def_id {
+        some(id) => !boxed.contains(id),
+        none => false
+    }
+}
+
 // ============================================================
 // Position handlers
 // ============================================================
@@ -1535,6 +1703,23 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 v_report(ctx, "uaf-take-borrow", true,
                     "Take of borrowed binding '${name}'", take_span)
                 CLS_BORROW
+            } else if ctx.kinds[index] == K_OPTION_CLEANUP {
+                if ctx.states[index] != S_OPTION_PENDING {
+                    let take_span = span
+                    v_report(ctx, "uaf-double-take", true,
+                        "second Take of cleanup-active Option '${name}' on the same path",
+                        take_span)
+                    CLS_BORROW
+                } else {
+                    if mode != M_CONSUMED {
+                        let take_span = span
+                        v_report(ctx, "leak-take-position", true,
+                            "Take of '${name}' appears in a non-consuming position",
+                            take_span)
+                    }
+                    ctx.states.set(index, S_OPTION_MOVED)
+                    CLS_OWNED
+                }
             } else if ctx.states[index] != S_LIVE {
                 let take_span = span
                 v_report(ctx, "uaf-double-take", true,
@@ -1988,6 +2173,13 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                     v_report(ctx, "leak-return", true,
                         "owned binding '${ctx.names[i]}' is live (not dropped) at this return", return_span)
                 }
+                if ctx.kinds[i] == K_OPTION_CLEANUP &&
+                   ctx.states[i] != S_OPTION_DROPPED {
+                    let return_span = span
+                    v_report(ctx, "leak-option-exit", true,
+                        "cleanup-active Option binding '${ctx.names[i]}' has no exit Drop at this return",
+                        return_span)
+                }
                 i = i + 1
             }
             CLS_EXCLUDED
@@ -2029,6 +2221,18 @@ fn v_ident(
         if v_type_excluded(ty, ctx.externs) {
             return CLS_EXCLUDED
         }
+        return CLS_BORROW
+    }
+
+    if ctx.kinds[idx] == K_OPTION_CLEANUP {
+        if ctx.states[idx] != S_OPTION_PENDING {
+            let read_span = span
+            v_report(ctx, "uaf-use-after-drop", true,
+                "read of cleanup-active Option '${name}' after Drop/Take on at least one reachable path",
+                read_span)
+        }
+        // This slot is an existing owner read. A consuming edge must carry the
+        // ownership planner's exact Take/Clone; a bare Ident remains a borrow.
         return CLS_BORROW
     }
 
@@ -2194,6 +2398,8 @@ fn v_handler_scope(h: HEffectHandler, mut ctx: VCtx) {
 fn v_block(block: HExpr, mode: Int, mut ctx: VCtx) -> (Int, Bool) {
     match block {
         HExpr::Block { stmts, tail, .. } => {
+            let option_cleanup_eligible = v_block_option_cleanup_eligible(
+                stmts, tail, mode, ctx.ownership)
             v_push_frame(ctx)
             let mut diverged = false
             for s in stmts {
@@ -2201,7 +2407,7 @@ fn v_block(block: HExpr, mode: Int, mut ctx: VCtx) -> (Int, Bool) {
                     // Verify the terminating statement itself, including its
                     // Return/Never operand and required cleanup, then stop at
                     // the same HIR boundary used by planning and RC lowering.
-                    v_stmt(s, ctx)
+                    v_stmt(s, option_cleanup_eligible, ctx)
                     if !stmt_reaches_next(s) { diverged = true }
                 }
             }
@@ -2273,18 +2479,41 @@ fn v_check_frame_leaks(mut ctx: VCtx) {
             v_report(ctx, "leak-binding", true,
                 "owned binding '${ctx.names[i]}' is never consumed (no drop/move) on the fall-through path", ctx.spans[i])
         }
+        if ctx.kinds[i] == K_OPTION_CLEANUP &&
+           ctx.states[i] != S_OPTION_DROPPED {
+            v_report(ctx, "leak-option-exit", true,
+                "cleanup-active Option binding '${ctx.names[i]}' has no exit Drop on the fall-through path",
+                ctx.spans[i])
+        }
         i = i + 1
     }
 }
 
-fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
+fn v_stmt(
+    stmt: HStmt, option_cleanup_eligible: Bool, mut ctx: VCtx
+) -> Bool {
     match stmt {
         HStmt::Let { name, def_id, ty, init, span, .. } => {
             v_let_like(name, def_id, ty, init, span, ctx)
             false
         },
         HStmt::Var { name, def_id, ty, init, span, .. } => {
-            v_let_like(name, def_id, ty, init, span, ctx)
+            if v_is_option_cleanup_var(name, def_id, ty, init,
+                    option_cleanup_eligible, ctx.boxed, ctx.externs) {
+                let _ = v_consume(init, ctx)
+                v_bind_def(ctx, name, def_id, K_OPTION_CLEANUP, span)
+                let index = match def_id {
+                    some(id) => v_lookup_def(ctx, id),
+                    none => 0 - 1
+                }
+                if index < 0 {
+                    panic("unreachable: verifier Option cleanup slot was not bound")
+                }
+                ctx.states.set(index, S_OPTION_PENDING)
+                v_bind_callable_contract(ctx, def_id, ty, span)
+            } else {
+                v_let_like(name, def_id, ty, init, span, ctx)
+            }
             false
         },
         HStmt::Assign { target, value, span } => {
@@ -2314,6 +2543,13 @@ fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
                     let return_span = span
                     v_report(ctx, "leak-return", true,
                         "owned binding '${ctx.names[i]}' is live (not dropped) at this return", return_span)
+                }
+                if ctx.kinds[i] == K_OPTION_CLEANUP &&
+                   ctx.states[i] != S_OPTION_DROPPED {
+                    let return_span = span
+                    v_report(ctx, "leak-option-exit", true,
+                        "cleanup-active Option binding '${ctx.names[i]}' has no exit Drop at this return",
+                        return_span)
                 }
                 i = i + 1
             }
@@ -2528,6 +2764,17 @@ fn v_assign(target: HExpr, value: HExpr, span: Span, mut ctx: VCtx) {
             if idx < 0 {
                 return
             }
+            if ctx.kinds[idx] == K_OPTION_CLEANUP {
+                if ctx.states[idx] != S_OPTION_DROPPED {
+                    let overwrite_span = span
+                    v_report(ctx, "leak-option-reassign", true,
+                        "cleanup-active Option '${name}' is assigned before its old wrapper slot is Dropped",
+                        overwrite_span)
+                }
+                ctx.states.set(idx, S_OPTION_PENDING)
+                v_bind_callable_contract(ctx, def_id, ty, span)
+                return
+            }
             if ctx.kinds[idx] == K_BORROW {
                 let overwrite_span = span
                 v_report(ctx, "x-overwrite-param", false,
@@ -2599,6 +2846,17 @@ fn v_drop(name: Str, def_id: Int, span: Span, mut ctx: VCtx) {
         let drop_span = span
         v_report(ctx, "uaf-drop-unknown", true,
             "Drop of '${name}' which is not in scope", drop_span)
+        return
+    }
+    if ctx.kinds[idx] == K_OPTION_CLEANUP {
+        if ctx.states[idx] == S_OPTION_DROPPED {
+            let drop_span = span
+            v_report(ctx, "uaf-double-drop", true,
+                "second Drop of cleanup-active Option '${name}' on the same path",
+                drop_span)
+            return
+        }
+        ctx.states.set(idx, S_OPTION_DROPPED)
         return
     }
     if ctx.kinds[idx] == K_BORROW {
@@ -2701,6 +2959,13 @@ fn v_check_loop_exit(
             let exit_span = span
             v_report(ctx, "leak-loop-exit", true,
                 "owned binding '${ctx.names[i]}' is live (not dropped) at this ${what}", exit_span)
+        }
+        if ctx.kinds[i] == K_OPTION_CLEANUP &&
+           ctx.states[i] != S_OPTION_DROPPED {
+            let exit_span = span
+            v_report(ctx, "leak-option-exit", true,
+                "cleanup-active Option binding '${ctx.names[i]}' has no exit Drop at this ${what}",
+                exit_span)
         }
         i = i + 1
     }

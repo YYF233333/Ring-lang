@@ -313,6 +313,16 @@ pub fn perceus_transform(program: HProgram) -> HProgram {
 //   "inject-range-continue-cleanup"
 //                 — incorrectly emit that Drop before Continue; verifier must
 //                   report uaf-loop-auto-drop before backend cleanup.
+//   "missing-option-reassign-drop"
+//                 — omit the first cleanup-active Option W4 Drop.
+//   "missing-option-rearmed-drop"
+//                 — omit the second cleanup-active Option W4 Drop, proving a
+//                   reset/reassignment re-arms the same exact slot.
+//   "missing-option-exit-drop"
+//                 — omit the first cleanup-active Option exit Drop.
+//   "force-option-tail-eligible"
+//                 — TEST ONLY: admit borrowed block tails so the verifier must
+//                   independently reject the resulting cleanup/Clone cycle.
 // Reached only via the `--rc-mutate=` CLI flag (verify path); the build/run
 // pipelines call perceus_transform and cannot be mutated.
 pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
@@ -368,13 +378,19 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     let ownership = input_ownership
     // Index 0 is the ordinary RC gensym. Remaining cells are test-only mutation
     // controls, kept outside semantic metadata so no boxed Map/struct alias can
-    // leak them: missing-Take, missing Range Break cleanup, and premature Range
-    // Continue cleanup respectively.
+    // leak them: missing-Take, missing Range Break cleanup, premature Range
+    // Continue cleanup, cleanup-active Option W4 ordinal, missing Option exit
+    // cleanup, and forced unsafe tail eligibility respectively.
     let mut rc_gensym = RcState {
         counters: [0,
             if mutate == "missing-take" { 1 } else { 0 },
             if mutate == "strip-range-break-cleanup" { 1 } else { 0 },
-            if mutate == "inject-range-continue-cleanup" { 1 } else { 0 }],
+            if mutate == "inject-range-continue-cleanup" { 1 } else { 0 },
+            if mutate == "missing-option-reassign-drop" { 1 }
+            else if mutate == "missing-option-rearmed-drop" { 2 }
+            else { 0 },
+            if mutate == "missing-option-exit-drop" { 1 } else { 0 },
+            if mutate == "force-option-tail-eligible" { 1 } else { 0 }],
         callable_projections: []
     }
     let new_decls = transform_decls(anf_program.decls,
@@ -2477,7 +2493,10 @@ struct OwnedSlot {
     // Range iteration slots are real per-iteration owners, but normal and
     // continue edges are cleaned by the backend increment block. Perceus only
     // emits their cleanup on edges that skip that block (break/return).
-    backend_loop_cleanup: Bool
+    backend_loop_cleanup: Bool,
+    // Exact mutable Option slot initially bound to the immortal `none`
+    // singleton and admitted only by the bounded no-op tail predicate below.
+    option_none_cleanup: Bool
 }
 
 fn owned_slot_equal(a: OwnedSlot, b: OwnedSlot) -> Bool {
@@ -2522,7 +2541,7 @@ fn transform_fn_body(
             }
             let param_name = param.name
             owned.push(OwnedSlot { name: param_name, def_id: def_id,
-                backend_loop_cleanup: false })
+                backend_loop_cleanup: false, option_none_cleanup: false })
         }
     }
     // One program-global traversal counter supplies both an unspellable name
@@ -2579,7 +2598,7 @@ fn add_fn_param_cleanup(
             final_stmts.push(HStmt::Let { name: binding_name,
                 name_span: synthetic_span(), def_id: some(binding_def_id),
                 ty: binding_ty, init: value_, span: synthetic_span() })
-            for drop_stmt in drops_for(owned_params) {
+            for drop_stmt in drops_for(owned_params, gensym) {
                 let cleanup = drop_stmt
                 final_stmts.push(cleanup)
             }
@@ -2594,7 +2613,7 @@ fn add_fn_param_cleanup(
                 ty: result_ty, effects: result_effects, span: result_span }
         },
         none => {
-            for drop_stmt in drops_for(owned_params) {
+            for drop_stmt in drops_for(owned_params, gensym) {
                 let cleanup = drop_stmt
                 final_stmts.push(cleanup)
             }
@@ -2652,6 +2671,54 @@ fn is_owner_bearing(
         HExpr::Call { callee_def_id, .. } =>
             call_returns_borrowed(ownership, callee_def_id),
         _ => false,
+    }
+}
+
+// S′ bounded safety gate for admitting `var slot: T? = none` to the existing
+// cleanup-owned path. Adding any block local to that path changes the block's
+// tail mode from borrow to escape. This predicate proves that change is a
+// semantic no-op on every reachable value leaf: an already planned Clone/Take
+// remains unchanged; a normal leaf is safe only when the shared exact-return
+// authority says it is not owner-bearing. Control-flow nodes recurse only over
+// their value-producing branches. Effect/handler/try shapes remain fail-closed
+// because their abort/resume ownership is not represented by this local proof.
+pub fn escape_is_noop_on_reachable_tail(
+    expr: HExpr, ownership: OwnershipMetadata
+) -> Bool {
+    if !expr_has_reachable_value(expr) { return true }
+    match expr {
+        HExpr::Clone { .. } | HExpr::Take { .. } => true,
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            if !escape_is_noop_on_reachable_tail(
+                    then_branch, ownership) {
+                return false
+            }
+            match else_branch {
+                some(other) => escape_is_noop_on_reachable_tail(
+                    other, ownership),
+                none => true
+            }
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            for arm in arms {
+                if expr_has_reachable_value(arm.body) &&
+                   !escape_is_noop_on_reachable_tail(
+                        arm.body, ownership) {
+                    return false
+                }
+            }
+            true
+        },
+        HExpr::Block { tail, .. } => match tail {
+            some(value) => escape_is_noop_on_reachable_tail(
+                value, ownership),
+            none => true
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            escape_is_noop_on_reachable_tail(body, ownership),
+        HExpr::TryCatch { .. } | HExpr::HandleExpr { .. } |
+        HExpr::EffectOp { .. } => false,
+        _ => !is_owner_bearing(expr, ownership)
     }
 }
 
@@ -2971,8 +3038,23 @@ fn rc_block_root(body: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<I
 
 // Process a block's statement list + tail.  Returns (new_stmts, new_tail).
 fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<Str>, drop_types: OwnershipMetadata, mut gensym: RcState, loop_base: Int) -> (List<HStmt>, HExpr?) {
+    let tail_for_gate = tail
+    let tail_for_transform = tail
+    let base_option_none_cleanup_eligible = match tail_for_gate {
+        some(value) => escape_is_noop_on_reachable_tail(
+            value, drop_types),
+        none => true
+    }
+    let force_option_none_cleanup =
+        !base_option_none_cleanup_eligible &&
+        gensym.counters.get(6) == some(1) &&
+        block_has_option_none_cleanup_candidate(stmts, boxed, externs)
+    if force_option_none_cleanup { gensym.counters.set(6, 0) }
+    let option_none_cleanup_eligible =
+        base_option_none_cleanup_eligible || force_option_none_cleanup
     // Bindings defined directly by these statements (not nested loop/branch scopes).
-    let block_locals = direct_block_locals(stmts, externs, drop_types)
+    let block_locals = direct_block_locals(stmts, boxed, externs, drop_types,
+        option_none_cleanup_eligible)
 
     // The owned set visible to each statement = enclosing owned ++ the bindings of
     // THIS block declared BEFORE that statement.  This must be built INCREMENTALLY
@@ -3011,7 +3093,8 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<Ow
         // when its initializer returns normally.
         if reaches_next {
             for n in stmt_droppable_locals(
-                    local_input, externs, drop_types) {
+                    local_input, boxed, externs, drop_types,
+                    option_none_cleanup_eligible) {
                 if !owned_contains(visible_owned, n) {
                     let owned_local = n
                     visible_owned.push(owned_local)
@@ -3058,7 +3141,7 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<Ow
 
     // The tail sees every block-local (all `let`s precede the tail).
     let new_tail = if reaches_tail {
-        match tail {
+        match tail_for_transform {
             some(t) => {
                 let tail_ = t
                 some(rc_escape_or_value(tail_, tail_escape, visible_owned,
@@ -3077,7 +3160,7 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<Ow
         // / double-free on the diverging path).
         ((new_stmts, new_tail))
     } else {
-        let drops = drops_for(own_block_locals)
+        let drops = drops_for(own_block_locals, gensym)
         match new_tail {
             some(t) => {
                 // Hoist the tail so the drops run AFTER it is evaluated.
@@ -3182,14 +3265,16 @@ fn fresh_scope_tmp(mut gensym: RcState) -> (Str, Int) {
 // exception: each iteration creates a fresh owner tracked with edge-sensitive
 // backend_loop_cleanup semantics.
 fn direct_block_locals(
-    stmts: List<HStmt>, externs: Set<Str>, ownership: OwnershipMetadata
+    stmts: List<HStmt>, boxed: Set<Int>, externs: Set<Str>,
+    ownership: OwnershipMetadata, option_none_cleanup_eligible: Bool
 ) -> List<OwnedSlot> {
     let mut out: List<OwnedSlot> = []
     for s in stmts {
         let locals_stmt = s
         let reachability_stmt = s
         for n in stmt_droppable_locals(
-                locals_stmt, externs, ownership) {
+                locals_stmt, boxed, externs, ownership,
+                option_none_cleanup_eligible) {
             let membership_slot = n
             if !owned_contains(out, membership_slot) {
                 let output_slot = n
@@ -3201,13 +3286,42 @@ fn direct_block_locals(
     out
 }
 
+fn option_none_cleanup_candidate(
+    stmt: HStmt, boxed: Set<Int>, externs: Set<Str>
+) -> Bool {
+    match stmt {
+        HStmt::Var { name, def_id: some(id), ty, init, .. } =>
+            !rc_name_skippable(name) && !boxed.contains(id) &&
+            type_is_physical_rc_eligible(ty, externs) &&
+            is_option_none_ctor_ident(init),
+        _ => false
+    }
+}
+
+fn block_has_option_none_cleanup_candidate(
+    stmts: List<HStmt>, boxed: Set<Int>, externs: Set<Str>
+) -> Bool {
+    for stmt in stmts {
+        let candidate_stmt = stmt
+        let reachability_stmt = stmt
+        if option_none_cleanup_candidate(
+                candidate_stmt, boxed, externs) {
+            return true
+        }
+        if !stmt_reaches_next(reachability_stmt) { return false }
+    }
+    false
+}
+
 // The droppable owned local(s) a SINGLE statement introduces (0 or 1).  Same
 // classification as direct_block_locals, factored out so rc_block_inner can grow
 // the visible-owned set incrementally (a binding is only droppable from its `let`
 // onward — see rc_block_inner).
 fn stmt_droppable_locals(
-    s: HStmt, externs: Set<Str>, ownership: OwnershipMetadata
+    s: HStmt, boxed: Set<Int>, externs: Set<Str>,
+    ownership: OwnershipMetadata, option_none_cleanup_eligible: Bool
 ) -> List<OwnedSlot> {
+    let candidate_stmt = s
     match s {
         HStmt::Let { name, def_id, init, .. } => {
             // B-102 R-clean: Type-DAG bindings participate in normal RC — a
@@ -3225,21 +3339,27 @@ fn stmt_droppable_locals(
                         "unreachable: cleanup-visible let has no exact DefId")
                 }
                 [OwnedSlot { name: output_name, def_id: exact,
-                    backend_loop_cleanup: false }]
+                    backend_loop_cleanup: false,
+                    option_none_cleanup: false }]
             } else { [] }
         },
         HStmt::Var { name, def_id, init, .. } => {
             let skippable_name = name
+            let cleanup_none = option_none_cleanup_eligible &&
+                option_none_cleanup_candidate(
+                    candidate_stmt, boxed, externs)
+            let ordinary_owned = is_droppable_init(
+                init, externs, ownership)
             if rc_name_skippable(skippable_name) == false &&
-               is_droppable_init(init, externs, ownership) {
+               (ordinary_owned || cleanup_none) {
                 let output_name = name
-                let exact = match def_id {
+                let cleanup_def_id = match def_id {
                     some(id) => id,
-                    none => panic(
-                        "unreachable: cleanup-visible var has no exact DefId")
+                    none => panic("unreachable: cleanup-visible var has no exact DefId")
                 }
-                [OwnedSlot { name: output_name, def_id: exact,
-                    backend_loop_cleanup: false }]
+                [OwnedSlot { name: output_name, def_id: cleanup_def_id,
+                    backend_loop_cleanup: false,
+                    option_none_cleanup: cleanup_none }]
             } else { [] }
         },
         _ => [],
@@ -3529,7 +3649,30 @@ fn loop_scoped_owned(
 
 // Build unconditional cleanup in reverse declaration order. A slot cleared by
 // Take is null, so the same Drop node is valid on moved and non-moved paths.
-fn drops_for(names: List<OwnedSlot>) -> List<HStmt> {
+fn emit_option_reassign_drop(
+    slot: OwnedSlot, mut gensym: RcState
+) -> Bool {
+    if !slot.option_none_cleanup { return true }
+    match gensym.counters.get(4) {
+        some(ordinal) => if ordinal > 0 {
+            gensym.counters.set(4, ordinal - 1)
+            ordinal != 1
+        } else { true },
+        none => true
+    }
+}
+
+fn emit_option_exit_drop(slot: OwnedSlot, mut gensym: RcState) -> Bool {
+    if !slot.option_none_cleanup { return true }
+    if gensym.counters.get(5) == some(1) {
+        gensym.counters.set(5, 0)
+        false
+    } else {
+        true
+    }
+}
+
+fn drops_for(names: List<OwnedSlot>, mut gensym: RcState) -> List<HStmt> {
     let mut out: List<HStmt> = []
     let mut index = names.len()
     while index > 0 {
@@ -3539,7 +3682,8 @@ fn drops_for(names: List<OwnedSlot>) -> List<HStmt> {
                 let skippable_name = slot.name
                 let drop_name = slot.name
                 let drop_def_id = slot.def_id
-                if rc_name_skippable(skippable_name) == false {
+                if rc_name_skippable(skippable_name) == false &&
+                   emit_option_exit_drop(slot, gensym) {
                     out.push(HStmt::Drop { name: drop_name,
                         def_id: drop_def_id, ty: Type::UnitType,
                         span: synthetic_span() })
@@ -3647,18 +3791,20 @@ fn rc_stmt(stmt: HStmt, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<St
                         dict_closure_dicts: none, ty: result_ty,
                         effects: value_effects, span: value_span
                     }
-                    [
-                        HStmt::Let { name: binding_name,
-                            name_span: synthetic_span(),
-                            def_id: some(binding_def_id),
-                            ty: binding_ty, init: new_value,
-                            span: synthetic_span() },
-                        HStmt::Drop { name: drop_name,
+                    let mut out: List<HStmt> = []
+                    out.push(HStmt::Let { name: binding_name,
+                        name_span: synthetic_span(),
+                        def_id: some(binding_def_id),
+                        ty: binding_ty, init: new_value,
+                        span: synthetic_span() })
+                    if emit_option_reassign_drop(drop_slot, gensym) {
+                        out.push(HStmt::Drop { name: drop_name,
                             def_id: drop_def_id, ty: Type::UnitType,
-                            span: synthetic_span() },
-                        HStmt::Assign { ..stmt,
-                            target: result_target, value: tmp_id },
-                    ]
+                            span: synthetic_span() })
+                    }
+                    out.push(HStmt::Assign { ..stmt,
+                        target: result_target, value: tmp_id })
+                    out
                 },
                 none => [HStmt::Assign { ..stmt,
                     target: result_target, value: new_value }],
@@ -3703,7 +3849,7 @@ fn rc_stmt(stmt: HStmt, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<St
                         name_span: synthetic_span(),
                         def_id: some(binding_def_id), ty: binding_ty,
                         init: new_v, span: synthetic_span() })
-                    for d in drops_for(owned) {
+                    for d in drops_for(owned, gensym) {
                         let cleanup = d
                         out.push(cleanup)
                     }
@@ -3717,7 +3863,7 @@ fn rc_stmt(stmt: HStmt, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<St
                 none => {
                     // void return — drop all owned locals in scope.
                     let mut out: List<HStmt> = []
-                    for d in drops_for(owned) {
+                    for d in drops_for(owned, gensym) {
                         let cleanup = d
                         out.push(cleanup)
                     }
@@ -3772,7 +3918,8 @@ fn rc_stmt(stmt: HStmt, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<St
                 }
                 let range_name = binding
                 range_owned.push(OwnedSlot { name: range_name,
-                    def_id: range_def_id, backend_loop_cleanup: true })
+                    def_id: range_def_id, backend_loop_cleanup: true,
+                    option_none_cleanup: false })
             }
             // B-104 D2: the body opens a NEW loop scope — bindings declared past
             // range_loop_base are loop-scoped. Break drops all of them; Continue
@@ -3799,7 +3946,7 @@ fn rc_stmt(stmt: HStmt, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<St
             let include_backend_cleanup =
                 gensym.counters.get(2) != some(1)
             for d in drops_for(loop_scoped_owned(
-                    owned, loop_base, include_backend_cleanup)) {
+                    owned, loop_base, include_backend_cleanup), gensym) {
                 let cleanup = d
                 out.push(cleanup)
             }
@@ -3811,7 +3958,7 @@ fn rc_stmt(stmt: HStmt, owned: List<OwnedSlot>, boxed: Set<Int>, externs: Set<St
             let include_backend_cleanup =
                 gensym.counters.get(3) == some(1)
             for d in drops_for(loop_scoped_owned(
-                    owned, loop_base, include_backend_cleanup)) {
+                    owned, loop_base, include_backend_cleanup), gensym) {
                 let cleanup = d
                 out.push(cleanup)
             }
@@ -4292,7 +4439,7 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, e
                     name_span: synthetic_span(),
                     def_id: some(binding_def_id), ty: binding_ty,
                     init: new_v, span: synthetic_span() })
-                for d in drops_for(owned) {
+                for d in drops_for(owned, gensym) {
                     let cleanup = d
                     out.push(cleanup)
                 }
@@ -4314,7 +4461,7 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, e
                 let return_span = span
                 let block_span = span
                 let mut out: List<HStmt> = []
-                for d in drops_for(owned) {
+                for d in drops_for(owned, gensym) {
                     let cleanup = d
                     out.push(cleanup)
                 }

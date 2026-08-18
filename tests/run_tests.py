@@ -163,6 +163,9 @@ CLOSURE_ENV_RC_FIXTURE = (
 SPREAD_SOURCE_SEQUENCE_FIXTURE = (
     "tests/cases/structural/spread_source_sequence.ring"
 )
+OPTION_CLEANUP_FIXTURE = (
+    "tests/cases/structural/ownership_option_map_exit.ring"
+)
 STRUCTURAL_ORACLE_FIXTURES = {
     "backend.c_line_directives": tuple(
         fixture
@@ -173,6 +176,9 @@ STRUCTURAL_ORACLE_FIXTURES = {
     "backend.closure_env_rc_mask_structural": (CLOSURE_ENV_RC_FIXTURE,),
     "backend.spread_source_sequence_structural": (
         SPREAD_SOURCE_SEQUENCE_FIXTURE,
+    ),
+    "backend.ownership_option_cleanup_structural": (
+        OPTION_CLEANUP_FIXTURE,
     ),
 }
 
@@ -6253,6 +6259,107 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path,
     return errors
 
 
+def run_option_cleanup_oracle(ring_exe: str, temp_root: Path,
+                              phase_case: Optional[str] = None) -> List[str]:
+    """Inspect S′ wrapper cleanup and no-op tail eligibility in generated C."""
+    c_path, _, error = build_c_artifacts_fresh(
+        ring_exe, OPTION_CLEANUP_FIXTURE, temp_root, no_c_lines=True,
+        phase_case=phase_case)
+    if error:
+        return [error]
+    try:
+        c_source = c_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"cannot read generated Option-cleanup C: {exc}"]
+
+    errors: List[str] = []
+    eligible = {
+        "ring_cleanup_fresh_bool_tail": (2, 1),
+        "ring_cleanup_nested_fresh_tail": (2, 1),
+        "ring_cleanup_normal_and_early": (3, 2),
+        "ring_cleanup_payload_borrow": (2, 1),
+    }
+    ineligible = (
+        "ring_cleanup_borrowed_bool_tail",
+        "ring_cleanup_borrowed_bool_block",
+        "ring_cleanup_borrowed_str_block",
+        "ring_cleanup_borrowed_int_tail",
+        "ring_cleanup_borrowed_field_tail",
+        "ring_cleanup_borrow_return_call_tail",
+        "ring_cleanup_unrelated_list_tail",
+        "ring_cleanup_move_resource_tail",
+        "ring_cleanup_boxed_control",
+        "ring_cleanup_contains_extern_control",
+    )
+
+    for symbol, (expected_drops, expected_returns) in eligible.items():
+        body, extract_error = extract_c_function_body(c_source, symbol)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        masked = mask_c_strings_and_comments(body)
+        drops = list(re.finditer(
+            r"\bring_drop\s*\(\s*r_wrapped\s*\)\s*;", masked))
+        assignments = list(re.finditer(
+            r"(?m)^[ \t]*r_wrapped\s*=", masked))
+        returns = list(re.finditer(r"(?m)^[ \t]*return\b", masked))
+        if len(drops) != expected_drops:
+            errors.append(
+                f"{symbol} wrapper Drop count {len(drops)} != "
+                f"{expected_drops}")
+        if len(returns) != expected_returns:
+            errors.append(
+                f"{symbol} return count {len(returns)} != {expected_returns}")
+        if len(assignments) < 2:
+            errors.append(f"{symbol} has no wrapper reassignment")
+        else:
+            prior_drops = [drop for drop in drops
+                           if drop.start() < assignments[1].start()]
+            if not prior_drops or (
+                    prior_drops[-1].start() < assignments[0].start()):
+                errors.append(
+                    f"{symbol} wrapper reassignment lacks preceding W4 Drop")
+        events = sorted(
+            [(item.start(), "drop") for item in drops]
+            + [(item.start(), "assign") for item in assignments]
+        )
+        for returned in returns:
+            preceding = [kind for position, kind in events
+                         if position < returned.start()]
+            if not preceding or preceding[-1] != "drop":
+                errors.append(
+                    f"{symbol} return lacks its final wrapper exit Drop")
+
+    for symbol in ineligible:
+        body, extract_error = extract_c_function_body(c_source, symbol)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        masked = mask_c_strings_and_comments(body)
+        drop_count = len(re.findall(
+            r"\bring_drop\s*\(\s*r_wrapped\s*\)\s*;", masked))
+        if drop_count != 0:
+            errors.append(
+                f"{symbol} ineligible wrapper unexpectedly has "
+                f"{drop_count} Drops")
+        if symbol != "ring_cleanup_boxed_control" and "r___rc_scope_" in masked:
+            errors.append(
+                f"{symbol} ineligible tail gained a cleanup scope hoist")
+
+    payload, extract_error = extract_c_function_body(
+        c_source, "ring_cleanup_payload_borrow")
+    if extract_error:
+        errors.append(extract_error)
+    else:
+        masked_payload = mask_c_strings_and_comments(payload)
+        if re.search(r"\bring_drop\s*\(\s*r_value\s*\)", masked_payload):
+            errors.append("borrowed Option payload is dropped separately")
+        if re.search(r"\br_value\s*=\s*(?:NULL|nullptr|0)\s*;",
+                     masked_payload):
+            errors.append("borrowed Option payload slot is cleared")
+    return errors
+
+
 def spread_never_body_sequence_errors(
     body: str, symbol: str, source_callee: str,
 ) -> List[str]:
@@ -6742,6 +6849,17 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
             SPREAD_SOURCE_SEQUENCE_FIXTURE,
             (SPREAD_SOURCE_SEQUENCE_FIXTURE,),
         ))
+    feature_id = "backend.ownership_option_cleanup_structural"
+    if (
+        matches_filter(feature_id, name_filter)
+        or matches_filter(OPTION_CLEANUP_FIXTURE, name_filter)
+    ):
+        jobs.append((
+            feature_id,
+            "option-cleanup",
+            OPTION_CLEANUP_FIXTURE,
+            (OPTION_CLEANUP_FIXTURE,),
+        ))
     with tempfile.TemporaryDirectory(prefix="ring_structural_") as tmpdir:
         temp_root = Path(tmpdir)
         for label, kind, entry, fixtures in jobs:
@@ -6753,6 +6871,9 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
                     ring_exe, temp_root, label)
             elif kind == "spread-sequence":
                 errors = run_spread_source_sequence_oracle(
+                    ring_exe, temp_root, label)
+            elif kind == "option-cleanup":
+                errors = run_option_cleanup_oracle(
                     ring_exe, temp_root, label)
             else:
                 errors = run_extern_rc_oracle(ring_exe, temp_root, label)
@@ -7751,6 +7872,43 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
         RcInvocationContract(
             "option-temporary live", "tests/cases/verify_rc/option_temp_leak.ring",
             ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
+            "cleanup-active Option live",
+            "tests/cases/ownership_option_branch_cleanup.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+            local_finding_exact=0,
+        ),
+        RcInvocationContract(
+            "cleanup-active Option missing first W4",
+            "tests/cases/ownership_option_branch_cleanup.ring",
+            ("--verify-rc", "--rc-mutate=missing-option-reassign-drop"),
+            False, fatal_exact=1, local_finding_exact=1,
+            finding_counts=(("leak-option-reassign", 1),),
+            finding_lines=(("leak-option-reassign", (67,)),),
+        ),
+        RcInvocationContract(
+            "cleanup-active Option missing rearmed W4",
+            "tests/cases/ownership_option_branch_cleanup.ring",
+            ("--verify-rc", "--rc-mutate=missing-option-rearmed-drop"),
+            False, fatal_exact=1, local_finding_exact=1,
+            finding_counts=(("leak-option-reassign", 1),),
+            finding_lines=(("leak-option-reassign", (68,)),),
+        ),
+        RcInvocationContract(
+            "cleanup-active Option missing exit Drop",
+            "tests/cases/ownership_option_branch_cleanup.ring",
+            ("--verify-rc", "--rc-mutate=missing-option-exit-drop"),
+            False, fatal_exact=1, local_finding_exact=1,
+            finding_counts=(("leak-option-exit", 1),),
+            finding_lines=(("leak-option-exit", (58,)),),
+        ),
+        RcInvocationContract(
+            "cleanup-active Option borrowed-tail false admission",
+            "tests/cases/ownership_option_branch_cleanup.ring",
+            ("--verify-rc", "--rc-mutate=force-option-tail-eligible"),
+            False, fatal_min=1,
+            finding_counts=(("uaf-drop-borrow", 1),),
         ),
         RcInvocationContract(
             "option-temporary skip-anf mutation", "tests/cases/verify_rc/option_temp_leak.ring",
@@ -10371,6 +10529,17 @@ def maybe_moved_verifier_source_errors(
             if !v_state_is_known(left) || !v_state_is_known(right) {
                 panic("unreachable: RC verifier encountered an unknown binding state")
             }
+            if kind == K_OPTION_CLEANUP {
+                if left == right { return ((left, true)) }
+                let left_pending = left == S_OPTION_PENDING ||
+                    left == S_OPTION_MOVED || left == S_OPTION_MAYBE_MOVED
+                let right_pending = right == S_OPTION_PENDING ||
+                    right == S_OPTION_MOVED || right == S_OPTION_MAYBE_MOVED
+                if left_pending && right_pending {
+                    return ((S_OPTION_MAYBE_MOVED, true))
+                }
+                return ((S_OPTION_MAYBE_MOVED, false))
+            }
             if kind != K_OWNED &&
                (left == S_MAYBE_MOVED || right == S_MAYBE_MOVED) {
                 panic("unreachable: non-owned RC slot entered MAYBE_MOVED state")
@@ -10414,7 +10583,12 @@ def maybe_moved_verifier_source_errors(
                     if !v_state_is_known(state) {
                         panic("unreachable: RC verifier capture read saw unknown state")
                     }
-                    if state != S_LIVE {
+                    let readable = if ctx.kinds[index] == K_OPTION_CLEANUP {
+                        state == S_OPTION_PENDING
+                    } else {
+                        state == S_LIVE
+                    }
+                    if !readable {
                         let capture_span = capture.span
                         v_report(ctx, "uaf-use-after-drop", true,
                             "capture reads an unavailable slot", capture_span)
@@ -10557,9 +10731,9 @@ def maybe_moved_verifier_source_errors(
             )
 
     exact_transition_digests = {
-        "v_ident": "18D89D61F2AC0D304F98A89AB4D4E8365578A388BC69751CF79E29BEFE1F96F4",
-        "v_assign": "8D8B2412A8D7B0CD9911E34AD84EE4B273C76E809F8609EAF7EA4BB41C8DF595",
-        "v_drop": "D9E4B00BC9DA92AF12A9193DB6E6FD666A8A20F7EEEB6D3928E968CEC15FE9D0",
+        "v_ident": "02EA6598893E876AFFD17A918E3C7C51DD2AE52ECDF1B01D2E324276CEAA4B28",
+        "v_assign": "C0B9B7DF3AB6CE42302A28AEDF467CB2EF47A4EEFC9D25183444C73025CC3A03",
+        "v_drop": "22B2DF3CF375337712B1E94C62F9795E117F7E2D94BFC0DB91E8E10C076AC94F",
     }
     for function_name, expected_digest in exact_transition_digests.items():
         function_body, function_error = extract_ring_function_body(
@@ -10584,7 +10758,7 @@ def maybe_moved_verifier_source_errors(
             ),
             (
                 "dead capture", "v_check_exact_capture_reads",
-                r"\bif\s+state\s*!=\s*S_LIVE\s*\{",
+                r"\bif\s+!readable\s*\{",
                 "capture must reject",
             ),
             (
@@ -10926,6 +11100,139 @@ def nested_block_scope_source_errors(source: str) -> List[str]:
     return errors
 
 
+def option_cleanup_source_errors(perceus_source: str,
+                                 verify_source: str) -> List[str]:
+    """Lock S′ bounded admission, independent recovery, and W4 ordinals."""
+    errors: List[str] = []
+    contracts = (
+        (
+            perceus_source,
+            "Perceus ordinary tail must reuse exact owner-bearing authority",
+            r"_\s*=>\s*!is_owner_bearing\s*\(\s*expr\s*,\s*ownership\s*\)",
+        ),
+        (
+            perceus_source,
+            "Perceus effect/control tails must remain fail-closed",
+            r"HExpr::TryCatch\s*\{\s*\.\.\s*\}\s*\|\s*"
+            r"HExpr::HandleExpr\s*\{\s*\.\.\s*\}\s*\|\s*"
+            r"HExpr::EffectOp\s*\{\s*\.\.\s*\}\s*=>\s*false",
+        ),
+        (
+            perceus_source,
+            "Perceus unsafe-tail mutation must consume one exact false gate",
+            r"!base_option_none_cleanup_eligible\s*&&\s*"
+            r"gensym\.counters\.get\s*\(\s*6\s*\)\s*==\s*some\s*\(\s*1\s*\)"
+            r"\s*&&\s*block_has_option_none_cleanup_candidate\s*\("
+            r"\s*stmts\s*,\s*boxed\s*,\s*externs\s*\)\s*"
+            r"if\s+force_option_none_cleanup\s*\{\s*"
+            r"gensym\.counters\.set\s*\(\s*6\s*,\s*0\s*\)",
+        ),
+        (
+            perceus_source,
+            "Perceus Option candidate scan must share the skippable-name gate",
+            r"HStmt::Var\s*\{\s*name\s*,\s*def_id\s*:\s*some\s*\(\s*id\s*\)"
+            r"\s*,\s*ty\s*,\s*init\s*,\s*\.\.\s*\}\s*=>\s*"
+            r"!rc_name_skippable\s*\(\s*name\s*\)\s*&&\s*"
+            r"!boxed\.contains\s*\(\s*id\s*\)",
+        ),
+        (
+            verify_source,
+            "verifier borrowed synthetic Clone must inspect its inner",
+            r"HExpr::Clone\s*\{\s*inner\s*,\s*\.\.\s*\}\s*=>\s*"
+            r"if\s+reject_synthetic_clone\s*\{\s*"
+            r"v_escape_is_noop_on_reachable_tail\s*\(\s*inner\s*,",
+        ),
+        (
+            verify_source,
+            "verifier nested blocks must recover their synthetic tail producer",
+            r"HExpr::Block\s*\{\s*stmts\s*,\s*tail\s*,\s*\.\.\s*\}\s*=>\s*"
+            r"match\s+v_original_block_tail\s*\(\s*stmts\s*,\s*tail\s*\)",
+        ),
+        (
+            verify_source,
+            "verifier synthetic borrowed mode must reject circular Clone proof",
+            r"value\s*,\s*ownership\s*,\s*synthetic\s*&&\s*"
+            r"mode\s*==\s*M_BORROWED",
+        ),
+        (
+            verify_source,
+            "verifier unknown calls must be owner-bearing",
+            r"v_exact_call_return_ownership\s*\(\s*ownership\s*,\s*"
+            r"callee_def_id\s*\)\s*!=\s*RETURN_OWNERSHIP_OWNED",
+        ),
+    )
+    for source, description, pattern in contracts:
+        count = len(re.findall(
+            pattern, mask_ring_strings_and_comments(source), re.DOTALL))
+        if count != 1:
+            errors.append(
+                f"{description} matched {count} times (expected 1)")
+
+    if re.search(
+            r"(?<!v_)\bescape_is_noop_on_reachable_tail\s*\(",
+            mask_ring_strings_and_comments(verify_source)) is not None:
+        errors.append(
+            "verifier must not call Perceus escape_is_noop_on_reachable_tail")
+
+    try:
+        fixture_source = (REPO / "tests" / "cases" /
+                          "ownership_option_branch_cleanup.ring").read_text(
+                              encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        errors.append(f"cannot read Option cleanup fixture: {exc}")
+        return errors
+    reset_body, reset_error = extract_ring_function_body(
+        fixture_source, "option_reset_none")
+    if reset_error:
+        errors.append(reset_error)
+    else:
+        assignments = list(re.finditer(
+            r"(?m)^\s*wrapped\s*=", fixture_source))
+        reset_start = fixture_source.find(reset_body or "")
+        reset_end = reset_start + len(reset_body or "")
+        if len(assignments) < 2 or not all(
+                reset_start <= item.start() < reset_end
+                for item in assignments[:2]):
+            errors.append(
+                "Option cleanup mutation ordinals 1/2 must be the same reset slot")
+        if not re.search(
+                r"missing-option-reassign-drop\"\s*\{\s*1\s*\}\s*"
+                r"else\s+if\s+mutate\s*==\s*"
+                r"\"missing-option-rearmed-drop\"\s*\{\s*2\s*\}",
+                perceus_source):
+            errors.append(
+                "Option cleanup first/rearmed mutations must retain ordinals 1/2")
+
+    errors.extend(exact_ring_function_contract_errors(
+        fixture_source,
+        "borrowed_str_block",
+        r"\bfn\s+borrowed_str_block\s*\(\s*value\s*:\s*Str\s*\)\s*\{",
+        """
+            {
+                let mut wrapped: Resource? = none
+                value
+            }
+            print(value)
+        """,
+        "Option cleanup borrowed-Str false-admission mutation fixture",
+    ))
+
+    # Mutation self-test: accepting a synthetic borrowed Clone without checking
+    # its inner must be killed by the independent source authority above.
+    anchor = "if reject_synthetic_clone {"
+    if verify_source.count(anchor) != 1:
+        errors.append(
+            "Option cleanup synthetic-Clone mutation anchor must occur once")
+    else:
+        mutated = verify_source.replace(anchor, "if false {", 1)
+        masked = mask_ring_strings_and_comments(mutated)
+        pattern = contracts[4][2]
+        if len(re.findall(pattern, masked, re.DOTALL)) != 0:
+            errors.append(
+                "Option cleanup borrowed-Clone mutation escaped source gate")
+    return errors
+
+
 def ownership_bootstrap_transition_source_errors() -> List[str]:
     """Lock the narrow prelude and fresh-value ownership transition."""
     errors: List[str] = []
@@ -10960,6 +11267,8 @@ def ownership_bootstrap_transition_source_errors() -> List[str]:
         sources["perceus"], sources["verify_rc"]))
     errors.extend(maybe_moved_verifier_source_errors(sources["verify_rc"]))
     errors.extend(maybe_moved_fixture_source_errors())
+    errors.extend(option_cleanup_source_errors(
+        sources["perceus"], sources["verify_rc"]))
     errors.extend(const_getter_ownership_source_errors(
         sources["registration"]))
     errors.extend(exact_import_alias_ownership_source_errors(
