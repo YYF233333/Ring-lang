@@ -701,6 +701,16 @@ def case_expects_panic(ring_file: Path, expected_raw: str) -> bool:
     )
 
 
+def expected_panic_diagnostic(expected_raw: str) -> str:
+    """Return the optional exact runtime diagnostic after EXPECT_PANIC."""
+    lines = norm(expected_raw).splitlines()
+    marker_index = next(
+        (index for index, line in enumerate(lines) if line.strip()), None)
+    if marker_index is None:
+        return ""
+    return "\n".join(lines[marker_index + 1:]).strip()
+
+
 # ---------------------------------------------------------------------------
 # Compile + link + run helpers
 # ---------------------------------------------------------------------------
@@ -841,7 +851,7 @@ def compile_link_run(ring_exe: str, clang_path: str, ring_file: str,
                 "expected panic (non-zero exit), but program exited 0: "
                 f"{(r.stdout or '')[:300]}"
             )
-        return True, r.stdout, ""
+        return True, (r.stdout or "") + (r.stderr or ""), ""
 
     if r.returncode != 0:
         return False, "", f"runtime crash (exit {r.returncode}): {(r.stderr or '')[:300]}"
@@ -1420,8 +1430,19 @@ def run_e2e(ring_exe: str, clang_path: str, collector: ResultCollector, *,
                 continue
 
             if expect_panic:
-                collector.add(TestResult(
-                    TestResult.PASS, suite, str(rel), "expected panic observed"))
+                diagnostic = expected_panic_diagnostic(expected_raw)
+                actual = norm(stdout).strip()
+                if diagnostic and actual != diagnostic:
+                    collector.add(TestResult(
+                        TestResult.FAIL, suite, str(rel),
+                        f"expected runtime diagnostic {diagnostic!r}, got {actual!r}"))
+                else:
+                    detail = (
+                        "expected runtime diagnostic observed"
+                        if diagnostic else "expected panic observed"
+                    )
+                    collector.add(TestResult(
+                        TestResult.PASS, suite, str(rel), detail))
                 continue
 
             actual = norm(stdout)

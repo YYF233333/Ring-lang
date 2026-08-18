@@ -34,7 +34,7 @@ extern fn ring_buf_set_byte(p: Ptr<Int>, offset: Int, val: Int) -> Unit
 extern fn ring_buf_alloc_zeroed(cap: Int) -> Ptr<Int>
 
 pub fn map_new<K, V>() -> Map<K, V> {
-    // Pre-allocate 8 slots to avoid edge cases with malloc(0) and initial grow.
+    // Start with the 8-slot minimum used by open addressing and later growth.
     // Use ring_buf_alloc_zeroed instead of a while loop to avoid mut effect leak.
     Map {
         meta: ring_buf_alloc_zeroed(8),
@@ -283,12 +283,10 @@ impl<K: Hash + Eq, V> Map {
                 }
                 gi = gi + 1
             }
-            // Dealloc old buffers
-            if self.cap > 0 {
-                ring_buf_dealloc(self.meta)
-                ring_slot_dealloc(self.keys, self.cap)
-                ring_slot_dealloc(self.values, self.cap)
-            }
+            // Dealloc old buffers by ownership, independent of logical capacity.
+            ring_buf_dealloc(self.meta)
+            ring_slot_dealloc(self.keys, self.cap)
+            ring_slot_dealloc(self.values, self.cap)
             self.meta = new_meta
             self.keys = new_keys
             self.values = new_values

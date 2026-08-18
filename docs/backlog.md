@@ -762,23 +762,6 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 - 新增 golden 用例锁定（catch body 写外层 mut：捕获路径 + 正常路径 + 嵌套 catch）
 - 全部 E2E + golden + rc 通过；动 RC 相关（box dup/drop）→ golden ×3
 
-### B-164 alloc 原语 size=0 语义未定义（heap corruption 风险）[bugfix] [P1] [S] [judgment] [doing]
-
-> 2026-07-10 立项（Discussion，B-152 P3 worker_feedback 通知触发）。
-
-**现象**：B-152 P3 中 `map_new()` 用 `ring_buf_alloc(0)` / `ring_slot_alloc(0)` 创建零容量 Map，后续 `drop_map` 处理空 buffer 时 Windows heap validator 报 heap corruption。Worker 以「预分配 8 slot」绕过，根因未定位（怀疑 malloc(0) 返回的 sentinel pointer 被 free 时的行为差异 MSVC vs glibc，未证实）。size=0 分配语义未定义 = P4 Set / 未来用户 unsafe 代码的复踩点。
-
-**涉及修改**：
-1. 定位根因：构造零容量分配 + drop 的最小复现，确认是 malloc(0) sentinel、drop 遍历越界读、还是其他
-2. `ring_runtime.cpp`：在 `ring_buf_alloc` / `ring_slot_alloc` / `ring_buf_alloc_zeroed` 层显式定义 size<=0 语义（推荐方向：最小分配 1 字节 / 1 slot，保证返回可安全 free 的唯一指针；具体依根因定）
-3. 回归测试：零容量分配 + drop 路径
-
-**验收标准**：
-- size=0 分配 + drop 在 Windows heap validator + ASan gating 档下 clean
-- 根因结论成文（本条目更新或 commit message）
-- `std/map.ring` 的「预分配 8」可改为纯容量策略（不再是 corruption workaround）
-- 完整 C/native、ASan 与自举回归通过
-
 ### B-162 Perceus FieldAccess scalar reassign 不消费旧 boxed scalar [bugfix] [P1] [M] [judgment] [queued]
 
 FieldAccess overwrite 不消费旧 boxed scalar，造成线性泄漏。优先在共享 HIR/Perceus 定义 overwrite；若 C emitter materialize load/drop/store，必须 verifier 可见、不复制 ownership，且 target 只求值一次。本项不与 unboxing 混做。
