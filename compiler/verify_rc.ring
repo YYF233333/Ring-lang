@@ -1250,11 +1250,23 @@ fn v_original_block_tail(stmts: List<HStmt>, tail: HExpr?) -> HExpr? {
             match tail_def_id {
                 some(def_id) => if is_synthetic_rc_def_id(def_id) {
                     match v_block_local_init(stmts, def_id) {
-                        some(init) => some(init),
-                        none => some(value)
+                        some(init) => {
+                            let matched_init = init
+                            some(matched_init)
+                        },
+                        none => {
+                            let unmatched_value = value
+                            some(unmatched_value)
+                        }
                     }
-                } else { some(value) },
-                none => some(value)
+                } else {
+                    let direct_value = value
+                    some(direct_value)
+                },
+                none => {
+                    let direct_value = value
+                    some(direct_value)
+                }
             }
         },
         none => none
