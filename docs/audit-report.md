@@ -115,6 +115,8 @@
 
 **Peak-state candidate stop（2026-08-18）**：同一 source-built gen1 的纯 `check compiler/main.ring` 也在 2281.06 s 触及 12 GiB，证明 blocker 属于共享 front end 而不是 C/RC/codegen。随后唯一实现的 module-state construction 把每个完成模块的完整 `TypeEnv` 立即投影为 B-145 所需的 visible-extern-name `Set<Str>`；源码 authority、同名 extern 隔离 check 及 native build/run 均通过，但完整 check 在 2251.54 s 再次触及同一 cap，peak commit 只比 baseline 多 4096 bytes，stderr 逐字节相同。因此 full per-module TypeEnv 不是 material peak owner，候选 `a58bf3e4` performance-rejected，不合入、不进入 gen2、不重跑。后续若无直接 allocation/rebuild authority，不得继续以“提前 drop 另一个容器”为猜测扩展 critical 自举路径。
 
+**Allocation census authority（2026-08-18）**：固定 source-built gen1 `main-lto.o` 仅换用 runtime 现有 `RING_ALLOC_STATS` 后，唯一 2400 s `check compiler/main.ring` 在硬超时前完成 1,238 个 2^25-allocation 周期样本，共 41,540,386,816 alloc / 41,500,267,011 free / 40,119,805 live；无 panic 或其他 stderr。最后样本的 `tid8=Option` 16,725,978 与 `tid5=Map` 16,725,286 只差 692，合计占 live 83.38%。从 3,355,443,200 alloc 样本到末样本，二者贡献净 live 增长的 96.44%；其余 top 为 List、`types::Type`、`types::EffectRow`、`hir::HExpr`。这把下一刀收窄到 coupled Option/Map producer 的 allocation-site/ownership attribution，并反驳无差别 container projection；但 stats 写计数表且刷出 1,238 行，逻辑进度未知，其 6.47 GiB commit / 5.20 GiB RSS 绝不能与未插桩 12 GiB baseline 当作改善。下一步只允许固定对象的短时 sampled RVA attribution；未证明单一 producer 前不得实现 cache/drop，且不得再跑 2400 s census 求更漂亮资源数。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

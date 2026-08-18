@@ -158,6 +158,67 @@ receipts remain under ignored `tmp-ownership-critical-acceptance/`.
   `FEEE26ED6EEC0FB0A6BE7A3BFD6523EA723804120ECFE09A7F2079BA557F84D3`.
   This refutes retained per-module `TypeEnv` as the material peak owner. Do not
   merge the candidate, run gen2 from it, or rerun it for a prettier result.
+- A runtime-only allocation census now supplies the first direct allocation
+  authority for the shared-front-end wall. It reuses the fixed source-built
+  gen1 `main-lto.o` SHA256
+  `503BB6337287DED78ADFB153259B0580F1CF6472A7A37AFF327AFC243DE7FB65`
+  and unchanged generated C SHA256
+  `62D4439839EC1FED4BB8ADD3C24FD7872C0812483B8DCA281BFE4E13DF41FAD7`.
+  Only `ring_runtime.cpp` SHA256
+  `162005B4A2DBAB6DC34646B2F4D21218424DE17FDC446D6A204842160EAD2B91`
+  was rebuilt with the existing opt-in `-DRING_ALLOC_STATS`; the resulting
+  runtime object is
+  `007B8887C366A25D6044A6374BD06E3D25C328FE9328865650965CD9E161B8E4`
+  and the linked diagnostic executable is
+  `189CA7F4BECF68860146629AEEBE2D6F06D6D870867AFE7D3A620B44894E8304`.
+  Exact compile/link receipts `56-alloc-stats-runtime-compile` and
+  `57-alloc-stats-link` PASS. Receipt `58-alloc-stats-smoke` checks
+  `examples/hello.ring`, prints `OK`, and emits a normal final alloc report;
+  its stderr SHA256 is
+  `8DCEB87CCA2B3214653514370AFB1A6653D428CECC7C0904B0E983AE1FFE0A35`.
+- The one authorized long census is final in
+  `results/59-alloc-stats-check-main-e38a489a`. The exact command remained
+  `check compiler/main.ring` under 2400 s / 12 GiB / 5-process governance.
+  It timed out normally after 2400.57 s with no measurement error, one process,
+  6,951,931,904 bytes peak job commit (6.47 GiB), and 5,579,550,720 bytes
+  sampled/root RSS (5.20 GiB). Measurement SHA256 is
+  `668875678285C7F7E16ACA6B1E8E66F63385491E6B60442787344DEBFF0598A1`;
+  stdout is empty (SHA256
+  `E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855`)
+  and stderr SHA256 is
+  `EAE367E6552B794ED716B1B3B0EC70F632B9F6CD45AB7A497E52A8BBDC8ECE57`.
+  The timeout killed the process, so there is no `atexit` final sample; stderr
+  contains 1,238 periodic `[alloc-stats]` lines, 238 registration lines, and
+  no other diagnostic or panic.
+- The periodic census trajectory is absolute and monotone in allocation
+  milestones:
+
+  | allocs | live | Option (tid 8) | Map (tid 5) | List (tid 4) | Type (tid 76) |
+  | ---: | ---: | ---: | ---: | ---: | ---: |
+  | 3,355,443,200 | 9,443,158 | 1,948,006 | 1,918,178 | 1,589,766 | 1,048,251 |
+  | 13,421,772,800 | 17,422,061 | 5,794,398 | 5,771,930 | 1,693,456 | 1,126,322 |
+  | 26,843,545,600 | 28,358,497 | 11,057,595 | 11,046,426 | 1,841,122 | 1,238,333 |
+  | 40,265,318,400 | 39,464,472 | 16,405,451 | 16,405,329 | 1,989,334 | 1,350,535 |
+  | 41,540,386,816 | 40,119,805 | 16,725,978 | 16,725,286 | 1,995,069 | 1,354,400 |
+
+  The last complete sample represents 17.30 million allocations/s and
+  0.09658% absolute retention. Frees therefore keep pace in percentage terms,
+  but that small residual over 41.54 billion allocations leaves 40.12 million
+  live boxes. `Option` and `Map` differ by only 692 objects and together form
+  83.38% of final live objects. From the 3.355-billion milestone onward they
+  contribute 29,585,080 of the 30,676,647 additional live objects: 96.44% of
+  net growth. The remaining mapped top types are `tid76=types::Type`,
+  `tid150=types::EffectRow`, and `tid84=hir::HExpr`; the final top six account
+  for 94.95% of live objects. This is strong evidence for a retained
+  `Option<Map<...>>`-shaped construction or two coupled producers, not for the
+  rejected completed-module `TypeEnv` hypothesis and not for a global failure
+  to run destructors.
+- The stats executable is deliberately not a performance comparator. Each
+  alloc/free performs extra global counter and type-table writes and the run
+  emitted 1,238 flushed reports. It reached an unknown earlier logical point
+  than receipt 43 and used 46.0% less commit / 55.1% less RSS; those differences
+  are instrumentation perturbation or progress differences, not an accepted
+  memory improvement. The census authorizes allocation-site attribution only.
 
 First failures remain evidence and must not be rewritten as passes:
 
@@ -179,6 +240,10 @@ First failures remain evidence and must not be rewritten as passes:
 - `results/55-candidate-gen1-check-compiler-main-projection`: the exact
   projection candidate reaches the same boundary 29.52 s earlier with the
   same stderr; this is the final receipt for that rejected construction.
+- `results/59-alloc-stats-check-main-e38a489a`: the one 2400 s allocation
+  census times out without panic after 1,238 complete samples. It is diagnostic
+  authority for live-type growth, not a performance or whole-loop pass, and
+  must not be rerun to compare wall time or peak memory with receipt 43.
 
 ## Remaining gates
 
@@ -193,10 +258,21 @@ First failures remain evidence and must not be rewritten as passes:
    that has direct authority for the peak; another unmeasured retained-container
    projection is not authorized. Do not rerun either command, raise the cap, or
    describe the absence of gen2 output as a correctness failure.
-3. Do not replace `compiler/dist-c/main.c` with gen1 yet. The generated file is
+3. The next and only evidence-led diagnostic is a short, bounded allocation
+   call-site attribution for the coupled `tid5=Map` and `tid8=Option` growth,
+   using the same fixed `main-lto.o`. Prefer the existing sampled
+   `RING_BOX_PROFILE` machinery, extended only to record Map if required, and
+   symbolize RVAs against the exact diagnostic executable. Start with a short
+   run and stop once the dominant retained call site is stable; do not launch
+   another 2400 s census first. If no site dominates, if sampling overhead or
+   helper inlining destroys provenance, or if the apparent pair is spread over
+   unrelated producers, record insufficient evidence and stop rather than
+   implementing a cache/drop guess. A source candidate is authorized only
+   after one concrete producer and its ownership/rollback boundary are proven.
+4. Do not replace `compiler/dist-c/main.c` with gen1 yet. The generated file is
    not fixed-point proven and differs broadly from the tracked anchor; review
    and a successful gen2 byte comparison are prerequisites.
-4. After a materially different route produces gen2, compare gen1/gen2 C
+5. After a materially different route produces gen2, compare gen1/gen2 C
    byte-for-byte, rerun the two focused gen2 gates, and only then update the
    bootstrap anchor and proceed to the remaining #268/#269 C/RC/ASan/double-
    bootstrap acceptance matrix. Neither critical finding is closed here.
