@@ -68,10 +68,10 @@ fn exact_pattern_identity() {
     // nested closures force codegen to transport those exact DefIds through
     // the closure environment instead of recapturing the outer binding.
     let selected = Resource { id: 13 }
-    let wrapped = some(Resource { id: 14 })
+    let wrapped = some(14)
     match wrapped {
         some(selected) => {
-            let read_selected = fn() -> Int { selected.id }
+            let read_selected = fn() -> Int { selected }
             print(read_selected())
         },
         none => {}
@@ -79,9 +79,9 @@ fn exact_pattern_identity() {
     print(observe(selected))
 
     let conditional = Resource { id: 15 }
-    let maybe_conditional = some(Resource { id: 16 })
+    let maybe_conditional = some(16)
     if let some(conditional) = maybe_conditional {
-        let read_conditional = fn() -> Int { conditional.id }
+        let read_conditional = fn() -> Int { conditional }
         print(read_conditional())
     }
     print(observe(conditional))
@@ -143,6 +143,24 @@ fn main() {
         print(observe(shadowed))
     }
     print(observe(shadowed))
+
+    let then_shadowed = 18
+    if true {
+        let then_shadowed = 19
+        print(then_shadowed)
+    } else {
+        print(-1)
+    }
+    print(then_shadowed)
+
+    let else_shadowed = 20
+    if false {
+        print(-1)
+    } else {
+        let else_shadowed = 21
+        print(else_shadowed)
+    }
+    print(else_shadowed)
 
     exact_pattern_identity()
 }

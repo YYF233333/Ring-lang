@@ -111,6 +111,8 @@
 
 **Development-blocking subitem closure（2026-08-13）**：用户已验收 `ownership-reachable-dispatch` item 完成。final A7 clean generation/native link、tracked anchor byte identity 与 focused callable/default/const/project/transaction/effect-mapping 矩阵共同满足 developer-unblock checkpoint；后续主线转入 B-176/B-180。#268/#269 继续保持 `[critical] [doing]` 仅表示 final-acceptance 长尾尚未清零，不得用来重新打开本 subitem 或阻塞性能实现；若性能工作发现会破坏该 checkpoint、baseline 可比性或 ownership authority 的确定失败，再按原 critical 优先级回切。
 
+**Critical long-tail re-entry（2026-08-18）**：B-180 技术探索按停止门关闭后，`ownership_modes_cfg` 验收矩阵暴露一个真实的 lexical shadow 错绑：普通块内 `let shadowed = ...` 离开后，外层读取仍携带内层 DefId，generated C 在 drop 内层槽后再次读取该槽，观测值由应有的 11 漂成 12。根因是嵌套 `Expr::Block` 与 `if`/`unsafe` 分支直接调用 current-scope `infer_block`，没有建立并在失败时恢复子 scope。当前 correctness checkpoint 新增 fail-safe `infer_scoped_block`，只接到四个嵌套词法入口；函数 owner 及 loop/pattern binder 的既有 scope authority 不变。source/mutation authority 与 canonical structural wiring 已 PASS，隔离 generated-C 行为镜像对 ownership shadow、then/else shadow、普通/复杂/嵌套 block、pattern shadow 与 unsafe block 六个 fixture 全部 PASS。该证据尚不关闭 #268/#269：旧编译器对 `check compiler/infer.ring` 的 120 s 与 300 s 有界尝试均无诊断但超时，tracked bootstrap/self-host/fixed-point 仍未生成或验证。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

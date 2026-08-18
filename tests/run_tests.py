@@ -9346,6 +9346,15 @@ def prelude_ownership_firebreak_source_errors(
                                             some(id) => id,
                                             none => panic("")
                                         }
+                                        if name == "ring_slot_dealloc" {
+                                            let exact_type = updated.ty
+                                            set_callable_transfer_levels(
+                                                ctx.env.types.ownership_metadata,
+                                                exact_def_id, source,
+                                                callable_interface_transfer_levels(
+                                                    ctx.env.types.ownership_metadata,
+                                                    exact_type))
+                                        }
                                         set_callable_result_role(
                                             ctx.env.types.ownership_metadata,
                                             exact_def_id,
@@ -9368,6 +9377,11 @@ def prelude_ownership_firebreak_source_errors(
                         "load_prelude phase-one loop must retain the exact "
                         "extern identity, ownership rebind, result-role, and "
                         "origin publication body"
+                    )
+                if phase_one_body.count('"ring_slot_dealloc"') != 1:
+                    errors.append(
+                        "load_prelude phase-one loop must retain the exact "
+                        "ring_slot_dealloc transfer-level identity"
                     )
             loop_open = decl_loops[1].end() - 1
             try:
@@ -10483,6 +10497,153 @@ def maybe_moved_fixture_source_errors() -> List[str]:
     return errors
 
 
+def const_getter_ownership_source_errors(source: str) -> List[str]:
+    """Lock the const getter's exact transfer-level spine."""
+    body, extract_error = extract_ring_function_body(source, "register_const")
+    if extract_error:
+        return [extract_error]
+    masked = mask_ring_strings_and_comments(body)
+    exact_count = len(re.findall(
+        r"\brecord_callable_ownership_with_transfer_levels\s*\(\s*"
+        r"ctx\.env\.types\.ownership_metadata\s*,\s*did\s*,\s*"
+        r"CALLABLE_BORROW_OWNED\s*,\s*CALLABLE_SOURCE_DECLARED\s*,\s*"
+        r"\[\s*callable_transfer_level\s*\(\s*"
+        r"CALLABLE_BORROW_OWNED\s*,\s*\[\s*\]\s*\)\s*\]\s*\)",
+        masked,
+    ))
+    inventory_count = len(re.findall(
+        r"\brecord_callable_ownership(?:_with_transfer_levels)?\s*\(",
+        masked,
+    ))
+    errors: List[str] = []
+    if exact_count != 1 or inventory_count != 1:
+        errors.append(
+            "register_const must publish one exact zero-argument getter "
+            "descriptor with its transfer-level spine; found "
+            f"exact={exact_count}, inventory={inventory_count}"
+        )
+    return errors
+
+
+def exact_import_alias_ownership_source_errors(source: str) -> List[str]:
+    """Lock exact aliases to the source descriptor and transfer spine."""
+    body, extract_error = extract_ring_function_body(
+        source, "localize_exact_import_alias_scheme")
+    if extract_error:
+        return [extract_error]
+    masked = mask_ring_strings_and_comments(body)
+    contracts = (
+        (
+            "source-state lookup",
+            r"\bcallable_state_by_def_id\.get\s*"
+            r"\(\s*source_def_id\s*\)",
+        ),
+        (
+            "checker-local callable allocation with transfer levels",
+            r"\bnew_local_callable_identity_scheme_with_transfer_levels\s*"
+            r"\(\s*ctx\.env\s*,\s*alias_scheme\s*,\s*"
+            r"ownership_term\s*,\s*source_state\.source\s*,\s*"
+            r"clone_callable_transfer_levels\s*\(\s*"
+            r"source_state\.transfer_levels\s*\)\s*\)",
+        ),
+    )
+    errors: List[str] = []
+    for description, pattern in contracts:
+        count = len(re.findall(pattern, masked))
+        if count != 1:
+            errors.append(
+                "localize_exact_import_alias_scheme "
+                f"{description} matched {count} times (expected 1)"
+            )
+    allocation_count = len(re.findall(
+        r"\bnew_local_callable_identity_scheme"
+        r"(?:_with_transfer_levels)?\s*\(",
+        masked,
+    ))
+    if allocation_count != 1:
+        errors.append(
+            "localize_exact_import_alias_scheme must allocate exactly one "
+            f"checker-local callable identity; found {allocation_count}"
+        )
+    return errors
+
+
+def nested_block_scope_source_errors(source: str) -> List[str]:
+    """Lock nested lexical blocks to fail-safe TypeEnv scope restoration."""
+    masked = mask_ring_strings_and_comments(source)
+    errors: List[str] = []
+    header_pattern = (
+        r"\bfn\s+infer_scoped_block\s*\(\s*mut\s+ctx\s*:\s*InferCtx\s*,\s*"
+        r"body\s*:\s*Expr\s*,\s*initial_subst\s*:\s*UnionFind\?\s*\)\s*"
+        r"->\s*InferResult\s*\{"
+    )
+    header_count = len(re.findall(header_pattern, masked, re.DOTALL))
+    if header_count != 1:
+        errors.append(
+            "nested lexical block scope firebreak header matched "
+            f"{header_count} times (expected 1)"
+        )
+    helper_body, helper_error = extract_ring_function_body(
+        source, "infer_scoped_block")
+    expected_helper_body = (
+        "ctx.env.push_scope()\n"
+        "    let scoped_result = some(\n"
+        "        infer_block(ctx, body, initial_subst)\n"
+        "    ) catch { _ => none }\n"
+        "    ctx.env.pop_scope()\n"
+        "    match scoped_result {\n"
+        "        some(result) => result,\n"
+        "        none => fail.raise(CompileError {})\n"
+        "    }"
+    )
+    if helper_error:
+        errors.append(helper_error)
+    elif helper_body.replace("\r\n", "\n").strip() != expected_helper_body:
+        errors.append(
+            "nested lexical block scope firebreak raw body changed"
+        )
+    placements = (
+        (
+            "ordinary block expression",
+            r"Expr::Block\s*\{\s*\.\.\s*\}\s*=>\s*"
+            r"infer_scoped_block\s*\(\s*ctx\s*,\s*expr\s*,\s*"
+            r"some\s*\(\s*subst\s*\)\s*\)",
+        ),
+        (
+            "unsafe block",
+            r"let\s+body_r\s*=\s*infer_scoped_block\s*\(\s*ctx\s*,\s*"
+            r"body\s*,\s*some\s*\(\s*subst\s*\)\s*\)",
+        ),
+        (
+            "if then branch",
+            r"let\s+then_r\s*=\s*infer_scoped_block\s*\(\s*ctx\s*,\s*"
+            r"then_branch\s*,\s*some\s*\(\s*s\s*\)\s*\)",
+        ),
+        (
+            "if else branch",
+            r"let\s+else_r\s*=\s*infer_scoped_block\s*\(\s*ctx\s*,\s*"
+            r"eb\s*,\s*some\s*\(\s*s\s*\)\s*\)",
+        ),
+    )
+    for description, pattern in placements:
+        count = len(re.findall(pattern, masked, re.DOTALL))
+        if count != 1:
+            errors.append(
+                f"nested lexical block {description} placement matched "
+                f"{count} times (expected 1)"
+            )
+    # Raw inventory is intentionally fail-closed: Ring string interpolation is
+    # executable, so masking strings here would let a hidden helper use escape.
+    inventory_count = len(re.findall(
+        r"\binfer_scoped_block\b", source))
+    if inventory_count != 5:
+        errors.append(
+            "nested lexical block scope helper must have one definition and "
+            f"four call sites; found {inventory_count} identifiers"
+        )
+    return errors
+
+
 def ownership_bootstrap_transition_source_errors() -> List[str]:
     """Lock the narrow prelude and fresh-value ownership transition."""
     errors: List[str] = []
@@ -10491,6 +10652,7 @@ def ownership_bootstrap_transition_source_errors() -> List[str]:
         "checker": REPO / "compiler" / "checker.ring",
         "hir": REPO / "compiler" / "hir.ring",
         "ownership": REPO / "compiler" / "ownership.ring",
+        "infer": REPO / "compiler" / "infer.ring",
         "infer_ctx": REPO / "compiler" / "infer_ctx.ring",
         "perceus": REPO / "compiler" / "perceus.ring",
         "verify_rc": REPO / "compiler" / "verify_rc.ring",
@@ -10516,22 +10678,152 @@ def ownership_bootstrap_transition_source_errors() -> List[str]:
         sources["perceus"], sources["verify_rc"]))
     errors.extend(maybe_moved_verifier_source_errors(sources["verify_rc"]))
     errors.extend(maybe_moved_fixture_source_errors())
+    errors.extend(const_getter_ownership_source_errors(
+        sources["registration"]))
+    errors.extend(exact_import_alias_ownership_source_errors(
+        sources["infer_ctx"]))
+    errors.extend(nested_block_scope_source_errors(sources["infer"]))
 
-    const_body, extract_error = extract_ring_function_body(
-        sources["registration"], "register_const")
-    if extract_error:
-        errors.append(extract_error)
-    else:
-        count = len(re.findall(
-            r"\brecord_callable_ownership\s*\(\s*"
-            r"ctx\.env\.types\.ownership_metadata\s*,\s*did\s*,\s*"
-            r"CALLABLE_BORROW_OWNED\s*,\s*CALLABLE_SOURCE_DECLARED\s*\)",
-            mask_ring_strings_and_comments(const_body),
-        ))
-        if count != 1:
+    nested_scope_mutations = (
+        (
+            "scope entry",
+            "ctx.env.push_scope()",
+            "ctx.env.pop_scope()",
+        ),
+        (
+            "interpolation early return",
+            "ctx.env.push_scope()",
+            '"${match true { true => return infer_block(ctx, body, '
+            'initial_subst), false => false }}"\n    ctx.env.push_scope()',
+        ),
+        (
+            "ordinary block placement",
+            "infer_scoped_block(ctx, expr, some(subst))",
+            "infer_block(ctx, expr, some(subst))",
+        ),
+        (
+            "unsafe block placement",
+            "infer_scoped_block(ctx, body, some(subst))",
+            "infer_block(ctx, body, some(subst))",
+        ),
+        (
+            "if then placement",
+            "infer_scoped_block(ctx, then_branch, some(s))",
+            "infer_block(ctx, then_branch, some(s))",
+        ),
+        (
+            "if else placement",
+            "infer_scoped_block(ctx, eb, some(s))",
+            "infer_block(ctx, eb, some(s))",
+        ),
+    )
+    helper_body, helper_extract_error = extract_ring_function_body(
+        sources["infer"], "infer_scoped_block")
+    for label, anchor, replacement in nested_scope_mutations:
+        mutation_source = sources["infer"]
+        mutation_anchor = anchor
+        if label in {"scope entry", "interpolation early return"} and (
+                helper_extract_error is None):
+            if helper_body.count(anchor) != 1:
+                errors.append(
+                    "ownership bootstrap nested scope-entry mutation found "
+                    f"{helper_body.count(anchor)} anchors (expected 1)"
+                )
+                continue
+            mutated_body = helper_body.replace(anchor, replacement, 1)
+            mutation_source = mutation_source.replace(
+                helper_body, mutated_body, 1)
+        else:
+            if mutation_source.count(mutation_anchor) != 1:
+                errors.append(
+                    f"ownership bootstrap nested {label} mutation found "
+                    f"{mutation_source.count(mutation_anchor)} anchors "
+                    "(expected 1)"
+                )
+                continue
+            mutation_source = mutation_source.replace(
+                mutation_anchor, replacement, 1)
+        mutation_errors = nested_block_scope_source_errors(mutation_source)
+        if not mutation_errors:
             errors.append(
-                "register_const must publish one exact zero-argument getter "
-                f"descriptor; found {count}"
+                f"ownership bootstrap nested {label} mutation escaped "
+                "source authority"
+            )
+    if helper_extract_error:
+        errors.append(helper_extract_error)
+
+    const_body, const_extract_error = extract_ring_function_body(
+        sources["registration"], "register_const")
+    const_anchor = "record_callable_ownership_with_transfer_levels"
+    if const_extract_error:
+        errors.append(const_extract_error)
+    elif const_body.count(const_anchor) != 1:
+        errors.append(
+            "ownership bootstrap const transfer-spine mutation found "
+            f"{const_body.count(const_anchor)} anchors (expected 1)"
+        )
+    else:
+        mutated_body = const_body.replace(
+            const_anchor, "record_callable_ownership", 1)
+        mutated_source = sources["registration"].replace(
+            const_body, mutated_body, 1)
+        mutation_errors = const_getter_ownership_source_errors(mutated_source)
+        if not any(
+                "with its transfer-level spine" in error
+                for error in mutation_errors):
+            errors.append(
+                "ownership bootstrap const transfer-spine mutation escaped "
+                f"source authority: {mutation_errors}"
+            )
+
+    alias_body, alias_extract_error = extract_ring_function_body(
+        sources["infer_ctx"], "localize_exact_import_alias_scheme")
+    alias_anchor = "new_local_callable_identity_scheme_with_transfer_levels"
+    if alias_extract_error:
+        errors.append(alias_extract_error)
+    elif alias_body.count(alias_anchor) != 1:
+        errors.append(
+            "ownership bootstrap alias transfer-spine mutation found "
+            f"{alias_body.count(alias_anchor)} anchors (expected 1)"
+        )
+    else:
+        mutated_body = alias_body.replace(
+            alias_anchor, "new_local_callable_identity_scheme", 1)
+        mutated_source = sources["infer_ctx"].replace(
+            alias_body, mutated_body, 1)
+        mutation_errors = exact_import_alias_ownership_source_errors(
+            mutated_source)
+        if not any(
+                "allocation with transfer levels" in error
+                for error in mutation_errors):
+            errors.append(
+                "ownership bootstrap alias transfer-spine mutation escaped "
+                f"source authority: {mutation_errors}"
+            )
+
+    load_body_for_mutation, load_extract_error = extract_ring_function_body(
+        sources["checker"], "load_prelude")
+    slot_anchor = 'if name == "ring_slot_dealloc"'
+    if load_extract_error:
+        errors.append(load_extract_error)
+    elif load_body_for_mutation.count(slot_anchor) != 1:
+        errors.append(
+            "ownership bootstrap prelude transfer-level mutation found "
+            f"{load_body_for_mutation.count(slot_anchor)} anchors (expected 1)"
+        )
+    else:
+        mutated_body = load_body_for_mutation.replace(
+            slot_anchor, 'if name == "__missing_slot_dealloc__"', 1)
+        mutated_checker = sources["checker"].replace(
+            load_body_for_mutation, mutated_body, 1)
+        mutation_errors = prelude_ownership_firebreak_source_errors(
+            sources["registration"], mutated_checker)
+        if not any(
+                "ring_slot_dealloc transfer-level identity" in error
+                for error in mutation_errors):
+            errors.append(
+                "ownership bootstrap prelude transfer-level mutation escaped "
+                f"source authority: {mutation_errors}"
             )
 
     load_body, extract_error = extract_ring_function_body(
@@ -11602,33 +11894,6 @@ def ownership_bootstrap_transition_source_errors() -> List[str]:
                             "missed its exact-function gate: "
                             f"{mutation_errors}"
                         )
-
-    import_alias_body, extract_error = extract_ring_function_body(
-        sources["infer_ctx"], "localize_exact_import_alias_scheme")
-    if extract_error:
-        errors.append(extract_error)
-    else:
-        masked = mask_ring_strings_and_comments(import_alias_body)
-        alias_contracts = (
-            (
-                "source-state lookup",
-                r"\bcallable_state_by_def_id\.get\s*"
-                r"\(\s*source_def_id\s*\)",
-            ),
-            (
-                "checker-local callable allocation",
-                r"\bnew_local_callable_identity_scheme\s*"
-                r"\(\s*ctx\.env\s*,\s*alias_scheme\s*,\s*"
-                r"ownership_term\s*,\s*source\s*\)",
-            ),
-        )
-        for description, pattern in alias_contracts:
-            count = len(re.findall(pattern, masked))
-            if count != 1:
-                errors.append(
-                    "localize_exact_import_alias_scheme "
-                    f"{description} matched {count} times (expected 1)"
-                )
 
     project_value_body, extract_error = extract_ring_function_body(
         sources["infer_ctx"], "apply_project_value_binding")

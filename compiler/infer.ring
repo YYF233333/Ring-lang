@@ -105,6 +105,25 @@ pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
     }
 }
 
+// infer_block runs inside the caller's current owner/binder scope.  Nested
+// source blocks need one additional lexical scope so a same-spelled local
+// cannot replace the binding seen after the block.  Restore that scope before
+// propagating CompileError; otherwise a failed nested block poisons the next
+// arm, branch, or declaration checked with the shared environment.
+fn infer_scoped_block(
+    mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?
+) -> InferResult {
+    ctx.env.push_scope()
+    let scoped_result = some(
+        infer_block(ctx, body, initial_subst)
+    ) catch { _ => none }
+    ctx.env.pop_scope()
+    match scoped_result {
+        some(result) => result,
+        none => fail.raise(CompileError {})
+    }
+}
+
 // ============================================================
 // Statement inference (from infer-stmt.ts)
 // ============================================================
@@ -1574,7 +1593,7 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
             infer_match(ctx, scrutinee, arms, match_span, subst)
         },
         Expr::Block { .. } =>
-            infer_block(ctx, expr, some(subst)),
+            infer_scoped_block(ctx, expr, some(subst)),
         Expr::IfExpr { condition, then_branch, else_branch, span } => {
             let if_span = span
             infer_if(
@@ -1711,7 +1730,7 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
                     DiagnosticContext::OtherContext { detail: some("unsafe block without requires") })
             }
             // Infer body (which is a Block expr from parse_block_expr)
-            let body_r = infer_block(ctx, body, some(subst))
+            let body_r = infer_scoped_block(ctx, body, some(subst))
             // Discharge: filter out UnsafeEffect from the body's effect row
             let mut filtered: List<Effect> = []
             for e in body_r.effects.effects {
@@ -4269,7 +4288,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
             hexpr_type(cond_r.hexpr), BOOL, s, span)
     }
 
-    let then_r = infer_block(ctx, then_branch, some(s))
+    let then_r = infer_scoped_block(ctx, then_branch, some(s))
     s = then_r.subst
     if condition_reaches_value {
         let me = merge_effects(
@@ -4284,7 +4303,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
     match else_branch {
         some(eb) => match eb {
             Expr::Block { .. } => {
-                let else_r = infer_block(ctx, eb, some(s))
+                let else_r = infer_scoped_block(ctx, eb, some(s))
                 s = else_r.subst
                 if condition_reaches_value {
                     let me2 = merge_effects(
