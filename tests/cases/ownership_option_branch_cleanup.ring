@@ -158,6 +158,20 @@ fn borrowed_str_block(value: Str) {
     print(value)
 }
 
+fn option_cleanup_fail() -> Bool with {fail<Int>} {
+    fail.raise(1)
+}
+
+fn option_catch_borrow() {
+    let mut wrapped: Resource? = none
+    wrapped = some(Resource { id: 130 })
+    let caught = option_cleanup_fail() catch {
+        _ => wrapped.is_some()
+    }
+    print(caught)
+    print(wrapped.is_some())
+}
+
 fn main() {
     if_choice(true)
     if_choice(false)
@@ -184,5 +198,6 @@ fn main() {
     option_shadow()
     direct_some_control()
     borrowed_str_block("borrowed str")
+    option_catch_borrow()
     print("done")
 }

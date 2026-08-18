@@ -323,6 +323,10 @@ pub fn perceus_transform(program: HProgram) -> HProgram {
 //   "force-option-tail-eligible"
 //                 — TEST ONLY: admit borrowed block tails so the verifier must
 //                   independently reject the resulting cleanup/Clone cycle.
+//   "inject-option-catch-drop"
+//                 — TEST ONLY: prepend one exact outer Option Drop to the first
+//                   eligible catch arm so verifier #167 must reject the state
+//                   change before restoring the try-body snapshot.
 // Reached only via the `--rc-mutate=` CLI flag (verify path); the build/run
 // pipelines call perceus_transform and cannot be mutated.
 pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
@@ -380,7 +384,8 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     // controls, kept outside semantic metadata so no boxed Map/struct alias can
     // leak them: missing-Take, missing Range Break cleanup, premature Range
     // Continue cleanup, cleanup-active Option W4 ordinal, missing Option exit
-    // cleanup, and forced unsafe tail eligibility respectively.
+    // cleanup, forced unsafe tail eligibility, and injected catch Drop
+    // respectively.
     let mut rc_gensym = RcState {
         counters: [0,
             if mutate == "missing-take" { 1 } else { 0 },
@@ -390,7 +395,8 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
             else if mutate == "missing-option-rearmed-drop" { 2 }
             else { 0 },
             if mutate == "missing-option-exit-drop" { 1 } else { 0 },
-            if mutate == "force-option-tail-eligible" { 1 } else { 0 }],
+            if mutate == "force-option-tail-eligible" { 1 } else { 0 },
+            if mutate == "inject-option-catch-drop" { 1 } else { 0 }],
         callable_projections: []
     }
     let new_decls = transform_decls(anf_program.decls,
@@ -3672,6 +3678,43 @@ fn emit_option_exit_drop(slot: OwnedSlot, mut gensym: RcState) -> Bool {
     }
 }
 
+fn inject_option_catch_drop(
+    body: HExpr, owned: List<OwnedSlot>, mut gensym: RcState
+) -> HExpr {
+    if gensym.counters.get(7) != some(1) { return body }
+    let mut target: OwnedSlot? = none
+    for slot in owned {
+        if target.is_none() && slot.option_none_cleanup {
+            let selected = slot
+            target = some(selected)
+        }
+    }
+    match target {
+        some(slot) => {
+            gensym.counters.set(7, 0)
+            let injected_drop = HStmt::Drop { name: slot.name,
+                def_id: slot.def_id, ty: Type::UnitType,
+                span: synthetic_span() }
+            let body_ty = hexpr_type(body)
+            let body_effects = hexpr_effects(body)
+            let body_span = hexpr_span(body)
+            match body {
+                HExpr::Block { stmts, .. } => {
+                    let mut injected: List<HStmt> = [injected_drop]
+                    for stmt in stmts {
+                        let retained = stmt
+                        injected.push(retained)
+                    }
+                    HExpr::Block { ..body, stmts: injected }
+                },
+                _ => HExpr::Block { stmts: [injected_drop], tail: some(body),
+                    ty: body_ty, effects: body_effects, span: body_span }
+            }
+        },
+        none => body
+    }
+}
+
 fn drops_for(names: List<OwnedSlot>, mut gensym: RcState) -> List<HStmt> {
     let mut out: List<HStmt> = []
     let mut index = names.len()
@@ -4287,8 +4330,10 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<OwnedSlot>, boxed: Set<Int>, e
                 let arm_body_ = arm.body
                 let new_body_arm = rc_block_root(arm_body_, escape, owned,
                     boxed, externs, drop_types, gensym, loop_base)
+                let mutated_body_arm = inject_option_catch_drop(
+                    new_body_arm, owned, gensym)
                 new_arms.push(HMatchArm { ..arm,
-                    guard: new_guard, body: new_body_arm })
+                    guard: new_guard, body: mutated_body_arm })
             }
             HExpr::TryCatch { ..expr, body: new_body, arms: new_arms }
         },

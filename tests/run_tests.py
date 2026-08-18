@@ -7299,13 +7299,15 @@ def rc_contract_failure(
         if missing:
             return f"{category} findings missing fixture lines {missing}"
     for category, function_name, binding_name in contract.finding_function_bindings:
-        expected_message = (
+        expected_messages = {
             f"in {function_name}: Drop of borrowed binding '{binding_name}' "
-            "(param/pattern/for-in projection) — frees a reference owned elsewhere"
-        )
+            "(param/pattern/for-in projection) — frees a reference owned elsewhere",
+            f"in {function_name}: Drop of non-droppable binding '{binding_name}' "
+            "(And-Or/effect/excluded init — possibly a borrow)",
+        }
         matching = [
             finding for finding in by_category.get(category, [])
-            if finding.message == expected_message
+            if finding.message in expected_messages
         ]
         if len(matching) != 1:
             return (
@@ -7908,7 +7910,25 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             "tests/cases/ownership_option_branch_cleanup.ring",
             ("--verify-rc", "--rc-mutate=force-option-tail-eligible"),
             False, fatal_min=1,
-            finding_counts=(("uaf-drop-borrow", 1),),
+            global_finding_counts=(("uaf-drop-borrow", 1),),
+            finding_function_bindings=(
+                ("uaf-drop-borrow", "borrowed_str_block", "wrapped"),
+            ),
+        ),
+        RcInvocationContract(
+            "cleanup-active Option catch-arm live",
+            "tests/cases/verify_rc/option_cleanup_catch_take.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+            local_finding_exact=0,
+        ),
+        RcInvocationContract(
+            "cleanup-active Option catch-arm state mutation",
+            "tests/cases/verify_rc/option_cleanup_catch_take.ring",
+            ("--verify-rc", "--rc-mutate=inject-option-catch-drop"),
+            False, fatal_exact=1,
+            local_finding_exact=1,
+            finding_counts=(("rc-imbalance", 1),),
+            finding_lines=(("rc-imbalance", (21,)),),
         ),
         RcInvocationContract(
             "option-temporary skip-anf mutation", "tests/cases/verify_rc/option_temp_leak.ring",
@@ -11160,6 +11180,30 @@ def option_cleanup_source_errors(perceus_source: str,
             r"v_exact_call_return_ownership\s*\(\s*ownership\s*,\s*"
             r"callee_def_id\s*\)\s*!=\s*RETURN_OWNERSHIP_OWNED",
         ),
+        (
+            verify_source,
+            "catch outer-state audit must exclude diverging arms",
+            r"let\s+arm_result\s*=\s*v_cf_branch\s*\(\s*arm\.body\s*,"
+            r"\s*mode\s*,\s*ctx\s*\)\s*v_pop_frame\s*\(\s*ctx\s*\)\s*"
+            r"if\s+!arm_result\.1\s*\{",
+        ),
+        (
+            verify_source,
+            "catch outer-state audit must include Option cleanup domain",
+            r"let\s+option_cleanup_changed\s*=\s*"
+            r"ctx\.kinds\s*\[\s*ci\s*\]\s*==\s*K_OPTION_CLEANUP\s*&&\s*"
+            r"snap_arm\s*\[\s*ci\s*\]\s*!=\s*snap0\s*\[\s*ci\s*\]\s*"
+            r"if\s+ordinary_owned_changed\s*\|\|\s*option_cleanup_changed",
+        ),
+        (
+            perceus_source,
+            "Perceus catch mutation must consume one exact Option slot",
+            r"gensym\.counters\.get\s*\(\s*7\s*\)\s*!=\s*some\s*\(\s*1\s*\)"
+            r"\s*\{\s*return\s+body\s*\}.*?"
+            r"slot\.option_none_cleanup.*?gensym\.counters\.set\s*\("
+            r"\s*7\s*,\s*0\s*\).*?HStmt::Drop\s*\{\s*name\s*:\s*slot\.name"
+            r"\s*,\s*def_id\s*:\s*slot\.def_id",
+        ),
     )
     for source, description, pattern in contracts:
         count = len(re.findall(
@@ -11226,10 +11270,28 @@ def option_cleanup_source_errors(perceus_source: str,
     else:
         mutated = verify_source.replace(anchor, "if false {", 1)
         masked = mask_ring_strings_and_comments(mutated)
-        pattern = contracts[4][2]
+        pattern = next(
+            item[2] for item in contracts
+            if item[1] ==
+            "verifier borrowed synthetic Clone must inspect its inner")
         if len(re.findall(pattern, masked, re.DOTALL)) != 0:
             errors.append(
                 "Option cleanup borrowed-Clone mutation escaped source gate")
+
+    catch_anchor = "ctx.kinds[ci] == K_OPTION_CLEANUP &&"
+    if verify_source.count(catch_anchor) != 1:
+        errors.append(
+            "Option cleanup catch-audit mutation anchor must occur once")
+    else:
+        mutated = verify_source.replace(catch_anchor, "false &&", 1)
+        masked = mask_ring_strings_and_comments(mutated)
+        pattern = next(
+            item[2] for item in contracts
+            if item[1] ==
+            "catch outer-state audit must include Option cleanup domain")
+        if len(re.findall(pattern, masked, re.DOTALL)) != 0:
+            errors.append(
+                "Option cleanup catch-audit deletion mutation escaped source gate")
     return errors
 
 

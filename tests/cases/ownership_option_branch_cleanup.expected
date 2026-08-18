@@ -42,4 +42,7 @@ drop 110
 true
 drop 120
 borrowed str
+true
+true
+drop 130
 done

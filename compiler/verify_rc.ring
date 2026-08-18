@@ -2109,17 +2109,25 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                     none => {},
                 }
                 if guard_reaches_value {
-                    v_cf_branch(arm.body, mode, ctx)
+                    let arm_result = v_cf_branch(arm.body, mode, ctx)
                     v_pop_frame(ctx)
-                    // #167: detect catch arm altering enclosing binding state
-                    let snap_arm = v_snapshot(ctx)
-                    let mut ci = 0
-                    while ci < snap0.len() && ci < snap_arm.len() {
-                        if snap0[ci] == S_LIVE && snap_arm[ci] != S_LIVE {
-                            v_report(ctx, "rc-imbalance", true,
-                                "catch arm drops/moves enclosing owned binding '${ctx.names[ci]}' — scope-end will double-free (#167 class)", arm.span)
+                    if !arm_result.1 {
+                        // #167: only a normally returning arm rejoins the outer
+                        // scope; detect it altering any enclosing cleanup state.
+                        let snap_arm = v_snapshot(ctx)
+                        let mut ci = 0
+                        while ci < snap0.len() && ci < snap_arm.len() {
+                            let ordinary_owned_changed =
+                                snap0[ci] == S_LIVE && snap_arm[ci] != S_LIVE
+                            let option_cleanup_changed =
+                                ctx.kinds[ci] == K_OPTION_CLEANUP &&
+                                snap_arm[ci] != snap0[ci]
+                            if ordinary_owned_changed || option_cleanup_changed {
+                                v_report(ctx, "rc-imbalance", true,
+                                    "catch arm drops/moves enclosing owned binding '${ctx.names[ci]}' — scope-end will double-free (#167 class)", arm.span)
+                            }
+                            ci = ci + 1
                         }
-                        ci = ci + 1
                     }
                 } else {
                     // Pattern miss can continue, but the diverging guard has
