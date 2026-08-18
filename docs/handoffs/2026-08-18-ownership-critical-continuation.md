@@ -219,6 +219,79 @@ receipts remain under ignored `tmp-ownership-critical-acceptance/`.
   than receipt 43 and used 46.0% less commit / 55.1% less RSS; those differences
   are instrumentation perturbation or progress differences, not an accepted
   memory improvement. The census authorizes allocation-site attribution only.
+- The focused attribution implementation is checkpoint
+  `b8e40d79c22918a08e7d00772e0760b14bcd148c`. It is guarded by the new
+  measurement-only `RING_MAP_OPTION_PROFILE`: Map and Option each use two
+  independently mixed 1/4096 lanes, sampled live state is keyed by pointer,
+  and born/live aggregation is keyed by `(tid, lane, RA0, RA1, RA2)`. Reports
+  occur only at 2^31 allocations and every 2^29 thereafter; 2^32 emits a final
+  report and self-stops with exit 86. Outer free and const retag both retire the
+  exact live count and sampled pointer. Independent review found no blocker.
+  With the macro disabled, parent and working-tree O3 LLVM IR are byte-identical
+  (847,543 characters under the same clang/flags), so the default runtime path
+  is unchanged.
+- The exact profile build reuses fixed `main-lto.o` SHA256
+  `503BB6337287DED78ADFB153259B0580F1CF6472A7A37AFF327AFC243DE7FB65`.
+  `ring_runtime.cpp` SHA256 is
+  `EBEA029A8CB6626872E470A23CB6DE00ADDF531A924910826D66D026AC6CB883`;
+  the O3/ThinLTO profile runtime object is
+  `A94C84BE6CF404A25CB911E493794D9EE19BB52FFD7C0AB243A50C7E3EADC004`.
+  The exact executable/map pair is
+  `AB57D9B0A8996156941F42A76B884191E58D8F34393121CADEBF09A0316F5ABF`
+  / `7360754C9D3AEC29F8F5B50C9AE0A0B56C0939E3701FE90E8F61E9D5B9E0A87F`.
+  The map contains one retained `ring_alloc`; all return addresses below are
+  symbolized against this map using `RVA - 1`. Toolchain is clang/LLD 22.1.6
+  (`fc4aad7b5db3fff421df9a9637605b9ca5667881`). Exact compile/link receipts are
+  `results/62-map-option-profile-runtime-compile` and
+  `results/63-map-option-profile-link`.
+- Smoke receipt `results/64-map-option-profile-smoke-hello` is PASS: exit 0,
+  stdout exactly `OK\r\n`, 2,668,459 allocations, both tids sampled,
+  `stack_failures=0`, `invariant_failures=0`, and every reported RA0/RA1/RA2 is
+  inside the exact image/map. Born-only signatures remain visible after their
+  sampled objects are freed, so the smoke also proves allocation/free closure.
+  Its measurement/stdout/stderr SHA256 values are respectively
+  `B7FDCB950DF781ECC9E3C9E4ABDBDC5D1B2F5B1A5AD9B08D0525790C7DB258C6`,
+  `19D8C9921B99C82D78C985136A5E28F6382011641FB6160C0C1A7573A402EA66`,
+  and `88051F872FD159095FEEEF33D69FBFEA475A0BFC3226C1815848E74F2287DE03`.
+- The one authorized main attribution is final in
+  `results/65-map-option-profile-check-main`. It reached the exact 2^32
+  allocation self-stop after 208.78 s, exit 86, with no timeout or measurement
+  error, one process, 2,339,614,720 bytes peak job commit and 2,276,249,600
+  bytes sampled tree RSS. stdout is empty. The measurement/stdout/stderr hashes
+  are `744E447942ACA600D0E65F7883A19E99C979685F286B67B23332E6A08DD806BD`,
+  `E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855`,
+  and `817ABA4C78D6FC90A5B9F016BECD964CE4202CD1B267FF1C9DAD193341BE8222`.
+  All five snapshots have zero stack/invariant failures:
+
+  | allocations | Map exact live | Option exact live | Map sample A/B | Option sample A/B |
+  | ---: | ---: | ---: | ---: | ---: |
+  | 2,147,483,648 | 1,564,502 | 1,594,411 | 405 / 386 | 379 / 359 |
+  | 2,684,354,560 | 1,800,221 | 1,830,222 | 466 / 458 | 437 / 415 |
+  | 3,221,225,472 | 1,918,183 | 1,948,011 | 490 / 487 | 467 / 444 |
+  | 3,758,096,384 | 2,120,634 | 2,150,562 | 541 / 527 | 506 / 493 |
+  | 4,294,967,296 | 2,446,941 | 2,475,254 | 632 / 613 | 597 / 567 |
+
+- The sampler is internally credible but the source-authorization gate fails.
+  Final estimate error versus exact live is 5.79% / 2.61% for Map A/B and
+  1.21% / 6.17% for Option A/B. However the final top-signature shares are only
+  34.02% / 36.05% and 29.82% / 32.10%; their Wilson 95% lower bounds are only
+  30.43% / 32.35% and 26.28% / 28.39%. Only Map A and Option B keep one top for
+  all final three snapshots. The final top explains 45.77% / 52.38% and
+  45.38% / 47.15% of sampled net-live growth from the third-last snapshot, so
+  only one lane barely crosses 50%.
+- Exact map, disassembly and fixed-C correlation resolve the two dominant
+  sibling groups, not one producer. The Struct arm at
+  `compiler/unify.ring:197-215` allocates Map at line 200 and wraps it in Some
+  at line 215; the Enum arm at `compiler/unify.ring:249-267` does the same at
+  lines 252/267. Both live signatures recurse through the enum-field return at
+  lines 276-277. Generated C moves `created` into the Option and borrows its
+  payload, but emits no drop for either `mapping` local on normal or early
+  return. The two arms share an invariant and missing-cleanup shape, yet they
+  remain two separately sampled source sites. Post-hoc top-two grouping reaches
+  roughly 62%-68% Map and 54%-57% Option, but it was not the preregistered unit
+  and its holdout majority is not closed. Verdict: `insufficient-evidence`.
+  Do not turn this result into a source workaround, cache/drop guess, new sample
+  grouping, or another run on the same snapshot.
 
 First failures remain evidence and must not be rewritten as passes:
 
@@ -258,17 +331,15 @@ First failures remain evidence and must not be rewritten as passes:
    that has direct authority for the peak; another unmeasured retained-container
    projection is not authorized. Do not rerun either command, raise the cap, or
    describe the absence of gen2 output as a correctness failure.
-3. The next and only evidence-led diagnostic is a short, bounded allocation
-   call-site attribution for the coupled `tid5=Map` and `tid8=Option` growth,
-   using the same fixed `main-lto.o`. Prefer the existing sampled
-   `RING_BOX_PROFILE` machinery, extended only to record Map if required, and
-   symbolize RVAs against the exact diagnostic executable. Start with a short
-   run and stop once the dominant retained call site is stable; do not launch
-   another 2400 s census first. If no site dominates, if sampling overhead or
-   helper inlining destroys provenance, or if the apparent pair is spread over
-   unrelated producers, record insufficient evidence and stop rather than
-   implementing a cache/drop guess. A source candidate is authorized only
-   after one concrete producer and its ownership/rollback boundary are proven.
+3. The fixed-object Map/Option call-site attribution is complete and recorded
+   as `insufficient-evidence`. It validly narrows growth to two sibling
+   Struct/Enum constructions in `type_reaches_callable_through_nominals`, but
+   no single preregistered full signature dominates or passes both holdout
+   lanes. This route authorizes no source candidate. Do not rerun, regroup the
+   observed top sites, disable ICF, raise the sample rate, or implement an
+   explicit drop/cache/source workaround to force a fixed point. A future route
+   requires genuinely new direct authority for the ownership-plan abstraction,
+   not another locator or retained-container hypothesis on this snapshot.
 4. Do not replace `compiler/dist-c/main.c` with gen1 yet. The generated file is
    not fixed-point proven and differs broadly from the tracked anchor; review
    and a successful gen2 byte comparison are prerequisites.
