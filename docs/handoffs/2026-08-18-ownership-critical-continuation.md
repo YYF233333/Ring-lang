@@ -56,10 +56,23 @@ receipts remain under ignored `tmp-ownership-critical-acceptance/`.
   block expressions, named-pattern shadowing, and unsafe blocks.
 - `git diff --check` is clean apart from the repository's existing LF/CRLF
   conversion warnings.
+- The formal source-compiler build in
+  `tmp-ownership-critical-acceptance/23-source-build-compiler/` timed out at
+  1200 s with empty stdout/stderr and no measurement error. It remained one
+  process, reached 4,921,294,848 bytes sampled/root RSS and 5,087,723,520 bytes
+  peak job commit, and produced no compiler artifact. This is a bootstrap
+  blocker, not evidence of a source diagnostic or crash; do not extend or
+  rerun it merely to obtain a more attractive receipt.
+- The stale Unit-1 `compiler.ownership_shadow_layout` oracle now follows the
+  A-prime transport: ownership terms, direct/result DefIds, transfer-state
+  spines, and content-addressed descriptor intern/merge/import. Its focused
+  source/mutation structural receipt is PASS (1/1) in
+  `tmp-ownership-critical-acceptance/24-current-ownership-shadow-layout/`.
 
 First failures remain evidence and must not be rewritten as passes:
 
-- `03b-canonical-structural-source`: stale pre-A-prime ownership layout oracle.
+- `03b-canonical-structural-source`: stale pre-A-prime ownership layout oracle;
+  retained as the first failure and superseded only by focused receipt `24`.
 - `03c-canonical-spread-structural`: stale generated-C temporary-name oracle.
 - `04-ownership-modes-cfg` and `04b`: original owner-bearing pattern capture and
   the intermediate forgotten `.id` correction.
@@ -71,9 +84,10 @@ First failures remain evidence and must not be rewritten as passes:
 
 1. Independently review the Ring scope/failure ownership topology; the ignored
    C mirror is behavior evidence only and does not prove generated cleanup.
-2. Generate a compiler from the changed Ring source under the 12 GiB / five
-   process lane. If the current whole-compiler bottleneck prevents this, retain
-   the checkpoint as unbootstrapped instead of substituting the mirror.
+2. Retain this checkpoint as unbootstrapped: the bounded 1200 s source build
+   already hit the current whole-compiler bottleneck without a diagnostic or
+   artifact. Do not substitute the mirror or repeat the same build absent a
+   materially different bootstrap route.
 3. With that generated compiler, rerun the focused ownership/block matrix and
    an error-recovery case that proves a failed nested block restores its scope.
 4. Only then update `compiler/dist-c/main.c`, run self-compile fixed-point, and

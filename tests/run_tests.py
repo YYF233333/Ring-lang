@@ -4295,13 +4295,41 @@ def matching_delimiter(masked: str, open_index: int,
 
 
 def ownership_shadow_layout_errors() -> List[str]:
-    """Validate Unit-1 ownership transport representation and authority."""
+    """Validate the current callable-ownership transport and identity layout."""
     errors: List[str] = []
     source_contracts = (
         (
             "FnMeta", REPO / "compiler" / "types.ring",
             r"(?m)^[ \t]*pub[ \t]+struct[ \t]+FnMeta[ \t]*\{",
-            ("effects", "ownership_id"),
+            ("effects", "ownership_term"),
+        ),
+        (
+            "CallableOwnershipDescriptor", REPO / "compiler" / "types.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+"
+            r"CallableOwnershipDescriptor[ \t]*\{",
+            ("prefix_params", "rest_param", "result"),
+        ),
+        (
+            "CallableTransferLevel", REPO / "compiler" / "types.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+CallableTransferLevel[ \t]*\{",
+            ("ownership_term", "force_params"),
+        ),
+        (
+            "CallableOwnershipState", REPO / "compiler" / "types.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+CallableOwnershipState[ \t]*\{",
+            ("source", "transfer_levels"),
+        ),
+        (
+            "OwnershipMetadata", REPO / "compiler" / "types.ring",
+            r"(?m)^[ \t]*pub[ \t]+struct[ \t]+OwnershipMetadata[ \t]*\{",
+            (
+                "callable_descriptors", "callable_by_def_id",
+                "callable_state_by_def_id", "callable_result_role_by_def_id",
+                "returned_callable_result_role_by_def_id",
+                "callable_result_role_spine_by_def_id",
+                "callable_inference_parents", "callable_inference_solutions",
+                "next_callable_inference_term", "ownership_shapes",
+            ),
         ),
         (
             "Type::FnType", REPO / "compiler" / "types.ring",
@@ -4312,8 +4340,9 @@ def ownership_shadow_layout_errors() -> List[str]:
             "HExpr::Call", REPO / "compiler" / "hir.ring",
             r"(?m)^[ \t]*Call[ \t]*\{[ \t]*callee[ \t]*:",
             (
-                "callee", "args", "type_args", "resolved_dicts",
-                "dict_dispatch", "ty", "effects", "span",
+                "callee", "callee_def_id", "callable_result_def_id", "args",
+                "type_args", "resolved_dicts", "dict_dispatch", "ty",
+                "effects", "span",
             ),
         ),
         (
@@ -4347,6 +4376,27 @@ def ownership_shadow_layout_errors() -> List[str]:
         ),
     )
 
+    def declaration_fields(
+        source: str, header_pattern: str,
+    ) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
+        masked = mask_ring_strings_and_comments(source)
+        matches = list(re.finditer(header_pattern, masked))
+        if len(matches) != 1:
+            return None, f"source declaration found {len(matches)} times"
+        open_index = masked.find("{", matches[0].start(), matches[0].end())
+        try:
+            close_index = matching_delimiter(masked, open_index, "{", "}")
+        except ValueError as exc:
+            return None, str(exc)
+        body = masked[open_index + 1:close_index]
+        fields = tuple(match.group(1) for match in re.finditer(
+            r"(?:^|,)[ \t\r\n]*(?:pub[ \t]+)?"
+            r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*:",
+            body,
+            re.MULTILINE,
+        ))
+        return fields, None
+
     source_cache: dict[Path, str] = {}
     for label, path, header_pattern, expected_fields in source_contracts:
         try:
@@ -4355,28 +4405,63 @@ def ownership_shadow_layout_errors() -> List[str]:
         except (OSError, UnicodeError) as exc:
             errors.append(f"{label}: cannot read {display_path(path)}: {exc}")
             continue
-        masked = mask_ring_strings_and_comments(source)
-        matches = list(re.finditer(header_pattern, masked))
-        if len(matches) != 1:
-            errors.append(f"{label}: source declaration found {len(matches)} times")
+        fields, field_error = declaration_fields(source, header_pattern)
+        if field_error is not None:
+            errors.append(f"{label}: {field_error}")
             continue
-        open_index = masked.find("{", matches[0].start(), matches[0].end())
-        try:
-            close_index = matching_delimiter(masked, open_index, "{", "}")
-        except ValueError as exc:
-            errors.append(f"{label}: {exc}")
-            continue
-        body = masked[open_index + 1:close_index]
-        fields = tuple(match.group(1) for match in re.finditer(
-            r"(?:^|,)[ \t\r\n]*(?:pub[ \t]+)?"
-            r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*:",
-            body,
-            re.MULTILINE,
-        ))
         if fields != expected_fields:
             errors.append(
                 f"{label}: expected source fields {expected_fields}, found {fields}")
 
+    layout_mutations = (
+        (
+            "FnMeta ownership term",
+            REPO / "compiler" / "types.ring",
+            "FnMeta",
+            "    pub ownership_term: Int\n}\n\n// Symbolic ownership shape",
+            "    pub ownership_id: Int\n}\n\n// Symbolic ownership shape",
+        ),
+        (
+            "call result DefId",
+            REPO / "compiler" / "hir.ring",
+            "HExpr::Call",
+            "callee_def_id: Int?, callable_result_def_id: Int?",
+            "callee_def_id: Int?",
+        ),
+        (
+            "callable transfer state",
+            REPO / "compiler" / "types.ring",
+            "CallableOwnershipState",
+            "pub transfer_levels: List<CallableTransferLevel>",
+            "pub ownership_levels: List<CallableTransferLevel>",
+        ),
+        (
+            "DefId state map",
+            REPO / "compiler" / "types.ring",
+            "OwnershipMetadata",
+            "pub callable_state_by_def_id: Map<Int, CallableOwnershipState>",
+            "pub callable_state_by_name: Map<Int, CallableOwnershipState>",
+        ),
+    )
+    contracts_by_label = {
+        label: (header_pattern, expected_fields)
+        for label, _path, header_pattern, expected_fields in source_contracts
+    }
+    for description, path, label, anchor, replacement in layout_mutations:
+        source = source_cache.get(path, "")
+        if source.count(anchor) != 1:
+            errors.append(
+                f"{description} mutation found {source.count(anchor)} anchors "
+                "(expected 1)")
+            continue
+        mutated = source.replace(anchor, replacement, 1)
+        header_pattern, expected_fields = contracts_by_label[label]
+        fields, field_error = declaration_fields(mutated, header_pattern)
+        if field_error is None and fields == expected_fields:
+            errors.append(
+                f"{description} mutation escaped ownership layout authority")
+
+    raw_compiler_sources: dict[Path, str] = {}
     all_compiler_sources: dict[Path, str] = {}
     compiler_sources: dict[Path, str] = {}
     for path in sorted((REPO / "compiler").glob("*.ring")):
@@ -4386,27 +4471,13 @@ def ownership_shadow_layout_errors() -> List[str]:
             errors.append(f"dynamic descriptors: cannot read {display_path(path)}: {exc}")
             continue
         masked_source = mask_ring_strings_and_comments(raw_source)
+        raw_compiler_sources[path] = raw_source
         all_compiler_sources[path] = masked_source
         if (
             "CallableOwnershipDescriptor" in raw_source
             or "callable_descriptors" in raw_source
         ):
             compiler_sources[path] = masked_source
-
-    body_inferred_writes: List[str] = []
-    for path, masked in all_compiler_sources.items():
-        for match in re.finditer(r"\bCALLABLE_SOURCE_BODY_INFERRED\b", masked):
-            prefix = masked[max(0, match.start() - 40):match.start()]
-            if path == REPO / "compiler" / "types.ring" and re.search(
-                r"pub[ \t]+const[ \t]*$", prefix
-            ):
-                continue
-            body_inferred_writes.append(
-                f"{display_path(path)}:{masked.count(chr(10), 0, match.start()) + 1}")
-    if body_inferred_writes:
-        errors.append(
-            "ownership provenance: BODY_INFERRED appears before the solver at "
-            + ", ".join(body_inferred_writes))
 
     def function_body(path: Path, name: str) -> Optional[str]:
         masked = all_compiler_sources.get(path, "")
@@ -4428,17 +4499,40 @@ def ownership_shadow_layout_errors() -> List[str]:
         return masked[open_index + 1:close_index]
 
     register_path = REPO / "compiler" / "infer_register.ring"
+    def registration_contract_errors(
+        function_name: str, body: str,
+    ) -> List[str]:
+        result: List[str] = []
+        if body.count("interface_callable_ownership(ctx.env, params)") != 1:
+            result.append(
+                f"ownership authority: {function_name} does not consume its "
+                "single explicit interface contract")
+        if body.count("fresh_callable_ownership_inference_term") != 1:
+            result.append(
+                f"ownership authority: {function_name} does not allocate its "
+                "single body-inferred term")
+        if "exact_prelude_extern_" in body or "ring_slot_" in body:
+            result.append(
+                f"ownership authority: {function_name} contains a raw-slot "
+                "name fallback")
+        return result
+
     for function_name in ("register_fn_common", "register_impl_method"):
         body = function_body(register_path, function_name)
         if body is not None:
-            if "interface_callable_ownership(params)" not in body:
+            errors.extend(registration_contract_errors(function_name, body))
+            interface_anchor = "interface_callable_ownership(ctx.env, params)"
+            if body.count(interface_anchor) != 1:
                 errors.append(
-                    f"ownership authority: {function_name} does not consume the "
-                    "explicit parameter contract")
-            if "exact_prelude_extern_" in body or "ring_slot_" in body:
-                errors.append(
-                    f"ownership authority: {function_name} contains a raw-slot "
-                    "name fallback")
+                    f"ownership authority: {function_name} interface mutation "
+                    f"found {body.count(interface_anchor)} anchors (expected 1)")
+            else:
+                mutated = body.replace(
+                    interface_anchor, "CALLABLE_BORROW_OWNED", 1)
+                if not registration_contract_errors(function_name, mutated):
+                    errors.append(
+                        f"ownership authority: {function_name} interface "
+                        "mutation escaped the source contract")
 
     infer_decl_path = REPO / "compiler" / "infer_decl.ring"
     registered_method_body = function_body(
@@ -4447,7 +4541,7 @@ def ownership_shadow_layout_errors() -> List[str]:
         registered_method_body is not None
         and not all(token in registered_method_body for token in (
             "let scheme = match trait_name",
-            "some(value) => value",
+            "some(value) => registered_type_scheme_result_firebreak(value)",
             "none => panic",
         ))
     ):
@@ -4456,13 +4550,20 @@ def ownership_shadow_layout_errors() -> List[str]:
             "back to a leaf binding")
     impl_check_body = function_body(
         infer_decl_path, "check_impl_decl_canonical")
-    if (
-        impl_check_body is not None
-        and impl_check_body.count("some(registration_scheme)") < 2
-    ):
-        errors.append(
-            "ownership authority: fn and extern impl methods do not both "
-            "consume their exact captured registration")
+    if impl_check_body is not None:
+        registration_anchor = "registered_impl_method_scheme_firebreak"
+        if impl_check_body.count(registration_anchor) != 2:
+            errors.append(
+                "ownership authority: fn and extern impl methods do not both "
+                "consume their exact captured registration")
+        else:
+            mutated = impl_check_body.replace(
+                registration_anchor,
+                "missing_impl_registration", 1)
+            if mutated.count(registration_anchor) == 2:
+                errors.append(
+                    "ownership authority: impl exact-registration mutation "
+                    "escaped the source contract")
     extern_check_body = function_body(
         infer_decl_path, "check_extern_fn_decl")
     if (
@@ -4479,7 +4580,7 @@ def ownership_shadow_layout_errors() -> List[str]:
             r"new_local_callable_scheme[ \t\r\n]*\(",
             r"exact_method_schemes[ \t\r\n]*\.[ \t\r\n]*insert"
             r"[ \t\r\n]*\([ \t\r\n]*tm[ \t\r\n]*\.[ \t\r\n]*name"
-            r"[ \t\r\n]*,[ \t\r\n]*scheme[ \t\r\n]*\)",
+            r"[ \t\r\n]*,[ \t\r\n]*indexed_scheme[ \t\r\n]*\)",
             r"method_schemes[ \t\r\n]*:[ \t\r\n]*exact_method_schemes",
         )
         if not all(re.search(pattern, delegate_register_body)
@@ -4496,8 +4597,8 @@ def ownership_shadow_layout_errors() -> List[str]:
             r"[ \t\r\n]*\.[ \t\r\n]*get[ \t\r\n]*\("
             r"[ \t\r\n]*tm[ \t\r\n]*\.[ \t\r\n]*name[ \t\r\n]*\)",
             r"resolved_method_scheme[ \t\r\n]*\.[ \t\r\n]*def_id",
-            r"def_id[ \t\r\n]*:[ \t\r\n]*some[ \t\r\n]*\("
-            r"[ \t\r\n]*resolved_method_def_id[ \t\r\n]*\)",
+            r"append_delegate_method_firebreak[ \t\r\n]*\([\s\S]*?"
+            r"resolved_method_def_id",
         )
         if not all(re.search(pattern, delegate_expand_body)
                    for pattern in delegate_hir_contracts):
@@ -4557,46 +4658,137 @@ def ownership_shadow_layout_errors() -> List[str]:
 
     descriptor_values: List[str] = []
     descriptor_writes: List[str] = []
-    for path, masked in compiler_sources.items():
-        for match in re.finditer(r"\bCallableOwnershipDescriptor[ \t]*\{", masked):
-            line_start = masked.rfind("\n", 0, match.start()) + 1
-            prefix = masked[line_start:match.start()]
-            if not re.search(r"\bpub[ \t]+struct[ \t]*$", prefix):
-                descriptor_values.append(
-                    f"{display_path(path)}:{masked.count(chr(10), 0, match.start()) + 1}")
+    for path, raw_source in raw_compiler_sources.items():
         for match in re.finditer(
-            r"\bcallable_descriptors[ \t\r\n]*\.[ \t\r\n]*insert[ \t\r\n]*\(",
-            masked,
+                r"\bCallableOwnershipDescriptor[ \t\r\n]*\{", raw_source):
+            descriptor_values.append(
+                f"{display_path(path)}:"
+                f"{raw_source.count(chr(10), 0, match.start()) + 1}")
+        for match in re.finditer(
+            r"\bcallable_descriptors[ \t\r\n]*\.[ \t\r\n]*insert"
+            r"[ \t\r\n]*\(",
+            raw_source,
         ):
             descriptor_writes.append(
-                f"{display_path(path)}:{masked.count(chr(10), 0, match.start()) + 1}")
-    if descriptor_values:
+                f"{display_path(path)}:"
+                f"{raw_source.count(chr(10), 0, match.start()) + 1}")
+    expected_types_prefix = f"{display_path(types_path)}:"
+    if len(descriptor_values) != 4 or not all(
+            value.startswith(expected_types_prefix)
+            for value in descriptor_values):
         errors.append(
-            "dynamic descriptors: Unit 1 constructs descriptor values at "
-            + ", ".join(descriptor_values))
+            "dynamic descriptors: expected the declaration, normalizer result, "
+            "function return boundary, and exact-vector constructor only in "
+            f"types.ring, found {descriptor_values}")
+    if len(descriptor_writes) != 2 or not all(
+            value.startswith(expected_types_prefix)
+            for value in descriptor_writes):
+        errors.append(
+            "dynamic descriptors: expected only content-addressed intern/merge "
+            f"writes in types.ring, found {descriptor_writes}")
+
+    intern_body = function_body(
+        types_path, "intern_callable_ownership_descriptor")
+    if intern_body is not None:
+        intern_contracts = (
+            r"normalize_callable_ownership_descriptor[ \t\r\n]*\(",
+            r"canonical_callable_ownership_id[ \t\r\n]*\(",
+            r"callable_descriptor_dynamic_id[ \t\r\n]*\(",
+            r"callable_descriptors[ \t\r\n]*\.[ \t\r\n]*get"
+            r"[ \t\r\n]*\(",
+            r"callable_descriptors[ \t\r\n]*\.[ \t\r\n]*insert"
+            r"[ \t\r\n]*\([ \t\r\n]*descriptor_id"
+            r"[ \t\r\n]*,[ \t\r\n]*normalized[ \t\r\n]*\)",
+            r"callable_descriptors_equal[ \t\r\n]*\(",
+        )
+        if not all(re.search(pattern, intern_body)
+                   for pattern in intern_contracts):
+            errors.append(
+                "dynamic descriptors: interning lost normalized "
+                "content-identity/collision authority")
+        intern_insert_anchor = "metadata.callable_descriptors.insert("
+        if intern_body.count(intern_insert_anchor) != 1:
+            errors.append(
+                "dynamic descriptors: intern-write mutation found "
+                f"{intern_body.count(intern_insert_anchor)} anchors (expected 1)")
+        else:
+            mutated = intern_body.replace(
+                intern_insert_anchor, "metadata.discarded_descriptors.insert(", 1)
+            if all(re.search(pattern, mutated)
+                   for pattern in intern_contracts):
+                errors.append(
+                    "dynamic descriptors: missing intern write escaped source "
+                    "authority")
+
+    merge_body = function_body(
+        types_path, "merge_callable_ownership_descriptor")
+    if merge_body is not None:
+        merge_contracts = (
+            r"normalize_callable_ownership_descriptor[ \t\r\n]*\(",
+            r"canonical_callable_ownership_id[ \t\r\n]*\(",
+            r"ownership_id[ \t\r\n]*!=[ \t\r\n]*"
+            r"callable_descriptor_dynamic_id[ \t\r\n]*\(",
+            r"callable_descriptors_equal[ \t\r\n]*\(",
+            r"none[ \t\r\n]*=>[ \t\r\n]*metadata\.callable_descriptors"
+            r"[ \t\r\n]*\.[ \t\r\n]*insert[ \t\r\n]*\("
+            r"[ \t\r\n]*ownership_id[ \t\r\n]*,[ \t\r\n]*normalized"
+            r"[ \t\r\n]*\)",
+        )
+        if not all(re.search(pattern, merge_body)
+                   for pattern in merge_contracts):
+            errors.append(
+                "dynamic descriptors: import merge lost exact ID/content "
+                "validation")
+        merge_insert_anchor = "metadata.callable_descriptors.insert("
+        if merge_body.count(merge_insert_anchor) != 1:
+            errors.append(
+                "dynamic descriptors: merge-write mutation found "
+                f"{merge_body.count(merge_insert_anchor)} anchors (expected 1)")
+        else:
+            mutated = merge_body.replace(
+                merge_insert_anchor, "metadata.discarded_descriptors.insert(", 1)
+            if all(re.search(pattern, mutated)
+                   for pattern in merge_contracts):
+                errors.append(
+                    "dynamic descriptors: missing import merge write escaped "
+                    "source authority")
 
     checker_path = REPO / "compiler" / "checker.ring"
-    expected_write_prefix = f"{display_path(checker_path)}:"
-    if len(descriptor_writes) != 1 or not descriptor_writes[0].startswith(
-        expected_write_prefix
-    ):
-        errors.append(
-            "dynamic descriptors: expected only checker hydration to write the "
-            f"table, found {descriptor_writes}")
-    checker_masked = compiler_sources.get(checker_path, "")
-    hydration_copy = re.search(
-        r"for[ \t]+entry[ \t]+in[ \t]+mod_\.ownership_metadata\."
-        r"callable_descriptors\.entries\(\)[ \t\r\n]*\{.*?"
-        r"let[ \t]*\([ \t]*ownership_id,[ \t]*descriptor[ \t]*\)"
-        r"[ \t]*=[ \t]*entry.*?callable_descriptors\.insert\("
-        r"[ \t\r\n]*ownership_id,[ \t\r\n]*descriptor[ \t\r\n]*\)",
-        checker_masked,
-        re.DOTALL,
-    )
-    if hydration_copy is None:
-        errors.append(
-            "dynamic descriptors: checker write is not a copy from imported "
-            "ownership metadata")
+    inject_body = function_body(checker_path, "inject_module_exports")
+    if inject_body is not None:
+        import_contract = re.search(
+            r"for[ \t]+entry[ \t]+in[ \t]+mod_\.ownership_metadata\."
+            r"callable_descriptors\.entries\(\)[ \t\r\n]*\{.*?"
+            r"let[ \t]*\([ \t]*ownership_id,[ \t]*descriptor[ \t]*\)"
+            r"[ \t]*=[ \t]*entry.*?merge_callable_ownership_descriptor\("
+            r"[ \t\r\n]*ctx\.env\.types\.ownership_metadata[ \t\r\n]*,"
+            r"[ \t\r\n]*imported_ownership_id[ \t\r\n]*,"
+            r"[ \t\r\n]*imported_descriptor[ \t\r\n]*\)",
+            inject_body,
+            re.DOTALL,
+        )
+        if import_contract is None:
+            errors.append(
+                "dynamic descriptors: imported descriptors do not pass "
+                "through the validated merge boundary")
+        merge_call_anchor = "merge_callable_ownership_descriptor("
+        if inject_body.count(merge_call_anchor) != 1:
+            errors.append(
+                "dynamic descriptors: import-merge mutation found "
+                f"{inject_body.count(merge_call_anchor)} anchors (expected 1)")
+        else:
+            mutated = inject_body.replace(
+                merge_call_anchor, "intern_callable_ownership_descriptor(", 1)
+            if re.search(
+                r"for[ \t]+entry[ \t]+in[ \t]+mod_\.ownership_metadata\."
+                r"callable_descriptors\.entries\(\)[ \t\r\n]*\{.*?"
+                r"merge_callable_ownership_descriptor\(",
+                mutated,
+                re.DOTALL,
+            ) is not None:
+                errors.append(
+                    "dynamic descriptors: imported-descriptor merge mutation "
+                    "escaped source authority")
 
     return errors
 
