@@ -394,3 +394,15 @@ needed here is which whole-loop candidate was kept or rejected.
   mirrors are archived only as local topology evidence: their executed I/O is
   asymmetric on skipped work and cannot decide performance. No independently
   supported B-180 compiler candidate remains.
+- The later ownership-critical bootstrap investigation adds one negative
+  front-end result without reopening B-180 candidate exploration. The
+  source-built gen1 baseline `check compiler/main.ring` reaches the fixed
+  12 GiB Job cap after 2281.06 s (12,885,037,056 bytes peak commit,
+  12,420,317,184 bytes peak RSS). A source-correct candidate that immediately
+  replaces every completed module's retained `TypeEnv` with the exact late
+  visible-extern-name projection reaches the same cap after 2251.54 s
+  (12,885,041,152 / 12,420,857,856 bytes) and emits byte-identical
+  `ring_alloc failed (size=16, typeid=8)` stderr. This rejects the retained
+  module environment as the material peak owner. The candidate is not merged
+  and no gen2 was attempted; another retained-container projection requires
+  new allocation authority rather than this negative result.

@@ -128,6 +128,36 @@ receipts remain under ignored `tmp-ownership-critical-acceptance/`.
   This is a resource-bound fixed-point blocker, not a source diagnostic or a
   failed ownership behavior gate. The first failure is final: do not rerun it
   or raise the cap merely to obtain a fixed point.
+- A paired pure-front-end control confirms that code generation is not the
+  boundary. `43-gen1-check-main-e38a489a` ran the same source-built gen1 with
+  `check compiler/main.ring`; it reached the same 12 GiB Job cap after
+  2281.06 s, with 12,885,037,056 bytes peak commit and 12,420,317,184 bytes
+  peak RSS. stdout is empty and stderr is exactly
+  `ring panic: ring_alloc failed (size=16, typeid=8)`. The measurement SHA256
+  is `45F51790C584269F313C04ABC896FE382C57A98CDD585F59706130BA695B3068`.
+- The first materially different peak-state candidate is preserved, but
+  performance-rejected, on branch `codex/b180-project-env-projection` at
+  `a58bf3e4a8467ff0a22061bd41c007270882e658`. It projects each completed
+  module's `TypeEnv` immediately to the exact B-145 `Set<Str>` of visible
+  extern type names instead of retaining the full environment until the late
+  filter. Its source/mutation authority passed; a minimal private nested
+  extern / public ordinary-function collision passed candidate and baseline
+  checks byte-for-byte, then candidate C build, link and native execution
+  produced exactly `7`. A clean A6 build also produced candidate gen1 C
+  SHA256 `6671E030987D39F24F855B16B03979C898EF125C8BC46B161F78CE205B0842F7`
+  and executable SHA256
+  `40D9DC7956DBFEFA754D667B58BDEB1ABBD59CAF306AAB6C7DA1DB77A6C84456`.
+- The decisive candidate `check compiler/main.ring` receipt is
+  `results/55-candidate-gen1-check-compiler-main-projection`. It still hit the
+  12 GiB cap after 2251.54 s: 12,885,041,152 bytes peak commit and
+  12,420,857,856 bytes peak RSS. Compared with receipt 43 this is 29.52 s
+  earlier, +4,096 bytes commit and +540,672 bytes RSS. stderr is byte-identical
+  to receipt 43 (SHA256
+  `C880F9E6AAEB6177D826DFCCE20F624E312A1B350F1CF60CE027891EE690CF35`),
+  and the candidate measurement SHA256 is
+  `FEEE26ED6EEC0FB0A6BE7A3BFD6523EA723804120ECFE09A7F2079BA557F84D3`.
+  This refutes retained per-module `TypeEnv` as the material peak owner. Do not
+  merge the candidate, run gen2 from it, or rerun it for a prettier result.
 
 First failures remain evidence and must not be rewritten as passes:
 
@@ -144,17 +174,25 @@ First failures remain evidence and must not be rewritten as passes:
   parameter syntax before generation; no artifact.
 - `42-gen1-fresh-gen2-e38a489a`: source-built gen1 reaches the 12 GiB Job
   commit boundary after 2279.57 s and fails a 16-byte allocation; no artifact.
+- `43-gen1-check-main-e38a489a`: the pure front end reaches the same boundary
+  after 2281.06 s with byte-stable `typeid=8` panic output.
+- `results/55-candidate-gen1-check-compiler-main-projection`: the exact
+  projection candidate reaches the same boundary 29.52 s earlier with the
+  same stderr; this is the final receipt for that rejected construction.
 
 ## Remaining gates
 
 1. Treat the new gen1 as real source-generated correctness evidence: the
    ownership/block runtime matrix and the failure-scope recovery probe have
    both passed. The older C mirror remains supporting evidence only.
-2. Retain the checkpoint as **not fixed-point closed**. Gen1-to-gen2 now has a
-   precise resource blocker at the unchanged 12 GiB limit; the next bootstrap
-   action must materially reduce peak compiler state or use a different
-   construction with the same authority. Do not rerun the same command, raise
-   the cap, or describe the absence of gen2 output as a correctness failure.
+2. Retain the checkpoint as **not fixed-point closed**. Gen1-to-gen2 and the
+   pure check now have the same precise resource blocker at the unchanged
+   12 GiB limit. Early projection of completed module TypeEnvs has been tested
+   and refuted as a peak-memory remedy. Any later bootstrap proposal must avoid
+   a proven high-volume allocation/rebuild, or change construction in a way
+   that has direct authority for the peak; another unmeasured retained-container
+   projection is not authorized. Do not rerun either command, raise the cap, or
+   describe the absence of gen2 output as a correctness failure.
 3. Do not replace `compiler/dist-c/main.c` with gen1 yet. The generated file is
    not fixed-point proven and differs broadly from the tracked anchor; review
    and a successful gen2 byte comparison are prerequisites.
