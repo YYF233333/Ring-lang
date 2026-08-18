@@ -309,6 +309,341 @@ static bool g_box_atexit = (atexit(ring_box_profile_report), true);
 #endif // RING_BOX_PROFILE
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Focused Map/Option allocation-site attribution (opt-in,
+// -DRING_MAP_OPTION_PROFILE).  This is deliberately separate from the legacy
+// RING_BOX_PROFILE/RING_ALLOC_STATS reports: it samples only typeids 5 and 8,
+// uses two independently mixed holdout lanes, records a three-frame signature,
+// and reports at a small fixed set of allocation milestones.  The diagnostic
+// self-stops at 2^32 allocations so it cannot accidentally become another full
+// compiler run.  Normal runtime builds preprocess this entire block away.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifdef RING_MAP_OPTION_PROFILE
+#ifndef _WIN32
+#error RING_MAP_OPTION_PROFILE requires Windows x64 stack capture
+#endif
+
+#ifndef RING_MAP_OPTION_PROFILE_SAMPLE
+#define RING_MAP_OPTION_PROFILE_SAMPLE 4096
+#endif
+static_assert(
+    RING_MAP_OPTION_PROFILE_SAMPLE > 0 &&
+    (RING_MAP_OPTION_PROFILE_SAMPLE & (RING_MAP_OPTION_PROFILE_SAMPLE - 1)) == 0,
+    "RING_MAP_OPTION_PROFILE_SAMPLE must be a power of two");
+
+#define RING_MAP_OPTION_NOINLINE __declspec(noinline)
+
+static constexpr uint64_t RING_MAP_OPTION_FIRST_REPORT = 1ULL << 31;
+static constexpr uint64_t RING_MAP_OPTION_REPORT_STEP = 1ULL << 29;
+static constexpr uint64_t RING_MAP_OPTION_STOP_ALLOCS = 1ULL << 32;
+static constexpr int RING_MAP_OPTION_STOP_CODE = 86;
+
+struct RingMapOptionSite {
+    void* ra0;
+    void* ra1;
+    void* ra2;
+    uint32_t tid;
+    uint8_t lane;
+
+    bool operator==(const RingMapOptionSite& other) const {
+        return ra0 == other.ra0 && ra1 == other.ra1 && ra2 == other.ra2 &&
+               tid == other.tid && lane == other.lane;
+    }
+};
+
+static uint64_t ring_map_option_mix64(uint64_t value) {
+    value += 0x9e3779b97f4a7c15ULL;
+    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    return value ^ (value >> 31);
+}
+
+struct RingMapOptionSiteHash {
+    size_t operator()(const RingMapOptionSite& site) const {
+        uint64_t hash = ring_map_option_mix64((uint64_t)site.tid << 8 | site.lane);
+        hash ^= ring_map_option_mix64((uint64_t)(uintptr_t)site.ra0);
+        hash ^= ring_map_option_mix64((uint64_t)(uintptr_t)site.ra1 + 0x51ed2705ULL);
+        hash ^= ring_map_option_mix64((uint64_t)(uintptr_t)site.ra2 + 0x94d049bbULL);
+        return (size_t)hash;
+    }
+};
+
+struct RingMapOptionLive {
+    void* ra0;
+    void* ra1;
+    void* ra2;
+    uint32_t tid;
+    uint8_t lane_mask;
+};
+
+static std::unordered_map<void*, RingMapOptionLive>* g_map_option_live = nullptr;
+static std::unordered_map<RingMapOptionSite, uint64_t, RingMapOptionSiteHash>*
+    g_map_option_born = nullptr;
+static uint64_t g_map_option_allocs = 0;
+static uint64_t g_map_option_next_report = RING_MAP_OPTION_FIRST_REPORT;
+static uint64_t g_map_option_birth_ordinal[2] = {0, 0};
+static int64_t g_map_option_exact_live[2] = {0, 0};
+static uint64_t g_map_option_stack_failures = 0;
+static uint64_t g_map_option_invariant_failures = 0;
+static bool g_map_option_final_reported = false;
+
+static int ring_map_option_index(uint32_t tid) {
+    if (tid == RING_TYPEID_MAP) return 0;
+    if (tid == RING_TYPEID_OPTION) return 1;
+    return -1;
+}
+
+static const char* ring_map_option_name(int index) {
+    return index == 0 ? "Map" : "Option";
+}
+
+static uintptr_t ring_map_option_image_base() {
+    static uintptr_t base = (uintptr_t)GetModuleHandleW(NULL);
+    return base;
+}
+
+static RingMapOptionSite ring_map_option_site(
+        const RingMapOptionLive& live, uint8_t lane) {
+    return RingMapOptionSite{
+        live.ra0, live.ra1, live.ra2, live.tid, lane
+    };
+}
+
+static bool ring_map_option_site_less(
+        const RingMapOptionSite& left, const RingMapOptionSite& right) {
+    if (left.tid != right.tid) return left.tid < right.tid;
+    if (left.lane != right.lane) return left.lane < right.lane;
+    if (left.ra0 != right.ra0) return (uintptr_t)left.ra0 < (uintptr_t)right.ra0;
+    if (left.ra1 != right.ra1) return (uintptr_t)left.ra1 < (uintptr_t)right.ra1;
+    return (uintptr_t)left.ra2 < (uintptr_t)right.ra2;
+}
+
+static void ring_map_option_report(const char* label) {
+    using SiteCount = std::pair<RingMapOptionSite, uint64_t>;
+    std::unordered_map<RingMapOptionSite, uint64_t, RingMapOptionSiteHash>
+        live_by_site;
+    uint64_t sample_live[2][2] = {{0, 0}, {0, 0}};
+    uint64_t sample_born[2][2] = {{0, 0}, {0, 0}};
+
+    if (g_map_option_live) {
+        for (const auto& entry : *g_map_option_live) {
+            const RingMapOptionLive& live = entry.second;
+            int index = ring_map_option_index(live.tid);
+            if (index < 0) {
+                g_map_option_invariant_failures++;
+                continue;
+            }
+            for (uint8_t lane = 0; lane < 2; lane++) {
+                if ((live.lane_mask & (uint8_t)(1u << lane)) == 0) continue;
+                RingMapOptionSite site = ring_map_option_site(live, lane);
+                live_by_site[site]++;
+                sample_live[index][lane]++;
+            }
+        }
+    }
+    if (g_map_option_born) {
+        for (const auto& entry : *g_map_option_born) {
+            int index = ring_map_option_index(entry.first.tid);
+            if (index < 0 || entry.first.lane >= 2) {
+                g_map_option_invariant_failures++;
+                continue;
+            }
+            sample_born[index][entry.first.lane] += entry.second;
+        }
+    }
+
+    fprintf(stderr,
+            "[map-option-profile] label=%s allocs=%llu table_live=%llu "
+            "stack_failures=%llu invariant_failures=%llu\n",
+            label,
+            (unsigned long long)g_map_option_allocs,
+            (unsigned long long)(g_map_option_live ? g_map_option_live->size() : 0),
+            (unsigned long long)g_map_option_stack_failures,
+            (unsigned long long)g_map_option_invariant_failures);
+
+    const uintptr_t base = ring_map_option_image_base();
+    for (int index = 0; index < 2; index++) {
+        const uint32_t tid = index == 0 ? RING_TYPEID_MAP : RING_TYPEID_OPTION;
+        for (uint8_t lane = 0; lane < 2; lane++) {
+            std::vector<SiteCount> sites;
+            for (const auto& entry : live_by_site) {
+                if (entry.first.tid == tid && entry.first.lane == lane) {
+                    sites.push_back(entry);
+                }
+            }
+            // Keep born-only signatures visible in smoke/closure receipts.  A
+            // short successful check may free every sampled value before
+            // atexit; omitting those sites would make stack provenance
+            // unverifiable even though sampling and erase both worked.
+            if (g_map_option_born) {
+                for (const auto& entry : *g_map_option_born) {
+                    if (entry.first.tid != tid || entry.first.lane != lane ||
+                        live_by_site.find(entry.first) != live_by_site.end()) {
+                        continue;
+                    }
+                    sites.push_back(SiteCount{entry.first, 0});
+                }
+            }
+            std::sort(sites.begin(), sites.end(),
+                [](const SiteCount& left, const SiteCount& right) {
+                    if (left.second != right.second) return left.second > right.second;
+                    return ring_map_option_site_less(left.first, right.first);
+                });
+
+            const unsigned long long estimated_live =
+                (unsigned long long)sample_live[index][lane] *
+                (unsigned long long)RING_MAP_OPTION_PROFILE_SAMPLE;
+            fprintf(stderr,
+                    "[map-option-summary] label=%s allocs=%llu tid=%u type=%s "
+                    "lane=%c exact_live=%lld sample_live=%llu sample_born=%llu "
+                    "estimated_live=%llu sample_rate=%d sites=%llu\n",
+                    label,
+                    (unsigned long long)g_map_option_allocs,
+                    tid, ring_map_option_name(index), (char)('A' + lane),
+                    (long long)g_map_option_exact_live[index],
+                    (unsigned long long)sample_live[index][lane],
+                    (unsigned long long)sample_born[index][lane],
+                    estimated_live, RING_MAP_OPTION_PROFILE_SAMPLE,
+                    (unsigned long long)sites.size());
+
+            size_t limit = sites.size() < 12 ? sites.size() : 12;
+            for (size_t rank = 0; rank < limit; rank++) {
+                const RingMapOptionSite& site = sites[rank].first;
+                uint64_t born = 0;
+                if (g_map_option_born) {
+                    auto born_it = g_map_option_born->find(site);
+                    if (born_it != g_map_option_born->end()) born = born_it->second;
+                }
+                double share = sample_live[index][lane]
+                    ? 100.0 * (double)sites[rank].second /
+                        (double)sample_live[index][lane]
+                    : 0.0;
+                fprintf(stderr,
+                        "[map-option-site] label=%s allocs=%llu tid=%u lane=%c "
+                        "rank=%llu live=%llu born=%llu share=%.4f "
+                        "rva0=0x%llx rva1=0x%llx rva2=0x%llx\n",
+                        label,
+                        (unsigned long long)g_map_option_allocs,
+                        tid, (char)('A' + lane),
+                        (unsigned long long)(rank + 1),
+                        (unsigned long long)sites[rank].second,
+                        (unsigned long long)born, share,
+                        (unsigned long long)((uintptr_t)site.ra0 - base),
+                        (unsigned long long)((uintptr_t)site.ra1 - base),
+                        (unsigned long long)((uintptr_t)site.ra2 - base));
+            }
+        }
+    }
+    fflush(stderr);
+}
+
+static void ring_map_option_report_at_exit() {
+    if (g_map_option_final_reported) return;
+    g_map_option_final_reported = true;
+    ring_map_option_report("exit");
+}
+
+static bool g_map_option_atexit =
+    (atexit(ring_map_option_report_at_exit), true);
+
+static uint8_t ring_map_option_sample_lanes(uint32_t tid, uint64_t ordinal) {
+    static constexpr uint64_t lane_seeds[2] = {
+        0x243f6a8885a308d3ULL,
+        0x13198a2e03707344ULL,
+    };
+    uint8_t lane_mask = 0;
+    for (uint8_t lane = 0; lane < 2; lane++) {
+        uint64_t keyed = ordinal ^ lane_seeds[lane] ^
+            ((uint64_t)tid * 0xd1b54a32d192ed03ULL);
+        if ((ring_map_option_mix64(keyed) &
+             (RING_MAP_OPTION_PROFILE_SAMPLE - 1)) == 0) {
+            lane_mask |= (uint8_t)(1u << lane);
+        }
+    }
+    return lane_mask;
+}
+
+static void ring_map_option_record(void* ptr, uint32_t tid, void* ra0) {
+    int index = ring_map_option_index(tid);
+    if (index < 0) return;
+    g_map_option_exact_live[index]++;
+
+    uint64_t ordinal = g_map_option_birth_ordinal[index]++;
+    uint8_t lane_mask = ring_map_option_sample_lanes(tid, ordinal);
+    if (lane_mask == 0) return;
+
+    void* frames[8] = {nullptr};
+    USHORT frame_count = CaptureStackBackTrace(0, 8, frames, nullptr);
+    void* ra1 = nullptr;
+    void* ra2 = nullptr;
+    bool found_ra0 = false;
+    for (USHORT i = 0; i < frame_count; i++) {
+        if (frames[i] != ra0) continue;
+        found_ra0 = true;
+        if (i + 1 < frame_count) ra1 = frames[i + 1];
+        if (i + 2 < frame_count) ra2 = frames[i + 2];
+        break;
+    }
+    if (!found_ra0 || !ra1 || !ra2) g_map_option_stack_failures++;
+
+    if (!g_map_option_live) {
+        g_map_option_live =
+            new std::unordered_map<void*, RingMapOptionLive>();
+        g_map_option_born = new std::unordered_map<
+            RingMapOptionSite, uint64_t, RingMapOptionSiteHash>();
+    }
+    RingMapOptionLive live{ra0, ra1, ra2, tid, lane_mask};
+    auto inserted = g_map_option_live->emplace(ptr, live);
+    if (!inserted.second) {
+        g_map_option_invariant_failures++;
+        inserted.first->second = live;
+    }
+    for (uint8_t lane = 0; lane < 2; lane++) {
+        if ((lane_mask & (uint8_t)(1u << lane)) == 0) continue;
+        (*g_map_option_born)[ring_map_option_site(live, lane)]++;
+    }
+}
+
+static void ring_map_option_retire(void* ptr, uint32_t tid) {
+    int index = ring_map_option_index(tid);
+    if (index < 0) return;
+    if (g_map_option_exact_live[index] <= 0) {
+        g_map_option_invariant_failures++;
+    } else {
+        g_map_option_exact_live[index]--;
+    }
+    if (!g_map_option_live) return;
+    auto found = g_map_option_live->find(ptr);
+    if (found == g_map_option_live->end()) return;
+    if (found->second.tid != tid) g_map_option_invariant_failures++;
+    g_map_option_live->erase(found);
+}
+
+static void ring_map_option_after_alloc(void* ptr, int64_t typeid_val, void* ra0) {
+    g_map_option_allocs++;
+    if (typeid_val == RING_TYPEID_MAP || typeid_val == RING_TYPEID_OPTION) {
+        ring_map_option_record(ptr, (uint32_t)typeid_val, ra0);
+    }
+    if (g_map_option_allocs != g_map_option_next_report) return;
+
+    const bool is_final = g_map_option_allocs == RING_MAP_OPTION_STOP_ALLOCS;
+    ring_map_option_report(is_final ? "milestone-final" : "milestone");
+    if (is_final) {
+        g_map_option_final_reported = true;
+        fprintf(stderr,
+                "[map-option-self-stop] allocs=%llu exit_code=%d\n",
+                (unsigned long long)g_map_option_allocs,
+                RING_MAP_OPTION_STOP_CODE);
+        fflush(stderr);
+        exit(RING_MAP_OPTION_STOP_CODE);
+    }
+    g_map_option_next_report += RING_MAP_OPTION_REPORT_STEP;
+}
+
+#else
+#define RING_MAP_OPTION_NOINLINE
+#endif // RING_MAP_OPTION_PROFILE
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Alloc/free leak counter (opt-in diagnostic, -DRING_ALLOC_STATS).  Inert in
 // normal builds.  Tracks `live = allocs - frees` overall and per-typeid; a leaking
 // program has live ≈ allocs (1:1, never plateaus), a reclaiming one has live
@@ -356,7 +691,8 @@ static bool g_stats_atexit = (atexit(ring_alloc_stats_report), true);
 #define RING_D5_COUNT(counter) ((void)0)
 #endif
 
-extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
+extern "C" RING_MAP_OPTION_NOINLINE void* ring_alloc(
+        int64_t size, int64_t typeid_val) {
     char* raw = (char*)malloc(8 + (size_t)size);
     if (!raw) {
         fprintf(stderr, "ring panic: ring_alloc failed (size=%lld, typeid=%lld)\n",
@@ -365,6 +701,9 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
     }
     *(uint32_t*)(raw)     = 1;                    // rc = 1 (new allocation)
     *(uint32_t*)(raw + 4) = (uint32_t)typeid_val; // typeid
+#ifdef RING_MAP_OPTION_PROFILE
+    ring_map_option_after_alloc(raw + 8, typeid_val, _ReturnAddress());
+#endif
 #ifdef RING_ALLOC_STATS
     g_allocs++;
     if (typeid_val >= 0 && typeid_val < 4096) g_live_tid[typeid_val]++;
@@ -468,6 +807,9 @@ extern "C" void ring_drop(void* ptr) {
             tid == RING_TYPEID_OPTION || tid == RING_TYPEID_SB || tid >= RING_TYPEID_USER_BASE)
             ring_box_profile_erase(ptr);
 #endif
+#ifdef RING_MAP_OPTION_PROFILE
+        ring_map_option_retire(ptr, tid);
+#endif
         free((char*)ptr - 8);
 #ifdef RING_ALLOC_STATS
         g_frees++;
@@ -542,6 +884,9 @@ extern "C" void* ring_const_intern(void* p) {
     // keeping it would show one permanent fake "leak" per const decl).
     ring_box_profile_erase(p);
 #endif
+#ifdef RING_MAP_OPTION_PROFILE
+    ring_map_option_retire(p, *tid_p);
+#endif
     *tid_p = RING_TYPEID_CONST_STATIC;
     return p;
 }
@@ -563,6 +908,9 @@ extern "C" void* ring_unit_intern(void* p) {
 #ifdef RING_BOX_PROFILE
     // Drop the box-profile sample recorded at allocation (immortal by design).
     ring_box_profile_erase(p);
+#endif
+#ifdef RING_MAP_OPTION_PROFILE
+    ring_map_option_retire(p, *tid_p);
 #endif
     *tid_p = RING_TYPEID_CONST_HEAP_STATIC;
     return p;
