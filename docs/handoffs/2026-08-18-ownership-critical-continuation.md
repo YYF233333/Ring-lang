@@ -68,12 +68,23 @@ receipts remain under ignored `tmp-ownership-critical-acceptance/`.
   spines, and content-addressed descriptor intern/merge/import. Its focused
   source/mutation structural receipt is PASS (1/1) in
   `tmp-ownership-critical-acceptance/24-current-ownership-shadow-layout/`.
+- The stale spread source-sequence oracle now accepts only a linear,
+  side-effect-free C identifier transport from the evaluated Never/Return
+  source through generated RC-scope and return temporaries. It still rejects
+  a wrong alias, reordered allocation, multiple/missing early returns, and any
+  intervening call or RC operation. The tracked-C diagnostic artifact is
+  recorded under `tmp-ownership-critical-acceptance/spread-inspect/`; the
+  explicit generated-C structural gate is PASS (1/1) in
+  `tmp-ownership-critical-acceptance/26-current-spread-source-sequence/`
+  (16.70 s wall, 216,129,536 bytes peak job commit, 251,879,424 bytes sampled
+  peak process-tree RSS, no timeout or measurement error).
 
 First failures remain evidence and must not be rewritten as passes:
 
 - `03b-canonical-structural-source`: stale pre-A-prime ownership layout oracle;
   retained as the first failure and superseded only by focused receipt `24`.
-- `03c-canonical-spread-structural`: stale generated-C temporary-name oracle.
+- `03c-canonical-spread-structural`: stale generated-C temporary-name oracle;
+  retained as the first failure and superseded only by focused receipt `26`.
 - `04-ownership-modes-cfg` and `04b`: original owner-bearing pattern capture and
   the intermediate forgotten `.id` correction.
 - `04c-ownership-modes-cfg-fixed`: the actual post-block 12-vs-11 finding.

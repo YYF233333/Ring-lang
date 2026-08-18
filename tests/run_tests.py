@@ -6303,13 +6303,51 @@ def spread_never_body_sequence_errors(
             errors.append(
                 f"{symbol}: expected exactly one early return before the "
                 f"destination allocation, found {len(early_returns)}")
-        elif source_lhs is not None and re.fullmatch(
-            rf"\s*return\s+{re.escape(source_lhs)}\s*;\s*",
-            early_returns[0][2],
-        ) is None:
-            errors.append(
-                f"{symbol}: early return must return the exact source "
-                f"assignment '{source_lhs}'")
+        elif source_lhs is not None:
+            return_match = re.fullmatch(
+                r"\s*return\s+(?P<value>[A-Za-z_][A-Za-z0-9_]*)\s*;\s*",
+                early_returns[0][2],
+            )
+            if return_match is None:
+                errors.append(
+                    f"{symbol}: early return must return one exact source "
+                    "transport identifier")
+            else:
+                carried = source_lhs
+                transport_valid = True
+                for statement in statements:
+                    if not (
+                        source_statements[0][0] < statement[0] <
+                        early_returns[0][0]
+                    ):
+                        continue
+                    alias = re.fullmatch(
+                        r"\s*(?:void\s*\*\s*)?"
+                        r"(?P<lhs>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+                        r"(?P<rhs>[A-Za-z_][A-Za-z0-9_]*)\s*;\s*",
+                        statement[2],
+                    )
+                    if alias is None:
+                        errors.append(
+                            f"{symbol}: source-to-return transport contains "
+                            "a non-alias statement")
+                        transport_valid = False
+                        break
+                    if alias.group("rhs") != carried:
+                        errors.append(
+                            f"{symbol}: source-to-return alias "
+                            f"'{alias.group('lhs')}' does not carry the exact "
+                            f"preceding source '{carried}'")
+                        transport_valid = False
+                        break
+                    carried = alias.group("lhs")
+                if (
+                    transport_valid
+                    and return_match.group("value") != carried
+                ):
+                    errors.append(
+                        f"{symbol}: early return does not return the exact "
+                        f"source transport '{carried}'")
         if (len(source_statements) == 1 and return_statements and not (
                 source_statements[0][0] < return_statements[0][0] <
                 first_alloc[0])):
@@ -6367,6 +6405,22 @@ def spread_sequence_statement_oracle_self_test_errors() -> List[str]:
                 f"{symbol}: independent valid sequence rejected by oracle: "
                 + "; ".join(valid_errors))
 
+        aliased_valid = (
+            f"tmp_source = {source_callee}(RING_INT(0));\n"
+            "tmp_scope = tmp_source;\n"
+            "tmp_return = tmp_scope;\n"
+            "return tmp_return;\n"
+            "tmp_destination = ring_alloc(16, 1);\n"
+            "tmp_field = RING_INT(1);\n"
+            "return tmp_destination;\n"
+        )
+        aliased_valid_errors = spread_never_body_sequence_errors(
+            aliased_valid, symbol, source_callee)
+        if aliased_valid_errors:
+            errors.append(
+                f"{symbol}: independent valid RC alias transport rejected: "
+                + "; ".join(aliased_valid_errors))
+
         reordered = (
             "tmp_destination = ring_alloc(16, 1);\n"
             f"tmp_source = {source_callee}(RING_INT(0));\n"
@@ -6410,13 +6464,49 @@ def spread_sequence_statement_oracle_self_test_errors() -> List[str]:
         wrong_lhs_errors = spread_never_body_sequence_errors(
             wrong_lhs, symbol, source_callee)
         if not any(
-            "early return must return the exact source assignment "
+            "early return does not return the exact source transport "
             "'wrong_source'" in error
             for error in wrong_lhs_errors
         ):
             errors.append(
                 f"{symbol}: independent wrong-lhs body escaped exact source "
                 "return validation")
+
+        wrong_alias = (
+            f"alias_source = {source_callee}(RING_INT(0));\n"
+            "alias_scope = unrelated_source;\n"
+            "return alias_scope;\n"
+            "alias_destination = ring_alloc(16, 1);\n"
+            "alias_field = RING_INT(1);\n"
+            "return alias_destination;\n"
+        )
+        wrong_alias_errors = spread_never_body_sequence_errors(
+            wrong_alias, symbol, source_callee)
+        if not any(
+            "does not carry the exact preceding source 'alias_source'" in error
+            for error in wrong_alias_errors
+        ):
+            errors.append(
+                f"{symbol}: independent wrong-alias transport escaped exact "
+                "source validation")
+
+        side_effect_transport = (
+            f"effect_source = {source_callee}(RING_INT(0));\n"
+            "ring_dup(effect_source);\n"
+            "return effect_source;\n"
+            "effect_destination = ring_alloc(16, 1);\n"
+            "effect_field = RING_INT(1);\n"
+            "return effect_destination;\n"
+        )
+        side_effect_errors = spread_never_body_sequence_errors(
+            side_effect_transport, symbol, source_callee)
+        if not any(
+            "source-to-return transport contains a non-alias statement" in error
+            for error in side_effect_errors
+        ):
+            errors.append(
+                f"{symbol}: independent side-effecting transport escaped "
+                "source validation")
 
         multiple_early = (
             f"first_source = {source_callee}(RING_INT(0));\n"
