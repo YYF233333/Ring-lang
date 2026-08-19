@@ -327,6 +327,30 @@ receipts remain under ignored `tmp-ownership-critical-acceptance/`.
   shapes are fail-closed. A dedicated verifier kind must independently reject
   missing first/rearmed W4 and exit Drops. This is a correct, reversible subset,
   not closure of the general owner-bearing-tail finding.
+- That candidate is now implemented on the continuation branch. Perceus uses
+  exact DefId cleanup slots plus the bounded reachable-tail predicate; verify_rc
+  independently recovers post-RC synthetic producers and tracks a dedicated
+  Option state. Independent review cleared the final TryCatch and strict-A6
+  transfer fixes. The source-built gen1 passes runtime Drop output 1/1, focused
+  RC live/mutations 8/8, generated-C structural 1/1, and parity 1/1. The fixed
+  A6 generated 24,431,738-byte C in 1435.52 s at 9,351,241,728 bytes peak Job
+  commit; C SHA256 is
+  `DBC1547E1B7031949B990ECB8D63062D49CC94897091428833BF0B1EB2D9AA1A`,
+  and the native O3/ThinLTO gen1 SHA256 is
+  `64CED1C43E95BC15314685E5EF78FF34D22D84D12BE1592708D4E36C0C14EB30`.
+- This does not close self-host. The full candidate gen1 is itself old-lowered;
+  its one gen2 build reached the fixed 12 GiB limit after 2371.12 s with
+  `ring_alloc failed (size=16, typeid=8)` and no output. The result explains the
+  crossing cycle: S-prime runs inside gen1 and would clean generated gen2 C, but
+  cannot retroactively clean the A6-generated gen1 executable that must survive
+  long enough to emit it.
+- One bounded crossing construction was independently authorized and is final.
+  Bootstrap-only commit `883e5713` replaces only the temporary mirror's
+  3016-line verifier with a 30-line, API-compatible, fail-closed stub. It leaves
+  ordinary parser/checker/ownership/Perceus/codegen/build paths intact. The
+  gen1-to-lite attempt still reached 12 GiB after 2347.24 s with byte-identical
+  typeid-8 stderr and no C artifact. The construction is insufficient and must
+  not merge or be widened by removing more modules.
 
 First failures remain evidence and must not be rewritten as passes:
 
@@ -352,6 +376,20 @@ First failures remain evidence and must not be rewritten as passes:
   census times out without panic after 1,238 complete samples. It is diagnostic
   authority for live-type growth, not a performance or whole-loop pass, and
   must not be rerun to compare wall time or peak memory with receipt 43.
+- `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/01-a6-fresh-gen1`:
+  operator-precondition failure after
+  compilation because the output directory had not been pre-created; preserved
+  and superseded once by receipt `02`, never rewritten as candidate evidence.
+- `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/07`,
+  `08`, and `10`: first executable test failures that
+  exposed non-unique mutation ordinals and invalid structural controls; tests
+  were isolated rather than production guarantees weakened.
+- `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/14-gen1-fresh-gen2`:
+  the only full S-prime self-host
+  attempt, final at 12 GiB/typeid 8 after 2371.12 s with no artifact.
+- `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/15-gen1-build-bootstrap-lite`:
+  the only verifier-stub
+  crossing attempt, final at the same wall after 2347.24 s with no artifact.
 
 ## Remaining gates
 
@@ -367,17 +405,19 @@ First failures remain evidence and must not be rewritten as passes:
    projection is not authorized. Do not rerun either command, raise the cap, or
    describe the absence of gen2 output as a correctness failure.
 3. The fixed-object allocation route remains closed as `insufficient-evidence`:
-   do not rerun, regroup, disable ICF, or patch `unify.ring`. The new minimal
-   fixture now supplies direct physical-cleanup authority and permits only the
-   bounded S-prime Perceus/verifier subset described above. It is not accepted
-   until focused mutations, runtime Drop output, source-built gen1 and a
-   materially different gen2/fixed-point attempt all pass. If S-prime needs one
-   more tail/exit special case, stop and lift borrow-source provenance into
-   ownership-planned shared HIR rather than resuming downstream traversal.
+   do not rerun, regroup, disable ICF, or patch `unify.ring`. S-prime has passed
+   its focused correctness gates, but both the full gen2 and the only authorized
+   bootstrap-lite crossing hit the unchanged resource wall. Do not profile the
+   same old-lowered gen1 again: profiling cannot make a Perceus-only fix apply to
+   the executable that contains it. Any next construction needs a new Argument
+   with direct authority for crossing the peak, not another retained-container
+   guess, module deletion, runtime/typeid workaround, or cap increase.
 4. Do not replace `compiler/dist-c/main.c` with gen1 yet. The generated file is
    not fixed-point proven and differs broadly from the tracked anchor; review
    and a successful gen2 byte comparison are prerequisites.
-5. After a materially different route produces gen2, compare gen1/gen2 C
-   byte-for-byte, rerun the two focused gen2 gates, and only then update the
-   bootstrap anchor and proceed to the remaining #268/#269 C/RC/ASan/double-
-   bootstrap acceptance matrix. Neither critical finding is closed here.
+5. After a genuinely new authorized route produces a full compiler generated by
+   S-prime, generate one further full compiler and compare those two full C
+   outputs byte-for-byte. Restore verifier/mutation gates on that full compiler,
+   then update the bootstrap anchor and proceed to the remaining #268/#269
+   C/RC/ASan/double-bootstrap acceptance matrix. Neither critical finding nor
+   the performance blocker is closed here.
