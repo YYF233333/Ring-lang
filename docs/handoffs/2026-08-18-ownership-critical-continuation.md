@@ -52,6 +52,8 @@
 
 ## Next action
 
-先完成 B-186：main/branch 看板同步、branch 单责、repository-health gate、origin push/CI。
-随后核对固定 gen1/source/runtime/toolchain 身份；只有全部 pins 与空闲资源门满足才启动上述
-唯一 22 GiB crossing。
+B-186 已由 `main@b29c8711` 与 GitHub Actions `32262726058` 全绿完成，主线进入 #268/#269。
+当前只从固定 authority archive 零源码变化重建 gen1 seed：必须逐项命中
+`64CED…` executable、`DBC154…` C、`5E862…` main-lto、`9DFD…` runtime-lto 及原 recipe/toolchain。
+任一 hash 不一致、archive 不足或需要源码变化即停止并唤醒 Discussion；全部 pins 与空闲资源门
+满足后先发送 preflight packet，不直接启动唯一 22 GiB crossing。

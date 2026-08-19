@@ -308,17 +308,13 @@ B186_RESOURCE_CROSSING_CONTRACT = TextContract(
 B186_BACKLOG_CONTRACT = TextContract(
     "B-186 backlog recovery route",
     (
-        ("### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]",),
+        ("B-186 recovery gate 已由",),
+        ("32262726058",),
         ("`B-176` 保持 queued",),
         ("B-180",),
         ("runner anchor-object cache",),
-        ("23622320128",),
-        ("12884901888",),
         ("worktree",),
-        ("不超过 5",),
-        ("origin/main",),
         ("paired-session",),
-        ("main mutation lease",),
     ),
     ordered=(
         "B-186 -> #268/#269",
@@ -445,6 +441,15 @@ PAIRED_WORKFLOW_CONTRACT = TextContract(
         "每次唤醒都创建新 session",
     ),
 )
+
+
+def b186_backlog_errors(text: str) -> list[str]:
+    errors = check_text_contract(text, B186_BACKLOG_CONTRACT)
+    if re.search(r"(?m)^### B-186 ", text):
+        errors.append(
+            "B-186 backlog recovery route: completed B-186 heading remains active"
+        )
+    return errors
 
 DISCUSSION_PAIR_CONTRACT = TextContract(
     "Discussion paired-session adapter",
@@ -915,7 +920,7 @@ class WorkflowValidator:
         text = self.read_text("docs/backlog.md")
         if text is None:
             return
-        for error in check_text_contract(text, B186_BACKLOG_CONTRACT):
+        for error in b186_backlog_errors(text):
             self.errors.append(f"docs/backlog.md: {error}")
 
     def validate_skills(self) -> None:
@@ -1288,7 +1293,7 @@ gen2 -> gen3，只有 C byte-identical 且 #268/#269 全部门通过才关闭。
 GOOD_B186_BACKLOG_FIXTURE = """
 Canonical dependency chain: B-186 -> #268/#269 -> B-176/B-180 ->
 remaining correctness/ABI -> B-183 -> B-174/B-177/B-175.
-### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]
+B-186 recovery gate 已由 main 与 CI 32262726058 完成。
 `B-176` 保持 queued；B-180 只保留 runner anchor-object cache。
 worktree 不超过 5，origin/main push gate 生效。
 paired-session 通过 main mutation lease 串行提交。
@@ -1655,6 +1660,17 @@ def run_self_tests() -> list[str]:
             "B-186 backlog recovery route",
         )
     )
+    lingering_b186 = (
+        GOOD_B186_BACKLOG_FIXTURE
+        + "\n### B-186 stale [infra] [P0] [M] [judgment] [doing]\n"
+    )
+    failures.extend(
+        deterministic_failure(
+            "completed B-186 heading fixture",
+            lambda: b186_backlog_errors(lingering_b186),
+            "completed B-186 heading remains active",
+        )
+    )
 
     bad_paired_lease = GOOD_PAIRED_WORKFLOW_FIXTURE.replace(
         "main mutation lease 保证任何时刻只有一个 session 可写；lease 期间另一方不得变更 main。",
@@ -1765,7 +1781,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             "workflow validator self-test passed: "
-            "24 legacy/broken fixtures rejected deterministically; "
+            "25 legacy/broken fixtures rejected deterministically; "
             "2 durable-ledger regressions passed"
         )
         return 0
@@ -1793,7 +1809,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{backlog_count} active backlog items, "
         f"{audit_count} active audit items, "
         "2 steward adapters, 4 Codex roles, "
-        "24 negative fixtures, 2 durable-ledger regressions"
+        "25 negative fixtures, 2 durable-ledger regressions"
     )
     return 0
 

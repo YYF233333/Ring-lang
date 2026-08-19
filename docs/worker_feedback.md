@@ -8,6 +8,6 @@
 
 - `[里程碑]` 2026-08-07：Json trait serialization 与 B-176 phase-timing/evidence continuity 已原子集成到 main `04f18edc`；本地完整标准门 1560/1560 通过，tracked C bootstrap 达到字节固定点，恢复后新触发的 CI run `31153646309` 的 check/test/bootstrap 全绿。B-176 尚待 critical 清零后的正式 cold/warm baseline，不把 continuity instrumentation 误记为性能专项完成。
 
-- `[里程碑]` 2026-08-19：用户批准 B-186 收敛恢复与路线重置：先 #268/#269 fixed point，再以最新 main 重做 B-176/B-180，随后 correctness/ABI freeze → B-183 → B-174/B-177/B-175。B-180 compiler lane 冻结，只保留 runner anchor-object cache；B-186 健康门通过后允许固定 S′ gen1 一次 22 GiB/72min-point/90min-hard-wall crossing，失败则永久停止资源加码并转 latest-main 分 checkpoint 重放。
+- `[里程碑]` 2026-08-20：B-186 收敛恢复已完成。`main@b29c8711` 的 repository-health/workflow/cache 门全绿，GitHub Actions `32262726058` 的 check/test/bootstrap 全部 success；实际 worktree=1、dirty=0、local branch=4，bundle/WIP archive 已验证。主线进入 #268/#269；B-176/B-180 继续 queued/frozen，仅保留 runner anchor-object cache。一次 22 GiB crossing 授权不变，但 exact seed pins 缺失，重建逐 hash 通过前不得启动。
 
 - `[里程碑]` 2026-08-19：用户固定双 session 协作：Discussion 负责用户对话、high-level 路线与方向监督，可 idle 等待唤醒；Steward 负责持续实现、验证与仓库健康。两者通过 compact peer message 协作，并以 main mutation lease 串行提交，禁止并发改共享 checkout。

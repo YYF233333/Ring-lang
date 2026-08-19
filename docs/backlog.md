@@ -17,6 +17,9 @@
 
 Canonical dependency chain：`B-186 -> #268/#269 -> B-176/B-180 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175`。
 
+B-186 recovery gate 已由 `main@b29c8711` 与 GitHub Actions `32262726058`（check/test/bootstrap 全绿）完成；worktree/ref/WIP、authority、paired-session、push/CI 与 health 约束已转为 `docs/workflow.md` / `docs/repository-health.json` 的持续门，活动历史只留 Git。
+`B-176` 保持 queued；B-180 只保留 runner anchor-object cache，compiler lane 继续冻结到 #268/#269 fixed point 闭环。
+
 处理顺序固定为六道门：
 
 1. **B-186 Repository convergence recovery**：先收敛 worktree/ref/WIP、指定每个活动 item 的唯一 authority、同步 main/branch 看板、恢复 repository-health gate，并在 push threshold 触发时先取得远端 CI。
@@ -29,34 +32,6 @@ Canonical dependency chain：`B-186 -> #268/#269 -> B-176/B-180 -> remaining cor
 B-180 不得以早期 developer-unblock checkpoint 绕过 #268/#269 final fixed point；其已证明的 runner anchor-object cache 可保留，所有 compiler candidates 冻结。B-176 只有在最新 main 可重放完整 baseline 后才算完成。
 
 ---
-
-## 治理恢复
-
-### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]
-
-一次性恢复 Repository Steward 的收敛能力，完成后删除本项。authority checkpoint 为
-`codex/b180-feedback-loop-continuation@b75d2c881908c95bef180f0e7fa802e745a20713`；
-当前保护包为 `Ring-lang-convergence-backup-b75d2c88`。
-
-**硬约束**：
-
-1. worktree 默认含 main 不超过 5；bulk cleanup 前必须有经验证的全 refs bundle 与 WIP/ignored archive，删除目标逐项核验且可恢复。
-2. 每个活动 item 恰好映射到一个 authority；branch 单责，不允许跨 item 污染。main 与 authority branch 的活动 heading/status 不得漂移。
-3. main ahead `origin/main` 超过 10 commits，或最老未 push commit 超过 24h 时，先 batch push 并取得 CI，再继续新实现。
-4. `B-176` 保持 queued，直到 #268/#269 闭环后从最新 main 启动同机 manifest 重放；`B-180` 冻结 compiler lane，只保留 runner anchor-object cache。
-5. 压缩 handoff 只留 invariants、blocker、authority SHA、evidence index 与下一可证伪动作；历史流水留 Git。
-6. 固化唯一 Discussion + 唯一 Steward 的 paired-session 控制面、双向 wake packet 与 main mutation lease；Discussion 可 idle 但不轮询，Steward 在实现侧持续推进。
-
-**一次性 crossing 授权**：恢复门全绿后，对完全固定且无代码变化的 S-prime gen1 只运行一次
-gen1 → gen2：Job commit `23622320128` bytes、active process `<=5`、无其他重负载、首次等待点
-精确 72 分钟、hard wall 90 分钟。若成功，gen2 → gen3/fixed point/完整 C/RC/ASan/self-host
-恢复 `12884901888` bytes；只有 gen2/gen3 C byte-identical 且原门全绿才关 `#268/#269`。
-若 22 GiB 触顶/超时/无产物，永久停止资源加码，不试 24/32 GiB、pagefile 或重跑；转 latest main
-独立重现/移植 S-prime 并先完成自身 fixed point，再分 checkpoint 重放 A-prime。二者不可分时先新 Argument。
-
-**验收**：repository-health / workflow validator（含负例）通过；实际 worktree <=5、dirty/WIP 已保护、
-authority map 一一覆盖活动 item、local branch 单责、main/branch 看板一致；main 状态与 runner cache 已同步，
-batch push 后 origin/main 与 CI 可复核；两套 provider 的 discussion/steward skill 均通过 paired-session contract 与 skill quick validation。
 
 ## 类型系统
 
