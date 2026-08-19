@@ -2509,6 +2509,44 @@ fn v_check_frame_leaks(mut ctx: VCtx) {
     }
 }
 
+fn v_var_like(
+    name: Str, def_id: Int?, ty: Type, init: HExpr, span: Span,
+    option_cleanup_eligible: Bool, mut ctx: VCtx
+) {
+    let eligibility_name = name
+    let eligibility_def_id = def_id
+    let eligibility_ty = ty
+    let eligibility_init = init
+    if v_is_option_cleanup_var(
+            eligibility_name, eligibility_def_id, eligibility_ty,
+            eligibility_init, option_cleanup_eligible,
+            ctx.boxed, ctx.externs) {
+        let consume_init = init
+        let binding_name = name
+        let binding_def_id = def_id
+        let binding_span = span
+        let lookup_def_id = def_id
+        let contract_def_id = def_id
+        let contract_ty = ty
+        let contract_span = span
+        let _ = v_consume(consume_init, ctx)
+        v_bind_def(ctx, binding_name, binding_def_id,
+            K_OPTION_CLEANUP, binding_span)
+        let index = match lookup_def_id {
+            some(id) => v_lookup_def(ctx, id),
+            none => 0 - 1
+        }
+        if index < 0 {
+            panic("unreachable: verifier Option cleanup slot was not bound")
+        }
+        ctx.states.set(index, S_OPTION_PENDING)
+        v_bind_callable_contract(
+            ctx, contract_def_id, contract_ty, contract_span)
+    } else {
+        v_let_like(name, def_id, ty, init, span, ctx)
+    }
+}
+
 fn v_stmt(
     stmt: HStmt, option_cleanup_eligible: Bool, mut ctx: VCtx
 ) -> Bool {
@@ -2518,22 +2556,8 @@ fn v_stmt(
             false
         },
         HStmt::Var { name, def_id, ty, init, span, .. } => {
-            if v_is_option_cleanup_var(name, def_id, ty, init,
-                    option_cleanup_eligible, ctx.boxed, ctx.externs) {
-                let _ = v_consume(init, ctx)
-                v_bind_def(ctx, name, def_id, K_OPTION_CLEANUP, span)
-                let index = match def_id {
-                    some(id) => v_lookup_def(ctx, id),
-                    none => 0 - 1
-                }
-                if index < 0 {
-                    panic("unreachable: verifier Option cleanup slot was not bound")
-                }
-                ctx.states.set(index, S_OPTION_PENDING)
-                v_bind_callable_contract(ctx, def_id, ty, span)
-            } else {
-                v_let_like(name, def_id, ty, init, span, ctx)
-            }
+            v_var_like(name, def_id, ty, init, span,
+                option_cleanup_eligible, ctx)
             false
         },
         HStmt::Assign { target, value, span } => {
