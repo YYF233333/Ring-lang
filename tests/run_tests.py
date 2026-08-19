@@ -7304,6 +7304,10 @@ def rc_contract_failure(
             "(param/pattern/for-in projection) — frees a reference owned elsewhere",
             f"in {function_name}: Drop of non-droppable binding '{binding_name}' "
             "(And-Or/effect/excluded init — possibly a borrow)",
+            f"in {function_name}: cleanup-active Option '{binding_name}' is "
+            "assigned before its old wrapper slot is Dropped",
+            f"in {function_name}: cleanup-active Option binding "
+            f"'{binding_name}' has no exit Drop on the fall-through path",
         }
         matching = [
             finding for finding in by_category.get(category, [])
@@ -7876,43 +7880,58 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             ("--verify-rc",), True, fatal_exact=0,
         ),
         RcInvocationContract(
-            "cleanup-active Option live",
-            "tests/cases/ownership_option_branch_cleanup.ring",
+            "cleanup-active Option reassignment live",
+            "tests/cases/verify_rc/option_cleanup_reassign.ring",
             ("--verify-rc",), True, fatal_exact=0,
             local_finding_exact=0,
         ),
         RcInvocationContract(
             "cleanup-active Option missing first W4",
-            "tests/cases/ownership_option_branch_cleanup.ring",
+            "tests/cases/verify_rc/option_cleanup_reassign.ring",
             ("--verify-rc", "--rc-mutate=missing-option-reassign-drop"),
             False, fatal_exact=1, local_finding_exact=1,
             finding_counts=(("leak-option-reassign", 1),),
-            finding_lines=(("leak-option-reassign", (67,)),),
+            finding_lines=(("leak-option-reassign", (13,)),),
+            finding_function_bindings=(
+                ("leak-option-reassign", "option_cleanup_reassign", "wrapped"),
+            ),
         ),
         RcInvocationContract(
             "cleanup-active Option missing rearmed W4",
-            "tests/cases/ownership_option_branch_cleanup.ring",
+            "tests/cases/verify_rc/option_cleanup_reassign.ring",
             ("--verify-rc", "--rc-mutate=missing-option-rearmed-drop"),
             False, fatal_exact=1, local_finding_exact=1,
             finding_counts=(("leak-option-reassign", 1),),
-            finding_lines=(("leak-option-reassign", (68,)),),
+            finding_lines=(("leak-option-reassign", (14,)),),
+            finding_function_bindings=(
+                ("leak-option-reassign", "option_cleanup_reassign", "wrapped"),
+            ),
         ),
         RcInvocationContract(
             "cleanup-active Option missing exit Drop",
-            "tests/cases/ownership_option_branch_cleanup.ring",
+            "tests/cases/verify_rc/option_cleanup_reassign.ring",
             ("--verify-rc", "--rc-mutate=missing-option-exit-drop"),
             False, fatal_exact=1, local_finding_exact=1,
             finding_counts=(("leak-option-exit", 1),),
-            finding_lines=(("leak-option-exit", (58,)),),
+            finding_lines=(("leak-option-exit", (12,)),),
+            finding_function_bindings=(
+                ("leak-option-exit", "option_cleanup_reassign", "wrapped"),
+            ),
+        ),
+        RcInvocationContract(
+            "cleanup-active Option false-admission live",
+            "tests/cases/verify_rc/option_cleanup_false_admission.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+            local_finding_exact=0,
         ),
         RcInvocationContract(
             "cleanup-active Option borrowed-tail false admission",
-            "tests/cases/ownership_option_branch_cleanup.ring",
+            "tests/cases/verify_rc/option_cleanup_false_admission.ring",
             ("--verify-rc", "--rc-mutate=force-option-tail-eligible"),
             False, fatal_min=1,
             global_finding_counts=(("uaf-drop-borrow", 1),),
             finding_function_bindings=(
-                ("uaf-drop-borrow", "borrowed_str_block", "wrapped"),
+                ("uaf-drop-borrow", "option_cleanup_false_admission", "wrapped"),
             ),
         ),
         RcInvocationContract(
@@ -11218,27 +11237,32 @@ def option_cleanup_source_errors(perceus_source: str,
         errors.append(
             "verifier must not call Perceus escape_is_noop_on_reachable_tail")
 
+    verify_fixture_dir = REPO / "tests" / "cases" / "verify_rc"
     try:
-        fixture_source = (REPO / "tests" / "cases" /
-                          "ownership_option_branch_cleanup.ring").read_text(
-                              encoding="utf-8")
+        reassign_source = (
+            verify_fixture_dir / "option_cleanup_reassign.ring"
+        ).read_text(encoding="utf-8")
+        false_admission_source = (
+            verify_fixture_dir / "option_cleanup_false_admission.ring"
+        ).read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
-        errors.append(f"cannot read Option cleanup fixture: {exc}")
+        errors.append(f"cannot read dedicated Option cleanup fixture: {exc}")
         return errors
-    reset_body, reset_error = extract_ring_function_body(
-        fixture_source, "option_reset_none")
-    if reset_error:
-        errors.append(reset_error)
+    reassign_body, reassign_error = extract_ring_function_body(
+        reassign_source, "option_cleanup_reassign")
+    if reassign_error:
+        errors.append(reassign_error)
     else:
         assignments = list(re.finditer(
-            r"(?m)^\s*wrapped\s*=", fixture_source))
-        reset_start = fixture_source.find(reset_body or "")
-        reset_end = reset_start + len(reset_body or "")
-        if len(assignments) < 2 or not all(
-                reset_start <= item.start() < reset_end
-                for item in assignments[:2]):
+            r"(?m)^\s*wrapped\s*=", reassign_source))
+        body_start = reassign_source.find(reassign_body or "")
+        body_end = body_start + len(reassign_body or "")
+        if len(assignments) != 2 or not all(
+                body_start <= item.start() < body_end
+                for item in assignments):
             errors.append(
-                "Option cleanup mutation ordinals 1/2 must be the same reset slot")
+                "Option cleanup W4 ordinals must be exactly two assignments "
+                "to the dedicated function's one slot")
         if not re.search(
                 r"missing-option-reassign-drop\"\s*\{\s*1\s*\}\s*"
                 r"else\s+if\s+mutate\s*==\s*"
@@ -11248,17 +11272,30 @@ def option_cleanup_source_errors(perceus_source: str,
                 "Option cleanup first/rearmed mutations must retain ordinals 1/2")
 
     errors.extend(exact_ring_function_contract_errors(
-        fixture_source,
-        "borrowed_str_block",
-        r"\bfn\s+borrowed_str_block\s*\(\s*value\s*:\s*Str\s*\)\s*\{",
+        reassign_source,
+        "option_cleanup_reassign",
+        r"\bfn\s+option_cleanup_reassign\s*\(\s*\)\s*\{",
+        """
+            let mut wrapped: ReassignResource? = none
+            wrapped = some(ReassignResource { id: 1 })
+            wrapped = none
+            print(wrapped.is_none())
+        """,
+        "Option cleanup same-slot W4 ordinal fixture",
+    ))
+    errors.extend(exact_ring_function_contract_errors(
+        false_admission_source,
+        "option_cleanup_false_admission",
+        r"\bfn\s+option_cleanup_false_admission\s*\(\s*"
+        r"value\s*:\s*Str\s*\)\s*\{",
         """
             {
-                let mut wrapped: Resource? = none
+                let mut wrapped: Str? = none
                 value
             }
             print(value)
         """,
-        "Option cleanup borrowed-Str false-admission mutation fixture",
+        "Option cleanup unique borrowed-Str false-admission fixture",
     ))
 
     # Mutation self-test: accepting a synthetic borrowed Clone without checking

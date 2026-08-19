@@ -88,9 +88,9 @@ fn cleanup_move_resource_tail(value: CleanupResource) -> Int {
 }
 
 fn cleanup_boxed_control() -> Int {
-    let mut wrapped: CleanupResource? = none
+    let mut wrapped: Str? = none
     let assign = fn() {
-        wrapped = some(CleanupResource { id: 8 })
+        wrapped = some("boxed")
     }
     assign()
     8
