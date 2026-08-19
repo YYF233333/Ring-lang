@@ -11,6 +11,7 @@
 - Tracked C anchor：24,279,526 bytes；SHA256
   `D7BB015B32EF8F4A438093509C794C82B60C13548808B0A1093AEFEAB0DF7F2E`
 - Coupled item：audit `#268` / `#269`。该 branch 不再承载其他实现 item。
+- Latest-main fallback base：`75f83b2d2208462051fa67b99d9296d79b61dcb2`；旧 branch 只保留 A-prime/S-prime 证据 authority，不作为可直接 bootstrap 的 seed。
 
 ## Invariants and state
 
@@ -20,22 +21,23 @@
 2. S-prime safe-tail Option cleanup 已有 source-built gen1 focused evidence：runtime
    1/1、RC 8/8、generated-C structural 1/1、parity 1/1；尚未通过 fixed point，
    不得更新 anchor 或关闭 `#268/#269`。
-3. `B-176` 尚无可从最新 main 重放的完整 baseline；保持 doing。`B-180`
+3. `B-176` 尚无可从最新 main 重放的完整 baseline；保持 queued。`B-180`
    compiler optimization 冻结，只保留 runner anchor-object cache。
-4. 恢复主线：`B-186 -> #268/#269 -> B-176/B-180 -> remaining correctness/ABI
+4. 恢复主线：`#268/#269 -> B-176/B-180 -> remaining correctness/ABI
    freeze -> B-183 -> B-174/B-177/B-175 preview candidate`。
 
-## Fixed crossing authorization
+## Closed crossing route
 
-- B-186 恢复门通过后，只允许对完全固定、无代码变化的 S-prime gen1 执行一次
-  gen1 -> gen2 crossing：Job commit `23622320128` bytes（22 GiB）、active processes
-  `<=5`、无其他重负载、首次等待点估计精确 72 分钟、hard wall 90 分钟。
-- gen1 仅是 bootstrap seed。若产出 gen2，gen2 -> gen3、文本 fixed point 和完整
-  C/RC/ASan/self-host/final acceptance 全部恢复 `12884901888` bytes（12 GiB）。
-  只有 gen2/gen3 C byte-identical 且原门全绿才能关闭 `#268/#269`。
-- 若 22 GiB 触顶、超时或无产物，永久停止资源加码：不试 24/32 GiB、pagefile 或
-  重跑。改在最新 main 独立重现/移植 S-prime 并完成其自身 fixed point，再分 checkpoint
-  重放 A-prime；若二者不可分，先执行新 Argument，不恢复 seed/unity probe tree。
+- 固定 `a11ea063` archive 可由 exact A6 重建出精确 `DBC154…` C，但同一轮产出的
+  `main-lto.o` 为 `E7910…`、`runtime-lto.o` 为 `6A09B…`，分别不等于权威
+  `5E862…` / `9DFD…` pins。
+- Git refs、B-186 bundle/WIP manifest、备份目录和现存 receipts 没有另存的 object bytes
+  或完整历史 recipe；`219a` / `8166` ignored evidence 已在 snapshot 前被宿主回收。
+- exact-object precondition 因而失败；22 GiB crossing 永久关闭且不算已消费一次 run。
+  禁止 link 近似 objects、接受新 hashes、猜 flags/path、以最终行为替代 pins、继续搜索或重试。
+- fallback 固定为 latest main 独立重现/移植 S-prime，先在 12 GiB 下完成自身 fixed point，
+  再分 bounded checkpoints 重放 A-prime；若二者不可分，先执行新 Argument。不得恢复
+  seed/unity probe tree。
 
 ## Evidence and blockers
 
@@ -52,8 +54,8 @@
 
 ## Next action
 
-B-186 已由 `main@b29c8711` 与 GitHub Actions `32262726058` 全绿完成，主线进入 #268/#269。
-当前只从固定 authority archive 零源码变化重建 gen1 seed：必须逐项命中
-`64CED…` executable、`DBC154…` C、`5E862…` main-lto、`9DFD…` runtime-lto 及原 recipe/toolchain。
-任一 hash 不一致、archive 不足或需要源码变化即停止并唤醒 Discussion；全部 pins 与空闲资源门
-满足后先发送 preflight packet，不直接启动唯一 22 GiB crossing。
+先做一个只读 S-prime 独立性矩阵：从 `cbfd5817`、`4eb08ce8`、`cf275c36`、`a11ea063`
+及其 focused tests 中列出每个新增/消费 symbol，并对 latest-main fallback base 证明它不依赖
+A-prime 的 lexical-scope、ownership-shape 或 callable-mode 变化。任何不可分依赖立即停止并提交
+新 Argument；矩阵闭合后才建立唯一 #268/#269 authority checkpoint，原子移植 S-prime 与 verifier/tests，
+先走 focused correctness，再按原 12 GiB 门做 S-prime 自身 fixed point。A-prime 只在该 fixed point 后分段重放。

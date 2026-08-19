@@ -315,9 +315,12 @@ B186_BACKLOG_CONTRACT = TextContract(
         ("runner anchor-object cache",),
         ("worktree",),
         ("paired-session",),
+        ("22 GiB crossing 路线已永久关闭",),
+        ("latest main", "S-prime"),
     ),
     ordered=(
-        "B-186 -> #268/#269",
+        "Canonical dependency chain",
+        "#268/#269 -> B-176/B-180",
         "B-176/B-180",
         "remaining correctness/ABI",
         "B-183",
@@ -1291,13 +1294,14 @@ gen2 -> gen3，只有 C byte-identical 且 #268/#269 全部门通过才关闭。
 """
 
 GOOD_B186_BACKLOG_FIXTURE = """
-Canonical dependency chain: B-186 -> #268/#269 -> B-176/B-180 ->
+Canonical dependency chain: #268/#269 -> B-176/B-180 ->
 remaining correctness/ABI -> B-183 -> B-174/B-177/B-175.
 B-186 recovery gate 已由 main 与 CI 32262726058 完成。
 `B-176` 保持 queued；B-180 只保留 runner anchor-object cache。
 worktree 不超过 5，origin/main push gate 生效。
 paired-session 通过 main mutation lease 串行提交。
-crossing 使用 23622320128，后续恢复 12884901888。
+固定 archive 缺少 object identity；22 GiB crossing 路线已永久关闭。
+fallback 在 latest main 先完成 S-prime，再重放 A-prime。
 """
 
 GOOD_PAIRED_WORKFLOW_FIXTURE = """
@@ -1647,9 +1651,9 @@ def run_self_tests() -> list[str]:
         )
     )
     bad_b186_route = GOOD_B186_BACKLOG_FIXTURE.replace(
-        "B-186 -> #268/#269 -> B-176/B-180 ->\n"
+        "#268/#269 -> B-176/B-180 ->\n"
         "remaining correctness/ABI -> B-183 -> B-174/B-177/B-175",
-        "B-176/B-180 -> B-186 -> B-174/B-177/B-175 -> B-183",
+        "B-176/B-180 -> B-174/B-177/B-175 -> B-183 -> #268/#269",
     )
     failures.extend(
         deterministic_failure(

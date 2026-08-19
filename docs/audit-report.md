@@ -131,6 +131,8 @@
 
 **B-186 fixed crossing verdict（2026-08-19 用户批准，适用于 #268/#269）**：完成 repository convergence recovery 后，只对完全固定、无代码变化的 S′ gen1 运行一次 gen1→gen2：Job commit `23622320128` bytes（22 GiB）、active process `<=5`、无其他重负载、首次等待点精确 72 分钟、hard wall 90 分钟。gen1 仅为 bootstrap seed；若产出 gen2，gen2→gen3、C byte fixed point、完整 C/RC/ASan/self-host/final acceptance 全部恢复 `12884901888` bytes（12 GiB），且只有 gen2/gen3 C byte-identical 与原门全绿才能删除两项 finding。若 22 GiB 触顶、超时或无产物，资源加码永久停止，不试 24/32 GiB、pagefile 或重跑；转为 latest main 上独立重现/移植 S′并先完成其自身 fixed point，再分 checkpoint 重放 A′。S′ 不能脱离 A′时先新 Argument，不恢复 seed/unity probe tree。
 
+**Exact crossing preflight closure（2026-08-20）**：B-186 恢复门通过后，从固定 `a11ea063` archive 做了一次零源码变化重建。exact A6（SHA256 `AB63D5632132497187677091FC511CC58B19CA73081A106321374244BEB7C8AE`）在 12 GiB / `<=5` 进程门内成功生成 24,431,738-byte C，SHA256 精确命中 `DBC1547E1B7031949B990ECB8D63062D49CC94897091428833BF0B1EB2D9AA1A`；但重建的 `main-lto.o` 为 `E7910C24663566D5D6397D2FA11DF8CC2A59844D6B7C70C7EC99EE83F9ACCDC5`，不等于权威 `5E86282616717D149A00E357ED23EAB023924F89E886DFE34FA4D805376AA527`，`runtime-lto.o` 为 `6A09B03514C08B70F4F0B460B247BB60970AFB999FAFE923CD7F24372FEF663E`，不等于权威 `9DFD32E60356D26C4EC138A9BACFB14490B1240019A41C904596B0C7F5C9871B`。Git 全 refs、B-186 bundle/WIP manifest、备份目录与现存 receipts 均没有另存的 object bytes 或完整历史 recipe；原 `219a` / `8166` ignored evidence 已在归档前被宿主回收。按预注册门在 link 前停止：不接受新 hash、不猜 flags/path、不以行为替代 identity，也不重试；22 GiB crossing 路线永久关闭且不算已消费一次 run。已激活既定 fallback：在 latest main 独立重现/移植 S′，先在 12 GiB 下达到自身 fixed point，再以 bounded checkpoints 重放 A′；若独立性审计失败，先新 Argument，禁止恢复 seed/unity tree。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

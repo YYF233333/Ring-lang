@@ -15,15 +15,15 @@
 
 **近期 break 审核门**：任何修改公开语法、签名、ABI 或可观察语义的 item，在实现前必须标成“已拍板 clean break”“等待 decision dossier”或“仅内部、非 breaking”之一。已拍板的 #268/#269 ownership 真值与 B-167 调用点 evidence 采用一次性切换；旧 ownership 猜测/传播路径和创建处 evidence ABI 必须在各自原子变更中删除，不形成双轨。B-168/B-169 的探针结论，以及 B-152、B-156、B-171、B-133 和 `io` effect 拆分等潜在用户面变化，在进入实现前显式核对 break 边界；需要新的公开语义决定时仍提交 dossier。每个已拍板 break 的验收都必须列出被删除的旧路径、同步迁移的仓内消费者/规范/测试，并在旧形式仍可表达时用负例证明它不会经 alias、fallback 或旧 ABI 继续生效。
 
-Canonical dependency chain：`B-186 -> #268/#269 -> B-176/B-180 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175`。
+Canonical dependency chain：`#268/#269 -> B-176/B-180 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175`。
 
 B-186 recovery gate 已由 `main@b29c8711` 与 GitHub Actions `32262726058`（check/test/bootstrap 全绿）完成；worktree/ref/WIP、authority、paired-session、push/CI 与 health 约束已转为 `docs/workflow.md` / `docs/repository-health.json` 的持续门，活动历史只留 Git。
 `B-176` 保持 queued；B-180 只保留 runner anchor-object cache，compiler lane 继续冻结到 #268/#269 fixed point 闭环。
 
 处理顺序固定为六道门：
 
-1. **B-186 Repository convergence recovery**：先收敛 worktree/ref/WIP、指定每个活动 item 的唯一 authority、同步 main/branch 看板、恢复 repository-health gate，并在 push threshold 触发时先取得远端 CI。
-2. **#268/#269 信任闭环**：ownership/RC/S-prime fixed point 与原完整门真正关闭前，不再启动 compiler optimization。一次性 22 GiB crossing 只按 B-186 的精确授权执行；失败即永久停止资源加码并走 latest-main 分 checkpoint 重放。
+1. **B-186 Repository convergence recovery（已完成）**：worktree/ref/WIP、单一 authority、main/branch 看板、repository-health 与 push/CI 已恢复；这些约束转为持续门。
+2. **#268/#269 信任闭环**：ownership/RC/S-prime fixed point 与原完整门真正关闭前，不再启动 compiler optimization。固定 archive 只能重建精确 `DBC154…` C，无法重建 `5E862…` / `9DFD…` native-object pins，且没有另存的权威 object/recipe；因此 22 GiB crossing 路线已永久关闭且不计为已执行。当前 fallback 固定为 latest main 上独立重现/移植 S-prime、先完成其自身 12 GiB fixed point，再分 checkpoint 重放 A-prime；若二者不可分，先执行新 Argument。
 3. **B-176/B-180 反馈速度**：在 post-ownership 最新 main 重做 baseline；runner 与 compiler 分 checkpoint，但原 2x 量化验收不变。compiler 只允许一个 profile-guided wave。
 4. **Remaining correctness / ABI freeze**：处理 B-162、B-164、#263、#264、#239、#244、#267、#257，再走 B-168 → B-169 → B-167 → B-152 → B-002，并完成 unsafe/Str 等 candidate gate。
 5. **B-183 repository identity / GitHub workflow**：放在 technical ABI/ownership/failure fixed point 之后、产品化之前；不再晚于 B-174 才处理。
