@@ -716,6 +716,73 @@ def _probe_controlled_target(
     return target
 
 
+def _system_include_probe_source(path: Path) -> str:
+    """Return preprocessor directives while preserving conditional includes."""
+
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+    directives: List[str] = []
+    continuing = False
+    for line in source.splitlines():
+        stripped = line.lstrip()
+        if continuing or stripped.startswith("#"):
+            directives.append(line)
+            continuing = line.rstrip().endswith("\\")
+        else:
+            # Preserve line boundaries so a directive cannot be joined to an
+            # adjacent token, but omit ordinary declarations and definitions.
+            directives.append("")
+    probe = "\n".join(directives) + ("\n" if source.endswith(("\n", "\r")) else "")
+    if re.search(r"(?m)^\s*#\s*include\s*<", probe) is None:
+        return ""
+    return probe
+
+
+def _probe_controlled_system_headers(
+    compiler: str,
+    driver_flags: Tuple[str, ...],
+    environment: Tuple[Tuple[str, str], ...],
+    source_path: Path,
+    language: str,
+    standard: str,
+    extra_flags: Tuple[str, ...] = (),
+) -> bool:
+    """Prove the candidate controlled driver can resolve actual system headers."""
+
+    probe_source = _system_include_probe_source(source_path)
+    if not probe_source:
+        return False
+    command = [
+        compiler,
+        *driver_flags,
+        *extra_flags,
+        f"-std={standard}",
+        *COMPILER_COMPILE_FLAGS,
+        "-iquote",
+        str(source_path.parent.resolve()),
+        "-E",
+        "-x",
+        language,
+        "-",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=probe_source,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=TIMEOUT_COMPILE,
+            cwd=str(REPO),
+            env=dict(environment),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
+
+
 def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
     if not DIST_C_MAIN.is_file() or not RUNTIME_CPP.is_file():
         return None
@@ -752,14 +819,33 @@ def _compiler_build_plan() -> Optional[_CompilerBuildPlan]:
         clang_target = _probe_controlled_target(clang, environment)
         runtime_target = _probe_controlled_target(runtime_compiler, environment)
         if clang_target is not None and clang_target == runtime_target:
-            controlled = True
-            cache_supported = True
-            target = clang_target
-            driver_flags = (
+            candidate_driver_flags = (
                 "--no-default-config",
-                f"--target={target}",
+                f"--target={clang_target}",
             )
-            linker_pin_flags = (f"-B{Path(linker).resolve().parent}",)
+            c_headers = _probe_controlled_system_headers(
+                clang,
+                candidate_driver_flags,
+                environment,
+                DIST_C_MAIN,
+                "c",
+                "c11",
+            )
+            cxx_headers = _probe_controlled_system_headers(
+                runtime_compiler,
+                candidate_driver_flags,
+                environment,
+                RUNTIME_CPP,
+                "c++",
+                "c++17",
+                runtime_frontend_flags + ("-D_CRT_SECURE_NO_WARNINGS",),
+            )
+            if c_headers and cxx_headers:
+                controlled = True
+                cache_supported = True
+                target = clang_target
+                driver_flags = candidate_driver_flags
+                linker_pin_flags = (f"-B{Path(linker).resolve().parent}",)
     return _CompilerBuildPlan(
         anchor_source=DIST_C_MAIN,
         runtime_source=RUNTIME_CPP,

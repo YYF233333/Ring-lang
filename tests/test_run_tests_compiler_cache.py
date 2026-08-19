@@ -234,6 +234,53 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(controlled["LANG"], "C")
             self.assertEqual(controlled["SOURCE_DATE_EPOCH"], "0")
 
+    def test_system_header_preflight_uses_actual_angle_include_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "fixture.c"
+            source.write_text(
+                "#ifdef _WIN32\n"
+                "#include <math.h>\n"
+                "#else\n"
+                "#include <unistd.h>\n"
+                "#endif\n"
+                '#include "local.h"\n'
+                "#include <stdint.h>\n"
+                "int ordinary_code;\n",
+                encoding="utf-8",
+            )
+            environment = (("PATH", str(Path(temp_dir).resolve())),)
+            completed = subprocess.CompletedProcess(["clang"], 0, "", "")
+            with patch.object(
+                runner.subprocess, "run", return_value=completed,
+            ) as invoke:
+                supported = runner._probe_controlled_system_headers(
+                    "clang", ("--no-default-config", "--target=test"),
+                    environment, source, "c", "c11",
+                )
+
+            self.assertTrue(supported)
+            command = invoke.call_args.args[0]
+            kwargs = invoke.call_args.kwargs
+            self.assertIn("--no-default-config", command)
+            self.assertIn("--target=test", command)
+            self.assertIn("-E", command)
+            self.assertNotIn("-c", command)
+            self.assertEqual(
+                kwargs["input"],
+                "#ifdef _WIN32\n"
+                "#include <math.h>\n"
+                "#else\n"
+                "#include <unistd.h>\n"
+                "#endif\n"
+                '#include "local.h"\n'
+                "#include <stdint.h>\n"
+                "\n",
+            )
+            self.assertEqual(kwargs["env"], dict(environment))
+            self.assertIs(kwargs["stdout"], subprocess.DEVNULL)
+            quote_index = command.index("-iquote")
+            self.assertEqual(command[quote_index + 1], str(source.parent.resolve()))
+
     def test_dependency_scan_uses_exact_controlled_recipe_and_hashes_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "fixture with space"
@@ -1368,6 +1415,119 @@ class CompilerAnchorCacheTests(unittest.TestCase):
             self.assertEqual(plan.linker_pin_flags, ())
             self.assertIsNone(plan.target)
             self.assertIsNone(runner._plan_environment(plan))
+
+    def test_matching_targets_without_system_headers_fall_back_to_original_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = self.make_plan(Path(temp_dir) / "fixture")
+            with (
+                patch.object(runner.sys, "platform", "win32"),
+                patch.object(runner, "DIST_C_MAIN", fixture.anchor_source),
+                patch.object(runner, "RUNTIME_CPP", fixture.runtime_source),
+                patch.object(runner, "find_clang", return_value=fixture.clang),
+                patch.object(runner.shutil, "which", return_value=fixture.runtime_compiler),
+                patch.object(
+                    runner, "_resolved_executable",
+                    side_effect=lambda executable: executable,
+                ),
+                patch.object(runner, "_find_lld_linker", return_value=fixture.linker),
+                patch.object(
+                    runner, "_controlled_environment",
+                    return_value=fixture.environment,
+                ),
+                patch.object(
+                    runner, "_probe_controlled_target",
+                    side_effect=[fixture.target, fixture.target],
+                ),
+                patch.object(
+                    runner, "_probe_controlled_system_headers",
+                    side_effect=[False, True],
+                ) as header_probe,
+            ):
+                plan = runner._compiler_build_plan()
+
+            self.assertIsNotNone(plan)
+            self.assertFalse(plan.controlled)
+            self.assertFalse(plan.cache_supported)
+            self.assertEqual(plan.driver_flags, ())
+            self.assertEqual(plan.linker_pin_flags, ())
+            self.assertIsNone(plan.target)
+            self.assertIsNone(runner._plan_environment(plan))
+            self.assertEqual(header_probe.call_count, 2)
+
+    def test_matching_targets_and_system_headers_enable_controlled_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = self.make_plan(Path(temp_dir) / "fixture")
+            with (
+                patch.object(runner.sys, "platform", "win32"),
+                patch.object(runner, "DIST_C_MAIN", fixture.anchor_source),
+                patch.object(runner, "RUNTIME_CPP", fixture.runtime_source),
+                patch.object(runner, "find_clang", return_value=fixture.clang),
+                patch.object(runner.shutil, "which", return_value=fixture.runtime_compiler),
+                patch.object(
+                    runner, "_resolved_executable",
+                    side_effect=lambda executable: executable,
+                ),
+                patch.object(runner, "_find_lld_linker", return_value=fixture.linker),
+                patch.object(
+                    runner, "_controlled_environment",
+                    return_value=fixture.environment,
+                ),
+                patch.object(
+                    runner, "_probe_controlled_target",
+                    side_effect=[fixture.target, fixture.target],
+                ),
+                patch.object(
+                    runner, "_probe_controlled_system_headers",
+                    side_effect=[True, True],
+                ) as header_probe,
+            ):
+                plan = runner._compiler_build_plan()
+
+            self.assertIsNotNone(plan)
+            self.assertTrue(plan.controlled)
+            self.assertTrue(plan.cache_supported)
+            self.assertEqual(plan.target, fixture.target)
+            self.assertIn("--no-default-config", plan.driver_flags)
+            self.assertEqual(plan.environment, fixture.environment)
+            self.assertEqual(header_probe.call_count, 2)
+
+    def test_runtime_headers_unavailable_disable_cache_with_exact_cxx_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = self.make_plan(Path(temp_dir) / "fixture")
+            with (
+                patch.object(runner.sys, "platform", "win32"),
+                patch.object(runner, "DIST_C_MAIN", fixture.anchor_source),
+                patch.object(runner, "RUNTIME_CPP", fixture.runtime_source),
+                patch.object(runner, "find_clang", return_value=fixture.clang),
+                patch.object(runner.shutil, "which", return_value=fixture.runtime_compiler),
+                patch.object(
+                    runner, "_resolved_executable",
+                    side_effect=lambda executable: executable,
+                ),
+                patch.object(runner, "_find_lld_linker", return_value=fixture.linker),
+                patch.object(
+                    runner, "_controlled_environment",
+                    return_value=fixture.environment,
+                ),
+                patch.object(
+                    runner, "_probe_controlled_target",
+                    side_effect=[fixture.target, fixture.target],
+                ),
+                patch.object(
+                    runner, "_probe_controlled_system_headers",
+                    side_effect=[True, False],
+                ) as header_probe,
+            ):
+                plan = runner._compiler_build_plan()
+
+            self.assertIsNotNone(plan)
+            self.assertFalse(plan.controlled)
+            self.assertFalse(plan.cache_supported)
+            self.assertEqual(plan.driver_flags, ())
+            cxx_call = header_probe.call_args_list[1]
+            self.assertEqual(cxx_call.args[0], fixture.runtime_compiler)
+            self.assertEqual(cxx_call.args[4:6], ("c++", "c++17"))
+            self.assertIn("-D_CRT_SECURE_NO_WARNINGS", cxx_call.args[6])
 
     def test_missing_explicit_linker_preserves_original_uncached_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
