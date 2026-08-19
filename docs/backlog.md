@@ -305,7 +305,7 @@ B-116 先以 native probe 选 lowering；归档 JS generator/Promise 不属于 s
 - 现有 std/ + compiler/ extern fn 全部通过（迁移后）
 - 自举一致
 
-### B-168 C-native abort/unwind 实现模型探针 [design-align] [P0] [M] [judgment] [queued] [after: B-183]
+### B-168 C-native abort/unwind 实现模型探针 [design-align] [P0] [M] [judgment] [queued] [after: B-180]
 
 > 2026-07-29 Discussion 用户拍板 P0/M、保持两候选中立实测。LLVM 已退役，B-002 Phase 2 原定的 `invoke`/`landingpad` 路径失效；现行 `setjmp`/`longjmp` 又已由 B-165 证明存在跨 catch 局部写入不可见问题。B-169/B-167 随后还会决定 effect/type evidence 的共享边界并改变 effectful function value evidence ABI，因此必须先确定共同的 C-native failure/control ABI，避免各项工作重复改写控制流、closure prototype 与 RC 证据面。
 
