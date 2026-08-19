@@ -125,6 +125,8 @@
 
 **Safe-tail self-host and crossing stop（2026-08-19）**：candidate gen1 自身仍由旧 Perceus lowering 生成，因此新 cleanup 只会进入它尚未产出的下一代。唯一 full gen1→gen2 尝试在 2371.12 s 触及固定 12 GiB，stderr 为 `ring_alloc failed (size=16, typeid=8)`，无 gen2。Independent Argument 随后只授权一次一文件 bootstrap-lite：临时 mirror 把 3016-line `verify_rc.ring` 换成同 `RcFinding` 布局/三 public API、调用即 panic 的 30-line fail-closed stub；普通 parser/checker/ownership/Perceus/codegen/build 图保持原样。该 construction 仍在 2347.24 s 触及同一上限并产生 byte-identical typeid-8 stderr，无 lite C。停止门已经触发：不得继续删模块、提高 cap、postpatch generated C、加 runtime/typeid workaround、改 `unify.ring` 热点或重跑旧 profile。S′ 保留为 correctness-evidenced、未 fixed-point-accepted 的 continuation candidate；tracked `compiler/dist-c/main.c` 不得更新。完整证据在 ignored `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/`。
 
+**A6-compatible seed prefix stop（2026-08-19）**：新 Argument 允许一个不合入的 seed：恢复 A6 的旧 scoped-block / exact-import 前端行为，同时保留 S′ Perceus/verifier。seed `098d8ea9` 经独立 review 后由 exact A6 一次生成成功（1385.47 s，peak Job commit 9,348,829,184 bytes），已精确 containment 两项旧行为并通过 S′ runtime 1/1、RC 8/8、structural 1/1、parity 1/1；但预注册的 2^32-allocation 对照门否决 full crossing。candidate final Map+Option exact live 4,890,080，仅比 control 4,922,195 低 0.652%，且 peak commit 2,313,269,248 仅低 1.126%；二者均未达到预先固定的 20% / 10% 改善门。因此未运行 seed→current1，禁止重试或把成功生成 seed 改写成 crossing progress。下一候选只允许先做 unity-source inline-module 等价小探针；未通过不得 full build。证据在 ignored `bench/check/results/ownership-option-cleanup-20260819/a6-seed-crossing/`。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

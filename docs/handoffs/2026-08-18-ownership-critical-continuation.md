@@ -428,6 +428,33 @@ First failures remain evidence and must not be rewritten as passes:
   current2/current3 C can establish the fixed point; current1/current2 is not
   sufficient because current1 was inferred by the deliberately reduced seed.
 
+### A6-compatible seed prefix stop (2026-08-19 continuation)
+
+- Bootstrap-only seed commit `098d8ea9f22e6d1fa80259923aa0c868d2b10341`
+  passed static admission and independent review: only `infer.ring` /
+  `infer_ctx.ring` differ from `a11ea063`, while S-prime Perceus/verifier and
+  every other compiler/runtime blob remain exact.  A6 generated the seed once
+  in 1385.47 s at 9,348,829,184 bytes peak Job commit; C is 24,420,368 bytes,
+  SHA256 `98FB046C7DFAE6C34DF59E7D849ACAD1E835D3FA7D8BBC28DB19DE1DDBDFB114`.
+- The native seed reproduced only its deliberately contained old outcomes:
+  private callable-const re-export failed with exact panic `callable slot has
+  no full transfer authority`, and `ownership_modes_cfg` changed only the
+  three outer shadow observations (11/18/20 to 12/19/21).  S-prime runtime
+  1/1, RC live/mutations 8/8, generated-C structural 1/1, and parity 1/1 all
+  passed.
+- The preregistered exact-2^32-allocation prefix rejected the construction.
+  It exited 86 with all five milestones and no measurement error, but final
+  exact Map+Option live was 4,890,080 versus control 4,922,195, only 0.652%
+  lower and far above the <=3,937,756 gate.  Peak Job commit was
+  2,313,269,248 versus 2,339,614,720 bytes, only 1.126% lower and above the
+  <=2,105,653,248 gate.  Therefore seed-to-current1 was not run and must not be
+  retried; the seed branch/artifacts remain evidence only.
+- The next bounded candidate is the already-argued unity-source bridge.  It
+  begins with a small inline-module equivalence probe for compiler dependency,
+  import/re-export, trait/effect, and generated-C identity.  A full unity build
+  is not authorized unless that probe is exact; failure returns to a new
+  authority-boundary Argument, not to module deletion or resource guesswork.
+
 1. Treat the new gen1 as real source-generated correctness evidence: the
    ownership/block runtime matrix and the failure-scope recovery probe have
    both passed. The older C mirror remains supporting evidence only.
