@@ -2,6 +2,15 @@ fn raise_number() -> Int with {fail<Int>} {
     fail.raise(23)
 }
 
+fn early_shadow(flag: Bool) -> Int {
+    let value = 50
+    if flag {
+        let value = 51
+        return value
+    }
+    value
+}
+
 fn main() {
     let shadowed = 11
     {
@@ -64,6 +73,9 @@ fn main() {
     let mut scalar = 1
     scalar = 2
     print(scalar)
+
+    print(early_shadow(true))
+    print(early_shadow(false))
 
     let loop_shadowed = 40
     while true {

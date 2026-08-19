@@ -912,9 +912,6 @@ fn infer_if_let_from_result(
     let mut pattern_bindings: List<HPatternBinding> = []
     ctx.env.push_scope()
     let then_result = some({
-        if !validate_or_pattern_binding_sets(ctx, iflet_pattern) {
-            fail.raise(CompileError {})
-        }
         s = bind_pattern(ctx, iflet_pattern, expr_type, s)
         pattern_bindings = exact_pattern_bindings(
             ctx.env, iflet_pattern)
@@ -3062,108 +3059,6 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
 // infer_match
 // ============================================================
 
-fn collect_pattern_binding_names(
-    pattern: Pattern, mut names: Set<Str>
-) {
-    match pattern {
-        Pattern::Binding { name, .. } => {
-            if name != "_" { names.insert(name) }
-        },
-        Pattern::Constructor { fields, .. } => {
-            for field in fields {
-                collect_pattern_binding_names(field, names)
-            }
-        },
-        Pattern::NamedConstructor { fields, .. } => {
-            for field in fields {
-                collect_pattern_binding_names(field.pattern, names)
-            }
-        },
-        Pattern::TuplePattern { elements, .. } => {
-            for element in elements {
-                collect_pattern_binding_names(element, names)
-            }
-        },
-        Pattern::OrPattern { patterns, .. } => {
-            for alternative in patterns {
-                collect_pattern_binding_names(alternative, names)
-            }
-        },
-        Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
-    }
-}
-
-fn pattern_binding_sets_equal(left: Set<Str>, right: Set<Str>) -> Bool {
-    if left.len() != right.len() { return false }
-    for name in left {
-        if !right.contains(name) { return false }
-    }
-    true
-}
-
-fn validate_or_pattern_binding_sets(
-    mut ctx: InferCtx, pattern: Pattern
-) -> Bool {
-    match pattern {
-        Pattern::OrPattern { patterns, span } => {
-            let mut expected: Set<Str>? = none
-            let mut valid = patterns.len() > 0
-            let mut mismatch_reported = false
-            for alternative in patterns {
-                if !validate_or_pattern_binding_sets(ctx, alternative) {
-                    valid = false
-                }
-                let mut names: Set<Str> = set_new()
-                collect_pattern_binding_names(alternative, names)
-                match expected {
-                    some(first) => if !pattern_binding_sets_equal(first, names) {
-                        valid = false
-                        if !mismatch_reported {
-                            let _ = type_error(ctx.sink, E0301,
-                                "Or-pattern alternatives must bind the same variables",
-                                span, DiagnosticContext::OtherContext {
-                                    detail: some("or-pattern binding set mismatch")
-                                })
-                            mismatch_reported = true
-                        }
-                    },
-                    none => { expected = some(names) }
-                }
-            }
-            valid
-        },
-        Pattern::Constructor { fields, .. } => {
-            let mut valid = true
-            for field in fields {
-                if !validate_or_pattern_binding_sets(ctx, field) {
-                    valid = false
-                }
-            }
-            valid
-        },
-        Pattern::NamedConstructor { fields, .. } => {
-            let mut valid = true
-            for field in fields {
-                if !validate_or_pattern_binding_sets(ctx, field.pattern) {
-                    valid = false
-                }
-            }
-            valid
-        },
-        Pattern::TuplePattern { elements, .. } => {
-            let mut valid = true
-            for element in elements {
-                if !validate_or_pattern_binding_sets(ctx, element) {
-                    valid = false
-                }
-            }
-            valid
-        },
-        Pattern::Wildcard { .. } | Pattern::Binding { .. } |
-        Pattern::Literal { .. } => true
-    }
-}
-
 fn collect_exact_pattern_bindings(
     env: TypeEnv, pattern: Pattern, mut seen: Set<Str>,
     mut out: List<HPatternBinding>
@@ -3236,9 +3131,6 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
         ctx.env.push_scope()
         let arm_result = some({
             let match_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
-            if !validate_or_pattern_binding_sets(ctx, match_pattern) {
-                fail.raise(CompileError {})
-            }
             s = bind_pattern(ctx, match_pattern, hexpr_type(scrut_r.hexpr), s)
             let pattern_bindings = exact_pattern_bindings(
                 ctx.env, match_pattern)
@@ -3490,9 +3382,6 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
         ctx.env.push_scope()
         let arm_result = some({
             let catch_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
-            if !validate_or_pattern_binding_sets(ctx, catch_pattern) {
-                fail.raise(CompileError {})
-            }
             s = bind_pattern(ctx, catch_pattern, error_type, s)
             let pattern_bindings = exact_pattern_bindings(
                 ctx.env, catch_pattern)

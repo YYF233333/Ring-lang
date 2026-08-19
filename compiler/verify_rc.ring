@@ -1414,6 +1414,11 @@ fn v_assign(target: HExpr, value: HExpr, span: Span, mut ctx: VCtx) {
                     "assignment to borrowed binding '${name}' overwrites a value owned elsewhere (documented)", span)
                 return
             }
+            if ctx.kinds[idx] == K_CAPTURE {
+                // The nested callable borrows the outer slot. The outer frame
+                // remains the ownership authority; do not re-arm or own it here.
+                return
+            }
             if ctx.states[idx] == S_LIVE && ctx.kinds[idx] == K_OWNED {
                 // Old value overwritten while live.
                 let boxed_var = ctx.boxed.contains(exact_def_id)
@@ -1470,7 +1475,7 @@ fn v_drop(name: Str, def_id: Int, span: Span, mut ctx: VCtx) {
             "Drop of '${name}' which is not in scope", span)
         return
     }
-    if ctx.kinds[idx] == K_BORROW {
+    if ctx.kinds[idx] == K_BORROW || ctx.kinds[idx] == K_CAPTURE {
         v_report(ctx, "uaf-drop-borrow", true,
             "Drop of borrowed binding '${name}' (param/pattern/for-in projection) — frees a reference owned elsewhere", span)
         return

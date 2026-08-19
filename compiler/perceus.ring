@@ -68,6 +68,8 @@ pub fn perceus_transform(program: HProgram) -> HProgram {
 //   "strip-local-ident-def-id" / "strip-capture-ident-def-id" — remove the
 //                   exact ID from one fixture-owned local/capture reference;
 //                   HIR validation must fail loud before verification/codegen.
+//   "drop-capture" — insert a Drop of an exact outer capture inside its
+//                   nested callable; verifier must reject the borrowed slot.
 // Reached only via the `--rc-mutate=` CLI flag (verify path); the build/run
 // pipelines call perceus_transform and cannot be mutated.
 pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
@@ -90,6 +92,8 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     } else if mutate == "strip-capture-ident-def-id" {
         mutate_strip_identity_def_id(
             anf_program, "identity_capture_probe", "capture_slot")
+    } else if mutate == "drop-capture" {
+        mutate_drop_identity_capture(anf_program)
     } else { anf_program }
     // B-091: `boxed_vars` (def_ids of `let mut` vars auto-boxed for write-through
     // closure capture) is threaded through the RC pass so the Assign old-value
@@ -1404,6 +1408,86 @@ fn mutate_strip_identity_stmt(
         HStmt::Var { init, .. } => HStmt::Var { ..stmt,
             init: mutate_strip_identity_expr(init, target_name, changed) },
         _ => stmt
+    }
+}
+
+fn mutate_drop_identity_capture(program: HProgram) -> HProgram {
+    let mut changed: List<Bool> = [false]
+    let mut decls: List<HDecl> = []
+    for decl in program.decls {
+        match decl {
+            HDecl::Fn { name, body, .. } => {
+                if name == "identity_capture_probe" {
+                    decls.push(HDecl::Fn { ..decl,
+                        body: mutate_capture_drop_body(body, changed) })
+                } else { decls.push(decl) }
+            },
+            _ => decls.push(decl)
+        }
+    }
+    if !changed[0] {
+        panic("RC capture Drop mutation target not found")
+    }
+    HProgram { decls: decls,
+        derived_impls: program.derived_impls,
+        boxed_vars: program.boxed_vars,
+        static_dicts: program.static_dicts,
+        extern_type_names: program.extern_type_names,
+        drop_types: program.drop_types }
+}
+
+fn mutate_capture_drop_body(body: HExpr, mut changed: List<Bool>) -> HExpr {
+    match body {
+        HExpr::Block { stmts, .. } => {
+            let mut capture_def_id: Int? = none
+            for stmt in stmts {
+                match stmt {
+                    HStmt::Let { name, def_id, .. } => {
+                        if name == "capture_slot" { capture_def_id = def_id }
+                    },
+                    _ => {}
+                }
+            }
+            let exact_def_id = match capture_def_id {
+                some(id) => id,
+                none => panic("RC capture Drop mutation binding not found")
+            }
+            let mut new_stmts: List<HStmt> = []
+            for stmt in stmts {
+                match stmt {
+                    HStmt::Let { name, init, .. } => {
+                        if name == "read_capture" {
+                            new_stmts.push(HStmt::Let { ..stmt,
+                                init: mutate_capture_drop_lambda(
+                                    init, exact_def_id, changed) })
+                        } else { new_stmts.push(stmt) }
+                    },
+                    _ => new_stmts.push(stmt)
+                }
+            }
+            HExpr::Block { ..body, stmts: new_stmts }
+        },
+        _ => body
+    }
+}
+
+fn mutate_capture_drop_lambda(
+    expr: HExpr, def_id: Int, mut changed: List<Bool>
+) -> HExpr {
+    match expr {
+        HExpr::Lambda { body, .. } => match body {
+            HExpr::Block { stmts, .. } => {
+                let mut new_stmts = stmts.concat([])
+                new_stmts.push(HStmt::Drop { name: "capture_slot",
+                    def_id: def_id, ty: Type::UnitType,
+                    span: synthetic_span() })
+                changed.set(0, true)
+                HExpr::Lambda { ..expr,
+                    body: HExpr::Block { ..body, stmts: new_stmts } }
+            },
+            _ => panic("RC capture Drop mutation lambda body is not a block")
+        },
+        _ => panic("RC capture Drop mutation target is not a lambda")
     }
 }
 

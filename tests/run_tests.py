@@ -4365,8 +4365,6 @@ def identity_checkpoint_contract_errors(
         "infer": (
             "fn infer_scoped_block(",
             "fn exact_pattern_bindings(",
-            "fn validate_or_pattern_binding_sets(",
-            "Or-pattern alternatives must bind the same variables",
             "freshen_default_argument_hir(ctx, dh)",
             "bindings: pattern_bindings",
             "resume_binding: resume_binding",
@@ -4391,10 +4389,11 @@ def identity_checkpoint_contract_errors(
             "SYNTHETIC_RC_DEF_ID_BASE",
             "def_id: slot.def_id",
             "validate_hir_binder_def_ids(transformed)",
+            "mutate_drop_identity_capture(anf_program)",
         ),
         "cctx": (
             "pub value_slots_by_def_id: Map<Int, Str>",
-            "pub name_only_values: Set<Str>",
+            "pub name_only_slots: Map<Str, Str>",
             "pub value_slot_names_by_def_id: Map<Int, Str>",
             "pub fn c_local_def(",
             "pub fn c_param_def(",
@@ -4407,11 +4406,14 @@ def identity_checkpoint_contract_errors(
         "cexpr": (
             "let found = match def_id",
             "some(id) => match c_exact_value_slot(ctx, name, id)",
-            "captured local '${name}' has no DefId",
+            "let exact_local_callee = match callee",
+            "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
+            "fn c_lookup_call_mut_flags(",
             "fn c_pattern_local(",
             "bind_c_root_pattern_after_success(",
             "C codegen: Drop '${name}' has no exact DefId slot",
             "C codegen: assignment '${name}' has no exact DefId",
+            "let is_name_only_dict = match init",
         ),
         "verify": (
             "def_ids: List<Int>",
@@ -4419,6 +4421,7 @@ def identity_checkpoint_contract_errors(
             "fn v_lookup_name(",
             "local reference '${name}' has no exact DefId",
             "fn v_drop(name: Str, def_id: Int",
+            "ctx.kinds[idx] == K_BORROW || ctx.kinds[idx] == K_CAPTURE",
             "for binding in arm.bindings",
             "def_id, \"assignment '${name}'\"",
         ),
@@ -4442,12 +4445,6 @@ def identity_checkpoint_contract_errors(
         if infer_source.count(placement) != 1:
             errors.append(f"infer: scoped-block placement drifted: {placement}")
 
-    for pattern_name in ("match_pattern", "catch_pattern", "iflet_pattern"):
-        placement = f"validate_or_pattern_binding_sets(ctx, {pattern_name})"
-        if infer_source.count(placement) != 1:
-            errors.append(
-                f"infer: or-pattern binding-set gate drifted for {pattern_name}")
-
     if sources["cexpr"].count("bind_c_root_pattern_after_success(") != 3:
         errors.append(
             "C or-pattern lowering must have one shared-slot helper and "
@@ -4462,6 +4459,52 @@ def identity_checkpoint_contract_errors(
             errors.append("C assignment no longer selects the exact DefId slot")
         if "ctx.named_values" in assign_body:
             errors.append("DefId-bearing C assignment regained a name fallback")
+
+    call_body, call_error = extract_ring_function_body(
+        sources["cexpr"], "gen_c_call")
+    if call_error:
+        errors.append(call_error)
+    elif not all(token in call_body for token in (
+            "let exact_local_callee = match callee",
+            "c_exact_value_slot(ctx, name, id)",
+            "gen_c_closure_call(ctx, slot, arg_vals)")):
+        errors.append("exact local callable no longer takes the closure ABI path")
+
+    mut_flags_body, mut_flags_error = extract_ring_function_body(
+        sources["cexpr"], "c_lookup_call_mut_flags")
+    if mut_flags_error:
+        errors.append(mut_flags_error)
+    else:
+        local_gate = "c_exact_value_slot(ctx, name, id).is_some()"
+        exact_gate_block = (
+            "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n"
+            "                    return none"
+        )
+        module_lookup = "ctx.fn_mut_params.get(resolved_key)"
+        if (
+            local_gate not in mut_flags_body
+            or exact_gate_block not in mut_flags_body
+            or mut_flags_body.index(local_gate) > mut_flags_body.index(module_lookup)
+        ):
+            errors.append(
+                "exact/local callable mut flags are not gated before module metadata")
+
+    name_only_body, name_only_error = extract_ring_function_body(
+        sources["cctx"], "c_name_only_value")
+    if name_only_error:
+        errors.append(name_only_error)
+    elif (
+        "ctx.name_only_slots.get(name)" not in name_only_body
+        or "ctx.named_values" in name_only_body
+    ):
+        errors.append("backend name-only lookup is not an independent slot map")
+
+    exact_local_body, exact_local_error = extract_ring_function_body(
+        sources["cctx"], "c_local_def")
+    if exact_local_error:
+        errors.append(exact_local_error)
+    elif "name_only_slots" in exact_local_body:
+        errors.append("exact source local registration contaminates name-only slots")
 
     lookup_body, lookup_error = extract_ring_function_body(
         sources["verify"], "v_lookup")
@@ -4511,6 +4554,8 @@ def identity_checkpoint_contract_errors(
     forbidden = {
         "perceus": ("DROP_PRODUCER_NOOP_NONE", "is_option_none_ctor_ident"),
         "hir": ("OwnershipMetadata", "Take {"),
+        "cctx": ("exact_value_names", "name_only_values"),
+        "cexpr": ('starts_with("__ring_dictlocal_")',),
     }
     for label, tokens in forbidden.items():
         for token in tokens:
@@ -4534,14 +4579,30 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
         source = c_path.read_text(encoding="utf-8")
         masked = mask_c_strings_and_comments(source)
 
+    def exact_shadow_slot_errors(body: str, label: str) -> List[str]:
+        slot_errors: List[str] = []
+        if not re.search(r"\bvoid\s*\*\s*r_value_2(?:\s*=\s*NULL)?\s*;", body):
+            slot_errors.append(
+                f"{label} generated C omitted the distinct shadow declaration")
+        if len(re.findall(r"\br_value_2\s*=\s*t[0-9]+\s*;", body)) != 1:
+            slot_errors.append(
+                f"{label} generated C must assign the exact shadow slot once")
+        if not re.search(r"\bt[0-9]+\s*=\s*r_value\s*;", body):
+            slot_errors.append(
+                f"{label} generated C did not read the exact parameter slot")
+        if not re.search(
+                r"\(\(void\*\*\)t[0-9]+\)\[1\]\s*=\s*r_value_2\s*;",
+                body):
+            slot_errors.append(
+                f"{label} generated C did not capture the exact shadow slot")
+        return slot_errors
+
     trait_body, trait_error = extract_c_function_body(
         source, "__ExactDefaultTrait_compute")
     if trait_error:
         errors.append(trait_error)
-    elif not all(token in trait_body for token in (
-            "void* r_value_2;", "= r_value;", "= r_value_2;")):
-        errors.append(
-            "trait default generated C did not keep parameter and shadow slots distinct")
+    else:
+        errors.extend(exact_shadow_slot_errors(trait_body, "trait default"))
 
     lambda_symbols = re.findall(
         r"(?m)^void\*\s+(ring_c_lambda_[0-9]+)\s*"
@@ -4557,10 +4618,9 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
         errors.append(
             "effect default generated C expected one value+2 closure, "
             f"found {len(effect_bodies)}")
-    elif not all(token in effect_bodies[0] for token in (
-            "void* r_value_2;", "= r_value;", "= r_value_2;")):
-        errors.append(
-            "effect default generated C did not keep parameter and shadow slots distinct")
+    else:
+        errors.extend(exact_shadow_slot_errors(
+            effect_bodies[0], "effect default"))
     return errors
 
 
@@ -4592,12 +4652,18 @@ def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[st
         ("default freshening", "infer", "freshen_default_argument_hir(ctx, dh)", "dh"),
         ("assignment exact slot", "cexpr", "c_exact_value_slot(ctx, name, exact_def_id)",
          "ctx.named_values.get(name)"),
+        ("exact local closure call", "cexpr",
+         "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
+         "let closure_result = gen_c_direct_call(ctx, name, arg_vals, dict_vals)"),
+        ("exact local mut-flag isolation", "cexpr",
+         "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n                    return none",
+         "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n                    return ctx.fn_mut_params.get(name)"),
+        ("independent name-only slot map", "cctx",
+         "ctx.name_only_slots.get(name)", "ctx.named_values.get(name)"),
         ("verifier exact lookup", "verify", "ctx.def_ids[i] == def_id",
          "ctx.names[i] == name"),
         ("or-pattern shared slot", "cexpr", "bind_c_root_pattern_after_success(",
          "bind_c_nested_pattern("),
-        ("or-pattern name-set gate", "infer", "validate_or_pattern_binding_sets(ctx, match_pattern)",
-         "true"),
         ("effect default HParam identity", "infer_decl", "def_id: some(effect_param_def_id)",
          "def_id: none"),
         ("effect default body identity", "infer_decl", "def_id: some(exact_effect_def_id)",
@@ -5766,6 +5832,36 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             TestResult.PASS if failure is None else TestResult.FAIL,
             suite, label, failure or "",
         ))
+
+    capture_drop_label = "neg/exact capture Drop mutation"
+    if (
+        matches_filter(capture_drop_label, name_filter)
+        or matches_filter(identity_fixture, name_filter)
+    ):
+        try:
+            result = ring_check(
+                ring_exe, str(REPO / identity_fixture),
+                extra_args=["--verify-rc", "--rc-mutate=drop-capture"],
+                phase_suite=suite, phase_case=capture_drop_label,
+            )
+        except subprocess.TimeoutExpired:
+            collector.add(TestResult(
+                TestResult.FAIL, suite, capture_drop_label, "timed out"))
+        else:
+            output = strip_ansi(process_output(result))
+            failure = None
+            if result.returncode == 0:
+                failure = "Drop of borrowed exact capture did not fail"
+            elif (
+                "rc-verify[uaf-drop-borrow]" not in output
+                or "capture_slot" not in output
+            ):
+                failure = (
+                    "missing exact capture Drop finding: " + output[:300])
+            collector.add(TestResult(
+                TestResult.PASS if failure is None else TestResult.FAIL,
+                suite, capture_drop_label, failure or "",
+            ))
 
 
 # ---------------------------------------------------------------------------

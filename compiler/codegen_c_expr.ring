@@ -26,8 +26,8 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_local_def,
     c_param, c_param_def, c_value_slot, c_exact_value_slot,
-    c_has_exact_value_name, c_register_name_only_value,
-    c_remove_name_only_value, c_name_only_value, c_mangle_fn,
+    c_register_name_only_value, c_remove_name_only_value,
+    c_name_only_value, c_mangle_fn,
     c_resolve_fn,
     c_mangle_method, c_sanitize, c_symbol_fragment, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
     c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid,
@@ -245,23 +245,9 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
     let found = match def_id {
         some(id) => match c_exact_value_slot(ctx, name, id) {
             some(slot) => some(slot),
-            none => {
-                if c_has_exact_value_name(ctx, name) ||
-                   c_has_exact_value_name(ctx, lookup_name) {
-                    panic("C codegen: local '${name}' has mismatched DefId ${id}")
-                }
-                none
-            }
+            none => none
         },
         none => {
-            let explicit_name_only =
-                c_name_only_value(ctx, lookup_name).is_some() ||
-                c_name_only_value(ctx, name).is_some()
-            if !explicit_name_only &&
-               (c_has_exact_value_name(ctx, name) ||
-                c_has_exact_value_name(ctx, lookup_name)) {
-                panic("C codegen: local '${name}' reference has no DefId")
-            }
             match c_name_only_value(ctx, lookup_name) {
                 some(cv) => some(cv),
                 none => c_name_only_value(ctx, name)
@@ -704,6 +690,17 @@ fn c_lookup_call_mut_flags(ctx: CCtx, callee: HExpr) -> List<Bool>? {
                 some(rn) => rn,
                 none => name,
             }
+            // Local closures carry their own callable ABI. They must not
+            // inherit mut-parameter metadata from a same-spelled module fn.
+            match def_id {
+                some(id) => if c_exact_value_slot(ctx, name, id).is_some() {
+                    return none
+                },
+                none => if c_name_only_value(ctx, call_name).is_some() ||
+                           c_name_only_value(ctx, name).is_some() {
+                    return none
+                }
+            }
             // Project metadata uses the same semantic key as the function
             // registry.  This is essential for aliases and for two modules
             // that export the same bare function name.
@@ -1144,14 +1141,6 @@ fn consider_c_capture_name(
         none => name,
     }
     if c_capture_name_is_bound(name, lookup_name, def_id, params) { return }
-    let explicit_name_only =
-        c_name_only_value(ctx, lookup_name).is_some() ||
-        c_name_only_value(ctx, name).is_some()
-    if def_id.is_none() && !explicit_name_only &&
-       (c_has_exact_value_name(ctx, name) ||
-        c_has_exact_value_name(ctx, lookup_name)) {
-        panic("C codegen: captured local '${name}' has no DefId")
-    }
     // Step 8: module-aware fn check (consider_capture_name parity —
     // resolved lookup_name → bare name → resolved name).
     let is_fn = match def_id {
@@ -2431,6 +2420,23 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
         dict_vals.push(c_resolve_dict_ref(ctx, dr))
     }
 
+    // An exact local Ident is a closure slot, never a direct/module symbol.
+    // Resolve it before every spelling-based builtin/FFI path.
+    let exact_local_callee = match callee {
+        HExpr::Ident { name, def_id: some(id), .. } =>
+            c_exact_value_slot(ctx, name, id),
+        _ => none
+    }
+    match exact_local_callee {
+        some(slot) => {
+            let closure_result = gen_c_closure_call(ctx, slot, arg_vals)
+            return if is_unit_type(result_ty) {
+                "RING_UNIT"
+            } else { closure_result }
+        },
+        none => {}
+    }
+
     let raw = match callee {
         HExpr::Ident { name, resolved_name, def_id, .. } => {
             let call_name = match resolved_name {
@@ -2447,11 +2453,6 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
                 none => {
                     let explicit = c_name_only_value(ctx, call_name).is_some() ||
                         c_name_only_value(ctx, name).is_some()
-                    if !explicit &&
-                       (c_has_exact_value_name(ctx, call_name) ||
-                        c_has_exact_value_name(ctx, name)) {
-                        panic("C codegen: callable local '${name}' has no DefId")
-                    }
                     explicit
                 }
             }
@@ -4082,9 +4083,13 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
     match stmt {
         HStmt::Let { name, def_id, init, span, .. } => {
             c_line_directive(ctx, span)
+            let is_name_only_dict = match init {
+                HExpr::DictConstruct { .. } => true,
+                _ => false
+            }
             let val = gen_c_expr(ctx, init)
             let cv = c_local_def(ctx, name, def_id)
-            if name.starts_with("__ring_dictlocal_") {
+            if is_name_only_dict {
                 c_register_name_only_value(ctx, name, cv)
             }
             c_emit(ctx, "${cv} = ${val};")

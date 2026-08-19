@@ -553,6 +553,18 @@ fn validate_hir_local_reference(
     }
 }
 
+fn validate_hir_drop_reference(
+    scope: HirValidationScope, name: Str, def_id: Int
+) {
+    let id_index = hir_validation_def_id_index(scope, def_id)
+    if id_index < 0 {
+        panic("HIR Drop '${name}' references out-of-scope DefId ${def_id}")
+    }
+    if scope.names[id_index] != name {
+        panic("HIR Drop DefId ${def_id} names '${scope.names[id_index]}', not '${name}'")
+    }
+}
+
 fn validate_hir_binder(mut seen: Set<Int>, def_id: Int, label: Str) {
     if seen.contains(def_id) {
         panic("HIR binder DefId collision ${def_id} at ${label}")
@@ -730,8 +742,7 @@ fn validate_hir_stmt(
             }
         },
         HStmt::Drop { name, def_id, .. } =>
-            validate_hir_local_reference(
-                scope, name, some(def_id), "Drop"),
+            validate_hir_drop_reference(scope, name, def_id),
         HStmt::Break { .. } | HStmt::Continue { .. } => {}
     }
 }
