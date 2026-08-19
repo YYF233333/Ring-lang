@@ -7,6 +7,7 @@ use ast::{Program, Decl, Expr, Stmt, Param, MatchArm, StructFieldInit,
     TypeParam, TypeBound, Span, UseDecl, DestructureBinding, span_zero,
     EffectOpDecl}
 use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
+    HPatternBinding,
     HStructFieldInit, HStringInterpPart, HProgram, DerivedImpl,
     TraitDispatch, DictDispatchInfo, DictRef, TraitBound,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod,
@@ -87,6 +88,22 @@ pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
             InferResult { hexpr: hblock, subst: subst, effects: effects }
         },
         _ => panic("unreachable: infer_block called with non-block expression")
+    }
+}
+
+// Nested source blocks own one lexical frame.  Restore it on both success and
+// CompileError so a failed branch cannot poison a sibling or later declaration.
+fn infer_scoped_block(
+    mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?
+) -> InferResult {
+    ctx.env.push_scope()
+    let scoped_result = some(
+        infer_block(ctx, body, initial_subst)
+    ) catch { _ => none }
+    ctx.env.pop_scope()
+    match scoped_result {
+        some(result) => result,
+        none => fail.raise(CompileError {})
     }
 }
 
@@ -892,9 +909,12 @@ fn infer_if_let_from_result(
     let expr_type = apply_subst(s, hexpr_type(expr_r.hexpr))
     let iflet_pattern = rewrite_bare_enum_bindings(ctx.env, pattern)
 
+    let mut pattern_bindings: List<HPatternBinding> = []
     ctx.env.push_scope()
     let then_result = some({
         s = bind_pattern(ctx, iflet_pattern, expr_type, s)
+        pattern_bindings = exact_pattern_bindings(
+            ctx.env, iflet_pattern)
         infer_block(ctx, then_block, some(s))
     }) catch { _ => none }
     ctx.env.pop_scope()
@@ -933,7 +953,8 @@ fn infer_if_let_from_result(
 
             StmtResult {
                 hstmt: HStmt::IfLet {
-                    pattern: iflet_pattern, expr: expr_r.hexpr,
+                    pattern: iflet_pattern, bindings: pattern_bindings,
+                    expr: expr_r.hexpr,
                     then_block: then_r.hexpr,
                     else_block: else_hblock, span: span
                 },
@@ -1216,7 +1237,7 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
         Expr::MatchExpr { scrutinee, arms, span } =>
             infer_match(ctx, scrutinee, arms, span, subst),
         Expr::Block { .. } =>
-            infer_block(ctx, expr, some(subst)),
+            infer_scoped_block(ctx, expr, some(subst)),
         Expr::IfExpr { condition, then_branch, else_branch, span } =>
             infer_if(ctx, condition, then_branch, else_branch, span, subst),
         Expr::StringInterp { parts, span } =>
@@ -1318,7 +1339,7 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
                     DiagnosticContext::OtherContext { detail: some("unsafe block without requires") })
             }
             // Infer body (which is a Block expr from parse_block_expr)
-            let body_r = infer_block(ctx, body, some(subst))
+            let body_r = infer_scoped_block(ctx, body, some(subst))
             // Discharge: filter out UnsafeEffect from the body's effect row
             let mut filtered: List<Effect> = []
             for e in body_r.effects.effects {
@@ -1556,6 +1577,513 @@ fn infer_unary_op(mut ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, sub
 // infer_call
 // ============================================================
 
+// Default arguments are retained HIR templates.  Each expansion is a fresh
+// evaluation, so every binder and every reference to it needs a new exact
+// identity.  Declaration references outside the template remain unchanged.
+fn register_default_binder(
+    mut ctx: InferCtx, def_id: Int?, mut remap: Map<Int, Int>, label: Str
+) {
+    match def_id {
+        some(old_id) => {
+            if remap.contains_key(old_id) {
+                panic("default HIR repeats binder DefId ${old_id} at ${label}")
+            }
+            remap.insert(old_id, ctx.env.fresh_def_id())
+        },
+        none => panic("default HIR ${label} has no exact DefId")
+    }
+}
+
+fn collect_default_param_binder(
+    mut ctx: InferCtx, param: HParam, mut remap: Map<Int, Int>, label: Str
+) {
+    register_default_binder(
+        ctx, param.def_id, remap, "${label} '${param.name}'")
+}
+
+fn collect_default_pattern_binders(
+    mut ctx: InferCtx, bindings: List<HPatternBinding>,
+    mut remap: Map<Int, Int>, label: Str
+) {
+    for binding in bindings {
+        register_default_binder(ctx, some(binding.def_id), remap,
+            "${label} '${binding.name}'")
+    }
+}
+
+fn collect_default_arm_binders(
+    mut ctx: InferCtx, arm: HMatchArm, mut remap: Map<Int, Int>
+) {
+    collect_default_pattern_binders(
+        ctx, arm.bindings, remap, "pattern binding")
+    match arm.guard {
+        some(guard) => collect_default_expr_binders(ctx, guard, remap),
+        none => {}
+    }
+    collect_default_expr_binders(ctx, arm.body, remap)
+}
+
+fn collect_default_stmt_binders(
+    mut ctx: InferCtx, stmt: HStmt, mut remap: Map<Int, Int>
+) {
+    match stmt {
+        HStmt::Let { name, def_id, init, .. } |
+        HStmt::Var { name, def_id, init, .. } => {
+            if name != "_" {
+                register_default_binder(
+                    ctx, def_id, remap, "local '${name}'")
+            }
+            collect_default_expr_binders(ctx, init, remap)
+        },
+        HStmt::Assign { target, value, .. } => {
+            collect_default_expr_binders(ctx, target, remap)
+            collect_default_expr_binders(ctx, value, remap)
+        },
+        HStmt::ExprStmt { expr, .. } =>
+            collect_default_expr_binders(ctx, expr, remap),
+        HStmt::Return { value, .. } => match value {
+            some(expr) => collect_default_expr_binders(ctx, expr, remap),
+            none => {}
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_default_expr_binders(ctx, condition, remap)
+            collect_default_expr_binders(ctx, body, remap)
+        },
+        HStmt::ForIn { binding, def_id, destructure,
+                       iterable, body, .. } => {
+            if binding != "_" {
+                register_default_binder(
+                    ctx, def_id, remap, "for binding '${binding}'")
+            }
+            match destructure {
+                some(bindings) => {
+                    for binding_ in bindings {
+                        if binding_.name != "_" {
+                            register_default_binder(ctx, binding_.def_id, remap,
+                                "for destructure '${binding_.name}'")
+                        }
+                    }
+                },
+                none => {}
+            }
+            collect_default_expr_binders(ctx, iterable, remap)
+            collect_default_expr_binders(ctx, body, remap)
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            for binding in bindings {
+                if binding.name != "_" {
+                    register_default_binder(ctx, binding.def_id, remap,
+                        "destructure '${binding.name}'")
+                }
+            }
+            collect_default_expr_binders(ctx, init, remap)
+        },
+        HStmt::IfLet { bindings, expr, then_block, else_block, .. } => {
+            collect_default_pattern_binders(
+                ctx, bindings, remap, "if-let binding")
+            collect_default_expr_binders(ctx, expr, remap)
+            collect_default_expr_binders(ctx, then_block, remap)
+            match else_block {
+                some(block) => collect_default_expr_binders(ctx, block, remap),
+                none => {}
+            }
+        },
+        HStmt::Break { .. } | HStmt::Continue { .. } |
+        HStmt::Drop { .. } => {}
+    }
+}
+
+fn collect_default_expr_binders(
+    mut ctx: InferCtx, expr: HExpr, mut remap: Map<Int, Int>
+) {
+    match expr {
+        HExpr::BinOp { left, right, .. } => {
+            collect_default_expr_binders(ctx, left, remap)
+            collect_default_expr_binders(ctx, right, remap)
+        },
+        HExpr::UnaryOp { operand, .. } =>
+            collect_default_expr_binders(ctx, operand, remap),
+        HExpr::Call { callee, args, .. } => {
+            collect_default_expr_binders(ctx, callee, remap)
+            for arg in args { collect_default_expr_binders(ctx, arg, remap) }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            collect_default_expr_binders(ctx, receiver, remap),
+        HExpr::StructLit { fields, spread, .. } |
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields {
+                collect_default_expr_binders(ctx, field.value, remap)
+            }
+            match spread {
+                some(value) => collect_default_expr_binders(ctx, value, remap),
+                none => {}
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_default_expr_binders(ctx, scrutinee, remap)
+            for arm in arms { collect_default_arm_binders(ctx, arm, remap) }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts {
+                collect_default_stmt_binders(ctx, stmt, remap)
+            }
+            match tail {
+                some(value) => collect_default_expr_binders(ctx, value, remap),
+                none => {}
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            collect_default_expr_binders(ctx, condition, remap)
+            collect_default_expr_binders(ctx, then_branch, remap)
+            match else_branch {
+                some(value) => collect_default_expr_binders(ctx, value, remap),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Literal(_) => {},
+                    HStringInterpPart::Expression(value) =>
+                        collect_default_expr_binders(ctx, value, remap)
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            collect_default_expr_binders(ctx, body, remap)
+            for arm in arms { collect_default_arm_binders(ctx, arm, remap) }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            collect_default_expr_binders(ctx, body, remap)
+            for handler in handlers {
+                for param in handler.params {
+                    collect_default_param_binder(
+                        ctx, param, remap, "handler parameter")
+                }
+                match handler.resume_binding {
+                    some(binding) => register_default_binder(
+                        ctx, some(binding.def_id), remap,
+                        "handler resume '${binding.name}'"),
+                    none => {}
+                }
+                collect_default_expr_binders(ctx, handler.body, remap)
+            }
+        },
+        HExpr::Lambda { params, body, .. } => {
+            for param in params {
+                collect_default_param_binder(
+                    ctx, param, remap, "lambda parameter")
+            }
+            collect_default_expr_binders(ctx, body, remap)
+        },
+        HExpr::EffectOp { args, .. } => {
+            for arg in args {
+                collect_default_expr_binders(ctx, arg, remap)
+            }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            collect_default_expr_binders(ctx, start, remap)
+            collect_default_expr_binders(ctx, end, remap)
+        },
+        HExpr::ListLit { elements, .. } |
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements {
+                collect_default_expr_binders(ctx, element, remap)
+            }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_default_expr_binders(ctx, receiver, remap)
+            collect_default_expr_binders(ctx, index, remap)
+        },
+        HExpr::Clone { inner, .. } =>
+            collect_default_expr_binders(ctx, inner, remap),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(inner) => collect_default_expr_binders(ctx, inner, remap),
+            none => {}
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            collect_default_expr_binders(ctx, body, remap),
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
+        HExpr::Ident { .. } | HExpr::DictConstruct { .. } => {}
+    }
+}
+
+fn remap_default_def_id(def_id: Int, remap: Map<Int, Int>) -> Int {
+    match remap.get(def_id) {
+        some(fresh) => fresh,
+        none => def_id
+    }
+}
+
+fn remap_default_optional_def_id(
+    def_id: Int?, remap: Map<Int, Int>
+) -> Int? {
+    match def_id {
+        some(id) => some(remap_default_def_id(id, remap)),
+        none => none
+    }
+}
+
+fn remap_default_param(param: HParam, remap: Map<Int, Int>) -> HParam {
+    HParam { ..param,
+        def_id: remap_default_optional_def_id(param.def_id, remap) }
+}
+
+fn remap_default_pattern_binding(
+    binding: HPatternBinding, remap: Map<Int, Int>
+) -> HPatternBinding {
+    HPatternBinding { ..binding,
+        def_id: remap_default_def_id(binding.def_id, remap) }
+}
+
+fn remap_default_arm(arm: HMatchArm, remap: Map<Int, Int>) -> HMatchArm {
+    let mut bindings: List<HPatternBinding> = []
+    for binding in arm.bindings {
+        bindings.push(remap_default_pattern_binding(binding, remap))
+    }
+    let guard = match arm.guard {
+        some(value) => some(remap_default_expr(value, remap)),
+        none => none
+    }
+    HMatchArm { ..arm, bindings: bindings, guard: guard,
+        body: remap_default_expr(arm.body, remap) }
+}
+
+fn remap_default_stmt(stmt: HStmt, remap: Map<Int, Int>) -> HStmt {
+    match stmt {
+        HStmt::Let { def_id, init, .. } => HStmt::Let { ..stmt,
+            def_id: remap_default_optional_def_id(def_id, remap),
+            init: remap_default_expr(init, remap) },
+        HStmt::Var { def_id, init, .. } => HStmt::Var { ..stmt,
+            def_id: remap_default_optional_def_id(def_id, remap),
+            init: remap_default_expr(init, remap) },
+        HStmt::Assign { target, value, .. } => HStmt::Assign { ..stmt,
+            target: remap_default_expr(target, remap),
+            value: remap_default_expr(value, remap) },
+        HStmt::ExprStmt { expr, .. } => HStmt::ExprStmt { ..stmt,
+            expr: remap_default_expr(expr, remap) },
+        HStmt::Return { value, .. } => HStmt::Return { ..stmt,
+            value: match value {
+                some(expr) => some(remap_default_expr(expr, remap)),
+                none => none
+            } },
+        HStmt::While { condition, body, .. } => HStmt::While { ..stmt,
+            condition: remap_default_expr(condition, remap),
+            body: remap_default_expr(body, remap) },
+        HStmt::ForIn { def_id, destructure, iterable, body, .. } => {
+            let new_destructure = match destructure {
+                some(bindings) => {
+                    let mut result: List<HForInDestructure> = []
+                    for binding in bindings {
+                        result.push(HForInDestructure { ..binding,
+                            def_id: remap_default_optional_def_id(
+                                binding.def_id, remap) })
+                    }
+                    some(result)
+                },
+                none => none
+            }
+            HStmt::ForIn { ..stmt,
+                def_id: remap_default_optional_def_id(def_id, remap),
+                destructure: new_destructure,
+                iterable: remap_default_expr(iterable, remap),
+                body: remap_default_expr(body, remap) }
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            let mut new_bindings: List<HLetDestructureBinding> = []
+            for binding in bindings {
+                new_bindings.push(HLetDestructureBinding { ..binding,
+                    def_id: remap_default_optional_def_id(
+                        binding.def_id, remap) })
+            }
+            HStmt::LetDestructure { ..stmt, bindings: new_bindings,
+                init: remap_default_expr(init, remap) }
+        },
+        HStmt::IfLet { bindings, expr, then_block, else_block, .. } => {
+            let mut new_bindings: List<HPatternBinding> = []
+            for binding in bindings {
+                new_bindings.push(
+                    remap_default_pattern_binding(binding, remap))
+            }
+            HStmt::IfLet { ..stmt, bindings: new_bindings,
+                expr: remap_default_expr(expr, remap),
+                then_block: remap_default_expr(then_block, remap),
+                else_block: match else_block {
+                    some(block) => some(remap_default_expr(block, remap)),
+                    none => none
+                } }
+        },
+        HStmt::Drop { def_id, .. } => HStmt::Drop { ..stmt,
+            def_id: remap_default_def_id(def_id, remap) },
+        HStmt::Break { .. } | HStmt::Continue { .. } => stmt
+    }
+}
+
+fn remap_default_expr(expr: HExpr, remap: Map<Int, Int>) -> HExpr {
+    match expr {
+        HExpr::Ident { def_id, .. } => HExpr::Ident { ..expr,
+            def_id: remap_default_optional_def_id(def_id, remap) },
+        HExpr::BinOp { left, right, .. } => HExpr::BinOp { ..expr,
+            left: remap_default_expr(left, remap),
+            right: remap_default_expr(right, remap) },
+        HExpr::UnaryOp { operand, .. } => HExpr::UnaryOp { ..expr,
+            operand: remap_default_expr(operand, remap) },
+        HExpr::Call { callee, args, .. } => {
+            let mut new_args: List<HExpr> = []
+            for arg in args { new_args.push(remap_default_expr(arg, remap)) }
+            HExpr::Call { ..expr,
+                callee: remap_default_expr(callee, remap), args: new_args }
+        },
+        HExpr::FieldAccess { receiver, .. } => HExpr::FieldAccess { ..expr,
+            receiver: remap_default_expr(receiver, remap) },
+        HExpr::StructLit { fields, spread, .. } => {
+            let mut new_fields: List<HStructFieldInit> = []
+            for field in fields { new_fields.push(HStructFieldInit { ..field,
+                value: remap_default_expr(field.value, remap) }) }
+            HExpr::StructLit { ..expr, fields: new_fields,
+                spread: match spread {
+                    some(value) => some(remap_default_expr(value, remap)),
+                    none => none
+                } }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            let mut new_fields: List<HStructFieldInit> = []
+            for field in fields { new_fields.push(HStructFieldInit { ..field,
+                value: remap_default_expr(field.value, remap) }) }
+            HExpr::NamedVariantConstruct { ..expr, fields: new_fields,
+                spread: match spread {
+                    some(value) => some(remap_default_expr(value, remap)),
+                    none => none
+                } }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            let mut new_arms: List<HMatchArm> = []
+            for arm in arms { new_arms.push(remap_default_arm(arm, remap)) }
+            HExpr::MatchExpr { ..expr,
+                scrutinee: remap_default_expr(scrutinee, remap),
+                arms: new_arms }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            let mut new_stmts: List<HStmt> = []
+            for stmt in stmts {
+                new_stmts.push(remap_default_stmt(stmt, remap))
+            }
+            HExpr::Block { ..expr, stmts: new_stmts,
+                tail: match tail {
+                    some(value) => some(remap_default_expr(value, remap)),
+                    none => none
+                } }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } =>
+            HExpr::IfExpr { ..expr,
+                condition: remap_default_expr(condition, remap),
+                then_branch: remap_default_expr(then_branch, remap),
+                else_branch: match else_branch {
+                    some(value) => some(remap_default_expr(value, remap)),
+                    none => none
+                } },
+        HExpr::StringInterp { parts, .. } => {
+            let mut new_parts: List<HStringInterpPart> = []
+            for part in parts {
+                match part {
+                    HStringInterpPart::Literal(value) =>
+                        new_parts.push(HStringInterpPart::Literal(value)),
+                    HStringInterpPart::Expression(value) =>
+                        new_parts.push(HStringInterpPart::Expression(
+                            remap_default_expr(value, remap)))
+                }
+            }
+            HExpr::StringInterp { ..expr, parts: new_parts }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            let mut new_arms: List<HMatchArm> = []
+            for arm in arms { new_arms.push(remap_default_arm(arm, remap)) }
+            HExpr::TryCatch { ..expr,
+                body: remap_default_expr(body, remap), arms: new_arms }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            let mut new_handlers: List<HEffectHandler> = []
+            for handler in handlers {
+                let mut new_params: List<HParam> = []
+                for param in handler.params {
+                    new_params.push(remap_default_param(param, remap))
+                }
+                new_handlers.push(HEffectHandler { ..handler,
+                    params: new_params,
+                    resume_binding: match handler.resume_binding {
+                        some(binding) => some(
+                            remap_default_pattern_binding(binding, remap)),
+                        none => none
+                    },
+                    body: remap_default_expr(handler.body, remap) })
+            }
+            HExpr::HandleExpr { ..expr,
+                body: remap_default_expr(body, remap),
+                handlers: new_handlers }
+        },
+        HExpr::Lambda { params, body, .. } => {
+            let mut new_params: List<HParam> = []
+            for param in params {
+                new_params.push(remap_default_param(param, remap))
+            }
+            HExpr::Lambda { ..expr, params: new_params,
+                body: remap_default_expr(body, remap) }
+        },
+        HExpr::EffectOp { args, .. } => {
+            let mut new_args: List<HExpr> = []
+            for arg in args { new_args.push(remap_default_expr(arg, remap)) }
+            HExpr::EffectOp { ..expr, args: new_args }
+        },
+        HExpr::RangeExpr { start, end, .. } => HExpr::RangeExpr { ..expr,
+            start: remap_default_expr(start, remap),
+            end: remap_default_expr(end, remap) },
+        HExpr::ListLit { elements, .. } => {
+            let mut result: List<HExpr> = []
+            for element in elements {
+                result.push(remap_default_expr(element, remap))
+            }
+            HExpr::ListLit { ..expr, elements: result }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            let mut result: List<HExpr> = []
+            for element in elements {
+                result.push(remap_default_expr(element, remap))
+            }
+            HExpr::TupleLit { ..expr, elements: result }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => HExpr::IndexExpr { ..expr,
+            receiver: remap_default_expr(receiver, remap),
+            index: remap_default_expr(index, remap) },
+        HExpr::Clone { inner, .. } => HExpr::Clone { ..expr,
+            inner: remap_default_expr(inner, remap) },
+        HExpr::ReturnExpr { value, .. } => HExpr::ReturnExpr { ..expr,
+            value: match value {
+                some(inner) => some(remap_default_expr(inner, remap)),
+                none => none
+            } },
+        HExpr::UnsafeBlock { body, .. } => HExpr::UnsafeBlock { ..expr,
+            body: remap_default_expr(body, remap) },
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
+        HExpr::DictConstruct { .. } => expr
+    }
+}
+
+fn freshen_default_argument_hir(
+    mut ctx: InferCtx, template: HExpr
+) -> HExpr {
+    let mut remap: Map<Int, Int> = map_new()
+    collect_default_expr_binders(ctx, template, remap)
+    for entry in remap.entries() {
+        let (old_id, fresh_id) = entry
+        if ctx.boxed_vars.contains(old_id) {
+            ctx.boxed_vars.insert(fresh_id)
+        }
+    }
+    remap_default_expr(template, remap)
+}
+
 fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     let callee_r = infer_expr(ctx, callee, subst)
     let callee_metadata = resolve_callee_metadata(ctx, callee_r.hexpr)
@@ -1621,8 +2149,11 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
                     while di < defaults.values.len() {
                         match defaults.values.get(di) {
                             some(dh) => {
-                                hargs.push(dh)
-                                arg_types.push(hexpr_type(dh))
+                                let default_arg =
+                                    freshen_default_argument_hir(ctx, dh)
+                                let default_arg_type = hexpr_type(default_arg)
+                                hargs.push(default_arg)
+                                arg_types.push(default_arg_type)
                             },
                             none => {}
                         }
@@ -2528,6 +3059,63 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
 // infer_match
 // ============================================================
 
+fn collect_exact_pattern_bindings(
+    env: TypeEnv, pattern: Pattern, mut seen: Set<Str>,
+    mut out: List<HPatternBinding>
+) {
+    match pattern {
+        Pattern::Wildcard { .. } | Pattern::Literal { .. } => {},
+        Pattern::Binding { name, .. } => {
+            if name != "_" && !seen.contains(name) {
+                seen.insert(name)
+                let scheme = match env.lookup(name) {
+                    some(value) => value,
+                    none => panic(
+                        "unreachable: inferred pattern binding is absent from its lexical scope")
+                }
+                let def_id = match scheme.def_id {
+                    some(id) => id,
+                    none => panic(
+                        "unreachable: inferred pattern binding has no exact DefId")
+                }
+                out.push(HPatternBinding {
+                    name: name, def_id: def_id, ty: scheme.ty
+                })
+            }
+        },
+        Pattern::Constructor { fields, .. } => {
+            for field in fields {
+                collect_exact_pattern_bindings(env, field, seen, out)
+            }
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            for field in fields {
+                collect_exact_pattern_bindings(
+                    env, field.pattern, seen, out)
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for element in elements {
+                collect_exact_pattern_bindings(env, element, seen, out)
+            }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            for alternative in patterns {
+                collect_exact_pattern_bindings(env, alternative, seen, out)
+            }
+        }
+    }
+}
+
+fn exact_pattern_bindings(
+    env: TypeEnv, pattern: Pattern
+) -> List<HPatternBinding> {
+    let mut result: List<HPatternBinding> = []
+    let mut seen: Set<Str> = set_new()
+    collect_exact_pattern_bindings(env, pattern, seen, result)
+    result
+}
+
 fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: Span, subst: UnionFind) -> InferResult {
     let scrut_r = infer_expr(ctx, scrutinee, subst)
     let mut s = scrut_r.subst
@@ -2544,6 +3132,8 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
         let arm_result = some({
             let match_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
             s = bind_pattern(ctx, match_pattern, hexpr_type(scrut_r.hexpr), s)
+            let pattern_bindings = exact_pattern_bindings(
+                ctx.env, match_pattern)
 
             let mut guard_hexpr: HExpr? = none
             match arm.guard {
@@ -2587,7 +3177,9 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
                 }
             }
 
-            harms.push(HMatchArm { pattern: match_pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
+            harms.push(HMatchArm { pattern: match_pattern,
+                bindings: pattern_bindings, guard: guard_hexpr,
+                body: body_r.hexpr, span: arm.span })
             true
         }) catch { _ => none }
         ctx.env.pop_scope()
@@ -2630,7 +3222,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
     s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL, s, span)
     let mut effects = cond_r.effects
 
-    let then_r = infer_block(ctx, then_branch, some(s))
+    let then_r = infer_scoped_block(ctx, then_branch, some(s))
     s = then_r.subst
     let me = merge_effects(ctx.sink, ctx.env, effects, then_r.effects, s, span)
     effects = me.0
@@ -2642,7 +3234,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
     match else_branch {
         some(eb) => match eb {
             Expr::Block { .. } => {
-                let else_r = infer_block(ctx, eb, some(s))
+                let else_r = infer_scoped_block(ctx, eb, some(s))
                 s = else_r.subst
                 let me2 = merge_effects(ctx.sink, ctx.env, effects, else_r.effects, s, span)
                 effects = me2.0
@@ -2791,6 +3383,8 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
         let arm_result = some({
             let catch_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
             s = bind_pattern(ctx, catch_pattern, error_type, s)
+            let pattern_bindings = exact_pattern_bindings(
+                ctx.env, catch_pattern)
 
             let mut guard_hexpr: HExpr? = none
             match arm.guard {
@@ -2813,7 +3407,9 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
             s = me.1
             s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
 
-            harms.push(HMatchArm { pattern: catch_pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
+            harms.push(HMatchArm { pattern: catch_pattern,
+                bindings: pattern_bindings, guard: guard_hexpr,
+                body: body_r.hexpr, span: arm.span })
             true
         }) catch { _ => none }
         ctx.env.pop_scope()
@@ -3096,10 +3692,23 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                     }
                 }
                 ctx.env.bind_mono(p.name, pt)
-                hparams.push(HParam { name: p.name, ty: pt, def_id: none, is_mutable: false })
+                let param_scheme = match ctx.env.lookup(p.name) {
+                    some(value) => value,
+                    none => panic(
+                        "unreachable: handler parameter is missing")
+                }
+                let param_def_id = match param_scheme.def_id {
+                    some(id) => id,
+                    none => panic(
+                        "unreachable: handler parameter has no exact DefId")
+                }
+                ctx.env.record_def_span(param_def_id, p.span)
+                hparams.push(HParam { name: p.name, ty: pt,
+                    def_id: some(param_def_id), is_mutable: false })
                 hi = hi + 1
             }
 
+            let mut resume_binding: HPatternBinding? = none
             match handler.resume_name {
                 some(rn) => {
                     let resume_param = match op_def {
@@ -3107,7 +3716,25 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
                         none => ctx.env.fresh_var()
                     }
                     let resume_ret = ctx.env.fresh_var()
-                    ctx.env.bind_mono(rn, Type::FnType { params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW })
+                    let resume_type = Type::FnType {
+                        params: [resume_param], return_type: resume_ret,
+                        effects: EMPTY_ROW
+                    }
+                    ctx.env.bind_mono(rn, resume_type)
+                    let resume_scheme = match ctx.env.lookup(rn) {
+                        some(value) => value,
+                        none => panic(
+                            "unreachable: handler resume binding is missing")
+                    }
+                    let resume_def_id = match resume_scheme.def_id {
+                        some(id) => id,
+                        none => panic(
+                            "unreachable: handler resume binding has no exact DefId")
+                    }
+                    ctx.env.record_def_span(resume_def_id, handler.span)
+                    resume_binding = some(HPatternBinding {
+                        name: rn, def_id: resume_def_id, ty: resume_type
+                    })
                 },
                 none => {}
             }
@@ -3194,7 +3821,8 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             }
             hhandlers.push(HEffectHandler {
                 effect_name: canonical_effect_name, op_name: handler.op_name,
-                params: hparams, resume_name: handler.resume_name, body: hbr.hexpr
+                params: hparams, resume_binding: resume_binding,
+                body: hbr.hexpr
             })
             handled_effects.insert(canonical_effect_name)
             true

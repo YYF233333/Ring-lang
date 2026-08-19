@@ -82,6 +82,9 @@ pub struct CCtx {
 
     // ---- registries ----
     pub named_values: Map<Str, Str>,           // ring var name -> C var name
+    // Cleanup-visible HIR identity -> exact C slot. DefId-bearing paths never
+    // consult named_values, which remains only for dict/evidence binders.
+    pub value_slots_by_def_id: Map<Int, Str>,
     pub functions: Map<Str, CFnInfo>,          // C mangled name -> info
     pub fn_evidence_params: Map<Str, List<Str>>, // C mangled name -> evidence param names
     pub local_fn_effects: Map<Str, EffectRow>,
@@ -217,6 +220,7 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         label_counter: 0,
         match_counter: 0,
         named_values: map_new(),
+        value_slots_by_def_id: map_new(),
         functions: map_new(),
         fn_evidence_params: map_new(),
         local_fn_effects: map_new(),
@@ -449,20 +453,57 @@ pub fn fresh_label(mut ctx: CCtx, prefix: Str) -> Str {
     "__ring_${prefix}_${n}"
 }
 
-// Register a Ring local binding: unique C name + hoisted decl + name map.
-pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
+// Register a Ring local binding. Hoisted locals start null so unconditional
+// cleanup is safe on control-flow paths that never initialize the slot.
+pub fn c_local_def(
+    mut ctx: CCtx, ring_name: Str, def_id: Int?
+) -> Str {
+    match def_id {
+        some(id) => if ctx.value_slots_by_def_id.contains_key(id) {
+            panic("C codegen: duplicate local DefId ${id}")
+        },
+        none => {}
+    }
     let cname = c_unique_local(ctx, ring_name)
-    ctx.cur_decls.push("    void* ${cname};")
+    ctx.cur_decls.push("    void* ${cname} = NULL;")
     ctx.named_values.insert(ring_name, cname)
+    match def_id {
+        some(id) => ctx.value_slots_by_def_id.insert(id, cname),
+        none => {}
+    }
     cname
+}
+
+pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
+    c_local_def(ctx, ring_name, none)
 }
 
 // Register a Ring parameter: unique C name + name map (declared in the
 // function signature, so no hoisted decl).
-pub fn c_param(mut ctx: CCtx, ring_name: Str) -> Str {
+pub fn c_param_def(
+    mut ctx: CCtx, ring_name: Str, def_id: Int?
+) -> Str {
+    match def_id {
+        some(id) => if ctx.value_slots_by_def_id.contains_key(id) {
+            panic("C codegen: duplicate parameter DefId ${id}")
+        },
+        none => {}
+    }
     let cname = c_unique_local(ctx, ring_name)
     ctx.named_values.insert(ring_name, cname)
+    match def_id {
+        some(id) => ctx.value_slots_by_def_id.insert(id, cname),
+        none => {}
+    }
     cname
+}
+
+pub fn c_param(mut ctx: CCtx, ring_name: Str) -> Str {
+    c_param_def(ctx, ring_name, none)
+}
+
+pub fn c_value_slot(ctx: CCtx, def_id: Int) -> Str? {
+    ctx.value_slots_by_def_id.get(def_id)
 }
 
 fn c_unique_local(mut ctx: CCtx, ring_name: Str) -> Str {
@@ -491,6 +532,7 @@ pub struct CEmitState {
     pub cur_body: List<Str>,
     pub used_locals: Set<Str>,
     pub named_values: Map<Str, Str>,
+    pub value_slots_by_def_id: Map<Int, Str>,
     pub indent: Int,
     pub in_function: Bool,
     pub current_fn_name: Str,
@@ -512,6 +554,7 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
         cur_body: ctx.cur_body,
         used_locals: ctx.used_locals,
         named_values: ctx.named_values,
+        value_slots_by_def_id: ctx.value_slots_by_def_id,
         indent: ctx.indent,
         in_function: ctx.in_function,
         current_fn_name: ctx.current_fn_name,
@@ -525,6 +568,7 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
     ctx.cur_body = []
     ctx.used_locals = set_new()
     ctx.named_values = map_new()
+    ctx.value_slots_by_def_id = map_new()
     ctx.indent = 1
     ctx.in_function = true
     ctx.current_fn_name = fn_name
@@ -549,6 +593,7 @@ pub fn c_pop_fn(mut ctx: CCtx, c_name: Str, params_str: Str, saved: CEmitState) 
     ctx.cur_body = saved.cur_body
     ctx.used_locals = saved.used_locals
     ctx.named_values = saved.named_values
+    ctx.value_slots_by_def_id = saved.value_slots_by_def_id
     ctx.indent = saved.indent
     ctx.in_function = saved.in_function
     ctx.current_fn_name = saved.current_fn_name

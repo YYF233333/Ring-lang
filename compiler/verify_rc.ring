@@ -50,8 +50,6 @@
 //   x-overwrite-boxed   auto-boxed mut cell writes leak the old cell value
 //                       (B-091: the write mutates cell.value, no drop).
 //   x-overwrite-param   assignment to a (mut) parameter overwrites a borrow.
-//   x-shadow-overwrite  re-binding a live owned name (flat shared alloca)
-//                       leaks the previous value.
 //   x-spread            struct/variant spread copies the source's field
 //                       pointers raw (no dup) — leak-on-spread, L1 posture.
 //   x-discard           `let _ = <owned>` discards without a drop.
@@ -99,7 +97,7 @@
 // (Block tails may have been hoisted into `let __rc_scope_N` + Ident tail) —
 // keep the two in sync; a drift shows up immediately as self-verify findings.
 
-use ast::{Span, Position, Pattern}
+use ast::{Span, Position}
 use types::{Type}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
@@ -142,6 +140,7 @@ pub struct RcFinding {
 
 struct VCtx {
     names: List<Str>,
+    def_ids: List<Int>,
     kinds: List<Int>,
     states: List<Int>,
     spans: List<Span>,
@@ -267,7 +266,9 @@ fn v_fn_scope(params: List<HParam>, body: HExpr, label: Str, boxed: Set<Int>, ex
     let mut ctx = v_new_ctx(boxed, externs, findings, label)
     v_push_frame(ctx)
     for p in params {
-        v_bind(ctx, p.name, K_BORROW, synthetic_vspan())
+        let def_id = v_required_def_id(
+            p.def_id, "parameter '${p.name}'")
+        v_bind(ctx, p.name, def_id, K_BORROW, synthetic_vspan())
     }
     match body {
         HExpr::Block { .. } => {
@@ -283,13 +284,15 @@ fn v_fn_scope(params: List<HParam>, body: HExpr, label: Str, boxed: Set<Int>, ex
 
 fn v_new_ctx(boxed: Set<Int>, externs: Set<Str>, mut findings: List<RcFinding>, label: Str) -> VCtx {
     let names: List<Str> = []
+    let def_ids: List<Int> = []
     let kinds: List<Int> = []
     let states: List<Int> = []
     let spans: List<Span> = []
     let frames: List<Int> = []
     let loop_bases: List<Int> = []
     VCtx {
-        names: names, kinds: kinds, states: states, spans: spans,
+        names: names, def_ids: def_ids,
+        kinds: kinds, states: states, spans: spans,
         frames: frames, loop_bases: loop_bases,
         boxed: boxed, externs: externs, findings: findings, fn_name: label
     }
@@ -298,6 +301,13 @@ fn v_new_ctx(boxed: Set<Int>, externs: Set<Str>, mut findings: List<RcFinding>, 
 fn synthetic_vspan() -> Span {
     let pos = Position { line: 0, column: 0, offset: 0 }
     Span { file: "<verify-rc>", start: pos, end: pos }
+}
+
+fn v_required_def_id(def_id: Int?, label: Str) -> Int {
+    match def_id {
+        some(id) => id,
+        none => panic("RC verifier ${label} has no exact DefId")
+    }
 }
 
 // ============================================================
@@ -320,6 +330,7 @@ fn v_pop_frame(mut ctx: VCtx) {
     let base = match ctx.frames.pop() { some(b) => b, none => 0 }
     while ctx.names.len() > base {
         ctx.names.pop()
+        ctx.def_ids.pop()
         ctx.kinds.pop()
         ctx.states.pop()
         ctx.spans.pop()
@@ -331,41 +342,29 @@ fn v_frame_base(ctx: VCtx) -> Int {
     if n == 0 { 0 } else { ctx.frames[n - 1] }
 }
 
-// Innermost binding index for a name, or -1.
-fn v_lookup(ctx: VCtx, name: Str) -> Int {
+// Exact binding index, or -1 for a declaration/global not owned by this scope.
+fn v_lookup(ctx: VCtx, def_id: Int) -> Int {
     let mut i = ctx.names.len() - 1
     let mut found = 0 - 1
     while i >= 0 && found < 0 {
-        if ctx.names[i] == name { found = i }
+        if ctx.def_ids[i] == def_id { found = i }
         i = i - 1
     }
     found
 }
 
-// Bind a name.  Codegen lowers every same-named local in a function to ONE
-// shared function-entry alloca (B-102 layer 3), so a re-binding of a name that
-// is still in scope is an OVERWRITE of the same slot, not a fresh slot: the
-// existing entry is updated in place.  A live owned previous value leaks
-// (x-shadow-overwrite); a droppability FLIP on the shared slot is UAF-direction
-// (the surviving scope-end drop no longer matches the slot's contents).
-fn v_bind(mut ctx: VCtx, name: Str, kind: Int, span: Span) {
+fn v_bind(
+    mut ctx: VCtx, name: Str, def_id: Int, kind: Int, span: Span
+) {
     if rc_name_skippable(name) {
         return
     }
-    let idx = v_lookup(ctx, name)
+    let idx = v_lookup(ctx, def_id)
     if idx >= 0 {
-        if ctx.kinds[idx] == K_OWNED && ctx.states[idx] == S_LIVE {
-            v_report(ctx, "x-shadow-overwrite", false,
-                "re-binding '${name}' overwrites a live owned value (shared alloca; previous value leaks)", span)
-        }
-        if ctx.kinds[idx] != kind && (ctx.kinds[idx] == K_OWNED || kind == K_OWNED) {
-            v_report(ctx, "uaf-shadow-mismatch", true,
-                "re-binding '${name}' flips droppability on the shared alloca (scope-end drop may free a non-owned value)", span)
-        }
-        ctx.kinds.set(idx, kind)
-        ctx.states.set(idx, S_LIVE)
+        panic("RC verifier duplicate binder DefId ${def_id} for '${name}'")
     } else {
         ctx.names.push(name)
+        ctx.def_ids.push(def_id)
         ctx.kinds.push(kind)
         ctx.states.push(S_LIVE)
         ctx.spans.push(span)
@@ -596,14 +595,14 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
         HExpr::StrLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
         HExpr::BoolLit { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
 
-        HExpr::Ident { name, ty, span, .. } => {
+        HExpr::Ident { name, def_id, ty, span, .. } => {
             // Inference represents a fieldless enum construction as an Ident,
             // but both native backends call its zero-argument constructor.  It
             // is therefore a fresh owned production, not a binding/global read.
             if nullary_variant_ctor || materialized_fn_value {
                 v_cls_of_fresh(ty, ctx.externs)
             } else {
-                v_ident(name, ty, span, mode, ctx)
+                v_ident(name, def_id, ty, span, mode, ctx)
             }
         },
 
@@ -768,9 +767,10 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             for arm in arms {
                 v_restore(ctx, snap0)
                 v_push_frame(ctx)
-                let mut bnames: List<Str> = []
-                v_pattern_bindings(arm.pattern, bnames)
-                for bn in bnames { v_bind(ctx, bn, K_BORROW, arm.span) }
+                for binding in arm.bindings {
+                    v_bind(ctx, binding.name, binding.def_id,
+                        K_BORROW, arm.span)
+                }
                 match arm.guard {
                     some(g) => { v_cond(g, ctx) },
                     none => {},
@@ -809,9 +809,10 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             for arm in arms {
                 v_restore(ctx, snap0)
                 v_push_frame(ctx)
-                let mut bnames: List<Str> = []
-                v_pattern_bindings(arm.pattern, bnames)
-                for bn in bnames { v_bind(ctx, bn, K_BORROW, arm.span) }
+                for binding in arm.bindings {
+                    v_bind(ctx, binding.name, binding.def_id,
+                        K_BORROW, arm.span)
+                }
                 match arm.guard {
                     some(g) => { v_cond(g, ctx) },
                     none => {},
@@ -898,8 +899,14 @@ fn v_cls_of_fresh(ty: Type, externs: Set<Str>) -> Int {
 //  exemption class retired with it.)
 
 // Identifier read/move.
-fn v_ident(name: Str, ty: Type, span: Span, mode: Int, mut ctx: VCtx) -> Int {
-    let idx = v_lookup(ctx, name)
+fn v_ident(
+    name: Str, def_id: Int?, ty: Type, span: Span,
+    mode: Int, mut ctx: VCtx
+) -> Int {
+    let idx = match def_id {
+        some(id) => v_lookup(ctx, id),
+        none => 0 - 1
+    }
     // An exact owned producer (slot read/take or Clone<TypeVar>) can bind an
     // unnamed TypeVar.  Binding provenance is stronger than the generic
     // type-level exclusion, so account K_OWNED before applying that guard.
@@ -1010,9 +1017,14 @@ fn v_handler_scope(h: HEffectHandler, mut ctx: VCtx) {
     // scope with borrowed op params (and the resume binding, when present).
     let mut hctx = v_new_ctx(ctx.boxed, ctx.externs, ctx.findings, "${ctx.fn_name}/handler ${h.effect_name}.${h.op_name}")
     v_push_frame(hctx)
-    for p in h.params { v_bind(hctx, p.name, K_BORROW, synthetic_vspan()) }
-    match h.resume_name {
-        some(rn) => { v_bind(hctx, rn, K_BORROW, synthetic_vspan()) },
+    for p in h.params {
+        let def_id = v_required_def_id(
+            p.def_id, "handler parameter '${p.name}'")
+        v_bind(hctx, p.name, def_id, K_BORROW, synthetic_vspan())
+    }
+    match h.resume_binding {
+        some(binding) => v_bind(hctx, binding.name, binding.def_id,
+            K_BORROW, synthetic_vspan()),
         none => {},
     }
     match h.body {
@@ -1072,8 +1084,11 @@ fn v_block(block: HExpr, mode: Int, mut ctx: VCtx) -> (Int, Bool) {
 fn v_block_tail(t: HExpr, mode: Int, mut ctx: VCtx) -> Int {
     let base = v_frame_base(ctx)
     match t {
-        HExpr::Ident { name, .. } => {
-            let idx = v_lookup(ctx, name)
+        HExpr::Ident { def_id, .. } => {
+            let idx = match def_id {
+                some(id) => v_lookup(ctx, id),
+                none => 0 - 1
+            }
             if idx >= base && idx >= 0 {
                 if ctx.kinds[idx] == K_OWNED && ctx.states[idx] == S_LIVE {
                     ctx.states.set(idx, S_MOVED)
@@ -1110,12 +1125,12 @@ fn v_check_frame_leaks(mut ctx: VCtx) {
 
 fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
     match stmt {
-        HStmt::Let { name, init, span, .. } => {
-            v_let_like(name, init, span, ctx)
+        HStmt::Let { name, def_id, init, span, .. } => {
+            v_let_like(name, def_id, init, span, ctx)
             false
         },
-        HStmt::Var { name, init, span, .. } => {
-            v_let_like(name, init, span, ctx)
+        HStmt::Var { name, def_id, init, span, .. } => {
+            v_let_like(name, def_id, init, span, ctx)
             false
         },
         HStmt::Assign { target, value, span } => {
@@ -1162,7 +1177,8 @@ fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
             ctx.loop_bases.pop()
             false
         },
-        HStmt::ForIn { binding, destructure, iterable, body, span, .. } => {
+        HStmt::ForIn { binding, def_id, destructure,
+                       iterable, body, span, .. } => {
             match iterable {
                 // A literal RangeExpr iterable is lowered by emit_for_in_range_direct
                 // (a direct counting loop that drops its own counter/bound boxes —
@@ -1173,9 +1189,22 @@ fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
             ctx.loop_bases.push(ctx.names.len())
             let snap0 = v_snapshot(ctx)
             v_push_frame(ctx)
-            v_bind(ctx, binding, K_BORROW, span)
+            if binding != "_" {
+                let binding_id = v_required_def_id(
+                    def_id, "for binding '${binding}'")
+                v_bind(ctx, binding, binding_id, K_BORROW, span)
+            }
             match destructure {
-                some(ds) => { for d in ds { v_bind(ctx, d.name, K_BORROW, span) } },
+                some(ds) => {
+                    for d in ds {
+                        if d.name != "_" {
+                            let destructure_id = v_required_def_id(d.def_id,
+                                "for destructure '${d.name}'")
+                            v_bind(ctx, d.name, destructure_id,
+                                K_BORROW, span)
+                        }
+                    }
+                },
                 none => {},
             }
             v_block(body, M_BORROWED, ctx)
@@ -1201,16 +1230,22 @@ fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
             // The destructure PROJECTS borrows out of the init (no ownership
             // taken); a fresh init was materialised by ANF (Stage 2 C2).
             v_borrow(init, "", ctx)
-            for b in bindings { v_bind(ctx, b.name, K_BORROW, span) }
+            for b in bindings {
+                if b.name != "_" {
+                    let binding_id = v_required_def_id(
+                        b.def_id, "destructure '${b.name}'")
+                    v_bind(ctx, b.name, binding_id, K_BORROW, span)
+                }
+            }
             false
         },
-        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+        HStmt::IfLet { bindings, expr, then_block, else_block, span, .. } => {
             v_borrow(expr, "", ctx)
             let snap0 = v_snapshot(ctx)
             v_push_frame(ctx)
-            let mut bnames: List<Str> = []
-            v_pattern_bindings(pattern, bnames)
-            for bn in bnames { v_bind(ctx, bn, K_BORROW, span) }
+            for binding in bindings {
+                v_bind(ctx, binding.name, binding.def_id, K_BORROW, span)
+            }
             let rt = v_block(then_block, M_BORROWED, ctx)
             v_pop_frame(ctx)
             let snap_t = v_snapshot(ctx)
@@ -1223,14 +1258,16 @@ fn v_stmt(stmt: HStmt, mut ctx: VCtx) -> Bool {
             v_merge_two(ctx, rt.1, snap_t, re.1, snap_e, snap0, span)
             rt.1 && re.1
         },
-        HStmt::Drop { name, span, .. } => {
-            v_drop(name, span, ctx)
+        HStmt::Drop { name, def_id, span, .. } => {
+            v_drop(name, def_id, span, ctx)
             false
         }
     }
 }
 
-fn v_let_like(name: Str, init: HExpr, span: Span, mut ctx: VCtx) {
+fn v_let_like(
+    name: Str, def_id: Int?, init: HExpr, span: Span, mut ctx: VCtx
+) {
     let cls = v_consume(init, ctx)
     if rc_name_skippable(name) {
         if cls == CLS_OWNED {
@@ -1239,11 +1276,13 @@ fn v_let_like(name: Str, init: HExpr, span: Span, mut ctx: VCtx) {
         }
         return
     }
+    let exact_def_id = v_required_def_id(
+        def_id, "local binding '${name}'")
     let bind_span = if span.file == "<perceus>" { hexpr_span(init) } else { span }
     if v_droppable_init(init, ctx.externs) {
-        v_bind(ctx, name, K_OWNED, bind_span)
+        v_bind(ctx, name, exact_def_id, K_OWNED, bind_span)
     } else {
-        v_bind(ctx, name, K_NONOWNED, bind_span)
+        v_bind(ctx, name, exact_def_id, K_NONOWNED, bind_span)
         // D1 rule ①: a contains-extern binding is non-droppable BY RULE (its
         // deep drop would reach the foreign handle) — documented, not a finding.
         if type_contains_extern_handle(hexpr_type(init), ctx.externs) {
@@ -1281,7 +1320,9 @@ fn v_assign(target: HExpr, value: HExpr, span: Span, mut ctx: VCtx) {
     match target {
         HExpr::Ident { name, def_id, ty, .. } => {
             v_consume(value, ctx)
-            let idx = v_lookup(ctx, name)
+            let exact_def_id = v_required_def_id(
+                def_id, "assignment '${name}'")
+            let idx = v_lookup(ctx, exact_def_id)
             if idx < 0 {
                 return
             }
@@ -1292,7 +1333,7 @@ fn v_assign(target: HExpr, value: HExpr, span: Span, mut ctx: VCtx) {
             }
             if ctx.states[idx] == S_LIVE && ctx.kinds[idx] == K_OWNED {
                 // Old value overwritten while live.
-                let boxed_var = match def_id { some(d) => ctx.boxed.contains(d), none => false }
+                let boxed_var = ctx.boxed.contains(exact_def_id)
                 if v_type_excluded(ty, ctx.externs) || type_contains_extern_handle(ty, ctx.externs) {
                     // outside the account
                 } else if boxed_var {
@@ -1333,8 +1374,8 @@ fn v_assign(target: HExpr, value: HExpr, span: Span, mut ctx: VCtx) {
     }
 }
 
-fn v_drop(name: Str, span: Span, mut ctx: VCtx) {
-    let idx = v_lookup(ctx, name)
+fn v_drop(name: Str, def_id: Int, span: Span, mut ctx: VCtx) {
+    let idx = v_lookup(ctx, def_id)
     if idx < 0 {
         v_report(ctx, "uaf-drop-unknown", true,
             "Drop of '${name}' which is not in scope", span)
@@ -1379,34 +1420,6 @@ fn v_check_loop_exit(mut ctx: VCtx, span: Span, what: Str) {
                 "owned binding '${ctx.names[i]}' is live (not dropped) at this ${what}", span)
         }
         i = i + 1
-    }
-}
-
-// ============================================================
-// Pattern binding collection
-// (OR-patterns bind through their first alternative)
-// ============================================================
-
-fn v_pattern_bindings(pat: Pattern, mut out: List<Str>) {
-    match pat {
-        Pattern::Wildcard { .. } => {},
-        Pattern::Binding { name, .. } => { out.push(name) },
-        Pattern::Constructor { fields, .. } => {
-            for f in fields { v_pattern_bindings(f, out) }
-        },
-        Pattern::NamedConstructor { fields, .. } => {
-            for f in fields { v_pattern_bindings(f.pattern, out) }
-        },
-        Pattern::Literal { .. } => {},
-        Pattern::TuplePattern { elements, .. } => {
-            for e in elements { v_pattern_bindings(e, out) }
-        },
-        Pattern::OrPattern { patterns, .. } => {
-            match patterns.get(0) {
-                some(p0) => v_pattern_bindings(p0, out),
-                none => {},
-            }
-        },
     }
 }
 

@@ -20,7 +20,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef, TypeKind,
     DERIVED_HASH_SEED}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
-    CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_local, c_mangle_fn,
+    CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_param_def,
+    c_local, c_mangle_fn,
     c_mangle_fn_with_prefix, c_mangle_method, c_sanitize, c_symbol_for_fn_key, c_symbol_fragment,
     c_line_directive,
     rt_use, rt_use_raw,
@@ -841,6 +842,7 @@ fn begin_c_fn(mut ctx: CCtx, mangled: Str) -> Map<Str, Str> {
     ctx.used_locals = set_new()
     let saved = ctx.named_values
     ctx.named_values = map_new()
+    ctx.value_slots_by_def_id = map_new()
     ctx.in_function = true
     ctx.current_fn_name = mangled
     ctx.indent = 1
@@ -857,6 +859,7 @@ fn end_c_fn(mut ctx: CCtx, mangled: Str, params_str: Str, saved: Map<Str, Str>) 
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
     ctx.named_values = saved
+    ctx.value_slots_by_def_id = map_new()
     ctx.in_function = false
     ctx.current_fn_name = ""
 }
@@ -890,7 +893,7 @@ fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: Effec
     // Parameters → C signature (uniform void* boxing, LLVM parity).
     let mut sig_parts: List<Str> = []
     for p in params {
-        let cn = c_param(ctx, p.name)
+        let cn = c_param_def(ctx, p.name, p.def_id)
         sig_parts.push("void* ${cn}")
     }
     for b in trait_bounds {
@@ -1543,7 +1546,7 @@ fn emit_c_one_default_method(mut ctx: CCtx, c_name: Str, default_fn_name: Str, t
 
     // Regular params (including self).
     for p in method.params {
-        let pv = c_param(ctx, p.name)
+        let pv = c_param_def(ctx, p.name, p.def_id)
         sig_parts.push("void* ${pv}")
     }
 

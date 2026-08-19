@@ -12,6 +12,21 @@ pub use builtin_methods::{CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
     OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS,
     STRINGBUILDER_METHODS}
 
+// Source and pattern/default binders use the checker's non-negative DefId
+// allocator.  Later lowering passes use disjoint negative namespaces so a
+// synthetic binding can never alias source HIR or another pass's binding.
+pub const SYNTHETIC_DICT_DEF_ID_BASE: Int = 0 - 3000000000
+pub const SYNTHETIC_ANF_DEF_ID_BASE: Int = 0 - 4000000000
+pub const SYNTHETIC_RC_DEF_ID_BASE: Int = 0 - 5000000000
+pub const SYNTHETIC_DEF_ID_NAMESPACE_SIZE: Int = 1000000000
+
+pub fn synthetic_def_id(base: Int, ordinal: Int) -> Int {
+    if ordinal <= 0 || ordinal >= SYNTHETIC_DEF_ID_NAMESPACE_SIZE {
+        panic("unreachable: synthetic DefId namespace exhausted")
+    }
+    base - ordinal
+}
+
 // Callable values installed directly by builtins.ring rather than parsed from
 // a Decl. Checker provenance and both native backends must consume this one
 // list so a newly added checker-only callable cannot drift across phases.
@@ -220,8 +235,17 @@ pub struct HStructFieldInit {
     pub value: HExpr
 }
 
+// Pattern AST preserves source shape.  This parallel transport is the exact
+// lexical slot contract consumed by RC verification and native lowering.
+pub struct HPatternBinding {
+    pub name: Str,
+    pub def_id: Int,
+    pub ty: Type
+}
+
 pub struct HMatchArm {
     pub pattern: Pattern,
+    pub bindings: List<HPatternBinding>,
     pub guard: HExpr?,
     pub body: HExpr,
     pub span: Span
@@ -231,7 +255,7 @@ pub struct HEffectHandler {
     pub effect_name: Str,
     pub op_name: Str,
     pub params: List<HParam>,
-    pub resume_name: Str?,
+    pub resume_binding: HPatternBinding?,
     pub body: HExpr
 }
 
@@ -319,10 +343,10 @@ pub enum HStmt {
     Break { span: Span },
     Continue { span: Span },
     LetDestructure { pattern: Pattern, bindings: List<HLetDestructureBinding>, init: HExpr, span: Span },
-    IfLet { pattern: Pattern, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
+    IfLet { pattern: Pattern, bindings: List<HPatternBinding>, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
 
     // Perceus RC: explicit reference counting op inserted by the RC pass.
-    Drop { name: Str, ty: Type, span: Span }
+    Drop { name: Str, def_id: Int, ty: Type, span: Span }
 }
 
 pub struct HStructField {
@@ -450,6 +474,327 @@ pub struct HProgram {
     // B-002p1: types with user `impl Drop` — perceus skips dup (move semantics),
     // codegen calls user drop body in ring_drop_T, move checker prevents UAM.
     pub drop_types: Set<Str>
+}
+
+// Definition identity is a cross-pass invariant.  Validate immediately after
+// synthetic lowering and again after RC insertion so a missing/colliding slot
+// cannot degrade into a backend spelling lookup.
+pub fn validate_hir_binder_def_ids(program: HProgram) {
+    let mut seen: Set<Int> = set_new()
+    validate_hir_decls(program.decls, seen)
+}
+
+fn validate_hir_binder(mut seen: Set<Int>, def_id: Int, label: Str) {
+    if seen.contains(def_id) {
+        panic("HIR binder DefId collision ${def_id} at ${label}")
+    }
+    seen.insert(def_id)
+}
+
+fn required_hir_def_id(def_id: Int?, label: Str) -> Int {
+    match def_id {
+        some(id) => id,
+        none => panic("HIR ${label} has no exact DefId")
+    }
+}
+
+fn validate_hir_params(
+    params: List<HParam>, mut seen: Set<Int>, label: Str
+) {
+    for param in params {
+        let id = required_hir_def_id(
+            param.def_id, "${label} parameter '${param.name}'")
+        validate_hir_binder(seen, id,
+            "${label} parameter '${param.name}'")
+    }
+}
+
+fn collect_hir_pattern_names(pattern: Pattern, mut names: Set<Str>) {
+    match pattern {
+        Pattern::Binding { name, .. } => {
+            if name != "_" { names.insert(name) }
+        },
+        Pattern::Constructor { fields, .. } => {
+            for field in fields { collect_hir_pattern_names(field, names) }
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            for field in fields {
+                collect_hir_pattern_names(field.pattern, names)
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for element in elements {
+                collect_hir_pattern_names(element, names)
+            }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            for alternative in patterns {
+                collect_hir_pattern_names(alternative, names)
+            }
+        },
+        Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
+    }
+}
+
+fn validate_hir_pattern_bindings(
+    pattern: Pattern, bindings: List<HPatternBinding>,
+    mut seen: Set<Int>, label: Str
+) {
+    let mut pattern_names: Set<Str> = set_new()
+    collect_hir_pattern_names(pattern, pattern_names)
+    let mut metadata_names: Set<Str> = set_new()
+    for binding in bindings {
+        if !pattern_names.contains(binding.name) {
+            panic("HIR ${label} metadata names non-binding '${binding.name}'")
+        }
+        if metadata_names.contains(binding.name) {
+            panic("HIR ${label} repeats binding metadata for '${binding.name}'")
+        }
+        metadata_names.insert(binding.name)
+        validate_hir_binder(seen, binding.def_id,
+            "${label} binding '${binding.name}'")
+    }
+    for name in pattern_names {
+        if !metadata_names.contains(name) {
+            panic("HIR ${label} binding '${name}' has no exact metadata")
+        }
+    }
+}
+
+fn validate_hir_arm(arm: HMatchArm, mut seen: Set<Int>, label: Str) {
+    validate_hir_pattern_bindings(arm.pattern, arm.bindings, seen, label)
+    match arm.guard {
+        some(guard) => validate_hir_expr(guard, seen),
+        none => {}
+    }
+    validate_hir_expr(arm.body, seen)
+}
+
+fn validate_hir_stmt(stmt: HStmt, mut seen: Set<Int>) {
+    match stmt {
+        HStmt::Let { name, def_id, init, .. } |
+        HStmt::Var { name, def_id, init, .. } => {
+            if name != "_" {
+                let id = required_hir_def_id(
+                    def_id, "local binding '${name}'")
+                validate_hir_binder(seen, id, "local binding '${name}'")
+            }
+            validate_hir_expr(init, seen)
+        },
+        HStmt::Assign { target, value, .. } => {
+            validate_hir_expr(target, seen)
+            validate_hir_expr(value, seen)
+        },
+        HStmt::ExprStmt { expr, .. } => validate_hir_expr(expr, seen),
+        HStmt::Return { value, .. } => match value {
+            some(expr) => validate_hir_expr(expr, seen),
+            none => {}
+        },
+        HStmt::While { condition, body, .. } => {
+            validate_hir_expr(condition, seen)
+            validate_hir_expr(body, seen)
+        },
+        HStmt::ForIn { binding, def_id, destructure,
+                       iterable, body, .. } => {
+            if binding != "_" {
+                let id = required_hir_def_id(
+                    def_id, "for binding '${binding}'")
+                validate_hir_binder(seen, id, "for binding '${binding}'")
+            }
+            match destructure {
+                some(bindings) => {
+                    for binding_ in bindings {
+                        if binding_.name != "_" {
+                            let id = required_hir_def_id(binding_.def_id,
+                                "for destructure binding '${binding_.name}'")
+                            validate_hir_binder(seen, id,
+                                "for destructure binding '${binding_.name}'")
+                        }
+                    }
+                },
+                none => {}
+            }
+            validate_hir_expr(iterable, seen)
+            validate_hir_expr(body, seen)
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            for binding in bindings {
+                if binding.name != "_" {
+                    let id = required_hir_def_id(binding.def_id,
+                        "destructure binding '${binding.name}'")
+                    validate_hir_binder(seen, id,
+                        "destructure binding '${binding.name}'")
+                }
+            }
+            validate_hir_expr(init, seen)
+        },
+        HStmt::IfLet { pattern, bindings, expr,
+                       then_block, else_block, .. } => {
+            validate_hir_pattern_bindings(
+                pattern, bindings, seen, "if-let pattern")
+            validate_hir_expr(expr, seen)
+            validate_hir_expr(then_block, seen)
+            match else_block {
+                some(block) => validate_hir_expr(block, seen),
+                none => {}
+            }
+        },
+        HStmt::Break { .. } | HStmt::Continue { .. } |
+        HStmt::Drop { .. } => {}
+    }
+}
+
+fn validate_hir_expr(expr: HExpr, mut seen: Set<Int>) {
+    match expr {
+        HExpr::BinOp { left, right, .. } => {
+            validate_hir_expr(left, seen)
+            validate_hir_expr(right, seen)
+        },
+        HExpr::UnaryOp { operand, .. } => validate_hir_expr(operand, seen),
+        HExpr::Call { callee, args, .. } => {
+            validate_hir_expr(callee, seen)
+            for arg in args { validate_hir_expr(arg, seen) }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            validate_hir_expr(receiver, seen),
+        HExpr::StructLit { fields, spread, .. } |
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for field in fields { validate_hir_expr(field.value, seen) }
+            match spread {
+                some(value) => validate_hir_expr(value, seen),
+                none => {}
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            validate_hir_expr(scrutinee, seen)
+            for arm in arms { validate_hir_arm(arm, seen, "match arm") }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts { validate_hir_stmt(stmt, seen) }
+            match tail {
+                some(value) => validate_hir_expr(value, seen),
+                none => {}
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            validate_hir_expr(condition, seen)
+            validate_hir_expr(then_branch, seen)
+            match else_branch {
+                some(value) => validate_hir_expr(value, seen),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Literal(_) => {},
+                    HStringInterpPart::Expression(value) =>
+                        validate_hir_expr(value, seen)
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            validate_hir_expr(body, seen)
+            for arm in arms { validate_hir_arm(arm, seen, "catch arm") }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            validate_hir_expr(body, seen)
+            for handler in handlers {
+                let label = "handler '${handler.effect_name}.${handler.op_name}'"
+                validate_hir_params(handler.params, seen, label)
+                match handler.resume_binding {
+                    some(binding) => validate_hir_binder(seen,
+                        binding.def_id,
+                        "${label} resume binding '${binding.name}'"),
+                    none => {}
+                }
+                validate_hir_expr(handler.body, seen)
+            }
+        },
+        HExpr::Lambda { params, body, .. } => {
+            validate_hir_params(params, seen, "lambda")
+            validate_hir_expr(body, seen)
+        },
+        HExpr::EffectOp { args, .. } => {
+            for arg in args { validate_hir_expr(arg, seen) }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            validate_hir_expr(start, seen)
+            validate_hir_expr(end, seen)
+        },
+        HExpr::ListLit { elements, .. } |
+        HExpr::TupleLit { elements, .. } => {
+            for element in elements { validate_hir_expr(element, seen) }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            validate_hir_expr(receiver, seen)
+            validate_hir_expr(index, seen)
+        },
+        HExpr::Clone { inner, .. } => validate_hir_expr(inner, seen),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(inner) => validate_hir_expr(inner, seen),
+            none => {}
+        },
+        HExpr::UnsafeBlock { body, .. } => validate_hir_expr(body, seen),
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
+        HExpr::Ident { .. } | HExpr::DictConstruct { .. } => {}
+    }
+}
+
+fn validate_hir_decls(decls: List<HDecl>, mut seen: Set<Int>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, def_id, params, body, .. } => {
+                match def_id {
+                    some(id) => validate_hir_binder(
+                        seen, id, "function '${name}'"),
+                    none => {}
+                }
+                validate_hir_params(params, seen, "function '${name}'")
+                validate_hir_expr(body, seen)
+            },
+            HDecl::Impl { methods, .. } => validate_hir_decls(methods, seen),
+            HDecl::Effect { name, ops, .. } => {
+                for op in ops {
+                    match op.default_body {
+                        some(body) => {
+                            validate_hir_params(op.params, seen,
+                                "effect default '${name}.${op.name}'")
+                            validate_hir_expr(body, seen)
+                        },
+                        none => {}
+                    }
+                }
+            },
+            HDecl::Test { body, .. } => validate_hir_expr(body, seen),
+            HDecl::Trait { name, methods, .. } => {
+                for method in methods {
+                    match method.body {
+                        some(body) => {
+                            validate_hir_params(method.params, seen,
+                                "trait default '${name}.${method.name}'")
+                            validate_hir_expr(body, seen)
+                        },
+                        none => {}
+                    }
+                }
+            },
+            HDecl::Const { name, def_id, init, .. } => {
+                match def_id {
+                    some(id) => validate_hir_binder(
+                        seen, id, "const '${name}'"),
+                    none => {}
+                }
+                validate_hir_expr(init, seen)
+            },
+            HDecl::ModBlock { decls: inner, .. } =>
+                validate_hir_decls(inner, seen),
+            HDecl::Struct { .. } | HDecl::Enum { .. } |
+            HDecl::ExternFn { .. } | HDecl::ExternType { .. } |
+            HDecl::TypeAlias { .. } | HDecl::Sig { .. } => {}
+        }
+    }
 }
 
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case

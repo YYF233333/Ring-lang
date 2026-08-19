@@ -3,7 +3,7 @@ use types::{Type, Effect, EffectRow, StructField, RecordField,
 use ast::{Pattern, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HForInDestructure,
-    HLetDestructureBinding, ValueBindingKind, TraitDispatch,
+    HLetDestructureBinding, HPatternBinding, ValueBindingKind, TraitDispatch,
     hexpr_type, hexpr_effects, hexpr_span}
 use union_find::{UnionFind}
 use env::{apply_subst, apply_subst_row}
@@ -187,15 +187,22 @@ fn zonk_stmt(ctx: ZonkCtx, stmt: HStmt) -> HStmt {
             })
             HStmt::LetDestructure { pattern: pattern, bindings: z_bindings, init: zonk_expr(ctx, init), span: span }
         },
-        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+        HStmt::IfLet { pattern, bindings, expr, then_block, else_block, span } => {
             let z_else = match else_block {
                 some(eb) => some(zonk_block(ctx, eb)),
                 none => none,
             }
-            HStmt::IfLet { pattern: pattern, expr: zonk_expr(ctx, expr), then_block: zonk_block(ctx, then_block), else_block: z_else, span: span }
+            HStmt::IfLet { pattern: pattern,
+                bindings: bindings.map(fn(b) { HPatternBinding {
+                    name: b.name, def_id: b.def_id,
+                    ty: zonk_type(ctx, b.ty) } }),
+                expr: zonk_expr(ctx, expr),
+                then_block: zonk_block(ctx, then_block),
+                else_block: z_else, span: span }
         },
-        HStmt::Drop { name, ty, span } =>
-            HStmt::Drop { name: name, ty: zonk_type(ctx, ty), span: span }
+        HStmt::Drop { name, def_id, ty, span } =>
+            HStmt::Drop { name: name, def_id: def_id,
+                ty: zonk_type(ctx, ty), span: span }
     }
 }
 
@@ -280,7 +287,12 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
                         some(g) => some(zonk_expr(ctx, g)),
                         none => none,
                     }
-                    HMatchArm { pattern: a.pattern, guard: z_guard, body: zonk_expr(ctx, a.body), span: a.span }
+                    HMatchArm { pattern: a.pattern,
+                        bindings: a.bindings.map(fn(b) { HPatternBinding {
+                            name: b.name, def_id: b.def_id,
+                            ty: zonk_type(ctx, b.ty) } }),
+                        guard: z_guard, body: zonk_expr(ctx, a.body),
+                        span: a.span }
                 }),
                 ty: z_ty, effects: z_eff, span: z_span
             },
@@ -323,6 +335,9 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
                 arms: arms.map(fn(a) {
                     HMatchArm {
                         pattern: a.pattern,
+                        bindings: a.bindings.map(fn(b) { HPatternBinding {
+                            name: b.name, def_id: b.def_id,
+                            ty: zonk_type(ctx, b.ty) } }),
                         guard: match a.guard {
                             some(g) => some(zonk_expr(ctx, g)),
                             none => none
@@ -340,7 +355,14 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
                     HEffectHandler {
                         effect_name: h.effect_name, op_name: h.op_name,
                         params: h.params.map(fn(p) { zonk_param(ctx, p) }),
-                        resume_name: h.resume_name,
+                        resume_binding: match h.resume_binding {
+                            some(binding) => some(HPatternBinding {
+                                name: binding.name,
+                                def_id: binding.def_id,
+                                ty: zonk_type(ctx, binding.ty)
+                            }),
+                            none => none
+                        },
                         body: zonk_expr(ctx, h.body)
                     }
                 }),

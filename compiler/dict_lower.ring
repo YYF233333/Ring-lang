@@ -41,7 +41,9 @@ use types::{Type, EffectRow, EMPTY_ROW}
 use hir::{HProgram, HDecl, HStmt, HExpr, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, HEffectOp, HTraitMethod, DictRef, TraitDispatch,
     HDictDef, DerivedImpl, DerivedField, DerivedVariant, FieldAction,
-    dict_instance_name, hexpr_type, hexpr_effects, hexpr_span}
+    dict_instance_name, hexpr_type, hexpr_effects, hexpr_span,
+    synthetic_def_id, SYNTHETIC_DICT_DEF_ID_BASE,
+    validate_hir_binder_def_ids}
 
 pub fn lower_dicts(program: HProgram) -> HProgram {
     let mut defs: List<HDictDef> = []
@@ -57,7 +59,7 @@ pub fn lower_dicts(program: HProgram) -> HProgram {
     for di in program.derived_impls {
         new_derived_impls.push(dl_derived_impl(di, defs, seen))
     }
-    HProgram {
+    let lowered = HProgram {
         decls: new_decls,
         derived_impls: new_derived_impls,
         boxed_vars: program.boxed_vars,
@@ -65,6 +67,8 @@ pub fn lower_dicts(program: HProgram) -> HProgram {
         extern_type_names: program.extern_type_names,
         drop_types: program.drop_types
     }
+    validate_hir_binder_def_ids(lowered)
+    lowered
 }
 
 fn dl_derived_action(action: FieldAction, mut defs: List<HDictDef>,
@@ -243,12 +247,16 @@ fn dl_ref_dyn(dr: DictRef, mut defs: List<HDictDef>, mut seen: Set<Str>,
                 DictRef::Static(inst)
             } else {
                 counter.set(0, counter[0] + 1)
-                let lname = "__ring_dictlocal_${counter[0]}"
+                let ordinal = counter[0]
+                let lname = "__ring_dictlocal_${ordinal}"
+                let local_def_id = synthetic_def_id(
+                    SYNTHETIC_DICT_DEF_ID_BASE, ordinal)
                 let construct = HExpr::DictConstruct {
                     base_dict: dict, trait_name: trait_name, inner: inner_refs,
                     ty: Type::TupleType { elements: [] }, effects: EMPTY_ROW, span: span
                 }
-                lets.push(HStmt::Let { name: lname, name_span: span, def_id: none,
+                lets.push(HStmt::Let { name: lname, name_span: span,
+                    def_id: some(local_def_id),
                     ty: Type::TupleType { elements: [] }, init: construct, span: span })
                 DictRef::Simple(lname)
             }
@@ -452,7 +460,7 @@ fn dl_expr(e: HExpr, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
             let mut new_handlers: List<HEffectHandler> = []
             for h in handlers {
                 new_handlers.push(HEffectHandler { effect_name: h.effect_name, op_name: h.op_name,
-                    params: h.params, resume_name: h.resume_name,
+                    params: h.params, resume_binding: h.resume_binding,
                     body: dl_expr(h.body, defs, seen, counter) })
             }
             HExpr::HandleExpr { body: dl_expr(body, defs, seen, counter), handlers: new_handlers, ty: ty, effects: effects, span: span }
@@ -505,7 +513,8 @@ fn dl_arms(arms: List<HMatchArm>, mut defs: List<HDictDef>, mut seen: Set<Str>, 
             some(g) => some(dl_expr(g, defs, seen, counter)),
             none => none,
         }
-        out.push(HMatchArm { pattern: arm.pattern, guard: new_guard,
+        out.push(HMatchArm { pattern: arm.pattern, bindings: arm.bindings,
+            guard: new_guard,
             body: dl_expr(arm.body, defs, seen, counter), span: arm.span })
     }
     out
@@ -545,15 +554,17 @@ fn dl_stmt(s: HStmt, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
         HStmt::LetDestructure { pattern, bindings, init, span } =>
             HStmt::LetDestructure { pattern: pattern, bindings: bindings,
                 init: dl_expr(init, defs, seen, counter), span: span },
-        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+        HStmt::IfLet { pattern, bindings, expr, then_block, else_block, span } => {
             let new_else = match else_block {
                 some(eb) => some(dl_expr(eb, defs, seen, counter)),
                 none => none,
             }
-            HStmt::IfLet { pattern: pattern, expr: dl_expr(expr, defs, seen, counter),
+            HStmt::IfLet { pattern: pattern, bindings: bindings,
+                expr: dl_expr(expr, defs, seen, counter),
                 then_block: dl_expr(then_block, defs, seen, counter), else_block: new_else, span: span }
         },
         // RC ops are inserted by perceus (after this pass) — never present.
-        HStmt::Drop { name, ty, span } => HStmt::Drop { name: name, ty: ty, span: span }
+        HStmt::Drop { name, def_id, ty, span } =>
+            HStmt::Drop { name: name, def_id: def_id, ty: ty, span: span }
     }
 }

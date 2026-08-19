@@ -16,14 +16,16 @@
 use types::{Type, EffectRow, EMPTY_ROW, type_to_builtin_name, BUILTIN_RANGE}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
-    HLetDestructureBinding, HStructFieldInit, HEffectHandler, HEffectOp, DictRef,
+    HLetDestructureBinding, HPatternBinding, HStructFieldInit,
+    HEffectHandler, HEffectOp, DictRef,
     TraitDispatch, DictDispatchInfo, effect_op_slot,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
     trait_dict_name, trait_bound_param_name, evidence_param_name,
     effect_name_from_evidence_param, is_extern_handle_type,
     slot_bridge_runtime_name}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
-    fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_param, c_mangle_fn,
+    fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_local_def,
+    c_param, c_param_def, c_value_slot, c_mangle_fn,
     c_resolve_fn,
     c_mangle_method, c_sanitize, c_symbol_fragment, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
     c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid,
@@ -238,9 +240,12 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
         none => name,
     }
     let boxed = is_boxed_def_c(ctx, def_id)
-    let found = match ctx.named_values.get(lookup_name) {
-        some(cv) => some(cv),
-        none => ctx.named_values.get(name),
+    let found = match def_id {
+        some(id) => c_value_slot(ctx, id),
+        none => match ctx.named_values.get(lookup_name) {
+            some(cv) => some(cv),
+            none => ctx.named_values.get(name)
+        }
     }
     match found {
         some(cv) => {
@@ -735,9 +740,12 @@ fn gen_c_mut_arg(mut ctx: CCtx, arg: HExpr) -> Str {
                     some(rn) => rn,
                     none => name,
                 }
-                let found = match ctx.named_values.get(lookup_name) {
-                    some(cv) => some(cv),
-                    none => ctx.named_values.get(name),
+                let found = match def_id {
+                    some(id) => c_value_slot(ctx, id),
+                    none => match ctx.named_values.get(lookup_name) {
+                        some(cv) => some(cv),
+                        none => ctx.named_values.get(name)
+                    }
                 }
                 match found {
                     some(cv) => {
@@ -1028,13 +1036,17 @@ fn ensure_c_wrapped_method_thunk(mut ctx: CCtx, method_c_name: Str, dispatch_ari
 // pointers outside Ring RC; ring_drop on them is a no-op).
 // ============================================================
 
+struct CCapture {
+    name: Str,
+    def_id: Int?,
+    extern_typed: Bool
+}
+
 fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HExpr, ty: Type) -> Str {
     // Capture collection runs against the ENCLOSING scope (named_values of
     // the function being emitted) — before the nested push.
-    let mut captures: List<Str> = []
+    let mut captures: List<CCapture> = []
     collect_c_captures(ctx, body, params, captures)
-    let mut extern_typed: Set<Str> = set_new()
-    collect_c_extern_typed_names(body, captures, params, ctx.extern_types, extern_typed)
 
     let ln = ctx.lambda_counter
     ctx.lambda_counter = ln + 1
@@ -1046,8 +1058,8 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     // Extract captures from env (slot i+1; slot 0 is the count).
     for i in 0..captures.len() {
         match captures.get(i) {
-            some(cap_name) => {
-                let cv = c_local(ctx, cap_name)
+            some(cap) => {
+                let cv = c_local_def(ctx, cap.name, cap.def_id)
                 c_emit(ctx, "${cv} = ((void**)env)[${i + 1}];")
             },
             none => {},
@@ -1055,7 +1067,7 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     }
     // Bind regular params.
     for p in params {
-        let pv = c_param(ctx, p.name)
+        let pv = c_param_def(ctx, p.name, p.def_id)
         sig_parts.push("void* ${pv}")
     }
     let val = gen_c_expr(ctx, body)
@@ -1071,12 +1083,20 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     c_emit(ctx, "*(int64_t*)${env} = ${captures.len()};")
     for i in 0..captures.len() {
         match captures.get(i) {
-            some(cap_name) => {
-                let cv = match ctx.named_values.get(cap_name) {
-                    some(v) => v,
-                    none => panic("C codegen: captured variable not found: ${cap_name}"),
+            some(cap) => {
+                let cv = match cap.def_id {
+                    some(id) => match c_value_slot(ctx, id) {
+                        some(v) => v,
+                        none => panic(
+                            "C codegen: exact captured DefId ${id} has no outer slot")
+                    },
+                    none => match ctx.named_values.get(cap.name) {
+                        some(v) => v,
+                        none => panic(
+                            "C codegen: captured variable not found: ${cap.name}")
+                    }
                 }
-                if extern_typed.contains(cap_name) == false {
+                if !cap.extern_typed {
                     rt_use(ctx, "ring_dup", 1)
                     c_emit(ctx, "ring_dup(${cv});")
                 }
@@ -1095,40 +1115,69 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
 // Decide whether a bare variable name should be captured (port of
 // consider_capture_name): not a lambda param, not a known module fn, and
 // present in the enclosing scope's named_values.
-fn consider_c_capture_name(ctx: CCtx, name: Str, resolved_name: Str?, params: List<HParam>, mut captures: List<Str>) {
+fn consider_c_capture_name(
+    ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?,
+    extern_typed: Bool, params: List<HParam>,
+    mut captures: List<CCapture>
+) {
     let lookup_name = match resolved_name {
         some(rn) => rn,
         none => name,
     }
-    if c_capture_name_is_bound(name, lookup_name, params) { return }
+    if c_capture_name_is_bound(name, lookup_name, def_id, params) { return }
     // Step 8: module-aware fn check (consider_capture_name parity —
     // resolved lookup_name → bare name → resolved name).
-    let is_fn = if ctx.functions.contains_key(c_resolve_fn(ctx, lookup_name)) {
-        true
-    } else if ctx.functions.contains_key(c_mangle_fn(name)) {
-        true
-    } else {
-        ctx.functions.contains_key(c_resolve_fn(ctx, name))
+    let is_fn = match def_id {
+        some(_) => false,
+        none => if ctx.functions.contains_key(c_resolve_fn(ctx, lookup_name)) {
+            true
+        } else if ctx.functions.contains_key(c_mangle_fn(name)) {
+            true
+        } else {
+            ctx.functions.contains_key(c_resolve_fn(ctx, name))
+        }
     }
     if is_fn { return }
-    let is_local = match ctx.named_values.get(lookup_name) {
-        some(_) => true,
-        none => ctx.named_values.get(name).is_some(),
+    let is_local = match def_id {
+        some(id) => c_value_slot(ctx, id).is_some(),
+        none => match ctx.named_values.get(lookup_name) {
+            some(_) => true,
+            none => ctx.named_values.get(name).is_some()
+        }
     }
     if is_local {
         let mut already = false
-        for c in captures {
-            if c == lookup_name || c == name { already = true }
+        for existing in captures {
+            let same = match def_id {
+                some(id) => match existing.def_id {
+                    some(existing_id) => existing_id == id,
+                    none => false
+                },
+                none => existing.def_id.is_none() &&
+                    (existing.name == lookup_name || existing.name == name)
+            }
+            if same { already = true }
         }
         if already == false {
-            captures.push(lookup_name)
+            captures.push(CCapture { name: lookup_name,
+                def_id: def_id, extern_typed: extern_typed })
         }
     }
 }
 
-fn c_capture_name_is_bound(name: Str, lookup_name: Str, params: List<HParam>) -> Bool {
+fn c_capture_name_is_bound(
+    name: Str, lookup_name: Str, def_id: Int?, params: List<HParam>
+) -> Bool {
     for p in params {
-        if p.name == lookup_name || p.name == name { return true }
+        let same = match def_id {
+            some(id) => match p.def_id {
+                some(param_id) => param_id == id,
+                none => false
+            },
+            none => p.def_id.is_none() &&
+                (p.name == lookup_name || p.name == name)
+        }
+        if same { return true }
     }
     false
 }
@@ -1140,15 +1189,16 @@ fn c_capture_name_is_bound(name: Str, lookup_name: Str, params: List<HParam>) ->
 fn extend_c_handler_capture_params(
     params: List<HParam>,
     handler_params: List<HParam>,
-    resume_name: Str?
+    resume_binding: HPatternBinding?
 ) -> List<HParam> {
     let mut extended: List<HParam> = []
     for p in params { extended.push(p) }
     for p in handler_params { extended.push(p) }
-    match resume_name {
-        some(rn) => {
+    match resume_binding {
+        some(binding) => {
             extended.push(HParam {
-                name: rn, ty: Type::ErrorType, def_id: none, is_mutable: false
+                name: binding.name, ty: binding.ty,
+                def_id: some(binding.def_id), is_mutable: false
             })
         },
         none => {},
@@ -1157,12 +1207,17 @@ fn extend_c_handler_capture_params(
 }
 
 // #B-087 gap 3: capture the dict param a trait dispatch routes through.
-fn collect_c_dispatch_dict(ctx: CCtx, dispatch: TraitDispatch?, params: List<HParam>, mut captures: List<Str>) {
+fn collect_c_dispatch_dict(
+    ctx: CCtx, dispatch: TraitDispatch?, params: List<HParam>,
+    mut captures: List<CCapture>
+) {
     match dispatch {
         some(d) => match d {
-            TraitDispatch::Dict { param } => consider_c_capture_name(ctx, param, none, params, captures),
+            TraitDispatch::Dict { param } => consider_c_capture_name(
+                ctx, param, none, none, false, params, captures),
             TraitDispatch::Direct { dict, extra_dicts } => {
-                consider_c_capture_name(ctx, dict, none, params, captures)
+                consider_c_capture_name(
+                    ctx, dict, none, none, false, params, captures)
                 for ed in extra_dicts { collect_c_dictref_names(ctx, ed, params, captures) }
             },
             TraitDispatch::Tuple { elements, .. } => {
@@ -1176,13 +1231,18 @@ fn collect_c_dispatch_dict(ctx: CCtx, dispatch: TraitDispatch?, params: List<HPa
     }
 }
 
-fn collect_c_dictref_names(ctx: CCtx, dr: DictRef, params: List<HParam>, mut captures: List<Str>) {
+fn collect_c_dictref_names(
+    ctx: CCtx, dr: DictRef, params: List<HParam>,
+    mut captures: List<CCapture>
+) {
     match dr {
-        DictRef::Simple(name) => consider_c_capture_name(ctx, name, none, params, captures),
+        DictRef::Simple(name) => consider_c_capture_name(
+            ctx, name, none, none, false, params, captures),
         // B-104 D4: module-level singleton — resolved globally, never captured.
         DictRef::Static(_) => {},
         DictRef::Wrapped { dict, inner_dicts, .. } => {
-            consider_c_capture_name(ctx, dict, none, params, captures)
+            consider_c_capture_name(
+                ctx, dict, none, none, false, params, captures)
             for inner in inner_dicts { collect_c_dictref_names(ctx, inner, params, captures) }
         },
     }
@@ -1190,10 +1250,16 @@ fn collect_c_dictref_names(ctx: CCtx, dr: DictRef, params: List<HParam>, mut cap
 
 // Collect free variable names referenced in a lambda body (port of
 // collect_captures).
-fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures: List<Str>) {
+fn collect_c_captures(
+    ctx: CCtx, expr: HExpr, params: List<HParam>,
+    mut captures: List<CCapture>
+) {
     match expr {
-        HExpr::Ident { name, resolved_name, dict_closure_dicts, .. } => {
-            consider_c_capture_name(ctx, name, resolved_name, params, captures)
+        HExpr::Ident { name, resolved_name, def_id,
+                       dict_closure_dicts, ty, .. } => {
+            consider_c_capture_name(ctx, name, resolved_name, def_id,
+                is_extern_handle_type(ty, ctx.extern_types),
+                params, captures)
             match dict_closure_dicts {
                 some(dicts) => {
                     for d in dicts {
@@ -1217,14 +1283,16 @@ fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures
             for a in args { collect_c_captures(ctx, a, params, captures) }
             for d in resolved_dicts { collect_c_dictref_names(ctx, d, params, captures) }
             match dict_dispatch {
-                some(dd) => consider_c_capture_name(ctx, dd.dict_param, none, params, captures),
+                some(dd) => consider_c_capture_name(ctx, dd.dict_param,
+                    none, none, false, params, captures),
                 none => {},
             }
             // B-145: evidence params forwarded by calls inside the body must
             // be captured (only ones actually in named_values are).
             let call_ev_names = extract_effect_names(effects)
             for en in call_ev_names {
-                consider_c_capture_name(ctx, evidence_param_name(en), none, params, captures)
+                consider_c_capture_name(ctx, evidence_param_name(en),
+                    none, none, false, params, captures)
             }
         },
         HExpr::DictConstruct { inner, .. } => {
@@ -1306,7 +1374,8 @@ fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures
         HExpr::HandleExpr { body: he_body, handlers: he_handlers, .. } => {
             collect_c_captures(ctx, he_body, params, captures)
             for h in he_handlers {
-                let arm_params = extend_c_handler_capture_params(params, h.params, h.resume_name)
+                let arm_params = extend_c_handler_capture_params(
+                    params, h.params, h.resume_binding)
                 collect_c_captures(ctx, h.body, arm_params, captures)
             }
         },
@@ -1315,7 +1384,8 @@ fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures
             // B-090: a non-fail effect op dispatches through its evidence —
             // capture the evidence param.  fail routes through ring_raise.
             if eo_eff != "fail" {
-                consider_c_capture_name(ctx, evidence_param_name(eo_eff), none, params, captures)
+                consider_c_capture_name(ctx, evidence_param_name(eo_eff),
+                    none, none, false, params, captures)
             }
         },
         HExpr::RangeExpr { start: rs, end: re, .. } => {
@@ -1332,7 +1402,10 @@ fn collect_c_captures(ctx: CCtx, expr: HExpr, params: List<HParam>, mut captures
     }
 }
 
-fn collect_c_captures_stmt(ctx: CCtx, stmt: HStmt, params: List<HParam>, mut captures: List<Str>) {
+fn collect_c_captures_stmt(
+    ctx: CCtx, stmt: HStmt, params: List<HParam>,
+    mut captures: List<CCapture>
+) {
     match stmt {
         HStmt::Let { init, .. } => collect_c_captures(ctx, init, params, captures),
         HStmt::Var { init, .. } => collect_c_captures(ctx, init, params, captures),
@@ -1366,8 +1439,10 @@ fn collect_c_captures_stmt(ctx: CCtx, stmt: HStmt, params: List<HParam>, mut cap
         },
         // B-084 #131: Perceus branch-balancing may place an HStmt::Drop for an
         // outer-scope variable inside the lambda body — treat as a use.
-        HStmt::Drop { name, .. } => {
-            consider_c_capture_name(ctx, name, none, params, captures)
+        HStmt::Drop { name, def_id, ty, .. } => {
+            consider_c_capture_name(ctx, name, none, some(def_id),
+                is_extern_handle_type(ty, ctx.extern_types),
+                params, captures)
         },
         _ => {},
     }
@@ -1391,7 +1466,8 @@ fn collect_c_extern_typed_names(
                 if c == lookup || c == name { found = true }
             }
             if found
-                && c_capture_name_is_bound(name, lookup, params) == false
+                && c_capture_name_is_bound(
+                    name, lookup, none, params) == false
                 && is_extern_handle_type(ty, externs) {
                 out.insert(lookup)
             }
@@ -1491,7 +1567,8 @@ fn collect_c_extern_typed_names(
         HExpr::HandleExpr { body: he_body, handlers: he_handlers, .. } => {
             collect_c_extern_typed_names(he_body, captures, params, externs, out)
             for h in he_handlers {
-                let arm_params = extend_c_handler_capture_params(params, h.params, h.resume_name)
+                let arm_params = extend_c_handler_capture_params(
+                    params, h.params, h.resume_binding)
                 collect_c_extern_typed_names(h.body, captures, arm_params, externs, out)
             }
         },
@@ -2091,7 +2168,7 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
             some(h) => {
                 let mut param_index = 0
                 for p in h.params {
-                    let pv = c_local(ctx, p.name)
+                    let pv = c_local_def(ctx, p.name, p.def_id)
                     if param_index == 0 {
                         c_emit(ctx, "${pv} = ${error_val};")
                     } else {
@@ -3110,11 +3187,12 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
     ctx.named_values = map_clone(saved_named)
     let next_lbl = fresh_label(ctx, "mnext")
     let mut next_used = false
+    let exact_bindings = arm.bindings
 
     match arm.pattern {
         Pattern::Wildcard { .. } => {},
         Pattern::Binding { name: bname, .. } => {
-            let bv = c_local(ctx, bname)
+            let bv = c_pattern_local(ctx, bname, exact_bindings)
             c_emit(ctx, "${bv} = ${scrut};")
         },
         Pattern::Literal { value, .. } => {
@@ -3138,7 +3216,8 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
                 none => {},
             }
             // Phase 2: bind fields.
-            bind_c_constructor_fields(ctx, scrut, cname, qualifier, fields)
+            bind_c_constructor_fields(
+                ctx, scrut, cname, qualifier, fields, exact_bindings)
         },
         Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
             if emit_c_ctor_tag_fail_test(ctx, scrut, cname, qualifier, next_lbl) {
@@ -3162,72 +3241,38 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
                     none => {},
                 },
             }
-            bind_c_named_constructor_fields(ctx, scrut, cname, qualifier, nfields)
+            bind_c_named_constructor_fields(
+                ctx, scrut, cname, qualifier, nfields, exact_bindings)
         },
         Pattern::OrPattern { patterns, .. } => {
-            // Match if ANY alternative matches: non-last alternatives jump to
-            // the shared body label on match; the last uses a fail test so an
-            // all-miss falls to the next arm.  Alternatives are ctor tags or
-            // literals (#181); field bindings across alternatives unsupported.
+            // Every successful alternative writes the arm's one shared set of
+            // exact slots before entering the common guard/body.
             let body_lbl = fresh_label(ctx, "mor")
             let mut body_used = false
             let nalts = patterns.len()
+            if nalts == 0 {
+                panic("C codegen: empty or-pattern reached match lowering")
+            }
             for k in 0..nalts {
                 match patterns.get(k) {
                     some(alt) => {
                         if k == nalts - 1 {
-                            // Last alternative: fail edge — a failed check falls
-                            // to the next arm; a full pass falls through to the
-                            // body label emitted right below.
-                            match alt {
-                                Pattern::Constructor { .. } => {
-                                    // #245: full pattern check (tag + nested
-                                    // literal/ctor fields), not just the tag.
-                                    if check_c_nested_ctor_tags(ctx, scrut, alt, next_lbl) {
-                                        next_used = true
-                                    }
-                                },
-                                Pattern::NamedConstructor { .. } => {
-                                    if check_c_nested_ctor_tags(ctx, scrut, alt, next_lbl) {
-                                        next_used = true
-                                    }
-                                },
-                                Pattern::Literal { value, .. } => {
-                                    emit_c_literal_fail_test(ctx, scrut, value, next_lbl)
-                                    next_used = true
-                                },
-                                _ => {},
+                            if check_c_nested_ctor_tags(
+                                    ctx, scrut, alt, next_lbl) {
+                                next_used = true
                             }
+                            bind_c_root_pattern_after_success(
+                                ctx, scrut, alt, exact_bindings)
                         } else {
-                            match alt {
-                                Pattern::Constructor { .. } => {
-                                    // #245: full pattern check; a failed check
-                                    // falls to the next alternative, a full pass
-                                    // jumps to the shared body.  No test emitted
-                                    // (unresolvable ctor) = unconditional match
-                                    // (LLVM best-effort parity).
-                                    let alt_miss = fresh_label(ctx, "morfail")
-                                    let tested = check_c_nested_ctor_tags(ctx, scrut, alt, alt_miss)
-                                    c_emit(ctx, "goto ${body_lbl};")
-                                    body_used = true
-                                    if tested {
-                                        c_raw(ctx, "${alt_miss}:;")
-                                    }
-                                },
-                                Pattern::NamedConstructor { .. } => {
-                                    let alt_miss = fresh_label(ctx, "morfail")
-                                    let tested = check_c_nested_ctor_tags(ctx, scrut, alt, alt_miss)
-                                    c_emit(ctx, "goto ${body_lbl};")
-                                    body_used = true
-                                    if tested {
-                                        c_raw(ctx, "${alt_miss}:;")
-                                    }
-                                },
-                                Pattern::Literal { value, .. } => {
-                                    emit_c_literal_match_test(ctx, scrut, value, body_lbl)
-                                    body_used = true
-                                },
-                                _ => {},
+                            let alt_miss = fresh_label(ctx, "morfail")
+                            let tested = check_c_nested_ctor_tags(
+                                ctx, scrut, alt, alt_miss)
+                            bind_c_root_pattern_after_success(
+                                ctx, scrut, alt, exact_bindings)
+                            c_emit(ctx, "goto ${body_lbl};")
+                            body_used = true
+                            if tested {
+                                c_raw(ctx, "${alt_miss}:;")
                             }
                         }
                     },
@@ -3274,7 +3319,8 @@ fn emit_c_match_arm(mut ctx: CCtx, arm: HMatchArm, scrut: Str, res: Str, end_lbl
                             _ => {
                                 let fv = fresh_tmp(ctx)
                                 c_emit(ctx, "${fv} = ring_list_get(${scrut}, ${j2});")
-                                bind_c_nested_pattern(ctx, fv, elem_pat2)
+                                bind_c_nested_pattern(
+                                    ctx, fv, elem_pat2, exact_bindings)
                             },
                         }
                     },
@@ -3550,10 +3596,59 @@ fn check_c_named_fields_nested_tags(mut ctx: CCtx, scrut: Str, field_names: List
 // bind_constructor_fields / bind_named_constructor_fields).
 // ============================================================
 
-fn bind_c_nested_pattern(mut ctx: CCtx, val: Str, pat: Pattern) {
+fn bind_c_root_pattern_after_success(
+    mut ctx: CCtx, scrut: Str, pattern: Pattern,
+    bindings: List<HPatternBinding>
+) {
+    match pattern {
+        Pattern::Constructor { name, qualifier, fields, .. } =>
+            bind_c_constructor_fields(
+                ctx, scrut, name, qualifier, fields, bindings),
+        Pattern::NamedConstructor { name, qualifier, fields, .. } =>
+            bind_c_named_constructor_fields(
+                ctx, scrut, name, qualifier, fields, bindings),
+        other => bind_c_nested_pattern(ctx, scrut, other, bindings)
+    }
+}
+
+fn exact_pattern_def_id(
+    bindings: List<HPatternBinding>, name: Str
+) -> Int {
+    let mut result: Int? = none
+    for binding in bindings {
+        if binding.name == name {
+            match result {
+                some(existing) => if existing != binding.def_id {
+                    panic("C codegen: colliding pattern DefIds for '${name}'")
+                },
+                none => { result = some(binding.def_id) }
+            }
+        }
+    }
+    match result {
+        some(id) => id,
+        none => panic(
+            "C codegen: pattern binding '${name}' has no exact DefId metadata")
+    }
+}
+
+fn c_pattern_local(
+    mut ctx: CCtx, name: Str, bindings: List<HPatternBinding>
+) -> Str {
+    let def_id = exact_pattern_def_id(bindings, name)
+    match c_value_slot(ctx, def_id) {
+        some(slot) => slot,
+        none => c_local_def(ctx, name, some(def_id))
+    }
+}
+
+fn bind_c_nested_pattern(
+    mut ctx: CCtx, val: Str, pat: Pattern,
+    bindings: List<HPatternBinding>
+) {
     match pat {
         Pattern::Binding { name, .. } => {
-            let cv = c_local(ctx, name)
+            let cv = c_pattern_local(ctx, name, bindings)
             c_emit(ctx, "${cv} = ${val};")
         },
         Pattern::Wildcard { .. } => {},
@@ -3567,7 +3662,7 @@ fn bind_c_nested_pattern(mut ctx: CCtx, val: Str, pat: Pattern) {
                             some(fp) => {
                                 let fv = fresh_tmp(ctx)
                                 c_emit(ctx, "${fv} = ((void**)${val})[${i + 1}];")
-                                bind_c_nested_pattern(ctx, fv, fp)
+                                bind_c_nested_pattern(ctx, fv, fp, bindings)
                             },
                             none => {},
                         }
@@ -3584,7 +3679,7 @@ fn bind_c_nested_pattern(mut ctx: CCtx, val: Str, pat: Pattern) {
                     some(ep) => {
                         let ev = fresh_tmp(ctx)
                         c_emit(ctx, "${ev} = ring_list_get(${val}, ${i});")
-                        bind_c_nested_pattern(ctx, ev, ep)
+                        bind_c_nested_pattern(ctx, ev, ep, bindings)
                     },
                     none => {},
                 }
@@ -3609,7 +3704,8 @@ fn bind_c_nested_pattern(mut ctx: CCtx, val: Str, pat: Pattern) {
                                 }
                                 let fv = fresh_tmp(ctx)
                                 c_emit(ctx, "${fv} = ((void**)${val})[${field_idx + 1}];")
-                                bind_c_nested_pattern(ctx, fv, nf.pattern)
+                                bind_c_nested_pattern(
+                                    ctx, fv, nf.pattern, bindings)
                             },
                             none => {},
                         }
@@ -3630,7 +3726,8 @@ fn bind_c_nested_pattern(mut ctx: CCtx, val: Str, pat: Pattern) {
                                         }
                                         let fv = fresh_tmp(ctx)
                                         c_emit(ctx, "${fv} = ((void**)${val})[${field_idx}];")
-                                        bind_c_nested_pattern(ctx, fv, nf.pattern)
+                                        bind_c_nested_pattern(
+                                            ctx, fv, nf.pattern, bindings)
                                     },
                                     none => {},
                                 }
@@ -3645,7 +3742,10 @@ fn bind_c_nested_pattern(mut ctx: CCtx, val: Str, pat: Pattern) {
 }
 
 // Bind a positional constructor pattern's fields (tag already verified).
-fn bind_c_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?, fields: List<Pattern>) {
+fn bind_c_constructor_fields(
+    mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?,
+    fields: List<Pattern>, bindings: List<HPatternBinding>
+) {
     match find_c_enum_by_variant(ctx, cname, qualifier) {
         some(_ei) => {
             for i in 0..fields.len() {
@@ -3656,7 +3756,8 @@ fn bind_c_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: S
                             _ => {
                                 let fv = fresh_tmp(ctx)
                                 c_emit(ctx, "${fv} = ((void**)${scrut})[${i + 1}];")
-                                bind_c_nested_pattern(ctx, fv, field_pat)
+                                bind_c_nested_pattern(
+                                    ctx, fv, field_pat, bindings)
                             },
                         }
                     },
@@ -3676,7 +3777,8 @@ fn bind_c_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: S
                                     _ => {
                                         let fv = fresh_tmp(ctx)
                                         c_emit(ctx, "${fv} = ((void**)${scrut})[${i}];")
-                                        bind_c_nested_pattern(ctx, fv, field_pat)
+                                        bind_c_nested_pattern(
+                                            ctx, fv, field_pat, bindings)
                                     },
                                 }
                             },
@@ -3691,7 +3793,11 @@ fn bind_c_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: S
 }
 
 // Bind a named-constructor pattern's fields by field name (tag verified).
-fn bind_c_named_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?, named_fields: List<NamedPatternField>) {
+fn bind_c_named_constructor_fields(
+    mut ctx: CCtx, scrut: Str, cname: Str, qualifier: Str?,
+    named_fields: List<NamedPatternField>,
+    bindings: List<HPatternBinding>
+) {
     match find_c_enum_by_variant(ctx, cname, qualifier) {
         some(ei) => match ei.variants.get(cname) {
             some(vi) => {
@@ -3709,7 +3815,8 @@ fn bind_c_named_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualif
                                 _ => {
                                     let fv = fresh_tmp(ctx)
                                     c_emit(ctx, "${fv} = ((void**)${scrut})[${field_idx + 1}];")
-                                    bind_c_nested_pattern(ctx, fv, nf.pattern)
+                                    bind_c_nested_pattern(
+                                        ctx, fv, nf.pattern, bindings)
                                 },
                             }
                         },
@@ -3737,7 +3844,8 @@ fn bind_c_named_constructor_fields(mut ctx: CCtx, scrut: Str, cname: Str, qualif
                                     _ => {
                                         let fv = fresh_tmp(ctx)
                                         c_emit(ctx, "${fv} = ((void**)${scrut})[${field_idx}];")
-                                        bind_c_nested_pattern(ctx, fv, nf.pattern)
+                                        bind_c_nested_pattern(
+                                            ctx, fv, nf.pattern, bindings)
                                     },
                                 }
                             },
@@ -3932,10 +4040,10 @@ fn gen_c_index_expr(mut ctx: CCtx, receiver: HExpr, index: HExpr) -> Str {
 
 pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
     match stmt {
-        HStmt::Let { name, init, span, .. } => {
+        HStmt::Let { name, def_id, init, span, .. } => {
             c_line_directive(ctx, span)
             let val = gen_c_expr(ctx, init)
-            let cv = c_local(ctx, name)
+            let cv = c_local_def(ctx, name, def_id)
             c_emit(ctx, "${cv} = ${val};")
         },
         HStmt::Var { name, def_id, init, span, .. } => {
@@ -3943,7 +4051,7 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
             let val = gen_c_expr(ctx, init)
             // B-091: closure-written `let mut` is auto-boxed into a shared cell.
             let stored = if is_boxed_def_c(ctx, def_id) { gen_c_cell_alloc(ctx, val) } else { val }
-            let cv = c_local(ctx, name)
+            let cv = c_local_def(ctx, name, def_id)
             c_emit(ctx, "${cv} = ${stored};")
         },
         HStmt::Assign { target, value, span } => {
@@ -3974,9 +4082,9 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
             c_line_directive(ctx, span)
             emit_c_while(ctx, condition, body)
         },
-        HStmt::ForIn { binding, iterable, body, span, .. } => {
+        HStmt::ForIn { binding, def_id, iterable, body, span, .. } => {
             c_line_directive(ctx, span)
-            emit_c_for_in(ctx, binding, iterable, body)
+            emit_c_for_in(ctx, binding, def_id, iterable, body)
         },
         HStmt::Break { .. } => {
             if ctx.in_loop {
@@ -3992,20 +4100,21 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
             c_line_directive(ctx, span)
             emit_c_let_destructure(ctx, bindings, init)
         },
-        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+        HStmt::IfLet { pattern, bindings, expr,
+                       then_block, else_block, span } => {
             c_line_directive(ctx, span)
-            emit_c_if_let(ctx, pattern, expr, then_block, else_block)
+            emit_c_if_let(ctx, pattern, bindings,
+                expr, then_block, else_block)
         },
         // Perceus RC ops (post-RC HIR input — mandatory from step 2 on).
-        HStmt::Drop { name, .. } => {
-            match ctx.named_values.get(name) {
+        HStmt::Drop { name, def_id, .. } => {
+            match c_value_slot(ctx, def_id) {
                 some(cv) => {
                     rt_use(ctx, "ring_drop", 1)
                     c_emit(ctx, "ring_drop(${cv});")
                 },
-                none => {
-                    eprintln("[rc-warn] C codegen Drop: variable '${name}' not found")
-                },
+                none => panic(
+                    "C codegen: Drop '${name}' has no exact DefId slot"),
             }
         }
     }
@@ -4021,16 +4130,13 @@ fn emit_c_assign(mut ctx: CCtx, target: HExpr, value: HExpr) {
     let val = gen_c_expr(ctx, value)
     match target {
         HExpr::Ident { name, resolved_name, def_id, .. } => {
-            let lookup = match resolved_name {
-                some(rn) => rn,
-                none => name,
-            }
             let boxed = is_boxed_def_c(ctx, def_id)
-            let found = match ctx.named_values.get(lookup) {
-                some(cv) => some(cv),
-                none => ctx.named_values.get(name),
+            let exact_def_id = match def_id {
+                some(id) => id,
+                none => panic(
+                    "C codegen: assignment '${name}' has no exact DefId")
             }
-            match found {
+            match c_value_slot(ctx, exact_def_id) {
                 some(cv) => {
                     if boxed {
                         c_emit(ctx, "*(void**)${cv} = ${val};")
@@ -4077,7 +4183,11 @@ fn emit_c_assign(mut ctx: CCtx, target: HExpr, value: HExpr) {
 // if/else (no labels needed — both branches fall through to the join).
 // ============================================================
 
-fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr, else_block: HExpr?) {
+fn emit_c_if_let(
+    mut ctx: CCtx, pattern: Pattern,
+    bindings: List<HPatternBinding>, expr: HExpr,
+    then_block: HExpr, else_block: HExpr?
+) {
     let scrut = gen_c_expr(ctx, expr)
     let scrut_ty = hexpr_type(expr)
     // Enum name from the scrutinee's type; "Option" fallback for the common
@@ -4101,20 +4211,8 @@ fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr
                 some(vi) => {
                     c_emit(ctx, "if (*(int64_t*)${scrut} == ${vi.tag}) {")
                     ctx.indent = ctx.indent + 1
-                    for i in 0..fields.len() {
-                        match fields.get(i) {
-                            some(fp) => {
-                                match fp {
-                                    Pattern::Binding { name: bname, .. } => {
-                                        let bv = c_local(ctx, bname)
-                                        c_emit(ctx, "${bv} = ((void**)${scrut})[${i + 1}];")
-                                    },
-                                    _ => {},
-                                }
-                            },
-                            none => {},
-                        }
-                    }
+                    bind_c_constructor_fields(ctx, scrut, name,
+                        some(enum_name), fields, bindings)
                     discard_c(gen_c_expr(ctx, then_block))
                     ctx.indent = ctx.indent - 1
                     ctx.named_values = saved_named
@@ -4161,7 +4259,8 @@ fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr
             }
 
             // Bind only after every refutable sub-pattern has passed.
-            bind_c_named_constructor_fields(ctx, scrut, cname, qualifier, nfields)
+            bind_c_named_constructor_fields(
+                ctx, scrut, cname, qualifier, nfields, bindings)
             discard_c(gen_c_expr(ctx, then_block))
             c_emit(ctx, "goto ${end_lbl};")
             ctx.named_values = saved_named
@@ -4178,7 +4277,7 @@ fn emit_c_if_let(mut ctx: CCtx, pattern: Pattern, expr: HExpr, then_block: HExpr
         },
         Pattern::Binding { name: bname, .. } => {
             // Irrefutable: bind the scrutinee, run then, skip else.
-            let bv = c_local(ctx, bname)
+            let bv = c_pattern_local(ctx, bname, bindings)
             c_emit(ctx, "${bv} = ${scrut};")
             discard_c(gen_c_expr(ctx, then_block))
         },
@@ -4234,10 +4333,14 @@ fn emit_c_while(mut ctx: CCtx, condition: HExpr, body: HExpr) {
 // current binding box leaks, the documented B-104b residual).
 // ============================================================
 
-fn emit_c_for_in(mut ctx: CCtx, binding: Str, iterable: HExpr, body: HExpr) {
+fn emit_c_for_in(
+    mut ctx: CCtx, binding: Str, def_id: Int?,
+    iterable: HExpr, body: HExpr
+) {
     match iterable {
         HExpr::RangeExpr { start, end, inclusive, .. } => {
-            emit_c_for_range_direct(ctx, binding, start, end, inclusive, body)
+            emit_c_for_range_direct(
+                ctx, binding, def_id, start, end, inclusive, body)
             return
         },
         _ => {},
@@ -4248,13 +4351,29 @@ fn emit_c_for_in(mut ctx: CCtx, binding: Str, iterable: HExpr, body: HExpr) {
         _ => false,
     }
     if is_range {
-        emit_c_for_range_var(ctx, binding, iterable, body)
+        emit_c_for_range_var(ctx, binding, def_id, iterable, body)
     } else {
         panic("C codegen invariant: non-Range for-in survived inference lowering")
     }
 }
 
-fn emit_c_for_range_direct(mut ctx: CCtx, binding: Str, start: HExpr, end: HExpr, inclusive: Bool, body: HExpr) {
+fn c_for_binding_local(
+    mut ctx: CCtx, binding: Str, def_id: Int?
+) -> Str {
+    if binding == "_" {
+        c_local(ctx, "__ring_for_wildcard")
+    } else {
+        match def_id {
+            some(id) => c_local_def(ctx, binding, some(id)),
+            none => panic("C codegen: for-in binding has no exact DefId")
+        }
+    }
+}
+
+fn emit_c_for_range_direct(
+    mut ctx: CCtx, binding: Str, def_id: Int?,
+    start: HExpr, end: HExpr, inclusive: Bool, body: HExpr
+) {
     let sv = gen_c_expr(ctx, start)
     let ev = gen_c_expr(ctx, end)
     let s_raw = fresh_i64(ctx)
@@ -4274,8 +4393,12 @@ fn emit_c_for_range_direct(mut ctx: CCtx, binding: Str, start: HExpr, end: HExpr
     c_emit(ctx, "while (1) {")
     ctx.indent = ctx.indent + 1
     c_emit(ctx, "if (!(${ci} ${cmp} ${e_raw})) break;")
-    let bv = c_local(ctx, binding)
-    c_emit(ctx, "${bv} = RING_INT(${ci});")
+    let binds_value = binding != "_"
+    let bv = if binds_value {
+        let slot = c_for_binding_local(ctx, binding, def_id)
+        c_emit(ctx, "${slot} = RING_INT(${ci});")
+        slot
+    } else { "" }
 
     let saved_cont = ctx.loop_continue_stmt
     let saved_in_loop = ctx.in_loop
@@ -4287,7 +4410,7 @@ fn emit_c_for_range_direct(mut ctx: CCtx, binding: Str, start: HExpr, end: HExpr
 
     c_raw(ctx, "${incr_label}:;")
     // B-104b: per-iteration counter box drop (normal path AND continue).
-    c_emit(ctx, "ring_drop(${bv});")
+    if binds_value { c_emit(ctx, "ring_drop(${bv});") }
     c_emit(ctx, "${ci} = ${ci} + 1;")
     ctx.indent = ctx.indent - 1
     c_emit(ctx, "}")
@@ -4295,7 +4418,10 @@ fn emit_c_for_range_direct(mut ctx: CCtx, binding: Str, start: HExpr, end: HExpr
 
 // Range stored in a variable: unbox { start, end, inclusive } slots, fold
 // inclusivity into the bound (end - (1 - incl)), loop with <=.
-fn emit_c_for_range_var(mut ctx: CCtx, binding: Str, iterable: HExpr, body: HExpr) {
+fn emit_c_for_range_var(
+    mut ctx: CCtx, binding: Str, def_id: Int?,
+    iterable: HExpr, body: HExpr
+) {
     let rv = gen_c_expr(ctx, iterable)
     let sb = fresh_tmp(ctx)
     let eb = fresh_tmp(ctx)
@@ -4315,8 +4441,12 @@ fn emit_c_for_range_var(mut ctx: CCtx, binding: Str, iterable: HExpr, body: HExp
     c_emit(ctx, "while (1) {")
     ctx.indent = ctx.indent + 1
     c_emit(ctx, "if (!(${ci} <= ${bound})) break;")
-    let bv = c_local(ctx, binding)
-    c_emit(ctx, "${bv} = RING_INT(${ci});")
+    let binds_value = binding != "_"
+    let bv = if binds_value {
+        let slot = c_for_binding_local(ctx, binding, def_id)
+        c_emit(ctx, "${slot} = RING_INT(${ci});")
+        slot
+    } else { "" }
 
     let saved_cont = ctx.loop_continue_stmt
     let saved_in_loop = ctx.in_loop
@@ -4328,7 +4458,7 @@ fn emit_c_for_range_var(mut ctx: CCtx, binding: Str, iterable: HExpr, body: HExp
 
     c_raw(ctx, "${incr_label}:;")
     rt_use(ctx, "ring_drop", 1)
-    c_emit(ctx, "ring_drop(${bv});")
+    if binds_value { c_emit(ctx, "ring_drop(${bv});") }
     c_emit(ctx, "${ci} = ${ci} + 1;")
     ctx.indent = ctx.indent - 1
     c_emit(ctx, "}")
@@ -4345,7 +4475,13 @@ fn emit_c_let_destructure(mut ctx: CCtx, bindings: List<HLetDestructureBinding>,
         match bindings.get(i) {
             some(b) => {
                 if b.name != "_" {
-                    let bv = c_local(ctx, b.name)
+                    let binding_def_id = match b.def_id {
+                        some(id) => id,
+                        none => panic(
+                            "C codegen: destructure binding has no exact DefId")
+                    }
+                    let bv = c_local_def(
+                        ctx, b.name, some(binding_def_id))
                     c_emit(ctx, "${bv} = ring_list_get(${val}, ${i});")
                 }
             },

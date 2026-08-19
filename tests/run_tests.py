@@ -4346,6 +4346,178 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path,
     return errors
 
 
+def identity_checkpoint_contract_errors(
+    sources: dict[str, str],
+) -> List[str]:
+    """Lock the behavior-preserving I-prime exact-slot transport."""
+    errors: List[str] = []
+    required_tokens = {
+        "hir": (
+            "pub struct HPatternBinding",
+            "Drop { name: Str, def_id: Int, ty: Type, span: Span }",
+            "SYNTHETIC_DICT_DEF_ID_BASE",
+            "SYNTHETIC_ANF_DEF_ID_BASE",
+            "SYNTHETIC_RC_DEF_ID_BASE",
+            "pub fn validate_hir_binder_def_ids",
+        ),
+        "infer": (
+            "fn infer_scoped_block(",
+            "fn exact_pattern_bindings(",
+            "freshen_default_argument_hir(ctx, dh)",
+            "bindings: pattern_bindings",
+            "resume_binding: resume_binding",
+        ),
+        "infer_decl": (
+            "trait default parameter has no exact DefId",
+            "effect default parameter has no exact DefId",
+            "def_id: some(exact_def_id)",
+        ),
+        "dict": (
+            "synthetic_def_id(",
+            "SYNTHETIC_DICT_DEF_ID_BASE",
+            "validate_hir_binder_def_ids(lowered)",
+        ),
+        "perceus": (
+            "struct OwnedSlot",
+            "fn owned_find_def_id(",
+            "SYNTHETIC_ANF_DEF_ID_BASE",
+            "SYNTHETIC_RC_DEF_ID_BASE",
+            "def_id: slot.def_id",
+            "validate_hir_binder_def_ids(transformed)",
+        ),
+        "cctx": (
+            "pub value_slots_by_def_id: Map<Int, Str>",
+            "pub fn c_local_def(",
+            "pub fn c_param_def(",
+            "pub fn c_value_slot(",
+            "value_slots_by_def_id: ctx.value_slots_by_def_id",
+            "ctx.value_slots_by_def_id = saved.value_slots_by_def_id",
+        ),
+        "cexpr": (
+            "let found = match def_id",
+            "some(id) => c_value_slot(ctx, id)",
+            "fn c_pattern_local(",
+            "bind_c_root_pattern_after_success(",
+            "C codegen: Drop '${name}' has no exact DefId slot",
+            "C codegen: assignment '${name}' has no exact DefId",
+        ),
+        "verify": (
+            "def_ids: List<Int>",
+            "if ctx.def_ids[i] == def_id",
+            "fn v_drop(name: Str, def_id: Int",
+            "for binding in arm.bindings",
+            "def_id, \"assignment '${name}'\"",
+        ),
+    }
+    for label, tokens in required_tokens.items():
+        source = sources[label]
+        for token in tokens:
+            if token not in source:
+                errors.append(f"{label}: missing exact-slot contract {token!r}")
+
+    infer_source = sources["infer"]
+    if len(re.findall(r"\binfer_scoped_block\b", infer_source)) != 5:
+        errors.append("infer: scoped-block helper must have one definition and four call sites")
+    scoped_placements = (
+        "infer_scoped_block(ctx, expr, some(subst))",
+        "infer_scoped_block(ctx, body, some(subst))",
+        "infer_scoped_block(ctx, then_branch, some(s))",
+        "infer_scoped_block(ctx, eb, some(s))",
+    )
+    for placement in scoped_placements:
+        if infer_source.count(placement) != 1:
+            errors.append(f"infer: scoped-block placement drifted: {placement}")
+
+    if sources["cexpr"].count("bind_c_root_pattern_after_success(") != 3:
+        errors.append(
+            "C or-pattern lowering must have one shared-slot helper and "
+            "two success-edge calls")
+
+    assign_body, assign_error = extract_ring_function_body(
+        sources["cexpr"], "emit_c_assign")
+    if assign_error:
+        errors.append(assign_error)
+    else:
+        if "c_value_slot(ctx, exact_def_id)" not in assign_body:
+            errors.append("C assignment no longer selects the exact DefId slot")
+        if "ctx.named_values" in assign_body:
+            errors.append("DefId-bearing C assignment regained a name fallback")
+
+    lookup_body, lookup_error = extract_ring_function_body(
+        sources["verify"], "v_lookup")
+    if lookup_error:
+        errors.append(lookup_error)
+    elif "ctx.names[i]" in lookup_body or "ctx.def_ids[i] == def_id" not in lookup_body:
+        errors.append("RC verifier lookup is not exact-DefId-only")
+
+    drops_body, drops_error = extract_ring_function_body(
+        sources["perceus"], "drops_for")
+    if drops_error:
+        errors.append(drops_error)
+    elif not all(token in drops_body for token in (
+            "let mut index = names.len()", "index = index - 1",
+            "def_id: slot.def_id")):
+        errors.append("Perceus cleanup is not reverse-order exact-slot")
+
+    # I-prime is identity only: the S-prime producer split and A-prime Take /
+    # ownership metadata must remain absent from this checkpoint.
+    forbidden = {
+        "perceus": ("DROP_PRODUCER_NOOP_NONE", "is_option_none_ctor_ident"),
+        "hir": ("OwnershipMetadata", "Take {"),
+    }
+    for label, tokens in forbidden.items():
+        for token in tokens:
+            if token in sources[label]:
+                errors.append(f"{label}: I-prime imported forbidden {token!r}")
+    return errors
+
+
+def identity_checkpoint_source_errors() -> List[str]:
+    paths = {
+        "hir": REPO / "compiler" / "hir.ring",
+        "infer": REPO / "compiler" / "infer.ring",
+        "infer_decl": REPO / "compiler" / "infer_decl.ring",
+        "dict": REPO / "compiler" / "dict_lower.ring",
+        "perceus": REPO / "compiler" / "perceus.ring",
+        "cctx": REPO / "compiler" / "codegen_c_ctx.ring",
+        "cexpr": REPO / "compiler" / "codegen_c_expr.ring",
+        "verify": REPO / "compiler" / "verify_rc.ring",
+    }
+    sources: dict[str, str] = {}
+    errors: List[str] = []
+    for label, path in paths.items():
+        try:
+            sources[label] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"cannot read {display_path(path)}: {exc}")
+    if errors:
+        return errors
+    errors.extend(identity_checkpoint_contract_errors(sources))
+
+    mutations = (
+        ("Drop DefId", "hir", "Drop { name: Str, def_id: Int, ty: Type, span: Span }",
+         "Drop { name: Str, ty: Type, span: Span }"),
+        ("default freshening", "infer", "freshen_default_argument_hir(ctx, dh)", "dh"),
+        ("assignment exact slot", "cexpr", "c_value_slot(ctx, exact_def_id)",
+         "ctx.named_values.get(name)"),
+        ("verifier exact lookup", "verify", "ctx.def_ids[i] == def_id",
+         "ctx.names[i] == name"),
+        ("or-pattern shared slot", "cexpr", "bind_c_root_pattern_after_success(",
+         "bind_c_nested_pattern("),
+        ("nested scope", "infer", "infer_scoped_block(ctx, expr, some(subst))",
+         "infer_block(ctx, expr, some(subst))"),
+    )
+    for label, source_name, anchor, replacement in mutations:
+        if sources[source_name].count(anchor) < 1:
+            errors.append(f"mutation {label}: anchor missing")
+            continue
+        mutated = dict(sources)
+        mutated[source_name] = sources[source_name].replace(anchor, replacement, 1)
+        if not identity_checkpoint_contract_errors(mutated):
+            errors.append(f"mutation {label} escaped exact-slot source oracle")
+    return errors
+
+
 def run_structural(ring_exe: str, collector: ResultCollector, *,
                    name_filter: Optional[str] = None) -> None:
     """Run generated-C source-map and extern-handle ownership oracles."""
@@ -4356,6 +4528,13 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
             collector.add(TestResult(
                 TestResult.FAIL, suite, f"fixture validation {index}", error))
         return
+
+    identity_label = "compiler.identity_checkpoint"
+    if matches_filter(identity_label, name_filter):
+        identity_errors = identity_checkpoint_source_errors()
+        collector.add(TestResult(
+            TestResult.PASS if not identity_errors else TestResult.FAIL,
+            suite, identity_label, "; ".join(identity_errors)))
 
     jobs = []
     for case_name, entry, fixtures in C_LINE_BUILD_CASES:
@@ -5337,10 +5516,9 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             ),
         ),
         RcInvocationContract(
-            "shadow overwrite", "tests/cases/verify_rc/shadow_overwrite.ring",
-            ("--verify-rc-strict",), False, strict=True, fatal_exact=0, exempt_min=1,
-            exempt_counts=(("x-shadow-overwrite", 1),),
-            finding_counts=(("x-shadow-overwrite", 1),),
+            "exact-DefId shadowing live", "tests/cases/verify_rc/shadow_overwrite.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+            local_finding_exact=0,
         ),
         RcInvocationContract(
             "control-flow value", "tests/cases/verify_rc/cf_value_leak.ring",
@@ -5388,15 +5566,17 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
         ),
         RcInvocationContract(
             "shadow mismatch lax", "tests/cases/verify_rc/shadow_mismatch.ring",
-            ("--verify-rc",), False, fatal_min=1, exempt_min=1,
-            exempt_counts=(("x-shadow-overwrite", 1),),
-            finding_counts=(("uaf-shadow-mismatch", 1),),
+            ("--verify-rc",), True, fatal_exact=0,
+            local_finding_exact=0, exempt_min=1,
+            exempt_counts=(("x-effect-value", 1),),
         ),
         RcInvocationContract(
             "shadow mismatch strict", "tests/cases/verify_rc/shadow_mismatch.ring",
-            ("--verify-rc-strict",), False, strict=True, fatal_min=1, exempt_min=1,
-            exempt_counts=(("x-shadow-overwrite", 1),),
-            finding_counts=(("uaf-shadow-mismatch", 1), ("x-shadow-overwrite", 1)),
+            ("--verify-rc-strict",), False, strict=True,
+            fatal_exact=0, local_finding_exact=1, exempt_min=1,
+            exempt_counts=(("x-effect-value", 1),),
+            finding_counts=(("x-effect-value", 1),),
+            finding_lines=(("x-effect-value", (12,)),),
         ),
     )
 

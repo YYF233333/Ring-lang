@@ -233,7 +233,7 @@ fn al_expr(e: HExpr) -> HExpr {
             let mut new_handlers: List<HEffectHandler> = []
             for h in handlers {
                 new_handlers.push(HEffectHandler { effect_name: h.effect_name, op_name: h.op_name,
-                    params: h.params, resume_name: h.resume_name,
+                    params: h.params, resume_binding: h.resume_binding,
                     body: al_expr(h.body) })
             }
             HExpr::HandleExpr { body: al_expr(body), handlers: new_handlers, ty: ty, effects: effects, span: span }
@@ -286,7 +286,8 @@ fn al_arms(arms: List<HMatchArm>) -> List<HMatchArm> {
             some(g) => some(al_expr(g)),
             none => none,
         }
-        out.push(HMatchArm { pattern: arm.pattern, guard: new_guard,
+        out.push(HMatchArm { pattern: arm.pattern, bindings: arm.bindings,
+            guard: new_guard,
             body: al_expr(arm.body), span: arm.span })
     }
     out
@@ -326,15 +327,17 @@ fn al_stmt(s: HStmt) -> HStmt {
         HStmt::LetDestructure { pattern, bindings, init, span } =>
             HStmt::LetDestructure { pattern: pattern, bindings: bindings,
                 init: al_expr(init), span: span },
-        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+        HStmt::IfLet { pattern, bindings, expr, then_block, else_block, span } => {
             let new_else = match else_block {
                 some(eb) => some(al_expr(eb)),
                 none => none,
             }
-            HStmt::IfLet { pattern: pattern, expr: al_expr(expr),
+            HStmt::IfLet { pattern: pattern, bindings: bindings,
+                expr: al_expr(expr),
                 then_block: al_expr(then_block), else_block: new_else, span: span }
         },
         // RC ops are inserted by perceus (after this pass) — never present.
-        HStmt::Drop { name, ty, span } => HStmt::Drop { name: name, ty: ty, span: span }
+        HStmt::Drop { name, def_id, ty, span } =>
+            HStmt::Drop { name: name, def_id: def_id, ty: ty, span: span }
     }
 }
