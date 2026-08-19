@@ -1,0 +1,56 @@
+{
+  "schema": "ring.repository-health.v1",
+  "max_worktrees": 5,
+  "max_dirty_worktrees": 0,
+  "max_main_ahead": 10,
+  "max_unpushed_age_hours": 24,
+  "board_authority_branch": "codex/b180-feedback-loop-continuation",
+  "board_items": ["B-186", "B-176", "B-180", "#268", "#269"],
+  "branches": [
+    {
+      "name": "main",
+      "role": "governance",
+      "active_items": ["B-186"],
+      "checkpoint": "086237823e3eacb1a30934bd48e438c20f6e457c"
+    },
+    {
+      "name": "codex/b180-feedback-loop-continuation",
+      "role": "authority",
+      "active_items": ["#268", "#269"],
+      "checkpoint": "b75d2c881908c95bef180f0e7fa802e745a20713",
+      "pollution_base": "b75d2c881908c95bef180f0e7fa802e745a20713",
+      "allowed_paths_after_base": [
+        ".agents/scripts/validate_workflow.py",
+        ".agents/scripts/repository_health.py",
+        "docs/audit-report.md",
+        "docs/backlog.md",
+        "docs/handoffs/",
+        "docs/repository-health.json",
+        "docs/worker_feedback.md",
+        "docs/workflow.md"
+      ]
+    },
+    {
+      "name": "codex/b176-workflow-throughput",
+      "role": "evidence",
+      "active_items": [],
+      "checkpoint": "3590241037aad3a719328dd72114cde3f834f4fe"
+    },
+    {
+      "name": "codex/ownership-unity-seed-probe",
+      "role": "experiment",
+      "active_items": [],
+      "checkpoint": "58075b40eac56a88bc8b481288e1a3db3a6086c4"
+    }
+  ],
+  "local_backup_artifacts": [
+    {
+      "path": "C:/Users/Yufeng Ying/Desktop/Ring-lang-convergence-backup-b75d2c88/all-refs.bundle",
+      "sha256": "74852CB23DD8D9D185446BA8B67125C666CA7F4F6A4EF4E39D0E19DBE0B2D5F2"
+    },
+    {
+      "path": "C:/Users/Yufeng Ying/Desktop/Ring-lang-convergence-backup-b75d2c88/wip-and-ignored.7z",
+      "sha256": "F1EB25DBB5D476396884B3A158355C6E20F6F4AB02EC7C826C4F75D48FF13B74"
+    }
+  ]
+}

@@ -129,6 +129,8 @@
 
 **Unity-source small-probe stop（2026-08-19）**：首版机械 wrapper 的 physical controls 全部通过，但四个 unity entry 均因 root `use` 位于 module declarations 后精确报 E0706，未到 codegen；原始证据在 bootstrap-probe commit `f75d107f` 的 ignored `tmp-unity-seed-probe/01`–`06`。独立反驳进一步证明不能把 root uses 简单 hoist：CLI 会据 `ast.uses.len()>0` 进入 project mode，resolver 又无条件建立 physical dependency BFS，从而失去 single-file crossing。仅 compiler-specific no-use synthetic main 获准一次修订探针，脚本 contract commit `58075b40` 与 11 项 Python tests 通过；但第一次运行在五分钟前人工停止、stdout/stderr 为空，唯一 superseding 295 s wrapper 又因含空格路径 quoting 错误实际检查截断的 `C:\Users\Yufeng`，从未打开 unity source。按 stop contract 不做第三次；该路线是 orchestration-inconclusive，不是 compiler PASS/FAIL，full unity/current generations 均未运行。再次进入须先做新的 authority-boundary Argument，不能静默修 wrapper 重试。
 
+**B-186 fixed crossing verdict（2026-08-19 用户批准，适用于 #268/#269）**：完成 repository convergence recovery 后，只对完全固定、无代码变化的 S′ gen1 运行一次 gen1→gen2：Job commit `23622320128` bytes（22 GiB）、active process `<=5`、无其他重负载、首次等待点精确 72 分钟、hard wall 90 分钟。gen1 仅为 bootstrap seed；若产出 gen2，gen2→gen3、C byte fixed point、完整 C/RC/ASan/self-host/final acceptance 全部恢复 `12884901888` bytes（12 GiB），且只有 gen2/gen3 C byte-identical 与原门全绿才能删除两项 finding。若 22 GiB 触顶、超时或无产物，资源加码永久停止，不试 24/32 GiB、pagefile 或重跑；转为 latest main 上独立重现/移植 S′并先完成其自身 fixed point，再分 checkpoint 重放 A′。S′ 不能脱离 A′时先新 Argument，不恢复 seed/unity probe tree。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

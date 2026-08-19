@@ -188,6 +188,26 @@ root 对通过 review 的工作：
 4. 平台有单次等待上限时，优先使用可中断的事件完成通知、deferred wait 或定时唤醒。只能分段时，各段只用于累计休眠，段间不追加状态或日志查询；累计等待时长必须恰好达到点估计，不得因为分段向上取整。若平台通过完成事件提前报告结束，立即消费结果。
 5. 用户明确询问、命令转为全局阻塞或结果改变结论时才报告状态。
 
+### 4.8 Repository convergence gate
+
+该门优先于新 wave、技术 probe 与 branch 扩张；B-186 完成后作为持续健康约束保留。
+
+1. **容量**：active worktree 默认含 main 不超过 5；超限时停止新实现，先做收敛。每个 active item 恰好出现在一个 authority group，且每个 authority branch 只服务一个 item/group；frozen item 不占实现 branch。
+2. **可恢复清理**：bulk worktree/ref cleanup 前必须生成并验证包含全部 heads/remotes/tags/notes 的 Git bundle，以及覆盖所有待删除 tracked diff、untracked、ignored evidence 的 WIP archive。manifest 固定 path/branch/HEAD/status/file hash；目标逐项解析为已登记 worktree，按最深路径移除。未被 archive 覆盖的 WIP 禁止删除。
+3. **看板一致**：main 是活动状态发布面；authority branch 的对应 backlog/audit heading、status、依赖与 blocker 不得与 main 冲突。handoff 只留 invariants、blocker、authority SHA、evidence index 和下一可证伪动作。
+4. **branch 单责**：健康检查枚举 local branches；除 main、活动 authority、证据 branch 与最多一个明确 experiment 外，其余 branch 必须已进入 verified bundle 后清理。一个 branch 同时修改两个活动 item 的独占范围视为 cross-item pollution，fail closed。
+5. **push threshold**：main ahead `origin/main` 超过 10 commits，或最老未 push commit 超过 24h 时，不得再启动新实现；先 batch push 并取得远端 CI。origin 缺失、behind/diverged 或 CI identity 不匹配同样 fail closed。
+6. **dirty/WIP**：health gate 报告所有 dirty worktree；未映射 authority 的 dirty 状态一律失败。clean checkpoint 可释放 worktree，但 branch/commit/evidence 必须仍可恢复。
+
+### 4.9 B-186 one-time resource crossing
+
+本授权只适用于固定 ownership authority 的一次 bootstrap crossing，不形成通用资源豁免：
+
+1. 启动前 B-186 repository-health、main/branch board sync、bundle/WIP protection、空闲机器与 exact seed/source/runtime/toolchain pins 全部通过；源码和生成输入不得变化。
+2. 唯一 S-prime gen1 -> gen2 使用 Job commit `23622320128` bytes（22 GiB）、active process `<=5`、无其他重负载、首次等待点估计精确 72 分钟、hard wall 90 分钟。gen1 只作 bootstrap seed。
+3. 若产出 gen2，立即恢复 `12884901888` bytes（12 GiB）；gen2 -> gen3、文本 fixed point、完整 C/RC/ASan/self-host 与 final acceptance 均走原门。只有 gen2/gen3 C byte-identical 且全部门绿才关闭 `#268/#269`。
+4. 若 22 GiB 触顶、超时或无产物，永久停止资源加码：不得尝试 24/32 GiB、pagefile、重跑或降低门槛。转到最新 main 独立重现/移植 S-prime，先完成其自身 fixed point，再分 checkpoint 重放 A-prime；若 S-prime 不能脱离 A-prime，先执行新 Argument，不恢复 seed/unity probe tree。
+
 ## 5. Maintenance 与 Refactor
 
 ### Maintenance

@@ -15,17 +15,47 @@
 
 **近期 break 审核门**：任何修改公开语法、签名、ABI 或可观察语义的 item，在实现前必须标成“已拍板 clean break”“等待 decision dossier”或“仅内部、非 breaking”之一。已拍板的 #268/#269 ownership 真值与 B-167 调用点 evidence 采用一次性切换；旧 ownership 猜测/传播路径和创建处 evidence ABI 必须在各自原子变更中删除，不形成双轨。B-168/B-169 的探针结论，以及 B-152、B-156、B-171、B-133 和 `io` effect 拆分等潜在用户面变化，在进入实现前显式核对 break 边界；需要新的公开语义决定时仍提交 dossier。每个已拍板 break 的验收都必须列出被删除的旧路径、同步迁移的仓内消费者/规范/测试，并在旧形式仍可表达时用负例证明它不会经 alias、fallback 或旧 ABI 继续生效。
 
-处理顺序按五道门组织：
+Canonical dependency chain：`B-186 -> #268/#269 -> B-176/B-180 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175`。
 
-1. **Critical 正确性底线 / 开发解阻门**：#268、#269 及执行中发现的新 critical 始终保持最高 correctness 严重度；先关闭会阻断当前 compiler 严格 `check/build`、可信 bootstrap 或可比测量的部分，建立精确的 developer-unblock checkpoint。其余不阻断开发回路的 critical 长尾可与 B-176/B-180 实现并行存在，但不得降级、关闭或从最终验收中豁免。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。
-2. **工具链反馈吞吐 P0**：2026-08-12 用户把 2026-08-03 的“critical 清零后立即优化”细化为：developer-unblock checkpoint 一旦成立，立即执行 B-176 → B-180，不再让不影响开发回路的 critical 长尾阻塞性能实现；若新 critical 会破坏该 checkpoint、测量有效性或当前优化所依赖的 ownership authority，则先修再继续。性能专项先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作；不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
-3. **其余正确性与语义/ABI 冻结**：随后处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257；再走 B-168 → B-169 → B-167 → B-152 → B-002 的 release critical path。B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。
-4. **发布产品面**：B-174 → B-175 得到可安装、可 `run/build/check/doctor` 的 Windows/Linux 候选包；B-181 建立生成程序的 runtime/内存/尺寸预算。随后 B-178 → B-016 补 formatter/LSP，B-177 → B-111 补版本化 agent contract 与可复现实验。
-5. **发布后能力**：先做 P1 correctness/ownership 与用户高频能力（B-110、B-172、B-173、B-149 等），再由 B-111 数据决定 refinement/async 的投入顺序。B-001/B-116→B-007 均在 RIIR/ABI 稳定后启动；GADT、dyn Trait、HKT/GAT、JIT、Debugger 等 P3 工作继续后置。
+处理顺序固定为六道门：
 
-性能仍让位于 critical correctness，但“让位”分成两道门：会破坏严格自举或测量真值的 critical 阻塞 B-176/B-180；其余 critical 长尾不阻塞实现，却继续阻塞 B-180 完成认定、合入验收与 release。B-176/B-180 先解决开发反馈回路；B-181 再决定 #262/B-079 等生成程序优化。B-105 只有在 B-180 证明 unchanged-module 重复工作仍是主导成本时启动，B-041 不进入 preview 路线。
+1. **B-186 Repository convergence recovery**：先收敛 worktree/ref/WIP、指定每个活动 item 的唯一 authority、同步 main/branch 看板、恢复 repository-health gate，并在 push threshold 触发时先取得远端 CI。
+2. **#268/#269 信任闭环**：ownership/RC/S-prime fixed point 与原完整门真正关闭前，不再启动 compiler optimization。一次性 22 GiB crossing 只按 B-186 的精确授权执行；失败即永久停止资源加码并走 latest-main 分 checkpoint 重放。
+3. **B-176/B-180 反馈速度**：在 post-ownership 最新 main 重做 baseline；runner 与 compiler 分 checkpoint，但原 2x 量化验收不变。compiler 只允许一个 profile-guided wave。
+4. **Remaining correctness / ABI freeze**：处理 B-162、B-164、#263、#264、#239、#244、#267、#257，再走 B-168 → B-169 → B-167 → B-152 → B-002，并完成 unsafe/Str 等 candidate gate。
+5. **B-183 repository identity / GitHub workflow**：放在 technical ABI/ownership/failure fixed point 之后、产品化之前；不再晚于 B-174 才处理。
+6. **Preview candidate**：B-174 → B-177 → B-175；随后 B-181、B-178/B-016、B-111 等证据与工具面按依赖推进。发布后能力继续按既有优先级。
+
+B-180 不得以早期 developer-unblock checkpoint 绕过 #268/#269 final fixed point；其已证明的 runner anchor-object cache 可保留，所有 compiler candidates 冻结。B-176 只有在最新 main 可重放完整 baseline 后才算完成。
 
 ---
+
+## 治理恢复
+
+### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]
+
+一次性恢复 Repository Steward 的收敛能力，完成后删除本项。authority checkpoint 为
+`codex/b180-feedback-loop-continuation@b75d2c881908c95bef180f0e7fa802e745a20713`；
+当前保护包为 `Ring-lang-convergence-backup-b75d2c88`。
+
+**硬约束**：
+
+1. worktree 默认含 main 不超过 5；bulk cleanup 前必须有经验证的全 refs bundle 与 WIP/ignored archive，删除目标逐项核验且可恢复。
+2. 每个活动 item 恰好映射到一个 authority；branch 单责，不允许跨 item 污染。main 与 authority branch 的活动 heading/status 不得漂移。
+3. main ahead `origin/main` 超过 10 commits，或最老未 push commit 超过 24h 时，先 batch push 并取得 CI，再继续新实现。
+4. `B-176` 保持 queued，直到 #268/#269 闭环后从最新 main 启动同机 manifest 重放；`B-180` 冻结 compiler lane，只保留 runner anchor-object cache。
+5. 压缩 handoff 只留 invariants、blocker、authority SHA、evidence index 与下一可证伪动作；历史流水留 Git。
+
+**一次性 crossing 授权**：恢复门全绿后，对完全固定且无代码变化的 S-prime gen1 只运行一次
+gen1 → gen2：Job commit `23622320128` bytes、active process `<=5`、无其他重负载、首次等待点
+精确 72 分钟、hard wall 90 分钟。若成功，gen2 → gen3/fixed point/完整 C/RC/ASan/self-host
+恢复 `12884901888` bytes；只有 gen2/gen3 C byte-identical 且原门全绿才关 `#268/#269`。
+若 22 GiB 触顶/超时/无产物，永久停止资源加码，不试 24/32 GiB、pagefile 或重跑；转 latest main
+独立重现/移植 S-prime 并先完成自身 fixed point，再分 checkpoint 重放 A-prime。二者不可分时先新 Argument。
+
+**验收**：repository-health / workflow validator（含负例）通过；实际 worktree <=5、dirty/WIP 已保护、
+authority map 一一覆盖活动 item、local branch 单责、main/branch 看板一致；main 状态与 runner cache 已同步，
+batch push 后 origin/main 与 CI 可复核。
 
 ## 类型系统
 
@@ -442,16 +472,31 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-### B-180 开发反馈回路吞吐专项 [refactor] [P0] [XL] [judgment] [doing:acceptance-blocked] [after: B-176] [before: B-183]
+### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [queued] [after: #268+#269] [before: B-180]
 
-**进入门**：B-176 的 developer-unblock checkpoint 与正式同快照 baseline 已成立；不再要求 #268、#269 的非开发阻塞长尾预先全部关闭。执行期间若新增 critical 会破坏严格自举、baseline 可比性、当前优化触及的 ownership/RC authority 或生成结果正确性，立即回到 critical 修复；否则保留为显式尾项，不阻塞 runner/测量基础设施和已证明独立的热点优化。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
+此前 `95e12437` snapshot 的 directional measurements 与 replay index 不能在最新 main
+重放，且 Codex 管理的 ignored raw directory 已被宿主回收，因此不构成 B-176 完成证据。
+post-ownership 必须从最新 main、tracked anchor、runtime、toolchain 与固定 manifest 重新采集。
 
-**提前实施边界（2026-08-12）**：可先做内容寻址 compiler artifact cache、有界 jobs、隔离 out-dir、确定性汇总、clang/runner 调度、opt-in phase profile，以及由 profile 证明且不复制未稳定 ownership authority 的热点修复。凡优化会改变尚未关闭 critical 所依赖的 ownership/RC 语义、metadata transaction、bootstrap identity 或诊断真值，必须等该局部 invariant 关闭后再动；不得用缓存、并发或批处理掩盖 nondeterminism、panic、false-green 或原始失败。
+**范围**：tiny/大单文件/module/`compiler/main.ring` 普通 check、`--verify-rc`、失败诊断；
+tracked compiler construction、单个 focused case、e2e/golden/RC/structural/self-compile 与完整门。
+记录 wall/CPU、peak RSS、进程数、case 数、cold/warm cache 和完整工具链指纹；短 lane >=5 次，
+预计 >=5min 的长 lane >=3 次，保留全部样本/invalid，不挑最好值。
+
+**验收**：在 clean 最新 main 形成可重放 baseline、top-3 wall-time 构成与 B-180 预算，明确区分
+compiler 内部、每进程初始化/重复 parse-check、runner/clang 调度。默认测量关闭时近零开销；
+一个 bounded wave 收口，不扩为通用 telemetry。
+
+### B-180 开发反馈回路吞吐专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176+#268+#269] [before: B-183]
+
+**进入门（2026-08-19 用户重置）**：#268/#269 fixed point 与 B-176 最新-main baseline 必须先完成。此前 developer-unblock checkpoint 只保留为历史证据，不再授权 compiler lane 与 ownership critical 并行。
+
+**冻结边界**：只保留已证明 fail-closed 的 runner anchor-object cache；其他 compiler candidates 全部 rejected/frozen。post-ownership 从最新 main 重新建立 B-176 baseline 后，runner 与 compiler 分 checkpoint，compiler 只允许一个 profile-guided wave。不得恢复历史 probe tree、拼接 rejected candidates 或用缓存掩盖 nondeterminism/panic/false-green。
 
 **实现范围 / 顺序**：
 
 1. 先按 B-176 的真实端到端等待选择第一刀；若 compiler construction、runner/clang 调度占主导，再改 `tests/run_tests.py` 与 `compiler/scripts/`：compiler artifact 使用由 `dist-c`/runtime/flags/toolchain 全指纹控制的内容寻址缓存，但每轮仍在隔离目录执行，禁止信任裸 root `ring.exe`；增加有界 `--jobs`、per-case 独立 out-dir、确定性汇总与 fail-fast 可选显示，原始失败永不自动重试或吞掉；
-2. 若 compiler 内部可能占主导，可在独立 worktree 先实现一个有边界、可回滚的热点猜测，再用 phase profile 与端到端命令决定去留；真实候选可做 memoization、减少重复 canonicalization/clone/sort 或更正数据结构。禁止没有明确假设、文件边界和淘汰门的无界横扫；
+2. compiler lane 只允许一次由最新 main profile 直接支持的 bounded wave；预先固定假设、文件边界、正确性门、端到端淘汰门与停止条件，未达到原 2x 总目标不得用多轮 speculative knives 补足；
 3. 若进程启动/重复初始化主导，比较 bounded worker-process/batch-check 与普通进程池；任何复用方案必须以随机 case 顺序、重复运行和进程隔离对照证明无 global state 泄漏。daemon、常驻服务和新公共协议不作为首轮默认；
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
 
@@ -487,9 +532,9 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 
 > **2026-08-19 ownership-cleanup crossing 最终裁决。** 新的 direct fixture 把 Map/Option allocation 信号提升为通用 correctness 根因：`var Option = none` 后装入 owned payload 时缺 W4/exit cleanup。bounded safe-tail 候选与独立 verifier 已通过 source-built gen1 的 runtime 1/1、RC/mutation 8/8、structural 1/1 和 parity 1/1；但该 gen1 自身仍由旧 Perceus lowering 生成，完整 gen2 在 2371.12 s 触及固定 12 GiB/typeid 8。唯一额外 construction 只把临时 mirror 的 3016-line verifier替换为同 API、调用即 panic 的 30-line fail-closed stub，仍在 2347.24 s 触及同一资源墙。两条收据都无产物，证据见 `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/`。不得继续删模块、提高 cap、patch generated C/runtime/typeid、重跑旧 profile或按 `unify.ring` 热点写 workaround；candidate 保留 correctness evidence，但 B-180/self-host acceptance 仍 blocked，tracked bootstrap 不更新。任何后续 crossing 必须先有新的直接 peak authority 与独立 Argument，不能把同类 size-cut 猜测当成下一刀。
 
-**整体验收**：以 B-176 同机、同代表命令集的配对原始样本为证据，常用 edit→check→focused validation 与提交前完整门的端到端等待应持续缩短到不再拖住 agent 开发节奏；不设置单一百分比、单阶段配额或“每个部分都要优化”的门槛。短文件、模块与失败诊断不得出现明显体感回退；串行 oracle 与任何并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。保留 cold/warm wall、CPU、peak aggregate/per-worker RSS 与明确内存/并发上限；任何用更多并发换 wall time 的方案都必须有低内存退化路径。**B-180 只有在全部 critical（含暂缓长尾）关闭、完整 C/RC/ASan/self-host/double-bootstrap 门通过后才能标记完成或作为 release-accepted 结果合入；任何原始失败都必须 fail loud。**
+**整体验收**：恢复原 2x 量化门，不降级。以 post-ownership B-176 同机同 manifest 为基线，`compiler/main.ring check` median、`check --verify-rc compiler/main.ring` 与完整本地标准门 wall time 均以基线的 `<=50%` 为目标；tiny/大单文件/module check p95 不得回退 >10%。runner/compiler checkpoint 可分别验收正确性，但只有合计达到 2x 且完整 C/RC/ASan/self-host/double-bootstrap 全绿才完成 B-180。串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，覆盖数不减少；任何原始失败必须 fail loud。
 
-### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-180] [before: B-168+B-174]
+### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-168+B-169+B-167+B-152+B-002+B-180] [before: B-174+B-177+B-175]
 
 > **2026-08-09 用户方向**：性能优化完成后、preview CLI 与 release 准备开始前迁移到 `vorton-lang`，并把用户—Steward 的异步协作切到 GitHub Issue / PR。D-004 只批准路线与顺序；进入本项时必须先展开执行规范和外部变更清单，再由用户批准 transfer、凭据/App、组织权限与批量导入等具体动作。
 

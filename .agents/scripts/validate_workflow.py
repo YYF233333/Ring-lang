@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -246,6 +247,101 @@ STEWARD_BEHAVIOR_CONTRACTS = (
 )
 
 LONG_COMMAND_WAIT_CONTRACT = STEWARD_BEHAVIOR_CONTRACTS[-1]
+
+REPOSITORY_CONVERGENCE_CONTRACT = TextContract(
+    "repository convergence gate",
+    (
+        ("Repository convergence gate",),
+        ("active worktree",),
+        ("不超过 5",),
+        ("active item",),
+        ("authority",),
+        ("branch 只服务",),
+        ("Git bundle",),
+        ("WIP archive",),
+        ("manifest",),
+        ("main",),
+        ("authority branch",),
+        ("cross-item pollution",),
+        ("origin/main",),
+        ("超过 10 commits",),
+        ("超过 24h",),
+        ("batch push",),
+        ("远端 CI",),
+        ("dirty worktree",),
+    ),
+    (
+        "先删除 worktree 再备份",
+        "dirty worktree 默认忽略",
+        "每个 item 可有多个 authority",
+    ),
+)
+
+B186_RESOURCE_CROSSING_CONTRACT = TextContract(
+    "B-186 one-time resource crossing",
+    (
+        ("B-186 one-time resource crossing",),
+        ("23622320128",),
+        ("22 GiB",),
+        ("<=5",),
+        ("72 分钟",),
+        ("90 分钟",),
+        ("bootstrap seed",),
+        ("12884901888",),
+        ("gen2 -> gen3",),
+        ("byte-identical",),
+        ("#268/#269",),
+        ("24/32 GiB",),
+        ("pagefile",),
+        ("最新 main",),
+        ("S-prime",),
+        ("A-prime",),
+        ("Argument",),
+    ),
+    (
+        "22 GiB 可重复运行",
+        "触顶后尝试 32 GiB",
+        "提高 pagefile 后重跑",
+    ),
+)
+
+B186_BACKLOG_CONTRACT = TextContract(
+    "B-186 backlog recovery route",
+    (
+        ("### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]",),
+        ("`B-176` 保持 queued",),
+        ("B-180",),
+        ("runner anchor-object cache",),
+        ("23622320128",),
+        ("12884901888",),
+        ("worktree",),
+        ("不超过 5",),
+        ("origin/main",),
+    ),
+    ordered=(
+        "B-186 -> #268/#269",
+        "B-176/B-180",
+        "remaining correctness/ABI",
+        "B-183",
+        "B-174/B-177/B-175",
+    ),
+)
+
+REPOSITORY_HEALTH_HELPER_CONTRACT = TextContract(
+    "repository health executable coverage",
+    (
+        ("max_worktrees",),
+        ("max_dirty_worktrees",),
+        ("local branch drift",),
+        ("active item/authority drift",),
+        ("main/authority board drift",),
+        ("cross-item branch pollution",),
+        ("origin/main",),
+        ("max_main_ahead",),
+        ("max_unpushed_age_hours",),
+        ("local_backup_artifacts",),
+    ),
+)
 
 GUARANTEE_BOUNDARY_CONTRACT = TextContract(
     "restore-vs-change guarantee boundary",
@@ -754,14 +850,21 @@ class WorkflowValidator:
         text = self.read_text("docs/workflow.md")
         if text is None:
             return
-        for error in check_text_contract(
-            text, WORKFLOW_AUDIT_LEDGER_CONTRACT
+        for contract in (
+            WORKFLOW_AUDIT_LEDGER_CONTRACT,
+            LONG_COMMAND_WAIT_CONTRACT,
+            REPOSITORY_CONVERGENCE_CONTRACT,
+            B186_RESOURCE_CROSSING_CONTRACT,
         ):
-            self.errors.append(f"docs/workflow.md: {error}")
-        for error in check_text_contract(
-            text, LONG_COMMAND_WAIT_CONTRACT
-        ):
-            self.errors.append(f"docs/workflow.md: {error}")
+            for error in check_text_contract(text, contract):
+                self.errors.append(f"docs/workflow.md: {error}")
+
+    def validate_b186_backlog_contract(self) -> None:
+        text = self.read_text("docs/backlog.md")
+        if text is None:
+            return
+        for error in check_text_contract(text, B186_BACKLOG_CONTRACT):
+            self.errors.append(f"docs/backlog.md: {error}")
 
     def validate_skills(self) -> None:
         existing_paths: set[str] = set()
@@ -852,6 +955,28 @@ class WorkflowValidator:
         ):
             self.errors.append(f"{relative}: {error}")
 
+    def validate_repository_health_helper(self) -> None:
+        relative = ".agents/scripts/repository_health.py"
+        text = self.read_text(relative)
+        if text is not None:
+            for error in check_text_contract(
+                text, REPOSITORY_HEALTH_HELPER_CONTRACT
+            ):
+                self.errors.append(f"{relative}: {error}")
+        config_relative = "docs/repository-health.json"
+        config_text = self.read_text(config_relative)
+        if config_text is None:
+            return
+        try:
+            config = json.loads(config_text)
+        except json.JSONDecodeError as error:
+            self.errors.append(f"{config_relative}: {error}")
+            return
+        if config.get("schema") != "ring.repository-health.v1":
+            self.errors.append(f"{config_relative}: schema mismatch")
+        if config.get("max_worktrees") != 5:
+            self.errors.append(f"{config_relative}: max_worktrees must be 5")
+
     def validate_codex_config(self) -> None:
         relative = ".codex/config.toml"
         config_path = self.root / relative
@@ -925,8 +1050,10 @@ class WorkflowValidator:
     def run(self) -> tuple[int, int]:
         backlog_count, audit_count = self.validate_headings()
         self.validate_workflow_contract()
+        self.validate_b186_backlog_contract()
         self.validate_skills()
         self.validate_audit_ledger_helper()
+        self.validate_repository_health_helper()
         self.validate_codex_config()
         return backlog_count, audit_count
 
@@ -1085,6 +1212,31 @@ already-tracked 只去重，不计支持票；critical 由 root 亲自读码。
 killed、duplicate、in-progress、insufficient-evidence 只进入本 round Summary。
 """
 
+GOOD_CONVERGENCE_FIXTURE = """
+### 4.8 Repository convergence gate
+active worktree 不超过 5。每个 active item 恰好有一个 authority，且 authority
+branch 只服务一个 group。bulk cleanup 前验证 Git bundle、WIP archive 与 manifest。
+main 和 authority branch 看板一致；cross-item pollution fail closed。
+main ahead origin/main 超过 10 commits 或最老未 push 超过 24h 时先 batch push，
+取得远端 CI。报告所有 dirty worktree，不得默认忽略。
+
+### 4.9 B-186 one-time resource crossing
+固定 S-prime gen1 只作为 bootstrap seed；23622320128 bytes（22 GiB），process <=5，
+首次等待 72 分钟，hard wall 90 分钟。成功后恢复 12884901888 bytes，执行
+gen2 -> gen3，只有 C byte-identical 且 #268/#269 全部门通过才关闭。
+失败后不试 24/32 GiB 或 pagefile；转最新 main 分别完成 S-prime、A-prime，
+不可分时先 Argument。
+"""
+
+GOOD_B186_BACKLOG_FIXTURE = """
+Canonical dependency chain: B-186 -> #268/#269 -> B-176/B-180 ->
+remaining correctness/ABI -> B-183 -> B-174/B-177/B-175.
+### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]
+`B-176` 保持 queued；B-180 只保留 runner anchor-object cache。
+worktree 不超过 5，origin/main push gate 生效。
+crossing 使用 23622320128，后续恢复 12884901888。
+"""
+
 
 def deterministic_failure(
     label: str, producer: Any, expected_fragment: str
@@ -1187,6 +1339,17 @@ def run_self_tests() -> list[str]:
             f"self-test good audit evidence fixture rejected: "
             f"{evidence_errors!r}"
         )
+    for fixture, contract in (
+        (GOOD_CONVERGENCE_FIXTURE, REPOSITORY_CONVERGENCE_CONTRACT),
+        (GOOD_CONVERGENCE_FIXTURE, B186_RESOURCE_CROSSING_CONTRACT),
+        (GOOD_B186_BACKLOG_FIXTURE, B186_BACKLOG_CONTRACT),
+    ):
+        fixture_errors = check_text_contract(fixture, contract)
+        if fixture_errors:
+            failures.append(
+                f"self-test good {contract.name} fixture rejected: "
+                f"{fixture_errors!r}"
+            )
     failures.extend(audit_ledger_process_self_test_errors())
     failures.extend(
         deterministic_failure(
@@ -1372,6 +1535,47 @@ def run_self_tests() -> list[str]:
         )
     )
 
+    bad_convergence = GOOD_CONVERGENCE_FIXTURE.replace(
+        "bulk cleanup 前验证 Git bundle、WIP archive 与 manifest。",
+        "先删除 worktree 再备份；dirty worktree 默认忽略。",
+    )
+    failures.extend(
+        deterministic_failure(
+            "repository convergence archive fixture",
+            lambda: check_text_contract(
+                bad_convergence, REPOSITORY_CONVERGENCE_CONTRACT
+            ),
+            "repository convergence gate",
+        )
+    )
+    bad_resource_crossing = GOOD_CONVERGENCE_FIXTURE.replace(
+        "失败后不试 24/32 GiB 或 pagefile；转最新 main 分别完成 S-prime、A-prime，",
+        "22 GiB 可重复运行；触顶后尝试 32 GiB，提高 pagefile 后重跑；",
+    )
+    failures.extend(
+        deterministic_failure(
+            "B-186 resource escalation fixture",
+            lambda: check_text_contract(
+                bad_resource_crossing, B186_RESOURCE_CROSSING_CONTRACT
+            ),
+            "B-186 one-time resource crossing",
+        )
+    )
+    bad_b186_route = GOOD_B186_BACKLOG_FIXTURE.replace(
+        "B-186 -> #268/#269 -> B-176/B-180 ->\n"
+        "remaining correctness/ABI -> B-183 -> B-174/B-177/B-175",
+        "B-176/B-180 -> B-186 -> B-174/B-177/B-175 -> B-183",
+    )
+    failures.extend(
+        deterministic_failure(
+            "B-186 canonical route fixture",
+            lambda: check_text_contract(
+                bad_b186_route, B186_BACKLOG_CONTRACT
+            ),
+            "B-186 backlog recovery route",
+        )
+    )
+
     bad_long_command_wait = GOOD_STEWARD_FIXTURE.replace(
         "长命令启动前形成单一的精确耗时点估计；首次计划等待时长必须等于该点估计，\n"
         "不得添加安全余量。预计 25 分钟就等待 25 分钟，不得给 40 分钟。\n"
@@ -1467,7 +1671,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             "workflow validator self-test passed: "
-            "20 legacy/broken fixtures rejected deterministically; "
+            "23 legacy/broken fixtures rejected deterministically; "
             "2 durable-ledger regressions passed"
         )
         return 0
@@ -1495,7 +1699,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{backlog_count} active backlog items, "
         f"{audit_count} active audit items, "
         "2 steward adapters, 4 Codex roles, "
-        "20 negative fixtures, 2 durable-ledger regressions"
+        "23 negative fixtures, 2 durable-ledger regressions"
     )
     return 0
 
