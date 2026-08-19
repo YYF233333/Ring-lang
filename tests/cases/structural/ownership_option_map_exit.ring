@@ -54,6 +54,7 @@ fn cleanup_borrowed_str_block(value: Str) {
         let mut wrapped: CleanupResource? = none
         value
     }
+    print(value)
 }
 
 fn cleanup_borrowed_int_tail(value: Int) -> Int {
@@ -101,13 +102,14 @@ fn cleanup_contains_extern_control() -> Bool {
     wrapped.is_none()
 }
 
-fn cleanup_payload_borrow() -> Int {
+fn cleanup_payload_borrow() {
     let mut wrapped: CleanupResource? = none
     wrapped = some(CleanupResource { id: 9 })
-    match wrapped {
+    let observed = match wrapped {
         some(value) => value.id,
         none => 0
     }
+    print(observed)
 }
 
 fn main() {}

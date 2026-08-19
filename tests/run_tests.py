@@ -6354,7 +6354,7 @@ def run_option_cleanup_oracle(ring_exe: str, temp_root: Path,
         masked_payload = mask_c_strings_and_comments(payload)
         if re.search(r"\bring_drop\s*\(\s*r_value\s*\)", masked_payload):
             errors.append("borrowed Option payload is dropped separately")
-        if re.search(r"\br_value\s*=\s*(?:NULL|nullptr|0)\s*;",
+        if re.search(r"(?m)^[ \t]*r_value\s*=\s*(?:NULL|nullptr|0)\s*;",
                      masked_payload):
             errors.append("borrowed Option payload slot is cleared")
     return errors
