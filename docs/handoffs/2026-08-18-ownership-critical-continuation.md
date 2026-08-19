@@ -4,14 +4,16 @@
 
 ## Authority
 
-- Branch：`codex/b180-feedback-loop-continuation`
-- Checkpoint：`b75d2c881908c95bef180f0e7fa802e745a20713`
+- Active branch：`codex/ownership-sprime-first`
+- Expected base：`e10a23f78e4305e21808566f2f86229c8b73e2aa`
+- Preserved A-prime/S-prime evidence branch：`codex/b180-feedback-loop-continuation`
+  at checkpoint `b75d2c881908c95bef180f0e7fa802e745a20713`
 - Tree / compiler subtree：`2f4b5d8896db437c59f40f55708f7c201760878b` /
   `d1da4c5e437a442a0607c4fda6c25e96ecb75b06`
 - Tracked C anchor：24,279,526 bytes；SHA256
   `D7BB015B32EF8F4A438093509C794C82B60C13548808B0A1093AEFEAB0DF7F2E`
-- Coupled item：audit `#268` / `#269`。该 branch 不再承载其他实现 item。
-- Latest-main fallback base：`75f83b2d2208462051fa67b99d9296d79b61dcb2`；旧 branch 只保留 A-prime/S-prime 证据 authority，不作为可直接 bootstrap 的 seed。
+- Coupled item：audit `#268` / `#269`。active branch 不承载其他实现 item。
+- 旧 branch 只保留 A-prime/S-prime evidence，不作为可直接 bootstrap 的 seed。
 
 ## Invariants and state
 
@@ -54,8 +56,10 @@
 
 ## Next action
 
-先做一个只读 S-prime 独立性矩阵：从 `cbfd5817`、`4eb08ce8`、`cf275c36`、`a11ea063`
-及其 focused tests 中列出每个新增/消费 symbol，并对 latest-main fallback base 证明它不依赖
-A-prime 的 lexical-scope、ownership-shape 或 callable-mode 变化。任何不可分依赖立即停止并提交
-新 Argument；矩阵闭合后才建立唯一 #268/#269 authority checkpoint，原子移植 S-prime 与 verifier/tests，
-先走 focused correctness，再按原 12 GiB 门做 S-prime 自身 fixed point。A-prime 只在该 fixed point 后分段重放。
+Argument 已选择 `I-prime -> S-prime -> A-prime`。第一 checkpoint 只实现 behavior-preserving I-prime：
+`infer_scoped_block`、source/pattern/default/dict/ANF/RC binder DefId、exact HIR Drop/slot map、
+Perceus/verifier/C backend exact lookup；DefId-bearing路径不得 name fallback，且不得引入 callable metadata、
+ownership shape/CFG 或 Take。先以 nested/branch/pattern/catch shadow、closure capture、default freshening、
+or-pattern 与 generated-C exact-slot oracle闭合并独立 review。第二 checkpoint 才把 exact-none NOOP producer
+lattice 与 S-prime 原子落地，恢复原 1/1 + 8/8 + 1/1 + 1/1 gates，再在 12 GiB 下做 surface fixed point。
+A-prime 只在该 fixed point 后分段重放；任一预注册停止门命中即冻结并回报。

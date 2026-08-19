@@ -23,7 +23,7 @@ B-186 recovery gate 已由 `main@b29c8711` 与 GitHub Actions `32262726058`（ch
 处理顺序固定为六道门：
 
 1. **B-186 Repository convergence recovery（已完成）**：worktree/ref/WIP、单一 authority、main/branch 看板、repository-health 与 push/CI 已恢复；这些约束转为持续门。
-2. **#268/#269 信任闭环**：ownership/RC/S-prime fixed point 与原完整门真正关闭前，不再启动 compiler optimization。固定 archive 只能重建精确 `DBC154…` C，无法重建 `5E862…` / `9DFD…` native-object pins，且没有另存的权威 object/recipe；因此 22 GiB crossing 路线已永久关闭且不计为已执行。当前 fallback 固定为 latest main 上独立重现/移植 S-prime、先完成其自身 12 GiB fixed point，再分 checkpoint 重放 A-prime；若二者不可分，先执行新 Argument。
+2. **#268/#269 信任闭环**：ownership/RC/S-prime fixed point 与原完整门真正关闭前，不再启动 compiler optimization。固定 archive 只能重建精确 `DBC154…` C，无法重建 `5E862…` / `9DFD…` native-object pins，且没有另存的权威 object/recipe；因此 22 GiB crossing 路线已永久关闭且不计为已执行。新的 separability Argument 选择 `I-prime -> S-prime -> A-prime`：先在 latest main 落 behavior-preserving exact-slot identity 层，再把 exact-none NOOP producer lattice 与 S-prime 原子落地并完成自身 12 GiB fixed point，最后分 checkpoint 重放 A-prime；name-only side-domain 与直接 atomic A-prime+S-prime 均不得作为捷径。
 3. **B-176/B-180 反馈速度**：在 post-ownership 最新 main 重做 baseline；runner 与 compiler 分 checkpoint，但原 2x 量化验收不变。compiler 只允许一个 profile-guided wave。
 4. **Remaining correctness / ABI freeze**：处理 B-162、B-164、#263、#264、#239、#244、#267、#257，再走 B-168 → B-169 → B-167 → B-152 → B-002，并完成 unsafe/Str 等 candidate gate。
 5. **B-183 repository identity / GitHub workflow**：放在 technical ABI/ownership/failure fixed point 之后、产品化之前；不再晚于 B-174 才处理。

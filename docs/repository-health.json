@@ -4,7 +4,7 @@
   "max_dirty_worktrees": 0,
   "max_main_ahead": 10,
   "max_unpushed_age_hours": 24,
-  "board_authority_branch": "codex/b180-feedback-loop-continuation",
+  "board_authority_branch": "codex/ownership-sprime-first",
   "board_items": ["B-176", "B-180", "#268", "#269"],
   "branches": [
     {
@@ -15,8 +15,8 @@
     },
     {
       "name": "codex/b180-feedback-loop-continuation",
-      "role": "authority",
-      "active_items": ["#268", "#269"],
+      "role": "evidence",
+      "active_items": [],
       "checkpoint": "b75d2c881908c95bef180f0e7fa802e745a20713",
       "pollution_base": "b75d2c881908c95bef180f0e7fa802e745a20713",
       "allowed_paths_after_base": [
@@ -29,6 +29,12 @@
         "docs/worker_feedback.md",
         "docs/workflow.md"
       ]
+    },
+    {
+      "name": "codex/ownership-sprime-first",
+      "role": "authority",
+      "active_items": ["#268", "#269"],
+      "checkpoint": "e10a23f78e4305e21808566f2f86229c8b73e2aa"
     },
     {
       "name": "codex/b176-workflow-throughput",
