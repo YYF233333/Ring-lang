@@ -393,6 +393,41 @@ First failures remain evidence and must not be rewritten as passes:
 
 ## Remaining gates
 
+### A6-compatible S-prime seed Argument (2026-08-19 continuation)
+
+- The next bounded construction is an untrusted bootstrap seed, not a compiler
+  acceptance candidate.  It keeps the accepted S-prime Perceus/verifier blobs,
+  restores `compiler/infer.ring` to the pre-scoped-block `95e12437` blob, and
+  removes only the final exact-import producer-edge helper/call from
+  `compiler/infer_ctx.ring`.  Every other compiler/runtime blob remains at
+  `a11ea063`; the seed, its generated C, and its branch must never merge or
+  replace the tracked anchor.
+- The rejected alternative is not another module deletion.  If this seed is
+  falsified, the next real candidate is an inline-module unity-source bridge,
+  preceded by a small import/trait/effect identity equivalence probe.  The
+  current CLI has no HIR serialization, phase-resume, or module-object artifact
+  that would make direct split compilation an existing short path.
+- Before the one A6-to-seed generation, static admission requires exactly two
+  changed compiler files, `infer.ring` blob
+  `91a7797d1f28817fd1432b0967c55033f71b740f`, removal of the exact-alias helper
+  and unique call, unchanged S-prime blobs `deb88eed474f168e8848a58a16fcafbdf86b13a7`
+  / `57dbda21604c0a4f4fb9e6da9be2cb62598860ba`, and clean diff/source gates.
+- A generated seed is contained, not trusted: lexical shadow and private
+  callable-const re-export must reproduce their two known pre-fix outcomes and
+  no new failure; the S-prime runtime, RC mutation, structural, and parity gates
+  must still pass.  The same existing Map/Option profiler will then stop both
+  constructions at exactly 2^32 allocations.  Against receipt 65's final exact
+  Map+Option live count 4,922,195 and peak Job commit 2,339,614,720 bytes, seed
+  admission to a full crossing requires combined live <= 3,937,756 (20% lower)
+  and peak commit <= 2,105,653,248 bytes (10% lower), with exit 86, five complete
+  milestones, and zero stack/invariant failures.  Missing either threshold
+  stops this route; there is no full-run retry.
+- If the prefix passes, seed-to-current1 must complete under the unchanged
+  12 GiB/5-process limits.  Current1 must restore both contained fixes and all
+  S-prime gates before current1-to-current2-to-current3.  Only byte-identical
+  current2/current3 C can establish the fixed point; current1/current2 is not
+  sufficient because current1 was inferred by the deliberately reduced seed.
+
 1. Treat the new gen1 as real source-generated correctness evidence: the
    ownership/block runtime matrix and the failure-scope recovery probe have
    both passed. The older C mirror remains supporting evidence only.
