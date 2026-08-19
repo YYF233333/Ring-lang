@@ -317,6 +317,8 @@ B186_BACKLOG_CONTRACT = TextContract(
         ("worktree",),
         ("不超过 5",),
         ("origin/main",),
+        ("paired-session",),
+        ("main mutation lease",),
     ),
     ordered=(
         "B-186 -> #268/#269",
@@ -420,6 +422,55 @@ DISCUSSION_CONTRACT = TextContract(
         "并 commit",
         "再删除 dossier",
         "最后把对应 item 从 `waiting-feedback` 改回 `queued`",
+    ),
+)
+
+PAIRED_WORKFLOW_CONTRACT = TextContract(
+    "Discussion-Steward paired-session control plane",
+    (
+        ("Discussion–Steward 双 session 控制面",),
+        ("唯一配对",),
+        ("Discussion session",),
+        ("Steward session",),
+        ("durable fallback",),
+        ("唤醒 Discussion",),
+        ("休眠而非轮询",),
+        ("main mutation lease",),
+        ("只有一个 session 可写",),
+        ("不得变更 main",),
+    ),
+    (
+        "Discussion 与 Steward 可同时写 main",
+        "Discussion 持续轮询 Steward",
+        "每次唤醒都创建新 session",
+    ),
+)
+
+DISCUSSION_PAIR_CONTRACT = TextContract(
+    "Discussion paired-session adapter",
+    (
+        ("paired Steward session",),
+        ("counterpart",),
+        ("durable fallback",),
+        ("main mutation lease",),
+        ("commit SHA",),
+        ("唤醒",),
+        ("休眠/idle",),
+        ("不轮询",),
+    ),
+)
+
+STEWARD_PAIR_CONTRACT = TextContract(
+    "Steward paired-session adapter",
+    (
+        ("Paired Discussion session",),
+        ("counterpart",),
+        ("main mutation lease",),
+        ("compact packet",),
+        ("唤醒",),
+        ("休眠/idle",),
+        ("不轮询",),
+        ("SHA",),
     ),
 )
 
@@ -855,6 +906,7 @@ class WorkflowValidator:
             LONG_COMMAND_WAIT_CONTRACT,
             REPOSITORY_CONVERGENCE_CONTRACT,
             B186_RESOURCE_CROSSING_CONTRACT,
+            PAIRED_WORKFLOW_CONTRACT,
         ):
             for error in check_text_contract(text, contract):
                 self.errors.append(f"docs/workflow.md: {error}")
@@ -924,6 +976,10 @@ class WorkflowValidator:
                         text, STEWARD_LEDGER_ADAPTER_CONTRACT
                     ):
                         self.errors.append(f"{relative}: {error}")
+                    for error in check_text_contract(
+                        text, STEWARD_PAIR_CONTRACT
+                    ):
+                        self.errors.append(f"{relative}: {error}")
                     if provider == ".agents":
                         for error in check_text_contract(
                             text, CODEX_CONTEXT_LEASE
@@ -933,6 +989,7 @@ class WorkflowValidator:
                     for contract in (
                         DISCUSSION_CONTRACT,
                         GUARANTEE_BOUNDARY_CONTRACT,
+                        DISCUSSION_PAIR_CONTRACT,
                     ):
                         for error in check_text_contract(text, contract):
                             self.errors.append(f"{relative}: {error}")
@@ -1234,7 +1291,27 @@ remaining correctness/ABI -> B-183 -> B-174/B-177/B-175.
 ### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]
 `B-176` 保持 queued；B-180 只保留 runner anchor-object cache。
 worktree 不超过 5，origin/main push gate 生效。
+paired-session 通过 main mutation lease 串行提交。
 crossing 使用 23622320128，后续恢复 12884901888。
+"""
+
+GOOD_PAIRED_WORKFLOW_FIXTURE = """
+## 0. Discussion–Steward 双 session 控制面
+唯一配对一个 Discussion session 与一个 Steward session；counterpart 缺失时使用
+durable fallback。Steward 只在高层变化时唤醒 Discussion，Discussion 采用休眠而非轮询。
+main mutation lease 保证任何时刻只有一个 session 可写；lease 期间另一方不得变更 main。
+"""
+
+GOOD_DISCUSSION_PAIR_FIXTURE = """
+Discussion 使用 paired Steward session，先发现并复用 counterpart；工具不可用走 durable fallback。
+写 main 前取得 main mutation lease，提交后发送 commit SHA。收到消息可被唤醒；
+无事时休眠/idle，不轮询实现状态。
+"""
+
+GOOD_STEWARD_PAIR_FIXTURE = """
+## Paired Discussion session
+Steward 复用 counterpart，通过 main mutation lease 串行写 main。
+Discussion 休眠/idle 时不轮询；高层变化用 compact packet 唤醒，并核对 verdict SHA。
 """
 
 
@@ -1343,6 +1420,9 @@ def run_self_tests() -> list[str]:
         (GOOD_CONVERGENCE_FIXTURE, REPOSITORY_CONVERGENCE_CONTRACT),
         (GOOD_CONVERGENCE_FIXTURE, B186_RESOURCE_CROSSING_CONTRACT),
         (GOOD_B186_BACKLOG_FIXTURE, B186_BACKLOG_CONTRACT),
+        (GOOD_PAIRED_WORKFLOW_FIXTURE, PAIRED_WORKFLOW_CONTRACT),
+        (GOOD_DISCUSSION_PAIR_FIXTURE, DISCUSSION_PAIR_CONTRACT),
+        (GOOD_STEWARD_PAIR_FIXTURE, STEWARD_PAIR_CONTRACT),
     ):
         fixture_errors = check_text_contract(fixture, contract)
         if fixture_errors:
@@ -1576,6 +1656,20 @@ def run_self_tests() -> list[str]:
         )
     )
 
+    bad_paired_lease = GOOD_PAIRED_WORKFLOW_FIXTURE.replace(
+        "main mutation lease 保证任何时刻只有一个 session 可写；lease 期间另一方不得变更 main。",
+        "Discussion 与 Steward 可同时写 main，并持续轮询彼此。",
+    )
+    failures.extend(
+        deterministic_failure(
+            "paired-session main lease fixture",
+            lambda: check_text_contract(
+                bad_paired_lease, PAIRED_WORKFLOW_CONTRACT
+            ),
+            "Discussion-Steward paired-session control plane",
+        )
+    )
+
     bad_long_command_wait = GOOD_STEWARD_FIXTURE.replace(
         "长命令启动前形成单一的精确耗时点估计；首次计划等待时长必须等于该点估计，\n"
         "不得添加安全余量。预计 25 分钟就等待 25 分钟，不得给 40 分钟。\n"
@@ -1671,7 +1765,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(
             "workflow validator self-test passed: "
-            "23 legacy/broken fixtures rejected deterministically; "
+            "24 legacy/broken fixtures rejected deterministically; "
             "2 durable-ledger regressions passed"
         )
         return 0
@@ -1699,7 +1793,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{backlog_count} active backlog items, "
         f"{audit_count} active audit items, "
         "2 steward adapters, 4 Codex roles, "
-        "23 negative fixtures, 2 durable-ledger regressions"
+        "24 negative fixtures, 2 durable-ledger regressions"
     )
     return 0
 

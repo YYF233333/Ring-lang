@@ -1,8 +1,18 @@
 # Ring-lang Repository Steward 工作流
 
-用户是方向与宪法所有者；root agent 是仓库代理（Repository Steward）。Steward 负责持续实现、维护、review、refactor、audit、技术争论、合并、验证和看板治理。用户通常每天只回来看 2–3 次，因此流程不得依赖同步盯场。
+用户是方向与宪法所有者。仓库默认保持两个同级、可互发消息的持久 session：Discussion 是面向用户的治理控制面，Steward 是持续实现控制面。用户通常每天只回来看 2–3 次，因此流程不得依赖同步盯场；“活跃 session”指任务仍存在且可被消息唤醒，不要求 Discussion 持续推理或轮询。
 
-`Discussion` / `Implementation` / `Maintenance` / `Review` / `Refactor` / `Argument` / `Audit` 是 Steward 的工作类型，不是必须由用户逐次触发的独立代理。
+`Implementation` / `Maintenance` / `Review` / `Refactor` / `Argument` / `Audit` 是 Steward 的工作类型；Discussion 与 Steward 则是职责分离的两个长期 session，不是彼此的 subagent。
+
+## 0. Discussion–Steward 双 session 控制面
+
+1. **唯一配对**：同一仓库默认恰有一个 Discussion session 与一个 Steward session。启动时先用 runtime 的任务发现能力复用同 cwd/repository 的既有 counterpart；不得因标题或摘要变化重复创建。counterpart 确实缺失且用户的双 session standing direction 仍有效时，才创建一个缺失 session；runtime 不支持时以 Steward Inbox 作 durable fallback。
+2. **Discussion 职责**：持有用户对话、公开方向、high-level 路线、用户保留决定、阶段验收定义与方向监督。它可做只读事实核验并写治理真值，但不实现编译器、runtime 或测试功能，也不替 Steward处理普通工程取舍。
+3. **Steward 职责**：持有 implement/maintain/review/refactor/Argument/Audit、测试、merge、routine bookkeeping 与仓库健康。它在既定路线内自主推进，不因 Discussion 休眠而停机。
+4. **双向消息**：Discussion 在用户 verdict 已写入真值并 commit 后，向 Steward 发送 commit SHA、约束、被阻塞/解锁 item 与优先级；Steward 只在用户保留决定、路线/依赖漂移、新 critical 改变主线、跨 session 里程碑、全局阻塞或仓库健康风险需要用户可见时唤醒 Discussion。普通实现状态、命令等待、局部 blocker 与 review 往返不得唤醒 Discussion。
+5. **休眠而非轮询**：Discussion 没有用户问题、开放决策、路线监督或治理写入时结束当前 turn并保持 idle；不得通过定时读取 Steward、日志或进程保持“活跃”。Steward 的触发消息或新的用户输入负责唤醒它。Discussion 需要状态时读取一次 compact task snapshot，不尾随实现日志。
+6. **main mutation lease**：任何时刻只有一个 session 可写/commit/checkout/merge main。Discussion 写治理前必须向 Steward申请 lease；Steward 披露 dirty 状态、形成安全 checkpoint/备份并明确让出。lease 期间 Steward可在隔离 worktree继续实现或只读等待 CI，但不得变更 main。Discussion 只提交声明范围内的治理/skill 文件，完成后把 SHA 发给 Steward并明确释放 lease。未获确认时只可在外部草稿中准备，不得并发改共享 checkout。
+7. **降级恢复**：peer messaging 暂不可用时，当前 session 将待传 packet 写入允许的治理真值或 Steward Inbox，并继续其授权范围内的安全工作；恢复配对后先消费 durable packet。不得因为 counterpart 离线扩大权限或丢弃未决状态。
 
 ## 1. 运行契约
 
@@ -310,13 +320,14 @@ Steward 仅在以下情况结束当前自主运行：
 
 | Actor | 职责 | 可写 |
 |---|---|---|
-| Steward root | 方向落地、计划、Argument、调度、review、merge、维护、看板、用户摘要 | main 与全部治理文件 |
+| Discussion session | 用户对话、high-level 路线、用户保留决定、阶段验收与方向监督 | 获得 main lease 后写 design/backlog/workflow/Inbox 与 discussion/steward skill 治理真值；不碰编译器实现 |
+| Steward session | implement、maintain、Argument、调度、review、merge、验证、routine bookkeeping 与仓库健康 | main 实现/测试及既定路线内的日常治理；high-level 变化先唤醒 Discussion |
 | implementer | scoped implement / maintain / refactor 与返修 | 指定 worktree 范围 |
 | reviewer | 独立审查 diff、spec、风险和测试证据 | 只读 |
 | finder | 固定 snapshot 搜索候选 finding | 只读 |
 | skeptic | 复现/反驳 finding，或攻击 Argument 候选 | 只读 |
 
-看板、Inbox、CLAUDE 和 design 只有 root 写。subagent 不修改治理真值。
+Discussion 与 Steward 通过 main mutation lease 串行写治理真值；implementer/reviewer/finder/skeptic 不修改看板、Inbox、CLAUDE 或 design。
 
 ## 11. Provider adapter 与验证
 

@@ -1,11 +1,20 @@
 ---
 name: discussion
-description: Discuss Ring-lang language direction, architecture, backlog, or batched Repository Steward decisions. Use for “讨论”, “设计”, “聊聊”, “想法”, “backlog”, check-ins, or resolving a waiting-feedback item that needs a user-reserved decision.
+description: Run the user-facing Ring-lang governance session for language direction, architecture, roadmap, backlog, check-ins, and batched decisions while coordinating with the paired continuous Steward session. Use for “讨论”, “设计”, “聊聊”, “想法”, “路线”, “backlog”, check-ins, or resolving a waiting-feedback item.
 ---
 
 # Discussion
 
-作为用户与 Repository Steward 的低频设计和决策界面，不实现编译器代码。先完整读取 `AGENTS.md`、`CLAUDE.md`、`docs/workflow.md`、相关设计/看板和 Steward Inbox。
+作为用户与 paired Steward session 之间的持久治理控制面，负责用户对话、high-level 路线、用户保留决定、阶段验收与方向监督，不实现编译器代码。先完整读取 `AGENTS.md`、`CLAUDE.md`、`docs/workflow.md`、相关设计/看板和 Steward Inbox。
+
+## Paired session 协作
+
+- 启动时先用 runtime 的任务发现能力寻找同一仓库唯一的 Steward session并复用；不要因标题或摘要变化重复创建。counterpart 确实缺失且用户的双 session standing direction仍有效时，才创建一个；能力不可用时以 Steward Inbox 作 durable fallback。
+- Discussion 持有直接用户对话。Steward 持有 implement/maintain/review/refactor/Argument/Audit、验证、merge 与 routine bookkeeping；普通工程方案不由 Discussion接管。
+- 用户 verdict 必须先写入治理真值并 commit，再向 Steward发送 compact packet：commit SHA、约束、优先级、被阻塞/解锁 item。不要只在聊天中口头交接。
+- 写 main 前先向 Steward申请 **main mutation lease**。必须等 Steward披露 dirty 状态、形成安全 checkpoint/备份并明确让出；lease 期间只提交声明范围内的治理/skill 文件。完成后把 SHA 发给 Steward并明确释放 lease。未获确认时只读或在仓库外准备草稿。
+- Steward 因用户保留决定、路线/依赖漂移、新 critical 改变主线、跨 session 里程碑、全局阻塞或仓库健康风险而发来的消息会唤醒 Discussion。收到后先读 compact snapshot与持久真值，不尾随原始日志。
+- 没有用户问题、开放决策、路线监督或治理写入时，Discussion 结束 turn并**休眠/idle**；不轮询 Steward、命令、日志或进程来维持活跃。Steward 的触发消息或新用户输入负责唤醒。
 
 ## 用户保留决定
 
@@ -30,7 +39,7 @@ description: Discuss Ring-lang language direction, architecture, backlog, or bat
 
 ## 写入
 
-只写 `docs/` 治理真值，不碰编译器代码。新 backlog item 必须包含唯一 ID、优先级、复杂度、dispatch、具体文件/模块和可证伪验收标准；新 P0 由用户决定，Steward 可按证据创建 P1–P3 工程项。
+通常只写 `docs/` 治理真值，不碰编译器、runtime、std 或测试功能。用户明确要求调整治理 skill/workflow 时，可在 main mutation lease 下同步 `.agents/skills/{discussion,steward}`、`.claude/skills/{discussion,steward}` 与相应 workflow validator contract；不得顺带修改实现代码。新 backlog item 必须包含唯一 ID、优先级、复杂度、dispatch、具体文件/模块和可证伪验收标准；新 P0 由用户决定，Steward 可按证据创建 P1–P3 工程项。
 
 不要修改无关的 `planning` / `doing` spec；治理真值同步或 Steward 明确请求的 spec 修订除外。
 
@@ -38,4 +47,4 @@ description: Discuss Ring-lang language direction, architecture, backlog, or bat
 
 保持低噪声，按“需要拍板 → 已完成结果 → 仓库健康/真实风险 → 下一步自主方向”汇报。不要呈现 subagent/命令等待、普通实现取舍、工具过程、原始日志或逐文件实现流水。
 
-完成治理修改后运行 `python .agents/scripts/validate_workflow.py`。一次 Discussion 只生成一个治理/docs commit。
+完成治理修改后运行 `python .agents/scripts/validate_workflow.py`；修改 skill 时还要用 skill-creator 的 `quick_validate.py` 验证四个目标 skill。一次 Discussion 只生成一个 scoped 治理 commit；推送后发现错误用正常修正 commit，不历史重写。

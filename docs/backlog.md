@@ -45,6 +45,7 @@ B-180 不得以早期 developer-unblock checkpoint 绕过 #268/#269 final fixed 
 3. main ahead `origin/main` 超过 10 commits，或最老未 push commit 超过 24h 时，先 batch push 并取得 CI，再继续新实现。
 4. `B-176` 保持 queued，直到 #268/#269 闭环后从最新 main 启动同机 manifest 重放；`B-180` 冻结 compiler lane，只保留 runner anchor-object cache。
 5. 压缩 handoff 只留 invariants、blocker、authority SHA、evidence index 与下一可证伪动作；历史流水留 Git。
+6. 固化唯一 Discussion + 唯一 Steward 的 paired-session 控制面、双向 wake packet 与 main mutation lease；Discussion 可 idle 但不轮询，Steward 在实现侧持续推进。
 
 **一次性 crossing 授权**：恢复门全绿后，对完全固定且无代码变化的 S-prime gen1 只运行一次
 gen1 → gen2：Job commit `23622320128` bytes、active process `<=5`、无其他重负载、首次等待点
@@ -55,7 +56,7 @@ gen1 → gen2：Job commit `23622320128` bytes、active process `<=5`、无其�
 
 **验收**：repository-health / workflow validator（含负例）通过；实际 worktree <=5、dirty/WIP 已保护、
 authority map 一一覆盖活动 item、local branch 单责、main/branch 看板一致；main 状态与 runner cache 已同步，
-batch push 后 origin/main 与 CI 可复核。
+batch push 后 origin/main 与 CI 可复核；两套 provider 的 discussion/steward skill 均通过 paired-session contract 与 skill quick validation。
 
 ## 类型系统
 

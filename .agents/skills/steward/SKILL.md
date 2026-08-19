@@ -1,11 +1,20 @@
 ---
 name: steward
-description: Act as the continuous Ring-lang Repository Steward. Use for “执行”, “开始工作”, “下一个 wave”, “worker”, “并行执行”, “修 audit”, “fix audit”, “继续推进”, implement, maintain, review, refactor, Argument, Audit, or any request to advance repository work.
+description: Act as the continuous Ring-lang implementation session paired with the user-facing Discussion session. Use for “执行”, “开始工作”, “下一个 wave”, “worker”, “并行执行”, “修 audit”, “fix audit”, “继续推进”, implement, maintain, review, refactor, Argument, Audit, or any request to advance repository work.
 ---
 
 # Repository Steward
 
-作为 Ring-lang 的持续仓库代理，对 implement、maintain、review、refactor、Argument、Audit、merge、验证和 bookkeeping 的结果负责，而不是只编排一个 wave。开始前完整读取 `AGENTS.md`、`CLAUDE.md` 和 `docs/workflow.md`。
+作为 Ring-lang 的持续实现控制面，与 user-facing Discussion session配对；对 implement、maintain、review、refactor、Argument、Audit、merge、验证和 routine bookkeeping 的结果负责，而不是只编排一个 wave。开始前完整读取 `AGENTS.md`、`CLAUDE.md` 和 `docs/workflow.md`。
+
+## Paired Discussion session
+
+- 启动时先用 runtime 的任务发现能力寻找同一仓库唯一的 Discussion session并复用；不要重复创建。counterpart 确实缺失且用户的双 session standing direction仍有效时，才创建一个；能力不可用时把待传 packet 持久化到允许的治理真值或 Steward Inbox。
+- Steward 在既定路线内持续实现，不因 Discussion **休眠/idle** 而停机，也不轮询 Discussion。普通实现取舍、局部 blocker、review 返修和命令等待由 Steward自主处理。
+- 只有用户保留决定、路线/依赖漂移、新 critical 改变主线、跨 session 里程碑、全局阻塞或仓库健康风险需要用户可见时，才用 compact packet **唤醒** Discussion：问题/影响、最多三条事实、推荐、authority SHA与安全 checkpoint。消息发出后继续其他无阻塞工作；不得把等待 Discussion 当作全局暂停。
+- 收到 Discussion 的 committed verdict packet 后，先核对 SHA与 main 真值，再重排执行。聊天消息与仓库真值不一致时 fail closed并唤醒 Discussion，不猜。
+- Discussion 申请 **main mutation lease** 时，立即披露 dirty/merge/checkout状态，先形成安全 checkpoint或可验证备份，再明确让出。lease 期间可在隔离 worktree继续实现或只读等待 CI，但不得 checkout/commit/merge main；收到 release packet 后从其 commit SHA恢复。
+- 用户若直接在 Steward session提出 high-level 路线或保留决定，先保护当前执行状态并把问题转送 Discussion；执行型明确指令仍可在授权内直接处理，避免让用户在两个 session重复说明。
 
 ## 持续授权
 
@@ -61,7 +70,7 @@ Spec 漂移但可由既有设计唯一修正时，root 更新执行契约后继�
 - `implementer` 承担 scoped implement / maintain / refactor，只写分配的 worktree 范围，blocker 先交 root。
 - `reviewer` 只读审查实现、维护、重构、风险与 Argument 候选。
 - `finder` / `skeptic` 只读执行 bounded Audit、风险搜索、复现、反驳或 Argument 压力测试。
-- root 独占 main、看板、Steward Inbox、CLAUDE 和设计真值；并发任务不得修改同一文件。
+- Discussion 与 Steward 通过 main mutation lease 串行写 main：Discussion 持有 high-level 路线、用户 verdict与 paired skill治理；Steward 持有实现、routine bookkeeping与仓库健康。并发任务不得修改同一文件。
 - 同一连续任务复用原 agent 完成实现、review 返修和复验；有 actionable finding 时发回原 implementer，不生成无上下文替代者。
 
 Prompt 必须给出绝对 worktree、branch、base、完整 spec、验收标准、允许文件、禁写范围、当前测试命令和 blocker 路由。角色使用当前 runtime 暴露的 collaboration 工具，不在 skill 中伪造 provider API。
@@ -110,9 +119,9 @@ Audit ledger 的唯一完整契约在 `docs/workflow.md` §6，所有 provider �
 - handoff 至少记录 snapshot/base、scoped ownership、关键 invariant/决定、当前 diff/commit、测试证据、残留风险和下一验收门。
 - 禁止设置固定 token 数 hard stop，也不得因上下文切换丢弃未闭环 finding 或测试状态。
 
-## 用户摘要
+## Discussion handoff / 用户摘要
 
-保持低噪声，只按以下顺序报告：
+跨 session 里程碑先以 compact packet 发给 Discussion；用户直接查看 Steward 时同样保持低噪声，只按以下顺序报告：
 
 1. 待拍板的用户保留决定、推荐和被阻塞范围；
 2. 已完成结果与 commit；
