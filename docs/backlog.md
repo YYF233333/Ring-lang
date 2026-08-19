@@ -15,17 +15,47 @@
 
 **近期 break 审核门**：任何修改公开语法、签名、ABI 或可观察语义的 item，在实现前必须标成“已拍板 clean break”“等待 decision dossier”或“仅内部、非 breaking”之一。已拍板的 #268/#269 ownership 真值与 B-167 调用点 evidence 采用一次性切换；旧 ownership 猜测/传播路径和创建处 evidence ABI 必须在各自原子变更中删除，不形成双轨。B-168/B-169 的探针结论，以及 B-152、B-156、B-171、B-133 和 `io` effect 拆分等潜在用户面变化，在进入实现前显式核对 break 边界；需要新的公开语义决定时仍提交 dossier。每个已拍板 break 的验收都必须列出被删除的旧路径、同步迁移的仓内消费者/规范/测试，并在旧形式仍可表达时用负例证明它不会经 alias、fallback 或旧 ABI 继续生效。
 
-处理顺序按五道门组织：
+Canonical dependency chain：`B-186 -> #268/#269 -> B-176/B-180 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175`。
 
-1. **Critical 正确性底线**：先修当前 critical audit #268、#269；执行中出现的新 critical 同样插在性能工作之前。不得为缩短门禁接受错误程序崩溃、静默资源泄漏或降低既有保证。
-2. **工具链反馈吞吐 P0**：2026-08-03 用户明确将“critical 清零后的第一优先级”改为 check/验证速度。B-176 可在 critical 修复期间提前采集不改变行为的基线；critical 清零后立即执行 B-176 → B-180，先压低 `compiler/main.ring check`、RC/self-verify 与本地完整门的 wall time，再启动其余非 critical 语言/发布工作。性能专项不得通过删测试、扩大 skip、自动重试原始失败或只跑快子集伪造收益。
-3. **其余正确性与语义/ABI 冻结**：随后处理会导致 silent wrong-code、heap corruption、RC/ABI 失真的 B-162、B-164、#263、#264、#239、#244、#267 与 #257；再走 B-168 → B-169 → B-167 → B-152 → B-002 的 release critical path。B-165 消费 B-168 结论，B-156 与 B-133 在候选发布前收口 unsafe/字符串公开边界。
-4. **发布产品面**：B-174 → B-177 → B-175，让可 `run/build/check/doctor` 的 Windows/Linux candidate 同时携带版本匹配的 agent skill、primer 与 semantic inspection contract。candidate 后 B-111 与 B-181 分别建立 agent 总成本和生成程序 runtime/内存/尺寸证据；二者无硬依赖，默认同为 formatter/LSP 之前的证据 lane，随后再走 B-178 → B-016。
-5. **发布后能力**：先做 P1 correctness/ownership 与用户高频能力（B-110、B-172、B-173、B-149 等），再由 B-111 数据决定 refinement/async 的投入顺序。B-001/B-116→B-007 均在 RIIR/ABI 稳定后启动；GADT、dyn Trait、HKT/GAT、JIT、Debugger 等 P3 工作继续后置。
+处理顺序固定为六道门：
 
-性能仍让位于 critical correctness，但现在明确越过其余非 critical 队列：B-176/B-180 先解决开发反馈回路；B-181 再决定 #262/B-079 等生成程序优化。B-105 只有在 B-180 证明 unchanged-module 重复工作仍是主导成本时启动，B-041 不进入 preview 路线。
+1. **B-186 Repository convergence recovery**：先收敛 worktree/ref/WIP、指定每个活动 item 的唯一 authority、同步 main/branch 看板、恢复 repository-health gate，并在 push threshold 触发时先取得远端 CI。
+2. **#268/#269 信任闭环**：ownership/RC/S-prime fixed point 与原完整门真正关闭前，不再启动 compiler optimization。一次性 22 GiB crossing 只按 B-186 的精确授权执行；失败即永久停止资源加码并走 latest-main 分 checkpoint 重放。
+3. **B-176/B-180 反馈速度**：在 post-ownership 最新 main 重做 baseline；runner 与 compiler 分 checkpoint，但原 2x 量化验收不变。compiler 只允许一个 profile-guided wave。
+4. **Remaining correctness / ABI freeze**：处理 B-162、B-164、#263、#264、#239、#244、#267、#257，再走 B-168 → B-169 → B-167 → B-152 → B-002，并完成 unsafe/Str 等 candidate gate。
+5. **B-183 repository identity / GitHub workflow**：放在 technical ABI/ownership/failure fixed point 之后、产品化之前；不再晚于 B-174 才处理。
+6. **Preview candidate**：B-174 → B-177 → B-175；随后 B-181、B-178/B-016、B-111 等证据与工具面按依赖推进。发布后能力继续按既有优先级。
+
+B-180 不得以早期 developer-unblock checkpoint 绕过 #268/#269 final fixed point；其已证明的 runner anchor-object cache 可保留，所有 compiler candidates 冻结。B-176 只有在最新 main 可重放完整 baseline 后才算完成。
 
 ---
+
+## 治理恢复
+
+### B-186 Repository convergence recovery [infra] [P0] [M] [judgment] [doing]
+
+一次性恢复 Repository Steward 的收敛能力，完成后删除本项。authority checkpoint 为
+`codex/b180-feedback-loop-continuation@b75d2c881908c95bef180f0e7fa802e745a20713`；
+当前保护包为 `Ring-lang-convergence-backup-b75d2c88`。
+
+**硬约束**：
+
+1. worktree 默认含 main 不超过 5；bulk cleanup 前必须有经验证的全 refs bundle 与 WIP/ignored archive，删除目标逐项核验且可恢复。
+2. 每个活动 item 恰好映射到一个 authority；branch 单责，不允许跨 item 污染。main 与 authority branch 的活动 heading/status 不得漂移。
+3. main ahead `origin/main` 超过 10 commits，或最老未 push commit 超过 24h 时，先 batch push 并取得 CI，再继续新实现。
+4. `B-176` 保持 queued，直到 #268/#269 闭环后从最新 main 启动同机 manifest 重放；`B-180` 冻结 compiler lane，只保留 runner anchor-object cache。
+5. 压缩 handoff 只留 invariants、blocker、authority SHA、evidence index 与下一可证伪动作；历史流水留 Git。
+
+**一次性 crossing 授权**：恢复门全绿后，对完全固定且无代码变化的 S-prime gen1 只运行一次
+gen1 → gen2：Job commit `23622320128` bytes、active process `<=5`、无其他重负载、首次等待点
+精确 72 分钟、hard wall 90 分钟。若成功，gen2 → gen3/fixed point/完整 C/RC/ASan/self-host
+恢复 `12884901888` bytes；只有 gen2/gen3 C byte-identical 且原门全绿才关 `#268/#269`。
+若 22 GiB 触顶/超时/无产物，永久停止资源加码，不试 24/32 GiB、pagefile 或重跑；转 latest main
+独立重现/移植 S-prime 并先完成自身 fixed point，再分 checkpoint 重放 A-prime。二者不可分时先新 Argument。
+
+**验收**：repository-health / workflow validator（含负例）通过；实际 worktree <=5、dirty/WIP 已保护、
+authority map 一一覆盖活动 item、local branch 单责、main/branch 看板一致；main 状态与 runner cache 已同步，
+batch push 后 origin/main 与 CI 可复核。
 
 ## 类型系统
 
@@ -442,37 +472,69 @@ G1 inline relative import、G2 single-file plan 按 staged NOTES 激活；Param.
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；完整 C/native、RC/verifier 与自举回归通过；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [doing] [before: B-180]
+### B-176 `check` / 验证反馈基线与 regression budget [infra] [P0] [M] [judgment] [queued] [after: #268+#269] [before: B-180]
 
-> **2026-08-03 用户重排**：critical 清零后立即优先提升工具链性能。当前快速分诊显示，O3+ThinLTO `ring.exe` 的 tiny/较大单文件 `check` 中位数约 0.10–0.11s、两层 module 约 0.18–0.19s；filtered e2e（含从 tracked `dist-c` 临时构建 compiler）为 6.46s。与此同时 runner 的正式集合含 332 个 root positive、238 个 golden、92 个 module project 等大量独立 case，主流程逐 suite、逐 case 串行启动 `ring.exe`/clang；`TIMEOUT_SELFCOMPILE` 已升至 1200s 并记录 clean build 约 18min。上述只作选路证据，正式基线必须由本项重测。
+此前 `95e12437` snapshot 的 directional measurements 与 replay index 不能在最新 main
+重放，且 Codex 管理的 ignored raw directory 已被宿主回收，因此不构成 B-176 完成证据。
+post-ownership 必须从最新 main、tracked anchor、runtime、toolchain 与固定 manifest 重新采集。
 
-当前测量完整性框架已合入；正在补齐 opt-in compiler phase timing，随后在 clean worktree 执行正式 cold/warm baseline、形成 top-3 构成与 B-180 逐项预算后收口。
+**范围**：tiny/大单文件/module/`compiler/main.ring` 普通 check、`--verify-rc`、失败诊断；
+tracked compiler construction、单个 focused case、e2e/golden/RC/structural/self-compile 与完整门。
+记录 wall/CPU、peak RSS、进程数、case 数、cold/warm cache 和完整工具链指纹；短 lane >=5 次，
+预计 >=5min 的长 lane >=3 次，保留全部样本/invalid，不挑最好值。
 
-本项只回答“开发反馈时间花在哪里”，不等待也不混入生成程序 runtime benchmark。critical 修复期间可以提前准备采样/只读 instrumentation；任何会改变 compiler/runner 行为的优化由 B-180 在 critical 清零后实施。
+**验收**：在 clean 最新 main 形成可重放 baseline、top-3 wall-time 构成与 B-180 预算，明确区分
+compiler 内部、每进程初始化/重复 parse-check、runner/clang 调度。默认测量关闭时近零开销；
+一个 bounded wave 收口，不扩为通用 telemetry。
 
-**测量面 / 文件**：新增 `bench/check/`（或 planning 时核定的等价单一入口）、机器可读 manifest/result schema 与 `docs/performance-baseline.md`；检查 `tests/run_tests.py`、`compiler/scripts/build_native.ps1`，并在 `compiler/cli.ring`、`compiler/compiler_mod.ring`、checker/infer/Perceus/verify_rc 边界提供 opt-in phase timing。默认 CLI 输出与产物不得变化。
+### B-180 开发反馈回路吞吐专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176+#268+#269] [before: B-183]
 
-1. direct feedback：tiny、代表性大单文件、两层/宽 module project、`compiler/main.ring` 的普通 `check`、`--verify-rc` 与失败诊断；
-2. runner feedback：tracked compiler C compile/link、单个 filtered case、e2e/golden/RC/structural/self-compile 与完整本地门分别计时；拆分 `ring.exe`、clang compile、link、run 与 Python orchestration；
-3. 资源与调用：wall/CPU time、peak RSS、进程数、每类 case 数、cache cold/warm 与工具链指纹；不得把并行 wall-time 收益混报成 CPU-time 收益；
-4. 短 lane 至少 5 次，预计 ≥5min 的长 lane 至少 3 次；保留全部原始样本，报告 median、离散度和 invalid 原因，不挑最好值。
+**进入门（2026-08-19 用户重置）**：#268/#269 fixed point 与 B-176 最新-main baseline 必须先完成。此前 developer-unblock checkpoint 只保留为历史证据，不再授权 compiler lane 与 ownership critical 并行。
 
-**验收**：形成可在 clean worktree 重放的 baseline、top-3 wall-time 构成与 B-180 的逐项收益预算；至少区分“compiler 内部算法”“每进程初始化/重复 parse-check”“runner/clang 调度”三类成本。测量入口自身开销可量化且关闭时近零；本项以一个 bounded measurement wave 收口，不扩张成通用 telemetry 框架。
-
-### B-180 `check` / runner 吞吐 2× 专项 [refactor] [P0] [XL] [judgment] [queued] [after: B-176] [before: B-183]
-
-**进入门**：#268、#269 已关闭；执行期间新增的 critical 也必须先关闭。进入后本项是唯一排在其余非 critical correctness、ABI、release feature 之前的主线 P0。
+**冻结边界**：只保留已证明 fail-closed 的 runner anchor-object cache；其他 compiler candidates 全部 rejected/frozen。post-ownership 从最新 main 重新建立 B-176 baseline 后，runner 与 compiler 分 checkpoint，compiler 只允许一个 profile-guided wave。不得恢复历史 probe tree、拼接 rejected candidates 或用缓存掩盖 nondeterminism/panic/false-green。
 
 **实现范围 / 顺序**：
 
-1. `tests/run_tests.py` 与 `compiler/scripts/`：compiler artifact 使用由 `dist-c`/runtime/flags/toolchain 全指纹控制的内容寻址缓存，但每轮仍在隔离目录执行，禁止信任裸 root `ring.exe`；增加有界 `--jobs`、per-case 独立 out-dir、确定性汇总与 fail-fast 可选显示，原始失败永不自动重试或吞掉；
-2. `compiler/cli.ring`、`compiler/compiler_mod.ring` 与 B-176 排名前列的 checker/infer/Perceus/verify_rc 模块：先用 phase profile 修 top hotspot，再做 memoization、减少重复 canonicalization/clone/sort 或更正数据结构；不得凭猜测横扫编译器；
+1. 先按 B-176 的真实端到端等待选择第一刀；若 compiler construction、runner/clang 调度占主导，再改 `tests/run_tests.py` 与 `compiler/scripts/`：compiler artifact 使用由 `dist-c`/runtime/flags/toolchain 全指纹控制的内容寻址缓存，但每轮仍在隔离目录执行，禁止信任裸 root `ring.exe`；增加有界 `--jobs`、per-case 独立 out-dir、确定性汇总与 fail-fast 可选显示，原始失败永不自动重试或吞掉；
+2. compiler lane 只允许一次由最新 main profile 直接支持的 bounded wave；预先固定假设、文件边界、正确性门、端到端淘汰门与停止条件，未达到原 2x 总目标不得用多轮 speculative knives 补足；
 3. 若进程启动/重复初始化主导，比较 bounded worker-process/batch-check 与普通进程池；任何复用方案必须以随机 case 顺序、重复运行和进程隔离对照证明无 global state 泄漏。daemon、常驻服务和新公共协议不作为首轮默认；
 4. 只有 profile 证明 unchanged module 的重复 parse/check 仍主导，才重写并激活 B-105，把 HIR/module cache 纳入其 per-module 增量范围；cache key 必须覆盖 compiler/std/source/import/effect-signature 指纹并 fail closed。
 
-**量化验收**：以 B-176 同机同 manifest 为基线，`compiler/main.ring check` median 与完整本地标准门 wall time 都降至基线的 **≤50%**；`check --verify-rc compiler/main.ring` 同样以 ≤50% 为目标，本项不得以只有 10–20% 改善宣告完成。tiny/大单文件/module check 的 p95 不得回退 >10%；串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，完整覆盖数不减少。报告 cold/warm wall、CPU、peak aggregate/per-worker RSS；若为了 2× 需要 >25% peak aggregate RSS 增长，必须先给出内存上限、自适应 jobs 与低内存退化证据。完整 C/RC/ASan/self-host 门通过，任何原始失败都必须 fail loud。
+> **2026-08-14 第一项 retained candidate。** Windows runner 只缓存 controlled recipe 下 tracked `main.c` 的 ThinLTO anchor object；key 绑定 source snapshot、实际 header/macro closure、三段 recipe、target、sanitized environment 与 clang/clang++/lld 内容身份。每轮仍 fresh runtime compile/link 与隔离 run dir；dependency closure 前后各扫一次。artifact/receipt 采用 immutable CAS，同 key divergence 先转为有界 durable poison tombstone，畸形 receipt、大小谎报、hardlink/flush/closure 漂移均 fail loud。focused `bool_ops` e2e 在同一 12 GiB/5-process 门下 fresh miss 与 warm hit 均 1 pass/0 fail，warm whole loop 约 3.2 s；原始 trace 见 replay index。该结果只关闭 runner construction 第一刀，不代表 B-180 或 release acceptance 完成。
 
-### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-180] [before: B-168+B-174]
+> **2026-08-14 第二项 profile-guided checkpoint，尚未合入。** Samply 将 `compiler/types.ring` 的主要等待定位到 callable-summary fixed point；一个有界 generated-C probe 表明，只有在 const owner transaction 与 exact alias rebind 均完成、blocked/pending/default-seed authority 全空，且 source annotation、literal 与 rebound scheme 三方同为相同的 `Int/Float/Str/Bool` primitive 时，省略该 const 后的重复 callable retry 能显著缩短整条命令。Ring source 候选 `8931ad0dafb0c55b00f12b6e0b769831f0b80a11` 已通过独立 source/mutation review，并把新增 helper 从 4 个收敛到 2 个；alias、nonliteral、inferred/callable/nominal const 与任何 pending/failed path 均保留旧 retry。但 exact A7 source check 在 300 s 超时，12 GiB/5-process、1500 s 的 bounded A7→A8 generation 也超时且未产出 C；随后 measurement-only C probe 作为 stage0 的独立 900 s attempt 同样无产物。后者显著降低 CPU/内存轨迹，但不是可信 bootstrap。原始失败见 replay index；不得据 generated-C probe 合入源码，也不得为漂亮结果自动重跑。下一步需要 materially different 的 bootstrap construction 或更深的 fixed-point 优化，不重复相同生成命令。
+
+> **2026-08-14 分段 profile 裁决。** 用户明确允许把慢命令只运行到一个有界前缀：先修复该前缀中已经由 profile 定位的瓶颈，再让后续瓶颈自然暴露；不要求一个候选先完成整条 `compiler/main.ring check` 才能继续，也不要求一次 profile 找出所有问题。每一刀仍须有原始样本、精确候选身份、资源上限、fail-loud 失败与独立正确性 authority；“后段仍超时”不否定已经从同一前段移除的真实热点。
+
+> **2026-08-14 exhaustiveness checkpoint，尚未合入。** 两个相互独立的 source 候选均已获独立 CLEAR：`2af820bc932acecda20d098fdc28fbef0fcb8a7e` 只在 discarded fn/impl precheck 中延后 E0601 exhaustiveness 诊断，并在 retained pass 原样重算；`b627b8becec292d52465287fce004c0275be481b` 在 Maranget pattern matrix 的 zero-column base 后加入等价的 irrefutable-row base，保留 malformed-row panic 路径与所有诊断/type/effect/ownership authority。measurement-only locator 表明原 `compiler/hir.ring:1886` 这一 28-arm match 从超过 100,000 次递归 matrix call 降至 28 次，随后编译继续推进到更多查询；这只证明前段热点消除，尚不是 bootstrap/合入验收。
+
+> **2026-08-14 下一热点，暂停点。** 对上述 matrix locator 的 60 s capped Xperf 前缀显示：旧 `check_matrix` 已退出顶部；约 90% sampled stacks 位于 `precheck_callable_summaries_to_fixed_point`，其中约 67% 沿 `lower_protocol_for_in → unify → unification_pair_reaches_callable → type_may_hide_callable → type_reaches_callable_through_nominals`。下一刀因此是 discarded callable precheck 中反复进行的 nominal-to-callable reachability traversal/分配，不是继续修改 pattern matrix。用户要求定位后暂停；恢复前不得实现或启动新 profile。原始 ETL 与 Job receipt 见 replay index。
+
+> **2026-08-18 callable reachability 第一轮裁决，已淘汰。** Argument 排除了跨 selector、precheck round 或 speculative→retained 边界的持久缓存：当前 nominal registry 与 mutable substitution 没有足以防止 overlay/rollback ABA 的 generation authority。隔离源码候选 `d5ffad63e72ade9b94b19d29a4d870448acb6081` 以 complete nominal walk 替代 pair-sensitive 重放；两个 ownership E0301 锚点与短 `types.ring` 检查通过，但同一 120 s `compiler/main.ring` 前缀只完成 196 个 locator query，低于旧 target 的 501，peak job commit / sampled tree RSS 也从约 8.39/8.08 GiB 增至 11.41/10.99 GiB。只删除 pair recursion 的 mutation 虽仍到 501，却把递归泛型反例从 callable ownership contract mismatch 推迟成 rebind error，不能保留。该候选不合入、不做 bootstrap，也不重复旧 ETW；raw receipts 与精确 executable/source hash 见 replay index。下一刀只能在保持现有 selector decision set、pair recursion 和原始失败的前提下消除 traversal/apply-subst 重复，并继续用同口径有界前缀决定去留。
+
+> **2026-08-18 hidden-only traversal 裁决，已淘汰。** 隔离候选 `15895ab7797d797d4aa658072150499f135081b8` 保留原 pair recursion、Struct/Enum actual 与 active-set 决策，只把一次 nominal walk 内 descendant 的重复 surface scan 收敛为 materialized member 边界的一次 `surface || hidden`。独立 review、source/mutation authority、旧 target source check、两个 ownership E0301 锚点与约 2.29 s 的 `types.ring` 均通过；但同一 120 s 主前缀仍精确停在 501 queries，peak job commit / sampled tree RSS 为 10.68/10.29 GiB，高于旧 8.39/8.08 GiB。该候选同样不合入、不做 bootstrap。证据表明单次 walker 内 surface replay 不是足以推动 whole loop 的成本；下一审计限定为 detector-local nominal binder substitution，优先判断能否在不跨调用缓存、不改变 pair/actual authority的前提下避免临时 Map 与 `apply_subst_map` 整树物化，否则放弃此方向。
+
+> **2026-08-18 nominal binder substitution 裁决，已淘汰。** 四个 detector-local `apply_subst_map` 站点的 measurement-only 分布探针在第 501 个 query 累计观测到：Struct hidden 34,764,600 次，其中 23,162,798 次可直接使用 raw member；Enum hidden 15,215,813 次全部可安全直接使用 root-binder actual；两个 Struct↔Record pair 站点均为 0。按该 authority 实现且独立 review CLEAR 的 Struct+Enum 候选 `6bd4bd95abfc2a9204362306f6d31a961bbbb393` 与更窄的 Enum-only 候选 `e018b12f44f2728de70df6fb75f1cff73a07b7f1` 均保留原 pair recursion、visited/failure 路径，并通过两个 E0301 锚点与 `compiler/types.ring` 短门。真实同拓扑 120 s 前缀中，两者仍都精确停在 501 queries；前者 sampled tree RSS / peak job commit 为 5,638,926,336 / 5,837,950,976 bytes，后者为 5,550,366,720 / 5,746,233,344 bytes，虽明显消除了资源放大，却没有推动可见 whole-loop 进度，因此均不合入、不 bootstrap、不重跑。下一步先在 query 501 正常返回后到下一 `check_exhaustive` 入口之间加入低频 phase-boundary locator；只有该 locator 仍把超时锁在 callable nominal detector，才允许做单 selector 安全 scope 内的 exact-root 重放探针，SCC summary 暂不启动。
+
+> **2026-08-18 post-query-501 coarse locator。** 纯插入、独立 review CLEAR 的 generated-C locator 在 query 501 之前只维护 allocation-free parent latches，之后以 4096-event budget 记录 caller/fixed-point/round/SCC/function/impl 边界。真实 120 s receipt 到达并正常返回 query 501 的 catch callsite，随后进入新的 fixed point；共 224 个 phase events、无 budget exhaustion，前 223 个全部成对闭合，唯一未闭合边界是 `perceus$$_ownership_metadata_with_role_maps` 的 function precheck。该函数源码只有 `compiler/perceus.ring:424` 一个 `for ... in callable_by_def_id.keys()`。下一且仅下一 locator 因此限定为这个 active function 下的 `lower_protocol_for_in` caller 与三个直接 `unify_at_noted` step；不得在第一轮结论外扩到全局 unify/walker，也不得据 coarse function boundary 直接实现 memo/SCC。
+
+> **2026-08-18 targeted for-in locator，callable 下钻终止。** 第二层 generated-C locator 只按完整 43-byte function identity 命中上述 function，并只包围其唯一 generic for-in caller 与 `lower_protocol_for_in` 内三个直接 `unify_at_noted` step；pre-query latches、sticky-invalid 和全部 begin/end/fail counter 均不受 trace gate 控制，原 call/RC/catch/control 序列经独立 review 保持不变。唯一 120 s receipt 到达 query 501，未出现 budget exhaustion、nesting invalid 或普通 Fail；target for-in、三个 outer-unify step、target function 与其 SCC 全部正常闭合，随后又正常闭合九个 function precheck，最终仅在同轮后续 `perceus$$_rc_stmt` 入口耗尽边界。coarse run 的 unmatched function 因而只是当次进度边界，不是 callable nominal traversal 或该 for-in 的热点证明。按 Argument 停止门，不再追逐新的末行、不开第三层 locator、不做 exact-root memo 或 nominal SCC summary；下一单元改为只读审计 callable-summary fixed point 为何整轮重放 function/impl SCC，以及能否以依赖/dirty authority 缩小真实 replay 工作集。
+
+> **2026-08-18 fixed-point replay 计数裁决。** 独立 review CLEAR 的 measurement-only C 镜像保持原 fingerprint equality、SCC/function/impl 调用、RC 与失败流不变，只在 query 1/28/100/250/501 输出 allocation-free 累计计数；SCC/function/impl 均有 normal-return 守恒，query 501 的 `invalid` 与全部 active/inflight latch 为零。真实 120 s 前缀中，14 个 initial invocation 共运行 27 轮，其中 13 轮发生 fingerprint change；相反，观测到的 101 个 post-const invocation 全部在 round 0 立即稳定、没有一轮 change，却累计重放 1,944 个 function SCC、2,043 个 function node 与 7 个 impl site，且所有 function/impl Bool 均为 true。该 target 沿用旧 probe topology，故有意排除了 `compiler/types.ring` 前 42 次 post-const retry；101 次结论不得外推为所有 const shape。seed clear/store 与 pending insert 均为 0；8,489 个 pending remove 只是原 `Set.remove` 调用次数，不能解释为集合真实 transition。该证据反驳立即建设依赖 worklist/SCC local convergence，并把下一刀限定为 behavior-preserving post-const exact-preflight shadow：先让原 FP 始终执行，证明 candidate token 覆盖 last-stable→owner-before→after→FP-return 的 const、forward/reverse alias、default/impl、pending/seed真实 transition、rollback、diagnostic/Fail/fresh-state authority；现有 callable fingerprint 或 owner before/after token 单独都不足以启用 skip。只有 shadow 中每个 would-skip 都对应稳定且零可观察 delta，才允许 source candidate；任何候选仍须以同口径 whole-loop 前进和相称 correctness/bootstrap 门决定去留。
+
+> **2026-08-18 post-const preflight shadow 裁决，invocation skip 路线终止。** 独立 review CLEAR 的全量-FP generated-C shadow 完整撤掉旧 50-const primitive guard，保留已审 matrix/defer locator topology，并让原 post-const fixed point 无条件执行。唯一 120 s receipt 到 query 501 时 `invalid=0`、event budget 未耗尽、143 个 ENTRY/END 全部闭合；143 次均为 `txn=true`、入口 global fingerprint 与上次 stable 相同、round 0 stable。六项 O(1) 状态筛选却只留下 13 次 clean：它们全部是 `compiler/builtin_methods.ring` 的 13 个顶层 `*_METHODS` 常量，而该 leaf module 没有 function/impl scheduler work，最多只可省 13 次 34,467-byte fingerprint（448,071 bytes output）。其余 130 次全部推进 fresh type/DefId，71 次还推进 callable ownership term/parent/solution 状态；按 session 的 delta 向量严格稳定为 59×`[9,2,0,0,0,0]`、7×`[138,58,19,19,7,0]`、50×`[1913,635,335,335,122,0]`、14×`[1536,741,407,407,21,0]`。这直接反驳 signature/transaction/round0 即可跳过；零长度 delta 也不能证明 UF/Map 内容、alias/default、ABA 或 path compression 不变。停止 transition/deep-owner shadow、dirty worklist 与 invocation cache，不实现收益极小的 empty-scheduler 特例；下一 Argument 只审计这 130 轮 fresh-ID/ownership rebuild 的真实 retention/rollback authority，并以 whole-loop 证据决定是否有可回收的 speculative churn。
+
+> **2026-08-18 fresh rebuild / snapshot 路线终止。** 对上述 130 轮的只读 authority 审计确认：四个无 default 参数的观测模块中，42,648 个 fresh DefId 随 discarded HIR 清理而不可达，但回卷 monotonic counter 既不回收对象也不省推理；成功 fn/impl precheck 则会发布可能含 fresh TypeVar/ownership term 的 scheme 或 EffectRow，并有意保留 ownership UF，故不能按 stable fingerprint、编号区间或 Map 长度整体 rollback/compact。default HIR capture 还是把 fresh DefId 保留到权威状态的直接通用反例。复用 2026-08-14 已固定的 Xperf ETL 做离线 stack 汇总（没有新采集）又把重复 snapshot 的收益上限限定在小量级：15,036 个总 samples 中 `infer_decl::map_clone` 209（约 1.39% inclusive）、`callable_summary_fingerprint` 186（约 1.24%）、`snapshot_const_owner_transaction` 94（约 0.63%）、`snapshot_default_authority_surface` 61（约 0.41%）；与 callable fixed-point 的 13,554 samples（约 90.14%）不在同一量级。停止 fresh-ID/UF 回收、summary/HIR 复用、mutation journal/COW 与重复 snapshot 去重，不再为该支线造新 probe。下一可执行单元回到已有真实前缀收益的隔离 irrefutable-matrix base `b627b8becec292d52465287fce004c0275be481b`：先重新锁定 source/mutation authority、独立反驳与最短 correctness 门，候选通过且仍保持原失败后才讨论集成；不得把 501-query measurement 直接当 bootstrap/合入验收。
+
+> **2026-08-18 narrow irrefutable-matrix 裁决，性能淘汰。** 从当前干净基线隔离得到的 `e757487802489deea42b4f05d2b4f9d17b66fd5c` 只把 Wildcard/Binding 视为直接 irrefutable，Or 与其余 Pattern 全部保留旧路；完整 raw helper body、全候选 identifier inventory 与 11 项定向 mutation 已获两份独立 CLEAR。content-bound targeted source/mutation gate 明确通过，两个 E0601 负例与三个非 primitive 正例也保持。固定 mirror/executable 的唯一 120 s 前缀把 `compiler/hir.ring:1886` 保持在 28 calls / 28 hits，501 个 query 全部正常闭合且没有 locator abort，因而局部 hotspot movement 成立；但它没有推进到 query 502 或下一可见 phase，sampled tree RSS / peak commit 反而为 10,715,787,264 / 11,132,325,888 bytes，显著高于旧同拓扑的 8,680,701,952 / 9,006,792,704 bytes。0.67 s timeout 差异不足以把内存差归因为源码回归，却同样不能提供 retain 所需的正向 whole-loop/resource 证据。该候选不合入、不 bootstrap、不重复 locator，也不得与 primitive/defer 拼接救结果；只保留 source-correct 与 28-call 原始证据。B-180 最后一项仍有独立 profile 假设的候选限定为从当前基线移植 `2af820bc932acecda20d098fdc28fbef0fcb8a7e` 的 defer-only 验收：retained pass 必须原样发布 E0601，discarded/speculative pass 只延后诊断计算，不改变 Or/matrix 语义。若 defer-only focused 行为失败、同口径前缀仍停在 501 且无绝对资源收益、或只能依赖已淘汰的混合 C，则终止 B-180 技术探索并记录无新增 retained compiler candidate。
+
+> **2026-08-18 defer-only 最终裁决，编译器候选技术探索终止。** 从当前基线隔离并经多轮独立 source authority 反驳收口的候选 `d8fe4ded621b832caadcfee920b721b54e68e3a6` 只在 discarded function / impl-effect precheck 中省略 speculative `check_exhaustive`，保留 retained E0601、类型解析、HIR/subst/effects 与 catch Fail cleanup。content-bound source/mutation 门和 A0/B0 retained-diagnostic/catch/recovery focused 门均一次通过。最终性能 authority 只使用无 locator 的纯 A0/B0：A0、B0 对同一 `compiler/main.ring` 都在 120 s 超时，没有 whole-loop 完成或独立 terminal 前进；A0 peak commit / sampled tree RSS 为 2,097,664,000 / 2,043,904,000 bytes，B0 反而为 6,926,209,024 / 6,690,410,496 bytes（约 3.30× / 3.27×）。因此候选不合入、不 bootstrap、不做 ETW、不重跑，也不与任何已淘汰候选组合。全部镜像、构建、focused 与最终原始 receipt 保存在 `bench/check/results/b180-exhaustive-precheck-defer-20260818/`。B-180 已无剩余独立支持的 compiler candidate；保留结果只有已合入的 runner anchor-object cache。技术探索关闭，完成认定继续受 #268/#269 critical 长尾与整体验收门阻塞，禁止为填补空档再开 speculative knife。
+
+> **2026-08-19 ownership-cleanup crossing 最终裁决。** 新的 direct fixture 把 Map/Option allocation 信号提升为通用 correctness 根因：`var Option = none` 后装入 owned payload 时缺 W4/exit cleanup。bounded safe-tail 候选与独立 verifier 已通过 source-built gen1 的 runtime 1/1、RC/mutation 8/8、structural 1/1 和 parity 1/1；但该 gen1 自身仍由旧 Perceus lowering 生成，完整 gen2 在 2371.12 s 触及固定 12 GiB/typeid 8。唯一额外 construction 只把临时 mirror 的 3016-line verifier替换为同 API、调用即 panic 的 30-line fail-closed stub，仍在 2347.24 s 触及同一资源墙。两条收据都无产物，证据见 `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/`。不得继续删模块、提高 cap、patch generated C/runtime/typeid、重跑旧 profile或按 `unify.ring` 热点写 workaround；candidate 保留 correctness evidence，但 B-180/self-host acceptance 仍 blocked，tracked bootstrap 不更新。任何后续 crossing 必须先有新的直接 peak authority 与独立 Argument，不能把同类 size-cut 猜测当成下一刀。
+
+**整体验收**：恢复原 2x 量化门，不降级。以 post-ownership B-176 同机同 manifest 为基线，`compiler/main.ring check` median、`check --verify-rc compiler/main.ring` 与完整本地标准门 wall time 均以基线的 `<=50%` 为目标；tiny/大单文件/module check p95 不得回退 >10%。runner/compiler checkpoint 可分别验收正确性，但只有合计达到 2x 且完整 C/RC/ASan/self-host/double-bootstrap 全绿才完成 B-180。串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，覆盖数不减少；任何原始失败必须 fail loud。
+
+### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-168+B-169+B-167+B-152+B-002+B-180] [before: B-174+B-177+B-175]
 
 > **2026-08-09 用户方向**：性能优化完成后、preview CLI 与 release 准备开始前迁移到 `vorton-lang`，并把用户—Steward 的异步协作切到 GitHub Issue / PR。D-004 只批准路线与顺序；进入本项时必须先展开执行规范和外部变更清单，再由用户批准 transfer、凭据/App、组织权限与批量导入等具体动作。
 
@@ -618,29 +680,29 @@ handle {
 
 **验收**：从任意目录对 hello、带参数 CLI、两层 module project 执行 check/build/run；路径含空格与非 ASCII；失败覆盖无 clang、坏源码、坏 link、缺 runtime；生成 exe 与直接 object+runtime 手工链接行为一致；完整 C/RC/self-compile/fixed-point 门通过。
 
-### B-175 可复现发布包与 Windows/Linux CI 矩阵 [infra] [P0] [L] [judgment] [queued] [after: B-174+B-177]
+### B-175 可复现发布包与 Windows/Linux CI 矩阵 [infra] [P0] [L] [judgment] [queued] [after: B-174]
 
 本项产出 **release candidate artifact**，不授权公开 release。首轮支持门为 Windows x64 + Linux x64；macOS 先做可重放 smoke/evidence，未通过同等门前不宣传支持。产品 compiler 仍使用 clang；Linux 额外用 gcc 编译生成 C 作为去相关信道。
 
 **范围 / 文件**：`.github/workflows/`、`compiler/scripts/`、release manifest/NOTICE、安装与卸载脚本、README/quickstart、artifact smoke tests。
 
-- D-002 已固定 `MIT OR Apache-2.0` 双许可与 `Yufeng Ying` holder；bundle 包含 compiler、版本匹配的 std/runtime 资产、agent skill/primer/public signatures/inspection schema、两份官方 license、SPDX expression、NOTICE/provenance、quickstart 与 checksum，不依赖源码仓库结构；
-- clean checkout 从 tracked `dist-c/main.c` 构建，clean unpack 能运行 `ring doctor`、hello、多文件 project 与 self-compile fixed point，并在干净 agent workspace 安装/复制 skill、读取 inspection contract；compiler/schema/skill 版本失配必须拒绝；
+- D-002 已固定 `MIT OR Apache-2.0` 双许可与 `Yufeng Ying` holder；bundle 包含 compiler、版本匹配的 std/runtime 资产、两份官方 license、SPDX expression、NOTICE/provenance、quickstart 与 checksum，不依赖源码仓库结构；
+- clean checkout 从 tracked `dist-c/main.c` 构建，clean unpack 能运行 `ring doctor`、hello、多文件 project 与 self-compile fixed point；
 - Windows/Linux 各跑 e2e/golden/RC/structural/parity/self-compile；Linux 同时验证 clang 与 gcc 的 C11 编译，平台差异限制在 runtime/driver 边界；
 - artifact 名、版本、target triple、toolchain requirements、SHA-256 与 provenance manifest 确定；同输入重建差异必须可解释；
 - 对 compiler/runtime/std/generated template 做 provenance inventory，贡献说明固定“提交即按同一双许可提供”；纯用户源码生成物不附加 Ring 许可，实际复制/链接的 runtime/std/template 仍由 manifest 明示相应 license/NOTICE。最终支持声明、tag 与 GitHub Release 仍属用户保留决定；完成许可 packaging 也不代用户发布。
 
 **发布阻断**：全部 critical finding 清零；当前排序列出的 silent wrong-code/heap/RC blockers 关闭；B-167/B-152/B-002/B-156/B-133 gate 完成；C-only 全量门和至少一轮 clean-clone CI 全绿；文档不得宣称 async/refinement/LSP 等未发货能力。
 
-### B-177 版本化 agent inspection contract + bundled skill/primer [feature] [P1] [L] [judgment] [queued] [after: B-174] [before: B-175+B-111]
+### B-177 版本化 agent inspection contract + bundled primer [feature] [P1] [L] [judgment] [queued] [after: B-174] [before: B-111]
 
-外部 agent-first 语言已把 query/check/test/run、稳定程序 identity 与版本匹配的语言 skills 作为 compiler 产品面；BAML 进一步把 skill、`describe`/`grep`、run/eval/trace 与 pinned toolchain 联成一个 agent loop。Ring 保持普通源码 + Git 为真值，不改成 graph-native 数据库；但必须让 agent 无需读完整实现即可取得可缓存、可校验的语义事实。
+外部 agent-first 语言已把 query/check/test/run、稳定程序 identity 与版本匹配的语言 skills 作为 compiler 产品面。Ring 保持普通源码 + Git 为真值，不改成 graph-native 数据库；但必须让 agent 无需读完整实现即可取得可缓存、可校验的语义事实。
 
-**用户面 / 文件**：在 CLI 增加 `ring inspect --format=json`（planning 时可在不制造第二套概念的前提下核定最终命名），并随 release bundle 提供版本匹配的 Ring primer、std public signatures 和 provider-neutral agent skill。Skill 须有确定的安装/复制入口，同时向人和 agent 提供可发现的语言/项目概览；输出至少包含 schema/compiler/source hash、module/import edge、public symbol stable identity、推断 type/effect/trait bound、capability/unsafe discharge 与诊断关联 span。
+**用户面 / 文件**：在 CLI 增加 `ring inspect --format=json`（planning 时可在不制造第二套概念的前提下核定最终命名），并随 release bundle 提供版本匹配的 Ring primer 与 std public signatures。输出至少包含 schema/compiler/source hash、module/import edge、public symbol stable identity、推断 type/effect/trait bound、capability/unsafe discharge 与诊断关联 span。
 
-**约束**：canonical ordering、schema version 与内容 hash 稳定；陈旧缓存/源码 hash 不匹配 fail closed；只暴露 checker/HIR 的权威事实，不在 CLI 重做解析/推断；v1 只读，不引入 compiler-managed patch/write 或第二份程序数据库。Skill 只能调用已记录的公开 CLI，必须声明 compiler/schema/skill identity，任一版本或 hash 失配均 fail closed。Primer/skill token 单独计量，必须由当前 compiler/spec 自动校验，不允许版本漂移。
+**约束**：canonical ordering、schema version 与内容 hash 稳定；陈旧缓存/源码 hash 不匹配 fail closed；只暴露 checker/HIR 的权威事实，不在 CLI 重做解析/推断；v1 只读，不引入 compiler-managed patch/write 或第二份程序数据库。Primer token 单独计量，必须由当前 compiler/spec 自动校验，不允许版本漂移。
 
-**验收**：单/多模块、re-export、泛型 trait/effect、unsafe 与错误程序的 JSON contract golden；相同输入字节稳定，语义变化改变 hash；primer + signatures + skill 在固定 token budget 内覆盖 B-111 任务所需核心；从 clean bundle 向临时 agent workspace 安装/复制 skill 并完成概览、符号查找与契约查询；旧 skill/schema/compiler 组合的负向测试必须拒绝；B-175 smoke 与 B-111 harness 实际消费 bundle 中的版本化产物而非手工副本。
+**验收**：单/多模块、re-export、泛型 trait/effect、unsafe 与错误程序的 JSON contract golden；相同输入字节稳定，语义变化改变 hash；primer + signatures 在固定 token budget 内覆盖 B-111 任务所需核心；B-111 harness 实际消费 bundle 中的版本化产物而非手工副本。
 
 ### B-178 `ring fmt` 与行为签名物化 [feature] [P1] [L] [judgment] [queued] [after: B-174]
 
@@ -679,16 +741,14 @@ source-map 支持 + 断点调试。
 4. **指标**：首次编译通过率 / 到绿轮数 / 隐藏测试运行时错误率 / 总 token（design.md §11.3 前四项）。
 5. 被测模型 Sonnet 级（平均 agentic 代表 + 便宜可多跑；顶级模型硬实力会掩盖语言差异）。放 `eval/`，手动触发，不进 CI（烧 token）。
 6. **行为契约子集**：任务集中预注册一组 signature-only/API-use 题；只提供模块签名，不提供实现，覆盖纯函数误用、`io`、`fail<E>`、`mut` 与资源生命周期。TS 题提供语义等价的 `.d.ts`/文档，不额外泄漏答案。该子集直接测量「签名信息密度」，不得事后挑题。
-7. **可复现协议**：锁定并记录模型名/版本、system prompt、temperature、上下文和输出预算、Ring/TS compiler commit/version、B-177 skill/schema/primer/signature hash、TS config、机器环境、每轮完整 prompt/diagnostic/semantic-query/patch、token 与 wall-clock。onboarding primer/skill token 单独报告，不得藏入免费上下文。
+7. **可复现协议**：锁定并记录模型名/版本、system prompt、temperature、上下文和输出预算、Ring/TS compiler commit/version、TS config、机器环境、每轮完整 prompt/diagnostic/patch、token 与 wall-clock。onboarding primer token 单独报告，不得藏入免费上下文。
 8. **分析纪律**：预先固定主指标、重试上限与失败分类；报告均值同时给出原始样本和离散程度。结果允许为 Ring 无优势或更差，禁止只发布胜例；版本/协议不一致的 run 标 invalid，不与正式结果合并。
-9. **Ring 工具面消融**：在至少 5 题的预注册行为契约子集上，使用同模型、同预算与同重复数，比较完整 B-177 bundle（skill + inspection + primer/signatures）与 primer/signatures-only。该消融只比较 Ring 产品面，不新增第三语言；其指标、题目和工具权限需预注册，结果与 Ring vs TS 主实验分开报告，不混池主指标。
 
 **验收标准**：
 - ≥15 题 × 2 语言 × 3 重复跑通，产出指标对比报告
 - Ring primer 成文且被 harness 实际使用
 - 失败案例归类（语法迁移 / 类型 / effect / std API），形成修缮清单回流 backlog
 - 至少 5 题属于预注册的行为契约子集；两语言输入信息量差异逐题可审计
-- 同一行为契约子集完成完整 B-177 bundle vs primer/signatures-only 消融，保留语义查询原始记录，允许 null/负向结果
 - 发布可重放 manifest 与逐轮原始记录；报告明确列出 null/负向结果、无效 run 和已知混杂因素
 
 ### B-182 证据携带补丁验收系统（低成本 agent 安全委派）[infra] [P1] [XL] [judgment] [queued] [after: B-111]
