@@ -127,6 +127,8 @@
 
 **A6-compatible seed prefix stop（2026-08-19）**：新 Argument 允许一个不合入的 seed：恢复 A6 的旧 scoped-block / exact-import 前端行为，同时保留 S′ Perceus/verifier。seed `098d8ea9` 经独立 review 后由 exact A6 一次生成成功（1385.47 s，peak Job commit 9,348,829,184 bytes），已精确 containment 两项旧行为并通过 S′ runtime 1/1、RC 8/8、structural 1/1、parity 1/1；但预注册的 2^32-allocation 对照门否决 full crossing。candidate final Map+Option exact live 4,890,080，仅比 control 4,922,195 低 0.652%，且 peak commit 2,313,269,248 仅低 1.126%；二者均未达到预先固定的 20% / 10% 改善门。因此未运行 seed→current1，禁止重试或把成功生成 seed 改写成 crossing progress。下一候选只允许先做 unity-source inline-module 等价小探针；未通过不得 full build。证据在 ignored `bench/check/results/ownership-option-cleanup-20260819/a6-seed-crossing/`。
 
+**Unity-source small-probe stop（2026-08-19）**：首版机械 wrapper 的 physical controls 全部通过，但四个 unity entry 均因 root `use` 位于 module declarations 后精确报 E0706，未到 codegen；原始证据在 bootstrap-probe commit `f75d107f` 的 ignored `tmp-unity-seed-probe/01`–`06`。独立反驳进一步证明不能把 root uses 简单 hoist：CLI 会据 `ast.uses.len()>0` 进入 project mode，resolver 又无条件建立 physical dependency BFS，从而失去 single-file crossing。仅 compiler-specific no-use synthetic main 获准一次修订探针，脚本 contract commit `58075b40` 与 11 项 Python tests 通过；但第一次运行在五分钟前人工停止、stdout/stderr 为空，唯一 superseding 295 s wrapper 又因含空格路径 quoting 错误实际检查截断的 `C:\Users\Yufeng`，从未打开 unity source。按 stop contract 不做第三次；该路线是 orchestration-inconclusive，不是 compiler PASS/FAIL，full unity/current generations 均未运行。再次进入须先做新的 authority-boundary Argument，不能静默修 wrapper 重试。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

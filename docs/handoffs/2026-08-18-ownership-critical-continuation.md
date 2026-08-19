@@ -455,6 +455,35 @@ First failures remain evidence and must not be rewritten as passes:
   is not authorized unless that probe is exact; failure returns to a new
   authority-boundary Argument, not to module deletion or resource guesswork.
 
+### Unity-source small-probe stop (2026-08-19 continuation)
+
+- Bootstrap-probe commits `f75d107f` and `58075b40` add only an experimental
+  bundler and 11 Python contract tests; no Ring source, runtime, tracked anchor,
+  or formal fixture changed.  The first construction wrapped physical modules
+  and appended the original entry.  All four physical controls passed, while
+  every unity source failed before codegen with exact E0706 because entry root
+  `use` declarations followed module declarations.  Those first failures remain
+  under ignored `tmp-unity-seed-probe/01` through `06`.
+- Independent Argument rejected merely hoisting those uses: any root use makes
+  `cli.ring` enter project mode, and resolver physical-dependency BFS then
+  reloads `cli.ring` or fails E0702, eliminating the single-file crossing.
+  Generic entry wrapping also adds avoidable public/DefId authority.  Only a
+  compiler-specific, no-root-use `fn main() { cli::cli_main() }` replacement
+  was cleared for one revised small probe.
+- That replacement passed its static contract but produced no authoritative
+  compiler result.  Receipt `07` was manually stopped before five minutes with
+  empty stdout/stderr; it is only an operator-early-stop.  The sole authorized
+  295-second superseding wrapper then lost quoting for the workspace's space,
+  so gen1 checked truncated path `C:\Users\Yufeng` and exited in 0.082 s.  It
+  never opened the unity source and is an orchestration failure, not a Ring
+  diagnostic.  Per the preregistered stop there is no `07c`; trait/effect/HOF,
+  build/link/C assertions, full unity, and current generations were not run.
+- The unity route is therefore inconclusive and stopped, not accepted or
+  correctness-refuted.  Resuming it requires a new authority-boundary Argument
+  and a fresh bounded probe contract; the current session must not silently fix
+  quoting and call that a continuation.  #268/#269 remain open while Steward
+  fills independent work.
+
 1. Treat the new gen1 as real source-generated correctness evidence: the
    ownership/block runtime matrix and the failure-scope recovery probe have
    both passed. The older C mirror remains supporting evidence only.
