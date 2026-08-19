@@ -82,9 +82,14 @@ pub struct CCtx {
 
     // ---- registries ----
     pub named_values: Map<Str, Str>,           // ring var name -> C var name
-    // Cleanup-visible HIR identity -> exact C slot. DefId-bearing paths never
-    // consult named_values, which remains only for dict/evidence binders.
+    // Explicit backend-only spelling domain (dict/evidence/thunk binders).
+    // A source local is never admitted here merely because named_values has
+    // the same spelling.
+    pub name_only_values: Set<Str>,
+    // Cleanup-visible HIR identity -> exact C slot and declared spelling.
     pub value_slots_by_def_id: Map<Int, Str>,
+    pub value_slot_names_by_def_id: Map<Int, Str>,
+    pub exact_value_names: Set<Str>,
     pub functions: Map<Str, CFnInfo>,          // C mangled name -> info
     pub fn_evidence_params: Map<Str, List<Str>>, // C mangled name -> evidence param names
     pub local_fn_effects: Map<Str, EffectRow>,
@@ -220,7 +225,10 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         label_counter: 0,
         match_counter: 0,
         named_values: map_new(),
+        name_only_values: set_new(),
         value_slots_by_def_id: map_new(),
+        value_slot_names_by_def_id: map_new(),
+        exact_value_names: set_new(),
         functions: map_new(),
         fn_evidence_params: map_new(),
         local_fn_effects: map_new(),
@@ -458,24 +466,29 @@ pub fn fresh_label(mut ctx: CCtx, prefix: Str) -> Str {
 pub fn c_local_def(
     mut ctx: CCtx, ring_name: Str, def_id: Int?
 ) -> Str {
-    match def_id {
-        some(id) => if ctx.value_slots_by_def_id.contains_key(id) {
-            panic("C codegen: duplicate local DefId ${id}")
-        },
-        none => {}
+    let exact_def_id = match def_id {
+        some(id) => id,
+        none => panic(
+            "C codegen: exact local '${ring_name}' has no DefId")
+    }
+    if ctx.value_slots_by_def_id.contains_key(exact_def_id) {
+        panic("C codegen: duplicate local DefId ${exact_def_id}")
     }
     let cname = c_unique_local(ctx, ring_name)
     ctx.cur_decls.push("    void* ${cname} = NULL;")
     ctx.named_values.insert(ring_name, cname)
-    match def_id {
-        some(id) => ctx.value_slots_by_def_id.insert(id, cname),
-        none => {}
-    }
+    ctx.value_slots_by_def_id.insert(exact_def_id, cname)
+    ctx.value_slot_names_by_def_id.insert(exact_def_id, ring_name)
+    ctx.exact_value_names.insert(ring_name)
     cname
 }
 
 pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
-    c_local_def(ctx, ring_name, none)
+    let cname = c_unique_local(ctx, ring_name)
+    ctx.cur_decls.push("    void* ${cname} = NULL;")
+    ctx.named_values.insert(ring_name, cname)
+    ctx.name_only_values.insert(ring_name)
+    cname
 }
 
 // Register a Ring parameter: unique C name + name map (declared in the
@@ -483,27 +496,71 @@ pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
 pub fn c_param_def(
     mut ctx: CCtx, ring_name: Str, def_id: Int?
 ) -> Str {
-    match def_id {
-        some(id) => if ctx.value_slots_by_def_id.contains_key(id) {
-            panic("C codegen: duplicate parameter DefId ${id}")
-        },
-        none => {}
+    let exact_def_id = match def_id {
+        some(id) => id,
+        none => panic(
+            "C codegen: exact parameter '${ring_name}' has no DefId")
+    }
+    if ctx.value_slots_by_def_id.contains_key(exact_def_id) {
+        panic("C codegen: duplicate parameter DefId ${exact_def_id}")
     }
     let cname = c_unique_local(ctx, ring_name)
     ctx.named_values.insert(ring_name, cname)
-    match def_id {
-        some(id) => ctx.value_slots_by_def_id.insert(id, cname),
-        none => {}
-    }
+    ctx.value_slots_by_def_id.insert(exact_def_id, cname)
+    ctx.value_slot_names_by_def_id.insert(exact_def_id, ring_name)
+    ctx.exact_value_names.insert(ring_name)
     cname
 }
 
 pub fn c_param(mut ctx: CCtx, ring_name: Str) -> Str {
-    c_param_def(ctx, ring_name, none)
+    let cname = c_unique_local(ctx, ring_name)
+    ctx.named_values.insert(ring_name, cname)
+    ctx.name_only_values.insert(ring_name)
+    cname
 }
 
 pub fn c_value_slot(ctx: CCtx, def_id: Int) -> Str? {
     ctx.value_slots_by_def_id.get(def_id)
+}
+
+pub fn c_exact_value_slot(
+    ctx: CCtx, name: Str, def_id: Int
+) -> Str? {
+    match ctx.value_slots_by_def_id.get(def_id) {
+        some(slot) => match ctx.value_slot_names_by_def_id.get(def_id) {
+            some(registered_name) => {
+                if registered_name != name {
+                    panic("C codegen: DefId ${def_id} names '${registered_name}', not '${name}'")
+                }
+                some(slot)
+            },
+            none => panic(
+                "C codegen: DefId ${def_id} slot has no registered spelling")
+        },
+        none => none
+    }
+}
+
+pub fn c_has_exact_value_name(ctx: CCtx, name: Str) -> Bool {
+    ctx.exact_value_names.contains(name)
+}
+
+pub fn c_register_name_only_value(
+    mut ctx: CCtx, name: Str, c_name: Str
+) {
+    ctx.named_values.insert(name, c_name)
+    ctx.name_only_values.insert(name)
+}
+
+pub fn c_remove_name_only_value(mut ctx: CCtx, name: Str) {
+    ctx.named_values.remove(name)
+    ctx.name_only_values.remove(name)
+}
+
+pub fn c_name_only_value(ctx: CCtx, name: Str) -> Str? {
+    if ctx.name_only_values.contains(name) {
+        ctx.named_values.get(name)
+    } else { none }
 }
 
 fn c_unique_local(mut ctx: CCtx, ring_name: Str) -> Str {
@@ -532,7 +589,10 @@ pub struct CEmitState {
     pub cur_body: List<Str>,
     pub used_locals: Set<Str>,
     pub named_values: Map<Str, Str>,
+    pub name_only_values: Set<Str>,
     pub value_slots_by_def_id: Map<Int, Str>,
+    pub value_slot_names_by_def_id: Map<Int, Str>,
+    pub exact_value_names: Set<Str>,
     pub indent: Int,
     pub in_function: Bool,
     pub current_fn_name: Str,
@@ -554,7 +614,10 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
         cur_body: ctx.cur_body,
         used_locals: ctx.used_locals,
         named_values: ctx.named_values,
+        name_only_values: ctx.name_only_values,
         value_slots_by_def_id: ctx.value_slots_by_def_id,
+        value_slot_names_by_def_id: ctx.value_slot_names_by_def_id,
+        exact_value_names: ctx.exact_value_names,
         indent: ctx.indent,
         in_function: ctx.in_function,
         current_fn_name: ctx.current_fn_name,
@@ -568,7 +631,10 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
     ctx.cur_body = []
     ctx.used_locals = set_new()
     ctx.named_values = map_new()
+    ctx.name_only_values = set_new()
     ctx.value_slots_by_def_id = map_new()
+    ctx.value_slot_names_by_def_id = map_new()
+    ctx.exact_value_names = set_new()
     ctx.indent = 1
     ctx.in_function = true
     ctx.current_fn_name = fn_name
@@ -593,7 +659,10 @@ pub fn c_pop_fn(mut ctx: CCtx, c_name: Str, params_str: Str, saved: CEmitState) 
     ctx.cur_body = saved.cur_body
     ctx.used_locals = saved.used_locals
     ctx.named_values = saved.named_values
+    ctx.name_only_values = saved.name_only_values
     ctx.value_slots_by_def_id = saved.value_slots_by_def_id
+    ctx.value_slot_names_by_def_id = saved.value_slot_names_by_def_id
+    ctx.exact_value_names = saved.exact_value_names
     ctx.indent = saved.indent
     ctx.in_function = saved.in_function
     ctx.current_fn_name = saved.current_fn_name

@@ -25,7 +25,9 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
     slot_bridge_runtime_name}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_local_def,
-    c_param, c_param_def, c_value_slot, c_mangle_fn,
+    c_param, c_param_def, c_value_slot, c_exact_value_slot,
+    c_has_exact_value_name, c_register_name_only_value,
+    c_remove_name_only_value, c_name_only_value, c_mangle_fn,
     c_resolve_fn,
     c_mangle_method, c_sanitize, c_symbol_fragment, c_global_cstr, c_interned_cstr, c_stub_stmt, c_stub_expr,
     c_line_directive, rt_use, rt_known_arity, get_or_assign_c_typeid,
@@ -241,10 +243,29 @@ fn gen_c_ident(mut ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?, dict
     }
     let boxed = is_boxed_def_c(ctx, def_id)
     let found = match def_id {
-        some(id) => c_value_slot(ctx, id),
-        none => match ctx.named_values.get(lookup_name) {
-            some(cv) => some(cv),
-            none => ctx.named_values.get(name)
+        some(id) => match c_exact_value_slot(ctx, name, id) {
+            some(slot) => some(slot),
+            none => {
+                if c_has_exact_value_name(ctx, name) ||
+                   c_has_exact_value_name(ctx, lookup_name) {
+                    panic("C codegen: local '${name}' has mismatched DefId ${id}")
+                }
+                none
+            }
+        },
+        none => {
+            let explicit_name_only =
+                c_name_only_value(ctx, lookup_name).is_some() ||
+                c_name_only_value(ctx, name).is_some()
+            if !explicit_name_only &&
+               (c_has_exact_value_name(ctx, name) ||
+                c_has_exact_value_name(ctx, lookup_name)) {
+                panic("C codegen: local '${name}' reference has no DefId")
+            }
+            match c_name_only_value(ctx, lookup_name) {
+                some(cv) => some(cv),
+                none => c_name_only_value(ctx, name)
+            }
         }
     }
     match found {
@@ -340,7 +361,7 @@ fn gen_c_extern_closure_wrapper(
     let mut i = 0
     for param_ty in param_types {
         let param_name = "__ring_extern_arg_${wn}_${i}"
-        ctx.named_values.insert(param_name, "p${i}")
+        c_register_name_only_value(ctx, param_name, "p${i}")
         synthetic_args.push(HExpr::Ident {
             name: param_name, resolved_name: none, def_id: none,
             dict_closure_dicts: none, ty: param_ty,
@@ -678,7 +699,7 @@ fn gen_c_unaryop(mut ctx: CCtx, op: UnaryOp, operand: HExpr, ty: Type) -> Str {
 // #B-087 gap 5 port: mut value-type args are passed as a shared CELL.
 fn c_lookup_call_mut_flags(ctx: CCtx, callee: HExpr) -> List<Bool>? {
     match callee {
-        HExpr::Ident { name, resolved_name, .. } => {
+        HExpr::Ident { name, resolved_name, def_id, .. } => {
             let call_name = match resolved_name {
                 some(rn) => rn,
                 none => name,
@@ -741,11 +762,9 @@ fn gen_c_mut_arg(mut ctx: CCtx, arg: HExpr) -> Str {
                     none => name,
                 }
                 let found = match def_id {
-                    some(id) => c_value_slot(ctx, id),
-                    none => match ctx.named_values.get(lookup_name) {
-                        some(cv) => some(cv),
-                        none => ctx.named_values.get(name)
-                    }
+                    some(id) => c_exact_value_slot(ctx, name, id),
+                    none => panic(
+                        "C codegen: boxed local '${name}' has no DefId")
                 }
                 match found {
                     some(cv) => {
@@ -796,7 +815,7 @@ pub fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
             // Scope reference: dict param / dict_lower local.  Unknown names
             // (`dict_closure_dicts` names and derived Simple refs) fall
             // through to the static singleton chain (LLVM parity).
-            match ctx.named_values.get(n) {
+            match c_name_only_value(ctx, n) {
                 some(cv) => cv,
                 none => resolve_c_static_dict(ctx, n),
             }
@@ -1085,12 +1104,12 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
         match captures.get(i) {
             some(cap) => {
                 let cv = match cap.def_id {
-                    some(id) => match c_value_slot(ctx, id) {
+                    some(id) => match c_exact_value_slot(ctx, cap.name, id) {
                         some(v) => v,
                         none => panic(
                             "C codegen: exact captured DefId ${id} has no outer slot")
                     },
-                    none => match ctx.named_values.get(cap.name) {
+                    none => match c_name_only_value(ctx, cap.name) {
                         some(v) => v,
                         none => panic(
                             "C codegen: captured variable not found: ${cap.name}")
@@ -1125,6 +1144,14 @@ fn consider_c_capture_name(
         none => name,
     }
     if c_capture_name_is_bound(name, lookup_name, def_id, params) { return }
+    let explicit_name_only =
+        c_name_only_value(ctx, lookup_name).is_some() ||
+        c_name_only_value(ctx, name).is_some()
+    if def_id.is_none() && !explicit_name_only &&
+       (c_has_exact_value_name(ctx, name) ||
+        c_has_exact_value_name(ctx, lookup_name)) {
+        panic("C codegen: captured local '${name}' has no DefId")
+    }
     // Step 8: module-aware fn check (consider_capture_name parity —
     // resolved lookup_name → bare name → resolved name).
     let is_fn = match def_id {
@@ -1139,10 +1166,10 @@ fn consider_c_capture_name(
     }
     if is_fn { return }
     let is_local = match def_id {
-        some(id) => c_value_slot(ctx, id).is_some(),
-        none => match ctx.named_values.get(lookup_name) {
+        some(id) => c_exact_value_slot(ctx, name, id).is_some(),
+        none => match c_name_only_value(ctx, lookup_name) {
             some(_) => true,
-            none => ctx.named_values.get(name).is_some()
+            none => c_name_only_value(ctx, name).is_some()
         }
     }
     if is_local {
@@ -1750,7 +1777,7 @@ fn gen_c_dict_dispatch_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, dd:
 
     // Dict param in scope; missing (delegate-expanded static dict name, B-121
     // gap 2) → static singleton chain.
-    let dict_ptr = match ctx.named_values.get(dd.dict_param) {
+    let dict_ptr = match c_name_only_value(ctx, dd.dict_param) {
         some(cv) => cv,
         none => resolve_c_static_dict(ctx, dd.dict_param),
     }
@@ -1767,7 +1794,7 @@ fn gen_c_dict_dispatch_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, dd:
 fn resolve_c_dispatch_dict(mut ctx: CCtx, dispatch: TraitDispatch, trait_name_hint: Str?) -> Str {
     match dispatch {
         TraitDispatch::Dict { param } => {
-            match ctx.named_values.get(param) {
+            match c_name_only_value(ctx, param) {
                 some(cv) => cv,
                 none => "RING_UNIT",
             }
@@ -1928,7 +1955,7 @@ fn c_lookup_evidence(mut ctx: CCtx, ep_name: Str) -> Str {
     // B-097 default evidence global (populated by __ring_default_evidence_init
     // before ring_main); else NULL for io/fail/unhandled effects (the runtime
     // handles those without evidence).  Port of lookup_evidence.
-    match ctx.named_values.get(ep_name) {
+    match c_name_only_value(ctx, ep_name) {
         some(cv) => cv,
         none => {
             let effect_name = effect_name_from_evidence_param(ep_name)
@@ -2097,7 +2124,7 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
             }
         }
 
-        match ctx.named_values.get(ev_name) {
+        match c_name_only_value(ctx, ev_name) {
             some(outer_cv) => saved_ev_entries.push((ev_name, outer_cv)),
             none => absent_ev_names.push(ev_name),
         }
@@ -2154,10 +2181,10 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
         // dispatch outward; explicitly remove names that were previously absent.
         for saved in saved_ev_entries {
             let (sname, scv) = saved
-            ctx.named_values.insert(sname, scv)
+            c_register_name_only_value(ctx, sname, scv)
         }
         for absent_name in absent_ev_names {
-            ctx.named_values.remove(absent_name)
+            c_remove_name_only_value(ctx, absent_name)
         }
 
         // The operation parameter is a lexical binder. Isolate it from the
@@ -2199,10 +2226,10 @@ fn gen_c_handle_expr(mut ctx: CCtx, body: HExpr, handlers: List<HEffectHandler>)
         emit_c_evidence_drops(ctx, ev_drop_vars)
         for saved in saved_ev_entries {
             let (sname, scv) = saved
-            ctx.named_values.insert(sname, scv)
+            c_register_name_only_value(ctx, sname, scv)
         }
         for absent_name in absent_ev_names {
-            ctx.named_values.remove(absent_name)
+            c_remove_name_only_value(ctx, absent_name)
         }
         res
     }
@@ -2248,8 +2275,8 @@ fn build_c_handler_evidence(mut ctx: CCtx, effect_name: Str, hs: List<HEffectHan
     // calls inside a default body dispatch through the handler's overrides
     // (not the outer/default evidence).
     let ev_name = evidence_param_name(effect_name)
-    let saved_ev = ctx.named_values.get(ev_name)
-    ctx.named_values.insert(ev_name, ev)
+    let saved_ev = c_name_only_value(ctx, ev_name)
+    c_register_name_only_value(ctx, ev_name, ev)
 
     match ctx.effect_ops.get(effect_name) {
         some(all_ops) => {
@@ -2272,8 +2299,8 @@ fn build_c_handler_evidence(mut ctx: CCtx, effect_name: Str, hs: List<HEffectHan
 
     // B-161: restore the original evidence binding.
     match saved_ev {
-        some(old_cv) => ctx.named_values.insert(ev_name, old_cv),
-        none => ctx.named_values.remove(ev_name),
+        some(old_cv) => c_register_name_only_value(ctx, ev_name, old_cv),
+        none => c_remove_name_only_value(ctx, ev_name),
     }
 
     ev
@@ -2341,7 +2368,7 @@ pub fn emit_c_default_evidence_init(mut ctx: CCtx) {
                 // Bind ev_name so collect_c_captures captures the evidence
                 // pointer into default-body closures that call sibling ops.
                 let ev_name = evidence_param_name(ename)
-                ctx.named_values.insert(ev_name, ev)
+                c_register_name_only_value(ctx, ev_name, ev)
 
                 for op in ops {
                     let slot_idx = effect_op_slot(ctx.effect_ops, ename, op.name)
@@ -2405,7 +2432,7 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
     }
 
     let raw = match callee {
-        HExpr::Ident { name, resolved_name, .. } => {
+        HExpr::Ident { name, resolved_name, def_id, .. } => {
             let call_name = match resolved_name {
                 some(rn) => rn,
                 none => name,
@@ -2415,7 +2442,20 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
             // before this early-return path, just like gen_c_direct_call.
             let print_key = c_resolve_fn(ctx, call_name)
             let mut is_extern_print = false
-            if ctx.named_values.contains_key(call_name) == false &&
+            let local_value = match def_id {
+                some(id) => c_exact_value_slot(ctx, name, id).is_some(),
+                none => {
+                    let explicit = c_name_only_value(ctx, call_name).is_some() ||
+                        c_name_only_value(ctx, name).is_some()
+                    if !explicit &&
+                       (c_has_exact_value_name(ctx, call_name) ||
+                        c_has_exact_value_name(ctx, name)) {
+                        panic("C codegen: callable local '${name}' has no DefId")
+                    }
+                    explicit
+                }
+            }
+            if !local_value &&
                ctx.ring_callable_names.contains(print_key) == false {
                 if call_name == "print" {
                     is_extern_print = true
@@ -2570,7 +2610,7 @@ fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: L
     // LOCAL scope is authoritative before every name-based builtin special.
     // Otherwise a legal local `ptr_from_addr`/`print`/Cell closure can inherit
     // backend behavior that belongs to a different exact DefId.
-    match ctx.named_values.get(name) {
+    match c_name_only_value(ctx, name) {
         some(cv) => { return gen_c_closure_call(ctx, cv, arg_vals) },
         none => {},
     }
@@ -3636,7 +3676,7 @@ fn c_pattern_local(
     mut ctx: CCtx, name: Str, bindings: List<HPatternBinding>
 ) -> Str {
     let def_id = exact_pattern_def_id(bindings, name)
-    match c_value_slot(ctx, def_id) {
+    match c_exact_value_slot(ctx, name, def_id) {
         some(slot) => slot,
         none => c_local_def(ctx, name, some(def_id))
     }
@@ -4044,6 +4084,9 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
             c_line_directive(ctx, span)
             let val = gen_c_expr(ctx, init)
             let cv = c_local_def(ctx, name, def_id)
+            if name.starts_with("__ring_dictlocal_") {
+                c_register_name_only_value(ctx, name, cv)
+            }
             c_emit(ctx, "${cv} = ${val};")
         },
         HStmt::Var { name, def_id, init, span, .. } => {
@@ -4108,7 +4151,7 @@ pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
         },
         // Perceus RC ops (post-RC HIR input — mandatory from step 2 on).
         HStmt::Drop { name, def_id, .. } => {
-            match c_value_slot(ctx, def_id) {
+            match c_exact_value_slot(ctx, name, def_id) {
                 some(cv) => {
                     rt_use(ctx, "ring_drop", 1)
                     c_emit(ctx, "ring_drop(${cv});")
@@ -4136,7 +4179,7 @@ fn emit_c_assign(mut ctx: CCtx, target: HExpr, value: HExpr) {
                 none => panic(
                     "C codegen: assignment '${name}' has no exact DefId")
             }
-            match c_value_slot(ctx, exact_def_id) {
+            match c_exact_value_slot(ctx, name, exact_def_id) {
                 some(cv) => {
                     if boxed {
                         c_emit(ctx, "*(void**)${cv} = ${val};")

@@ -124,6 +124,7 @@ const M_BORROWED: Int = 1    // parent only reads
 const K_OWNED: Int = 0       // droppable owned local — exactly-once consumption
 const K_BORROW: Int = 1      // param / pattern projection / for-in binding / destructure
 const K_NONOWNED: Int = 2    // local the pass deliberately does not drop
+const K_CAPTURE: Int = 3     // outer exact binding, borrowed in nested callable
 
 // Binding states (owned bindings)
 const S_LIVE: Int = 0
@@ -270,6 +271,32 @@ fn v_fn_scope(params: List<HParam>, body: HExpr, label: Str, boxed: Set<Int>, ex
             p.def_id, "parameter '${p.name}'")
         v_bind(ctx, p.name, def_id, K_BORROW, synthetic_vspan())
     }
+    v_callable_body(body, ctx)
+    v_pop_frame(ctx)
+}
+
+fn v_child_scope(
+    params: List<HParam>, body: HExpr, label: Str, parent: VCtx
+) {
+    let mut ctx = v_new_ctx(
+        parent.boxed, parent.externs, parent.findings, label)
+    v_push_frame(ctx)
+    let mut index = 0
+    while index < parent.names.len() {
+        v_bind(ctx, parent.names[index], parent.def_ids[index],
+            K_CAPTURE, parent.spans[index])
+        index = index + 1
+    }
+    for p in params {
+        let def_id = v_required_def_id(
+            p.def_id, "parameter '${p.name}'")
+        v_bind(ctx, p.name, def_id, K_BORROW, synthetic_vspan())
+    }
+    v_callable_body(body, ctx)
+    v_pop_frame(ctx)
+}
+
+fn v_callable_body(body: HExpr, mut ctx: VCtx) {
     match body {
         HExpr::Block { .. } => {
             v_block(body, M_CONSUMED, ctx)
@@ -279,7 +306,6 @@ fn v_fn_scope(params: List<HParam>, body: HExpr, label: Str, boxed: Set<Int>, ex
             ((0, false))
         },
     }
-    v_pop_frame(ctx)
 }
 
 fn v_new_ctx(boxed: Set<Int>, externs: Set<Str>, mut findings: List<RcFinding>, label: Str) -> VCtx {
@@ -353,6 +379,15 @@ fn v_lookup(ctx: VCtx, def_id: Int) -> Int {
     found
 }
 
+fn v_lookup_name(ctx: VCtx, name: Str) -> Int {
+    let mut index = ctx.names.len() - 1
+    while index >= 0 {
+        if ctx.names[index] == name { return index }
+        index = index - 1
+    }
+    0 - 1
+}
+
 fn v_bind(
     mut ctx: VCtx, name: Str, def_id: Int, kind: Int, span: Span
 ) {
@@ -418,8 +453,8 @@ fn v_type_excluded(ty: Type, externs: Set<Str>) -> Bool {
 // decision), adapted to POST-RC shapes — the ONE structural difference: a
 // dropping block's tail has been hoisted by rc_block_inner into a fresh
 // `let __rc_scope_N = <escape-processed tail>` and the syntactic tail is a
-// bare Ident, so a Block-tail Ident classifies via the init of the LAST
-// same-named Let/Var among the block's direct statements (the hoist), exactly
+// bare Ident, so a Block-tail Ident classifies via the init of its exact DefId
+// among the block's direct statements (the hoist), exactly
 // like hir.is_fresh_owned_bool_value's post-RC Block arm.  (The pass-side
 // `Ident => true` arm means "owner-bearing, will be Clone-wrapped at the
 // escape"; post-RC that Clone is visible directly.)  KEEP IN SYNC with
@@ -491,9 +526,12 @@ fn v_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
             match tail {
                 some(t) => match t {
                     // POST-RC hoisted tail: classify the hoist binding's init.
-                    HExpr::Ident { name, .. } => match v_block_local_init(stmts, name) {
-                        some(hi) => v_droppable_init(hi, externs),
-                        none => true,
+                    HExpr::Ident { def_id, .. } => match def_id {
+                        some(id) => match v_block_local_init(stmts, id) {
+                            some(hi) => v_droppable_init(hi, externs),
+                            none => true
+                        },
+                        none => false
                     },
                     _ => v_droppable_init(t, externs),
                 },
@@ -515,14 +553,18 @@ fn v_droppable_branch(body: HExpr, externs: Set<Str>) -> Bool {
     }
 }
 
-// The init of the LAST direct Let/Var binding `name` in a statement list
+// The init of the exact direct Let/Var binding `def_id` in a statement list
 // (post-RC hoist resolution; mirrors hir.block_local_init).
-fn v_block_local_init(stmts: List<HStmt>, name: Str) -> HExpr? {
+fn v_block_local_init(stmts: List<HStmt>, def_id: Int) -> HExpr? {
     let mut found: HExpr? = none
     for s in stmts {
         match s {
-            HStmt::Let { name: n, init, .. } => { if n == name { found = some(init) } },
-            HStmt::Var { name: n, init, .. } => { if n == name { found = some(init) } },
+            HStmt::Let { def_id: some(id), init, .. } => {
+                if id == def_id { found = some(init) }
+            },
+            HStmt::Var { def_id: some(id), init, .. } => {
+                if id == def_id { found = some(init) }
+            },
             _ => {},
         }
     }
@@ -720,9 +762,9 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
         HExpr::Lambda { params, body, ty, .. } => {
             // Fresh function scope.  Captures are dup'd by gen_lambda at
             // construction and released by drop_closure_env (balanced — B-098
-            // closure model); inside the body, captured outer names come
-            // through the env, so the body is verified in isolation.
-            v_fn_scope(params, body, "${ctx.fn_name}/<lambda>", ctx.boxed, ctx.externs, ctx.findings)
+            // closure model). Seed exact outer identities as borrowed capture
+            // slots so a stripped/mismatched capture DefId fails loud.
+            v_child_scope(params, body, "${ctx.fn_name}/<lambda>", ctx)
             v_cls_of_fresh(ty, ctx.externs)
         },
 
@@ -903,9 +945,24 @@ fn v_ident(
     name: Str, def_id: Int?, ty: Type, span: Span,
     mode: Int, mut ctx: VCtx
 ) -> Int {
+    let name_index = v_lookup_name(ctx, name)
     let idx = match def_id {
-        some(id) => v_lookup(ctx, id),
-        none => 0 - 1
+        some(id) => {
+            let exact_index = v_lookup(ctx, id)
+            if exact_index >= 0 && ctx.names[exact_index] != name {
+                panic("RC verifier DefId ${id} names '${ctx.names[exact_index]}', not '${name}'")
+            }
+            if exact_index < 0 && name_index >= 0 {
+                panic("RC verifier local reference '${name}' has mismatched DefId ${id}")
+            }
+            exact_index
+        },
+        none => {
+            if name_index >= 0 {
+                panic("RC verifier local reference '${name}' has no exact DefId")
+            }
+            0 - 1
+        }
     }
     // An exact owned producer (slot read/take or Clone<TypeVar>) can bind an
     // unnamed TypeVar.  Binding provenance is stronger than the generic
@@ -1017,6 +1074,12 @@ fn v_handler_scope(h: HEffectHandler, mut ctx: VCtx) {
     // scope with borrowed op params (and the resume binding, when present).
     let mut hctx = v_new_ctx(ctx.boxed, ctx.externs, ctx.findings, "${ctx.fn_name}/handler ${h.effect_name}.${h.op_name}")
     v_push_frame(hctx)
+    let mut capture_index = 0
+    while capture_index < ctx.names.len() {
+        v_bind(hctx, ctx.names[capture_index], ctx.def_ids[capture_index],
+            K_CAPTURE, ctx.spans[capture_index])
+        capture_index = capture_index + 1
+    }
     for p in h.params {
         let def_id = v_required_def_id(
             p.def_id, "handler parameter '${p.name}'")
@@ -1084,10 +1147,24 @@ fn v_block(block: HExpr, mode: Int, mut ctx: VCtx) -> (Int, Bool) {
 fn v_block_tail(t: HExpr, mode: Int, mut ctx: VCtx) -> Int {
     let base = v_frame_base(ctx)
     match t {
-        HExpr::Ident { def_id, .. } => {
+        HExpr::Ident { name, def_id, .. } => {
             let idx = match def_id {
-                some(id) => v_lookup(ctx, id),
-                none => 0 - 1
+                some(id) => {
+                    let exact_index = v_lookup(ctx, id)
+                    if exact_index >= 0 && ctx.names[exact_index] != name {
+                        panic("RC verifier tail DefId ${id} names '${ctx.names[exact_index]}', not '${name}'")
+                    }
+                    if exact_index < 0 && v_lookup_name(ctx, name) >= 0 {
+                        panic("RC verifier tail '${name}' has mismatched DefId ${id}")
+                    }
+                    exact_index
+                },
+                none => {
+                    if v_lookup_name(ctx, name) >= 0 {
+                        panic("RC verifier tail local '${name}' has no exact DefId")
+                    }
+                    0 - 1
+                }
             }
             if idx >= base && idx >= 0 {
                 if ctx.kinds[idx] == K_OWNED && ctx.states[idx] == S_LIVE {
@@ -1323,6 +1400,12 @@ fn v_assign(target: HExpr, value: HExpr, span: Span, mut ctx: VCtx) {
             let exact_def_id = v_required_def_id(
                 def_id, "assignment '${name}'")
             let idx = v_lookup(ctx, exact_def_id)
+            if idx >= 0 && ctx.names[idx] != name {
+                panic("RC verifier assignment DefId ${exact_def_id} names '${ctx.names[idx]}', not '${name}'")
+            }
+            if idx < 0 && v_lookup_name(ctx, name) >= 0 {
+                panic("RC verifier assignment '${name}' has mismatched DefId ${exact_def_id}")
+            }
             if idx < 0 {
                 return
             }
@@ -1376,6 +1459,12 @@ fn v_assign(target: HExpr, value: HExpr, span: Span, mut ctx: VCtx) {
 
 fn v_drop(name: Str, def_id: Int, span: Span, mut ctx: VCtx) {
     let idx = v_lookup(ctx, def_id)
+    if idx >= 0 && ctx.names[idx] != name {
+        panic("RC verifier Drop DefId ${def_id} names '${ctx.names[idx]}', not '${name}'")
+    }
+    if idx < 0 && v_lookup_name(ctx, name) >= 0 {
+        panic("RC verifier Drop '${name}' has mismatched DefId ${def_id}")
+    }
     if idx < 0 {
         v_report(ctx, "uaf-drop-unknown", true,
             "Drop of '${name}' which is not in scope", span)

@@ -842,7 +842,10 @@ fn begin_c_fn(mut ctx: CCtx, mangled: Str) -> Map<Str, Str> {
     ctx.used_locals = set_new()
     let saved = ctx.named_values
     ctx.named_values = map_new()
+    ctx.name_only_values = set_new()
     ctx.value_slots_by_def_id = map_new()
+    ctx.value_slot_names_by_def_id = map_new()
+    ctx.exact_value_names = set_new()
     ctx.in_function = true
     ctx.current_fn_name = mangled
     ctx.indent = 1
@@ -859,7 +862,10 @@ fn end_c_fn(mut ctx: CCtx, mangled: Str, params_str: Str, saved: Map<Str, Str>) 
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
     ctx.named_values = saved
+    ctx.name_only_values = set_new()
     ctx.value_slots_by_def_id = map_new()
+    ctx.value_slot_names_by_def_id = map_new()
+    ctx.exact_value_names = set_new()
     ctx.in_function = false
     ctx.current_fn_name = ""
 }

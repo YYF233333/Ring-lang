@@ -429,9 +429,9 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
                 },
                 none => "p${pi.to_str()}"
             }
-            let param_def_id = ctx.env.fresh_def_id()
+            let effect_param_def_id = ctx.env.fresh_def_id()
             op_params.push(HParam { name: p_name, ty: pt,
-                def_id: some(param_def_id), is_mutable: false })
+                def_id: some(effect_param_def_id), is_mutable: false })
             pi = pi + 1
         }
         // Type-check default body if present
@@ -444,14 +444,14 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
                     // Bind op params in a new scope for type checking the default body
                     ctx.env.push_scope()
                     for p in op_params {
-                        let exact_def_id = match p.def_id {
+                        let exact_effect_def_id = match p.def_id {
                             some(id) => id,
                             none => panic(
                                 "unreachable: effect default parameter has no exact DefId")
                         }
                         ctx.env.bind(p.name, TypeScheme {
                             ty: p.ty, type_vars: [], bounds: [],
-                            def_id: some(exact_def_id)
+                            def_id: some(exact_effect_def_id)
                         })
                     }
                     let checked_default = some({
@@ -1379,9 +1379,9 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
                 some(aps) => match aps.get(pi) { some(ap) => ap.is_mutable, none => false },
                 none => false
             }
-            let param_def_id = ctx.env.fresh_def_id()
+            let trait_param_def_id = ctx.env.fresh_def_id()
             hparams.push(HParam { name: p_name, ty: param_type,
-                def_id: some(param_def_id), is_mutable: p_mutable })
+                def_id: some(trait_param_def_id), is_mutable: p_mutable })
             pi = pi + 1
         }
 
@@ -1475,14 +1475,14 @@ fn check_trait_default_body(
     }
 
     for p in hparams {
-        let exact_def_id = match p.def_id {
+        let exact_trait_def_id = match p.def_id {
             some(id) => id,
             none => panic(
                 "unreachable: trait default parameter has no exact DefId")
         }
         ctx.env.bind(p.name, TypeScheme {
             ty: p.ty, type_vars: [], bounds: [],
-            def_id: some(exact_def_id)
+            def_id: some(exact_trait_def_id)
         })
         if p.is_mutable {
             match ctx.env.lookup(p.name) {

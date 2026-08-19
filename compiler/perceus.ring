@@ -65,6 +65,9 @@ pub fn perceus_transform(program: HProgram) -> HProgram {
 //   "drop-params" — append a Drop for every function parameter to the function
 //                   body: params are BORROWS (L1 point 4) → the verifier must
 //                   report uaf-drop-borrow.
+//   "strip-local-ident-def-id" / "strip-capture-ident-def-id" — remove the
+//                   exact ID from one fixture-owned local/capture reference;
+//                   HIR validation must fail loud before verification/codegen.
 // Reached only via the `--rc-mutate=` CLI flag (verify path); the build/run
 // pipelines call perceus_transform and cannot be mutated.
 pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
@@ -81,22 +84,29 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     // checker phase, covers use-imported extern types across modules).
     let externs = program.extern_type_names
     let anf_program = if mutate == "skip-anf" { program } else { anf_normalize(program, externs) }
+    let rc_program = if mutate == "strip-local-ident-def-id" {
+        mutate_strip_identity_def_id(
+            anf_program, "identity_reference_probe", "reference_slot")
+    } else if mutate == "strip-capture-ident-def-id" {
+        mutate_strip_identity_def_id(
+            anf_program, "identity_capture_probe", "capture_slot")
+    } else { anf_program }
     // B-091: `boxed_vars` (def_ids of `let mut` vars auto-boxed for write-through
     // closure capture) is threaded through the RC pass so the Assign old-value
     // Drop is suppressed for them — a boxed write mutates `cell.value`, it does
     // NOT consume/free the shared cell pointer.
-    let drops = anf_program.drop_types
+    let drops = rc_program.drop_types
     let mut rc_counter: List<Int> = [0]
-    let new_decls = transform_decls(anf_program.decls,
-        anf_program.boxed_vars, externs, drops, rc_counter)
+    let new_decls = transform_decls(rc_program.decls,
+        rc_program.boxed_vars, externs, drops, rc_counter)
     let mutated_decls = if mutate == "drop-params" { mutate_drop_params(new_decls) } else { new_decls }
     let transformed = HProgram {
         decls: mutated_decls,
-        derived_impls: anf_program.derived_impls,
-        boxed_vars: anf_program.boxed_vars,
-        static_dicts: anf_program.static_dicts,
-        extern_type_names: anf_program.extern_type_names,
-        drop_types: anf_program.drop_types
+        derived_impls: rc_program.derived_impls,
+        boxed_vars: rc_program.boxed_vars,
+        static_dicts: rc_program.static_dicts,
+        extern_type_names: rc_program.extern_type_names,
+        drop_types: rc_program.drop_types
     }
     validate_hir_binder_def_ids(transformed)
     transformed
@@ -1324,6 +1334,77 @@ fn transform_decl(
 struct OwnedSlot {
     name: Str,
     def_id: Int
+}
+
+fn mutate_strip_identity_def_id(
+    program: HProgram, fn_name: Str, target_name: Str
+) -> HProgram {
+    let mut changed: List<Bool> = [false]
+    let mut decls: List<HDecl> = []
+    for decl in program.decls {
+        match decl {
+            HDecl::Fn { name, body, .. } => {
+                if name == fn_name {
+                    decls.push(HDecl::Fn { ..decl,
+                        body: mutate_strip_identity_expr(
+                            body, target_name, changed) })
+                } else { decls.push(decl) }
+            },
+            _ => decls.push(decl)
+        }
+    }
+    if !changed[0] {
+        panic("RC identity mutation target '${fn_name}/${target_name}' not found")
+    }
+    HProgram { decls: decls,
+        derived_impls: program.derived_impls,
+        boxed_vars: program.boxed_vars,
+        static_dicts: program.static_dicts,
+        extern_type_names: program.extern_type_names,
+        drop_types: program.drop_types }
+}
+
+fn mutate_strip_identity_expr(
+    expr: HExpr, target_name: Str, mut changed: List<Bool>
+) -> HExpr {
+    if changed[0] { return expr }
+    match expr {
+        HExpr::Ident { name, def_id: some(_), .. } => {
+            if name == target_name {
+                changed.set(0, true)
+                HExpr::Ident { ..expr, def_id: none }
+            } else { expr }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            let mut new_stmts: List<HStmt> = []
+            for stmt in stmts {
+                new_stmts.push(mutate_strip_identity_stmt(
+                    stmt, target_name, changed))
+            }
+            let new_tail = match tail {
+                some(value) => some(mutate_strip_identity_expr(
+                    value, target_name, changed)),
+                none => none
+            }
+            HExpr::Block { ..expr, stmts: new_stmts, tail: new_tail }
+        },
+        HExpr::Lambda { body, .. } => HExpr::Lambda { ..expr,
+            body: mutate_strip_identity_expr(body, target_name, changed) },
+        _ => expr
+    }
+}
+
+fn mutate_strip_identity_stmt(
+    stmt: HStmt, target_name: Str, mut changed: List<Bool>
+) -> HStmt {
+    if changed[0] { return stmt }
+    match stmt {
+        HStmt::Let { init, .. } => HStmt::Let { ..stmt,
+            init: mutate_strip_identity_expr(init, target_name, changed) },
+        HStmt::Var { init, .. } => HStmt::Var { ..stmt,
+            init: mutate_strip_identity_expr(init, target_name, changed) },
+        _ => stmt
+    }
 }
 
 fn owned_contains(slots: List<OwnedSlot>, candidate: OwnedSlot) -> Bool {

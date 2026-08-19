@@ -484,6 +484,75 @@ pub fn validate_hir_binder_def_ids(program: HProgram) {
     validate_hir_decls(program.decls, seen)
 }
 
+struct HirValidationScope {
+    names: List<Str>,
+    def_ids: List<Int>,
+    frames: List<Int>
+}
+
+fn new_hir_validation_scope() -> HirValidationScope {
+    HirValidationScope { names: [], def_ids: [], frames: [] }
+}
+
+fn push_hir_validation_scope(mut scope: HirValidationScope) {
+    scope.frames.push(scope.names.len())
+}
+
+fn pop_hir_validation_scope(mut scope: HirValidationScope) {
+    let base = match scope.frames.pop() { some(value) => value, none => 0 }
+    while scope.names.len() > base {
+        scope.names.pop()
+        scope.def_ids.pop()
+    }
+}
+
+fn bind_hir_validation_scope(
+    mut scope: HirValidationScope, name: Str, def_id: Int
+) {
+    scope.names.push(name)
+    scope.def_ids.push(def_id)
+}
+
+fn hir_validation_name_index(scope: HirValidationScope, name: Str) -> Int {
+    let mut index = scope.names.len() - 1
+    while index >= 0 {
+        if scope.names[index] == name { return index }
+        index = index - 1
+    }
+    0 - 1
+}
+
+fn hir_validation_def_id_index(
+    scope: HirValidationScope, def_id: Int
+) -> Int {
+    let mut index = scope.def_ids.len() - 1
+    while index >= 0 {
+        if scope.def_ids[index] == def_id { return index }
+        index = index - 1
+    }
+    0 - 1
+}
+
+fn validate_hir_local_reference(
+    scope: HirValidationScope, name: Str, def_id: Int?, label: Str
+) {
+    let name_index = hir_validation_name_index(scope, name)
+    match def_id {
+        some(id) => {
+            let id_index = hir_validation_def_id_index(scope, id)
+            if id_index >= 0 && scope.names[id_index] != name {
+                panic("HIR ${label} DefId ${id} names '${scope.names[id_index]}', not '${name}'")
+            }
+            if name_index >= 0 && scope.def_ids[name_index] != id {
+                panic("HIR ${label} '${name}' has mismatched DefId ${id}; visible slot is ${scope.def_ids[name_index]}")
+            }
+        },
+        none => if name_index >= 0 {
+            panic("HIR ${label} local reference '${name}' has no exact DefId")
+        }
+    }
+}
+
 fn validate_hir_binder(mut seen: Set<Int>, def_id: Int, label: Str) {
     if seen.contains(def_id) {
         panic("HIR binder DefId collision ${def_id} at ${label}")
@@ -499,13 +568,15 @@ fn required_hir_def_id(def_id: Int?, label: Str) -> Int {
 }
 
 fn validate_hir_params(
-    params: List<HParam>, mut seen: Set<Int>, label: Str
+    params: List<HParam>, mut seen: Set<Int>,
+    mut scope: HirValidationScope, label: Str
 ) {
     for param in params {
         let id = required_hir_def_id(
             param.def_id, "${label} parameter '${param.name}'")
         validate_hir_binder(seen, id,
             "${label} parameter '${param.name}'")
+        bind_hir_validation_scope(scope, param.name, id)
     }
 }
 
@@ -538,7 +609,7 @@ fn collect_hir_pattern_names(pattern: Pattern, mut names: Set<Str>) {
 
 fn validate_hir_pattern_bindings(
     pattern: Pattern, bindings: List<HPatternBinding>,
-    mut seen: Set<Int>, label: Str
+    mut seen: Set<Int>, mut scope: HirValidationScope, label: Str
 ) {
     let mut pattern_names: Set<Str> = set_new()
     collect_hir_pattern_names(pattern, pattern_names)
@@ -553,6 +624,7 @@ fn validate_hir_pattern_bindings(
         metadata_names.insert(binding.name)
         validate_hir_binder(seen, binding.def_id,
             "${label} binding '${binding.name}'")
+        bind_hir_validation_scope(scope, binding.name, binding.def_id)
     }
     for name in pattern_names {
         if !metadata_names.contains(name) {
@@ -561,46 +633,53 @@ fn validate_hir_pattern_bindings(
     }
 }
 
-fn validate_hir_arm(arm: HMatchArm, mut seen: Set<Int>, label: Str) {
-    validate_hir_pattern_bindings(arm.pattern, arm.bindings, seen, label)
+fn validate_hir_arm(
+    arm: HMatchArm, mut seen: Set<Int>,
+    mut scope: HirValidationScope, label: Str
+) {
+    push_hir_validation_scope(scope)
+    validate_hir_pattern_bindings(
+        arm.pattern, arm.bindings, seen, scope, label)
     match arm.guard {
-        some(guard) => validate_hir_expr(guard, seen),
+        some(guard) => validate_hir_expr(guard, seen, scope),
         none => {}
     }
-    validate_hir_expr(arm.body, seen)
+    validate_hir_expr(arm.body, seen, scope)
+    pop_hir_validation_scope(scope)
 }
 
-fn validate_hir_stmt(stmt: HStmt, mut seen: Set<Int>) {
+fn validate_hir_stmt(
+    stmt: HStmt, mut seen: Set<Int>, mut scope: HirValidationScope
+) {
     match stmt {
         HStmt::Let { name, def_id, init, .. } |
         HStmt::Var { name, def_id, init, .. } => {
+            validate_hir_expr(init, seen, scope)
             if name != "_" {
                 let id = required_hir_def_id(
                     def_id, "local binding '${name}'")
                 validate_hir_binder(seen, id, "local binding '${name}'")
+                bind_hir_validation_scope(scope, name, id)
             }
-            validate_hir_expr(init, seen)
         },
         HStmt::Assign { target, value, .. } => {
-            validate_hir_expr(target, seen)
-            validate_hir_expr(value, seen)
+            validate_hir_expr(target, seen, scope)
+            validate_hir_expr(value, seen, scope)
         },
-        HStmt::ExprStmt { expr, .. } => validate_hir_expr(expr, seen),
+        HStmt::ExprStmt { expr, .. } =>
+            validate_hir_expr(expr, seen, scope),
         HStmt::Return { value, .. } => match value {
-            some(expr) => validate_hir_expr(expr, seen),
+            some(expr) => validate_hir_expr(expr, seen, scope),
             none => {}
         },
         HStmt::While { condition, body, .. } => {
-            validate_hir_expr(condition, seen)
-            validate_hir_expr(body, seen)
+            validate_hir_expr(condition, seen, scope)
+            validate_hir_expr(body, seen, scope)
         },
         HStmt::ForIn { binding, def_id, destructure,
                        iterable, body, .. } => {
-            if binding != "_" {
-                let id = required_hir_def_id(
-                    def_id, "for binding '${binding}'")
-                validate_hir_binder(seen, id, "for binding '${binding}'")
-            }
+            validate_hir_expr(iterable, seen, scope)
+            push_hir_validation_scope(scope)
             match destructure {
                 some(bindings) => {
                     for binding_ in bindings {
@@ -609,78 +688,103 @@ fn validate_hir_stmt(stmt: HStmt, mut seen: Set<Int>) {
                                 "for destructure binding '${binding_.name}'")
                             validate_hir_binder(seen, id,
                                 "for destructure binding '${binding_.name}'")
+                            bind_hir_validation_scope(
+                                scope, binding_.name, id)
                         }
                     }
                 },
-                none => {}
+                none => if binding != "_" {
+                    let id = required_hir_def_id(
+                        def_id, "for binding '${binding}'")
+                    validate_hir_binder(
+                        seen, id, "for binding '${binding}'")
+                    bind_hir_validation_scope(scope, binding, id)
+                }
             }
-            validate_hir_expr(iterable, seen)
-            validate_hir_expr(body, seen)
+            validate_hir_expr(body, seen, scope)
+            pop_hir_validation_scope(scope)
         },
         HStmt::LetDestructure { bindings, init, .. } => {
+            validate_hir_expr(init, seen, scope)
             for binding in bindings {
                 if binding.name != "_" {
                     let id = required_hir_def_id(binding.def_id,
                         "destructure binding '${binding.name}'")
                     validate_hir_binder(seen, id,
                         "destructure binding '${binding.name}'")
+                    bind_hir_validation_scope(scope, binding.name, id)
                 }
             }
-            validate_hir_expr(init, seen)
         },
         HStmt::IfLet { pattern, bindings, expr,
                        then_block, else_block, .. } => {
+            validate_hir_expr(expr, seen, scope)
+            push_hir_validation_scope(scope)
             validate_hir_pattern_bindings(
-                pattern, bindings, seen, "if-let pattern")
-            validate_hir_expr(expr, seen)
-            validate_hir_expr(then_block, seen)
+                pattern, bindings, seen, scope, "if-let pattern")
+            validate_hir_expr(then_block, seen, scope)
+            pop_hir_validation_scope(scope)
             match else_block {
-                some(block) => validate_hir_expr(block, seen),
+                some(block) => validate_hir_expr(block, seen, scope),
                 none => {}
             }
         },
-        HStmt::Break { .. } | HStmt::Continue { .. } |
-        HStmt::Drop { .. } => {}
+        HStmt::Drop { name, def_id, .. } =>
+            validate_hir_local_reference(
+                scope, name, some(def_id), "Drop"),
+        HStmt::Break { .. } | HStmt::Continue { .. } => {}
     }
 }
 
-fn validate_hir_expr(expr: HExpr, mut seen: Set<Int>) {
+fn validate_hir_expr(
+    expr: HExpr, mut seen: Set<Int>, mut scope: HirValidationScope
+) {
     match expr {
+        HExpr::Ident { name, def_id, .. } =>
+            validate_hir_local_reference(
+                scope, name, def_id, "Ident"),
         HExpr::BinOp { left, right, .. } => {
-            validate_hir_expr(left, seen)
-            validate_hir_expr(right, seen)
+            validate_hir_expr(left, seen, scope)
+            validate_hir_expr(right, seen, scope)
         },
-        HExpr::UnaryOp { operand, .. } => validate_hir_expr(operand, seen),
+        HExpr::UnaryOp { operand, .. } =>
+            validate_hir_expr(operand, seen, scope),
         HExpr::Call { callee, args, .. } => {
-            validate_hir_expr(callee, seen)
-            for arg in args { validate_hir_expr(arg, seen) }
+            validate_hir_expr(callee, seen, scope)
+            for arg in args { validate_hir_expr(arg, seen, scope) }
         },
         HExpr::FieldAccess { receiver, .. } =>
-            validate_hir_expr(receiver, seen),
+            validate_hir_expr(receiver, seen, scope),
         HExpr::StructLit { fields, spread, .. } |
         HExpr::NamedVariantConstruct { fields, spread, .. } => {
-            for field in fields { validate_hir_expr(field.value, seen) }
+            for field in fields {
+                validate_hir_expr(field.value, seen, scope)
+            }
             match spread {
-                some(value) => validate_hir_expr(value, seen),
+                some(value) => validate_hir_expr(value, seen, scope),
                 none => {}
             }
         },
         HExpr::MatchExpr { scrutinee, arms, .. } => {
-            validate_hir_expr(scrutinee, seen)
-            for arm in arms { validate_hir_arm(arm, seen, "match arm") }
-        },
-        HExpr::Block { stmts, tail, .. } => {
-            for stmt in stmts { validate_hir_stmt(stmt, seen) }
-            match tail {
-                some(value) => validate_hir_expr(value, seen),
-                none => {}
+            validate_hir_expr(scrutinee, seen, scope)
+            for arm in arms {
+                validate_hir_arm(arm, seen, scope, "match arm")
             }
         },
+        HExpr::Block { stmts, tail, .. } => {
+            push_hir_validation_scope(scope)
+            for stmt in stmts { validate_hir_stmt(stmt, seen, scope) }
+            match tail {
+                some(value) => validate_hir_expr(value, seen, scope),
+                none => {}
+            }
+            pop_hir_validation_scope(scope)
+        },
         HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
-            validate_hir_expr(condition, seen)
-            validate_hir_expr(then_branch, seen)
+            validate_hir_expr(condition, seen, scope)
+            validate_hir_expr(then_branch, seen, scope)
             match else_branch {
-                some(value) => validate_hir_expr(value, seen),
+                some(value) => validate_hir_expr(value, seen, scope),
                 none => {}
             }
         },
@@ -689,56 +793,69 @@ fn validate_hir_expr(expr: HExpr, mut seen: Set<Int>) {
                 match part {
                     HStringInterpPart::Literal(_) => {},
                     HStringInterpPart::Expression(value) =>
-                        validate_hir_expr(value, seen)
+                        validate_hir_expr(value, seen, scope)
                 }
             }
         },
         HExpr::TryCatch { body, arms, .. } => {
-            validate_hir_expr(body, seen)
-            for arm in arms { validate_hir_arm(arm, seen, "catch arm") }
+            validate_hir_expr(body, seen, scope)
+            for arm in arms {
+                validate_hir_arm(arm, seen, scope, "catch arm")
+            }
         },
         HExpr::HandleExpr { body, handlers, .. } => {
-            validate_hir_expr(body, seen)
+            validate_hir_expr(body, seen, scope)
             for handler in handlers {
                 let label = "handler '${handler.effect_name}.${handler.op_name}'"
-                validate_hir_params(handler.params, seen, label)
+                push_hir_validation_scope(scope)
+                validate_hir_params(handler.params, seen, scope, label)
                 match handler.resume_binding {
-                    some(binding) => validate_hir_binder(seen,
-                        binding.def_id,
-                        "${label} resume binding '${binding.name}'"),
+                    some(binding) => {
+                        validate_hir_binder(seen, binding.def_id,
+                            "${label} resume binding '${binding.name}'")
+                        bind_hir_validation_scope(
+                            scope, binding.name, binding.def_id)
+                    },
                     none => {}
                 }
-                validate_hir_expr(handler.body, seen)
+                validate_hir_expr(handler.body, seen, scope)
+                pop_hir_validation_scope(scope)
             }
         },
         HExpr::Lambda { params, body, .. } => {
-            validate_hir_params(params, seen, "lambda")
-            validate_hir_expr(body, seen)
+            push_hir_validation_scope(scope)
+            validate_hir_params(params, seen, scope, "lambda")
+            validate_hir_expr(body, seen, scope)
+            pop_hir_validation_scope(scope)
         },
         HExpr::EffectOp { args, .. } => {
-            for arg in args { validate_hir_expr(arg, seen) }
+            for arg in args { validate_hir_expr(arg, seen, scope) }
         },
         HExpr::RangeExpr { start, end, .. } => {
-            validate_hir_expr(start, seen)
-            validate_hir_expr(end, seen)
+            validate_hir_expr(start, seen, scope)
+            validate_hir_expr(end, seen, scope)
         },
         HExpr::ListLit { elements, .. } |
         HExpr::TupleLit { elements, .. } => {
-            for element in elements { validate_hir_expr(element, seen) }
+            for element in elements {
+                validate_hir_expr(element, seen, scope)
+            }
         },
         HExpr::IndexExpr { receiver, index, .. } => {
-            validate_hir_expr(receiver, seen)
-            validate_hir_expr(index, seen)
+            validate_hir_expr(receiver, seen, scope)
+            validate_hir_expr(index, seen, scope)
         },
-        HExpr::Clone { inner, .. } => validate_hir_expr(inner, seen),
+        HExpr::Clone { inner, .. } =>
+            validate_hir_expr(inner, seen, scope),
         HExpr::ReturnExpr { value, .. } => match value {
-            some(inner) => validate_hir_expr(inner, seen),
+            some(inner) => validate_hir_expr(inner, seen, scope),
             none => {}
         },
-        HExpr::UnsafeBlock { body, .. } => validate_hir_expr(body, seen),
+        HExpr::UnsafeBlock { body, .. } =>
+            validate_hir_expr(body, seen, scope),
         HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
         HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
-        HExpr::Ident { .. } | HExpr::DictConstruct { .. } => {}
+        HExpr::DictConstruct { .. } => {}
     }
 }
 
@@ -751,30 +868,37 @@ fn validate_hir_decls(decls: List<HDecl>, mut seen: Set<Int>) {
                         seen, id, "function '${name}'"),
                     none => {}
                 }
-                validate_hir_params(params, seen, "function '${name}'")
-                validate_hir_expr(body, seen)
+                let mut scope = new_hir_validation_scope()
+                validate_hir_params(
+                    params, seen, scope, "function '${name}'")
+                validate_hir_expr(body, seen, scope)
             },
             HDecl::Impl { methods, .. } => validate_hir_decls(methods, seen),
             HDecl::Effect { name, ops, .. } => {
                 for op in ops {
                     match op.default_body {
                         some(body) => {
-                            validate_hir_params(op.params, seen,
+                            let mut scope = new_hir_validation_scope()
+                            validate_hir_params(op.params, seen, scope,
                                 "effect default '${name}.${op.name}'")
-                            validate_hir_expr(body, seen)
+                            validate_hir_expr(body, seen, scope)
                         },
                         none => {}
                     }
                 }
             },
-            HDecl::Test { body, .. } => validate_hir_expr(body, seen),
+            HDecl::Test { body, .. } => {
+                let mut scope = new_hir_validation_scope()
+                validate_hir_expr(body, seen, scope)
+            },
             HDecl::Trait { name, methods, .. } => {
                 for method in methods {
                     match method.body {
                         some(body) => {
-                            validate_hir_params(method.params, seen,
+                            let mut scope = new_hir_validation_scope()
+                            validate_hir_params(method.params, seen, scope,
                                 "trait default '${name}.${method.name}'")
-                            validate_hir_expr(body, seen)
+                            validate_hir_expr(body, seen, scope)
                         },
                         none => {}
                     }
@@ -786,7 +910,8 @@ fn validate_hir_decls(decls: List<HDecl>, mut seen: Set<Int>) {
                         seen, id, "const '${name}'"),
                     none => {}
                 }
-                validate_hir_expr(init, seen)
+                let mut scope = new_hir_validation_scope()
+                validate_hir_expr(init, seen, scope)
             },
             HDecl::ModBlock { decls: inner, .. } =>
                 validate_hir_decls(inner, seen),
@@ -1360,17 +1485,20 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
         // tail-escape invariant moves a fresh tail / Clone-wraps an
         // owner-bearing one) and is never in the block's own drop set (it is
         // created after block_locals).  So: a non-Ident tail classifies
-        // directly; an Ident tail classifies via the init of the LAST Let/Var
-        // of that name among this block's direct statements (the hoist, or a
+        // directly; an Ident tail classifies via the init of its exact DefId
+        // among this block's direct statements (the hoist, or a
         // user binding — which, in a NON-dropping block, was necessarily
         // non-droppable, so its init classifies false: borrows stay
         // un-dropped).  An Ident with no binding in this block is an outer
         // borrow → false.
         HExpr::Block { stmts, tail, .. } => match tail {
             some(t) => match t {
-                HExpr::Ident { name, .. } => match block_local_init(stmts, name) {
-                    some(init) => is_fresh_owned_bool_value(init),
-                    none => false,
+                HExpr::Ident { def_id, .. } => match def_id {
+                    some(id) => match block_local_init(stmts, id) {
+                        some(init) => is_fresh_owned_bool_value(init),
+                        none => false
+                    },
+                    none => false
                 },
                 _ => is_fresh_owned_bool_value(t),
             },
@@ -1397,17 +1525,17 @@ pub fn compare_by_first<T>(a: (Str, T), b: (Str, T)) -> Int {
     if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 }
 }
 
-// The initialiser of the LAST direct `let`/`var` statement binding `name` in a
+// The initialiser of the exact direct `let`/`var` statement binding `def_id` in a
 // statement list (helper for is_fresh_owned_bool_value's post-RC Block arm).
-fn block_local_init(stmts: List<HStmt>, name: Str) -> HExpr? {
+fn block_local_init(stmts: List<HStmt>, def_id: Int) -> HExpr? {
     let mut found: HExpr? = none
     for s in stmts {
         match s {
-            HStmt::Let { name: n, init, .. } => {
-                if n == name { found = some(init) }
+            HStmt::Let { def_id: some(id), init, .. } => {
+                if id == def_id { found = some(init) }
             },
-            HStmt::Var { name: n, init, .. } => {
-                if n == name { found = some(init) }
+            HStmt::Var { def_id: some(id), init, .. } => {
+                if id == def_id { found = some(init) }
             },
             _ => {},
         }

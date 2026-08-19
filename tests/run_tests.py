@@ -4359,10 +4359,14 @@ def identity_checkpoint_contract_errors(
             "SYNTHETIC_ANF_DEF_ID_BASE",
             "SYNTHETIC_RC_DEF_ID_BASE",
             "pub fn validate_hir_binder_def_ids",
+            "fn validate_hir_local_reference(",
+            "block_local_init(stmts, id)",
         ),
         "infer": (
             "fn infer_scoped_block(",
             "fn exact_pattern_bindings(",
+            "fn validate_or_pattern_binding_sets(",
+            "Or-pattern alternatives must bind the same variables",
             "freshen_default_argument_hir(ctx, dh)",
             "bindings: pattern_bindings",
             "resume_binding: resume_binding",
@@ -4370,7 +4374,10 @@ def identity_checkpoint_contract_errors(
         "infer_decl": (
             "trait default parameter has no exact DefId",
             "effect default parameter has no exact DefId",
-            "def_id: some(exact_def_id)",
+            "def_id: some(effect_param_def_id)",
+            "def_id: some(exact_effect_def_id)",
+            "def_id: some(trait_param_def_id)",
+            "def_id: some(exact_trait_def_id)",
         ),
         "dict": (
             "synthetic_def_id(",
@@ -4387,15 +4394,20 @@ def identity_checkpoint_contract_errors(
         ),
         "cctx": (
             "pub value_slots_by_def_id: Map<Int, Str>",
+            "pub name_only_values: Set<Str>",
+            "pub value_slot_names_by_def_id: Map<Int, Str>",
             "pub fn c_local_def(",
             "pub fn c_param_def(",
             "pub fn c_value_slot(",
+            "pub fn c_exact_value_slot(",
+            "pub fn c_name_only_value(",
             "value_slots_by_def_id: ctx.value_slots_by_def_id",
             "ctx.value_slots_by_def_id = saved.value_slots_by_def_id",
         ),
         "cexpr": (
             "let found = match def_id",
-            "some(id) => c_value_slot(ctx, id)",
+            "some(id) => match c_exact_value_slot(ctx, name, id)",
+            "captured local '${name}' has no DefId",
             "fn c_pattern_local(",
             "bind_c_root_pattern_after_success(",
             "C codegen: Drop '${name}' has no exact DefId slot",
@@ -4404,6 +4416,8 @@ def identity_checkpoint_contract_errors(
         "verify": (
             "def_ids: List<Int>",
             "if ctx.def_ids[i] == def_id",
+            "fn v_lookup_name(",
+            "local reference '${name}' has no exact DefId",
             "fn v_drop(name: Str, def_id: Int",
             "for binding in arm.bindings",
             "def_id, \"assignment '${name}'\"",
@@ -4428,6 +4442,12 @@ def identity_checkpoint_contract_errors(
         if infer_source.count(placement) != 1:
             errors.append(f"infer: scoped-block placement drifted: {placement}")
 
+    for pattern_name in ("match_pattern", "catch_pattern", "iflet_pattern"):
+        placement = f"validate_or_pattern_binding_sets(ctx, {pattern_name})"
+        if infer_source.count(placement) != 1:
+            errors.append(
+                f"infer: or-pattern binding-set gate drifted for {pattern_name}")
+
     if sources["cexpr"].count("bind_c_root_pattern_after_success(") != 3:
         errors.append(
             "C or-pattern lowering must have one shared-slot helper and "
@@ -4438,7 +4458,7 @@ def identity_checkpoint_contract_errors(
     if assign_error:
         errors.append(assign_error)
     else:
-        if "c_value_slot(ctx, exact_def_id)" not in assign_body:
+        if "c_exact_value_slot(ctx, name, exact_def_id)" not in assign_body:
             errors.append("C assignment no longer selects the exact DefId slot")
         if "ctx.named_values" in assign_body:
             errors.append("DefId-bearing C assignment regained a name fallback")
@@ -4459,6 +4479,33 @@ def identity_checkpoint_contract_errors(
             "def_id: slot.def_id")):
         errors.append("Perceus cleanup is not reverse-order exact-slot")
 
+    for function_name, required in (
+        ("check_effect_decl", (
+            "let effect_param_def_id = ctx.env.fresh_def_id()",
+            "def_id: some(effect_param_def_id)",
+            "let exact_effect_def_id = match p.def_id",
+            "def_id: some(exact_effect_def_id)",
+        )),
+        ("check_trait_decl", (
+            "let trait_param_def_id = ctx.env.fresh_def_id()",
+            "def_id: some(trait_param_def_id)",
+        )),
+        ("check_trait_default_body", (
+            "let exact_trait_def_id = match p.def_id",
+            "def_id: some(exact_trait_def_id)",
+        )),
+    ):
+        body, extract_error = extract_ring_function_body(
+            sources["infer_decl"], function_name)
+        if extract_error:
+            errors.append(extract_error)
+        else:
+            for token in required:
+                if body.count(token) != 1:
+                    errors.append(
+                        f"{function_name}: exact default parameter contract "
+                        f"{token!r} matched {body.count(token)} times")
+
     # I-prime is identity only: the S-prime producer split and A-prime Take /
     # ownership metadata must remain absent from this checkpoint.
     forbidden = {
@@ -4472,7 +4519,52 @@ def identity_checkpoint_contract_errors(
     return errors
 
 
-def identity_checkpoint_source_errors() -> List[str]:
+def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
+    """Require distinct parameter/shadow slots in trait/effect default C."""
+    errors: List[str] = []
+    with tempfile.TemporaryDirectory(prefix="ring_identity_default_c_") as tmpdir:
+        c_path, _, build_error = build_c_artifacts_fresh(
+            ring_exe, "tests/cases/default_body_exact_param_identity.ring",
+            Path(tmpdir), no_c_lines=True,
+            phase_case="compiler.identity_checkpoint/default-body-c",
+        )
+        if build_error:
+            return [build_error]
+        assert c_path is not None
+        source = c_path.read_text(encoding="utf-8")
+        masked = mask_c_strings_and_comments(source)
+
+    trait_body, trait_error = extract_c_function_body(
+        source, "__ExactDefaultTrait_compute")
+    if trait_error:
+        errors.append(trait_error)
+    elif not all(token in trait_body for token in (
+            "void* r_value_2;", "= r_value;", "= r_value_2;")):
+        errors.append(
+            "trait default generated C did not keep parameter and shadow slots distinct")
+
+    lambda_symbols = re.findall(
+        r"(?m)^void\*\s+(ring_c_lambda_[0-9]+)\s*"
+        r"\(void\* env, void\* r_value\)\s*\{",
+        masked,
+    )
+    effect_bodies: List[str] = []
+    for symbol in lambda_symbols:
+        body, extract_error = extract_c_function_body(source, symbol)
+        if extract_error is None and "RING_INT(2)" in body:
+            effect_bodies.append(body)
+    if len(effect_bodies) != 1:
+        errors.append(
+            "effect default generated C expected one value+2 closure, "
+            f"found {len(effect_bodies)}")
+    elif not all(token in effect_bodies[0] for token in (
+            "void* r_value_2;", "= r_value;", "= r_value_2;")):
+        errors.append(
+            "effect default generated C did not keep parameter and shadow slots distinct")
+    return errors
+
+
+def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[str]:
     paths = {
         "hir": REPO / "compiler" / "hir.ring",
         "infer": REPO / "compiler" / "infer.ring",
@@ -4498,12 +4590,22 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("Drop DefId", "hir", "Drop { name: Str, def_id: Int, ty: Type, span: Span }",
          "Drop { name: Str, ty: Type, span: Span }"),
         ("default freshening", "infer", "freshen_default_argument_hir(ctx, dh)", "dh"),
-        ("assignment exact slot", "cexpr", "c_value_slot(ctx, exact_def_id)",
+        ("assignment exact slot", "cexpr", "c_exact_value_slot(ctx, name, exact_def_id)",
          "ctx.named_values.get(name)"),
         ("verifier exact lookup", "verify", "ctx.def_ids[i] == def_id",
          "ctx.names[i] == name"),
         ("or-pattern shared slot", "cexpr", "bind_c_root_pattern_after_success(",
          "bind_c_nested_pattern("),
+        ("or-pattern name-set gate", "infer", "validate_or_pattern_binding_sets(ctx, match_pattern)",
+         "true"),
+        ("effect default HParam identity", "infer_decl", "def_id: some(effect_param_def_id)",
+         "def_id: none"),
+        ("effect default body identity", "infer_decl", "def_id: some(exact_effect_def_id)",
+         "def_id: some(ctx.env.fresh_def_id())"),
+        ("trait default HParam identity", "infer_decl", "def_id: some(trait_param_def_id)",
+         "def_id: none"),
+        ("trait default body identity", "infer_decl", "def_id: some(exact_trait_def_id)",
+         "def_id: some(ctx.env.fresh_def_id())"),
         ("nested scope", "infer", "infer_scoped_block(ctx, expr, some(subst))",
          "infer_block(ctx, expr, some(subst))"),
     )
@@ -4515,6 +4617,8 @@ def identity_checkpoint_source_errors() -> List[str]:
         mutated[source_name] = sources[source_name].replace(anchor, replacement, 1)
         if not identity_checkpoint_contract_errors(mutated):
             errors.append(f"mutation {label} escaped exact-slot source oracle")
+    if ring_exe is not None:
+        errors.extend(default_body_identity_generated_c_errors(ring_exe))
     return errors
 
 
@@ -4531,7 +4635,7 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
 
     identity_label = "compiler.identity_checkpoint"
     if matches_filter(identity_label, name_filter):
-        identity_errors = identity_checkpoint_source_errors()
+        identity_errors = identity_checkpoint_source_errors(ring_exe)
         collector.add(TestResult(
             TestResult.PASS if not identity_errors else TestResult.FAIL,
             suite, identity_label, "; ".join(identity_errors)))
@@ -5516,9 +5620,13 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
             ),
         ),
         RcInvocationContract(
+            "exact reference identity live",
+            "tests/cases/verify_rc/exact_reference_def_id.ring",
+            ("--verify-rc",), True, fatal_exact=0,
+        ),
+        RcInvocationContract(
             "exact-DefId shadowing live", "tests/cases/verify_rc/shadow_overwrite.ring",
             ("--verify-rc",), True, fatal_exact=0,
-            local_finding_exact=0,
         ),
         RcInvocationContract(
             "control-flow value", "tests/cases/verify_rc/cf_value_leak.ring",
@@ -5566,14 +5674,13 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
         ),
         RcInvocationContract(
             "shadow mismatch lax", "tests/cases/verify_rc/shadow_mismatch.ring",
-            ("--verify-rc",), True, fatal_exact=0,
-            local_finding_exact=0, exempt_min=1,
+            ("--verify-rc",), True, fatal_exact=0, exempt_min=1,
             exempt_counts=(("x-effect-value", 1),),
         ),
         RcInvocationContract(
             "shadow mismatch strict", "tests/cases/verify_rc/shadow_mismatch.ring",
             ("--verify-rc-strict",), False, strict=True,
-            fatal_exact=0, local_finding_exact=1, exempt_min=1,
+            fatal_exact=0, exempt_min=1,
             exempt_counts=(("x-effect-value", 1),),
             finding_counts=(("x-effect-value", 1),),
             finding_lines=(("x-effect-value", (12,)),),
@@ -5612,11 +5719,52 @@ def run_rc(ring_exe: str, collector: ResultCollector, *,
         failure = rc_contract_failure(
             contract, result.returncode, process_output(result),
         )
+        if (
+            failure is None
+            and contract.name == "exact-DefId shadowing live"
+            and "x-shadow-overwrite" in process_output(result)
+        ):
+            failure = "exact-DefId shadowing still reports shared-name overwrite"
         collector.add(TestResult(
             TestResult.PASS if failure is None else TestResult.FAIL,
             suite,
             name,
             failure or "",
+        ))
+
+    identity_fixture = "tests/cases/verify_rc/exact_reference_def_id.ring"
+    identity_mutations = (
+        ("local", "strip-local-ident-def-id"),
+        ("capture", "strip-capture-ident-def-id"),
+    )
+    for mutation_name, mutation in identity_mutations:
+        label = f"neg/exact reference {mutation_name} DefId mutation"
+        if not (
+            matches_filter(label, name_filter)
+            or matches_filter(identity_fixture, name_filter)
+        ):
+            continue
+        try:
+            result = ring_check(
+                ring_exe, str(REPO / identity_fixture),
+                extra_args=["--verify-rc", f"--rc-mutate={mutation}"],
+                phase_suite=suite, phase_case=label,
+            )
+        except subprocess.TimeoutExpired:
+            collector.add(TestResult(TestResult.FAIL, suite, label, "timed out"))
+            continue
+        output = strip_ansi(process_output(result))
+        failure = None
+        if result.returncode == 0:
+            failure = "stripped exact local reference DefId did not fail"
+        elif "HIR Ident local reference" not in output:
+            failure = (
+                "missing fail-loud exact-reference diagnostic: "
+                + output[:300]
+            )
+        collector.add(TestResult(
+            TestResult.PASS if failure is None else TestResult.FAIL,
+            suite, label, failure or "",
         ))
 
 
