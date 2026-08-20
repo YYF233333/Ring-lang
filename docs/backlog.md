@@ -779,14 +779,6 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 
 **验收**：inventory 100% 有结论与证据锚；所有保留的本地路径/命令/Markdown link 可解析，C-only 构建/测试说明与当前入口一致；活动看板、audit、Inbox、handoff、CLAUDE/design/lang-spec 无已知状态/依赖冲突；retired backend 不再作为现行 oracle/依赖，完成流水不占活动真值；`python .agents/scripts/validate_workflow.py` 与适用的文档/link/example checks 通过；独立 reviewer 以 `current / historical / future` 三类边界主动寻找误删与漏删。
 
-### B-189 Outer invocation one-shot failure evidence authority [infra] [P1] [M] [judgment] [planning]
-
-2026-08-20 H+T authority `9585309c` 的唯一 fresh-construction launcher在进入 B-188 `one_shot_gate` attempt前即因 Python dynamic-import初始化失败而 exit 1；无 child、attempt、raw/verdict或 artifact。该命令按预注册门永久停止且不得修 import 重跑。B-188 已证明的边界只从 supervisor 内 child 开始，不能覆盖最外层 interpreter/launcher/import/config/schema failure；在本项完成前，所有 one-shot probe/build/bootstrap/acceptance 全局冻结。
-
-**A-root verdict（2026-08-20 用户批准；2026-08-21 用户收窄 trust model）**：接受 `OS launch + pinned CPython -I -S + small stdlib-only bootstrap + evidence-root/argv delivery` 为仓库内部 one-shot 的有限永久 acceptance trust root；不新增外部依赖、runtime或公开语言/CLI面。调用者、plan、argv/env、evidence目录与既有receipt默认友善，B-189明确不是 security / tamper boundary。Bootstrap第一项业务动作仍须在读取、compile/import真实launcher前O_EXCL创建并fsync outer attempt/raw，之后第二阶段Python/site/script syntax、仓库import、dataclass/config/schema、child nonzero与timeout等真实故障必须留下raw+verdict或attempt-only incomplete。固定interpreter path/version与entry/launcher hashes足够支持内部可恢复性；不把严格8KiB、frozen-only closure、whole-stdlib manifest或native supervisor作为永久门。
-
-**内部可靠性约束 / 验收**：同一evidence root不得自动retry；outer与inner记录基本关联，资源握手前不得spawn target，结束后正常清理Windows Job/POSIX process group。保留直接且低成本的correctness检查：v1基本schema、NaN/Inf拒绝、stored status与实际inner结果一致、普通wall/output bounds，以及syntax/import/config/child failure的raw证据恢复。独立review只验证真实故障可恢复、普通成功不误报、cleanup与v1兼容。明确不保证恶意修改receipt/hash、额外argv flag、路径alias/case/junction/reparse、CPython stdlib distribution漂移或故意输出洪泛，也不为这些场景保留对抗mutation矩阵。该收窄不改变旧958永久nonretry/non-input，不降低H+T provenance、RC/ASan/self-host或12 GiB门；B-189完整通过并形成fresh construction authority前，所有one-shot继续冻结。
-
 ### B-179 project manifest 与可复现 dependency lock [feature] [P2] [XL] [judgment] [queued] [after: B-175]
 
 首个 preview 允许以 entry `.ring` 文件作为 project root，不等待 registry；随后补 `ring.toml` + lockfile，把编译器/std 兼容、local/path/git dependency、feature/capability 与构建输入变为可复现真值。Registry、账号、签名服务与付费托管不在本项。
