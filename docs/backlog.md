@@ -768,7 +768,7 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 
 **验收**：inventory 100% 有结论与证据锚；所有保留的本地路径/命令/Markdown link 可解析，C-only 构建/测试说明与当前入口一致；活动看板、audit、Inbox、handoff、CLAUDE/design/lang-spec 无已知状态/依赖冲突；retired backend 不再作为现行 oracle/依赖，完成流水不占活动真值；`python .agents/scripts/validate_workflow.py` 与适用的文档/link/example checks 通过；独立 reviewer 以 `current / historical / future` 三类边界主动寻找误删与漏删。
 
-### B-188 One-shot gate failure evidence durability [infra] [P1] [M] [judgment] [queued]
+### B-188 One-shot gate failure evidence durability [infra] [P1] [M] [judgment] [planning]
 
 2026-08-20 I′ oracle-substrate preflight 暴露：bounded validator child 写出 82-byte stderr 后 exit 1，但 parent 只持久化通用 `validator-worker exited 1`；attempt、stage、stream byte counts 与 generic verdict 尚在，原始 child failure 已不可恢复。该 one-shot 按门永久停止，内部原因保持 unknown；本项不得借修复重跑、追认或重新分类该结果。
 
