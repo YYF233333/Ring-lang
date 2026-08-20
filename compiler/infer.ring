@@ -1623,18 +1623,25 @@ fn collect_default_arm_binders(
     collect_default_expr_binders(ctx, arm.body, remap)
 }
 
+fn collect_default_local_binder(
+    mut ctx: InferCtx, name: Str, def_id: Int?, init: HExpr,
+    mut remap: Map<Int, Int>
+) {
+    if name != "_" {
+        register_default_binder(
+            ctx, def_id, remap, "local '${name}'")
+    }
+    collect_default_expr_binders(ctx, init, remap)
+}
+
 fn collect_default_stmt_binders(
     mut ctx: InferCtx, stmt: HStmt, mut remap: Map<Int, Int>
 ) {
     match stmt {
-        HStmt::Let { name, def_id, init, .. } |
-        HStmt::Var { name, def_id, init, .. } => {
-            if name != "_" {
-                register_default_binder(
-                    ctx, def_id, remap, "local '${name}'")
-            }
-            collect_default_expr_binders(ctx, init, remap)
-        },
+        HStmt::Let { name, def_id, init, .. } =>
+            collect_default_local_binder(ctx, name, def_id, init, remap),
+        HStmt::Var { name, def_id, init, .. } =>
+            collect_default_local_binder(ctx, name, def_id, init, remap),
         HStmt::Assign { target, value, .. } => {
             collect_default_expr_binders(ctx, target, remap)
             collect_default_expr_binders(ctx, value, remap)
@@ -1693,6 +1700,27 @@ fn collect_default_stmt_binders(
     }
 }
 
+fn collect_default_field_binders(
+    mut ctx: InferCtx, fields: List<HStructFieldInit>, spread: HExpr?,
+    mut remap: Map<Int, Int>
+) {
+    for field in fields {
+        collect_default_expr_binders(ctx, field.value, remap)
+    }
+    match spread {
+        some(value) => collect_default_expr_binders(ctx, value, remap),
+        none => {}
+    }
+}
+
+fn collect_default_expr_value_binders(
+    mut ctx: InferCtx, values: List<HExpr>, mut remap: Map<Int, Int>
+) {
+    for value in values {
+        collect_default_expr_binders(ctx, value, remap)
+    }
+}
+
 fn collect_default_expr_binders(
     mut ctx: InferCtx, expr: HExpr, mut remap: Map<Int, Int>
 ) {
@@ -1709,16 +1737,10 @@ fn collect_default_expr_binders(
         },
         HExpr::FieldAccess { receiver, .. } =>
             collect_default_expr_binders(ctx, receiver, remap),
-        HExpr::StructLit { fields, spread, .. } |
-        HExpr::NamedVariantConstruct { fields, spread, .. } => {
-            for field in fields {
-                collect_default_expr_binders(ctx, field.value, remap)
-            }
-            match spread {
-                some(value) => collect_default_expr_binders(ctx, value, remap),
-                none => {}
-            }
-        },
+        HExpr::StructLit { fields, spread, .. } =>
+            collect_default_field_binders(ctx, fields, spread, remap),
+        HExpr::NamedVariantConstruct { fields, spread, .. } =>
+            collect_default_field_binders(ctx, fields, spread, remap),
         HExpr::MatchExpr { scrutinee, arms, .. } => {
             collect_default_expr_binders(ctx, scrutinee, remap)
             for arm in arms { collect_default_arm_binders(ctx, arm, remap) }
@@ -1785,12 +1807,10 @@ fn collect_default_expr_binders(
             collect_default_expr_binders(ctx, start, remap)
             collect_default_expr_binders(ctx, end, remap)
         },
-        HExpr::ListLit { elements, .. } |
-        HExpr::TupleLit { elements, .. } => {
-            for element in elements {
-                collect_default_expr_binders(ctx, element, remap)
-            }
-        },
+        HExpr::ListLit { elements, .. } =>
+            collect_default_expr_value_binders(ctx, elements, remap),
+        HExpr::TupleLit { elements, .. } =>
+            collect_default_expr_value_binders(ctx, elements, remap),
         HExpr::IndexExpr { receiver, index, .. } => {
             collect_default_expr_binders(ctx, receiver, remap)
             collect_default_expr_binders(ctx, index, remap)

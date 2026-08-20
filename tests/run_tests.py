@@ -4461,6 +4461,75 @@ def identity_checkpoint_contract_errors(
         if infer_source.count(placement) != 1:
             errors.append(f"infer: scoped-block placement drifted: {placement}")
 
+    # Tracked gen0 accepts source OrPattern syntax but cannot lower a shared
+    # body that reads payload variables bound by its alternatives.  Keep the
+    # I-prime compiler implementation crossing-compatible without constraining
+    # the language feature itself: each formerly shared traversal arm is an
+    # explicit arm that delegates to a common helper.
+    crossing_split_inventory = (
+        ("hir", "validate_hir_stmt",
+         "HStmt::Let { name, def_id, init, .. }",
+         "HStmt::Var { name, def_id, init, .. }",
+         "validate_hir_local_binding("),
+        ("hir", "validate_hir_expr",
+         "HExpr::StructLit { fields, spread, .. }",
+         "HExpr::NamedVariantConstruct { fields, spread, .. }",
+         "validate_hir_field_values("),
+        ("hir", "validate_hir_expr",
+         "HExpr::ListLit { elements, .. }",
+         "HExpr::TupleLit { elements, .. }",
+         "validate_hir_expr_values("),
+        ("infer", "collect_default_stmt_binders",
+         "HStmt::Let { name, def_id, init, .. }",
+         "HStmt::Var { name, def_id, init, .. }",
+         "collect_default_local_binder("),
+        ("infer", "collect_default_expr_binders",
+         "HExpr::StructLit { fields, spread, .. }",
+         "HExpr::NamedVariantConstruct { fields, spread, .. }",
+         "collect_default_field_binders("),
+        ("infer", "collect_default_expr_binders",
+         "HExpr::ListLit { elements, .. }",
+         "HExpr::TupleLit { elements, .. }",
+         "collect_default_expr_value_binders("),
+    )
+    crossing_bodies: dict[tuple[str, str], str] = {}
+    for label, function_name, left, right, helper in crossing_split_inventory:
+        key = (label, function_name)
+        body = crossing_bodies.get(key)
+        if body is None:
+            body, extract_error = extract_ring_function_body(
+                sources[label], function_name)
+            if extract_error:
+                errors.append(extract_error)
+                continue
+            crossing_bodies[key] = body
+        for arm in (left, right):
+            arm_token = f"{arm} =>"
+            if body.count(arm_token) != 1:
+                errors.append(
+                    f"{function_name}: crossing split arm {arm!r} matched "
+                    f"{body.count(arm_token)} times")
+        if body.count(helper) != 2:
+            errors.append(
+                f"{function_name}: crossing helper {helper!r} matched "
+                f"{body.count(helper)} times")
+        combined = re.compile(
+            rf"{re.escape(left)}\s*\|\s*{re.escape(right)}")
+        if combined.search(mask_ring_strings_and_comments(body)):
+            errors.append(
+                f"{function_name}: payload-binding OrPattern arm regained")
+
+    payload_or_pattern = re.compile(
+        r"(?m)^\s*[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*\s*"
+        r"(?:\{(?!\s*\.\.\s*\})[^{}\n]+\}|"
+        r"\(\s*(?!\s*\))[^()\n]+\))\s*\|(?!\|)")
+    for (label, function_name), body in crossing_bodies.items():
+        match = payload_or_pattern.search(mask_ring_strings_and_comments(body))
+        if match is not None:
+            errors.append(
+                f"{label}.{function_name}: payload-binding source OrPattern "
+                f"remains at {match.group(0).strip()!r}")
+
     if sources["cexpr"].count("bind_c_root_pattern_after_success(") != 3:
         errors.append(
             "C or-pattern lowering must have one shared-slot helper and "
@@ -4776,6 +4845,25 @@ def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[st
          "if false {"),
         ("nested scope", "infer", "infer_scoped_block(ctx, expr, some(subst))",
          "infer_block(ctx, expr, some(subst))"),
+        ("HIR crossing arm split", "hir",
+         "HStmt::Let { name, def_id, init, .. } =>\n"
+         "            validate_hir_local_binding(\n"
+         "                name, def_id, init, seen, scope),\n"
+         "        HStmt::Var { name, def_id, init, .. } =>\n"
+         "            validate_hir_local_binding(\n"
+         "                name, def_id, init, seen, scope)",
+         "HStmt::Let { name, def_id, init, .. } |\n"
+         "        HStmt::Var { name, def_id, init, .. } =>\n"
+         "            validate_hir_local_binding(\n"
+         "                name, def_id, init, seen, scope)"),
+        ("default traversal crossing arm split", "infer",
+         "HExpr::ListLit { elements, .. } =>\n"
+         "            collect_default_expr_value_binders(ctx, elements, remap),\n"
+         "        HExpr::TupleLit { elements, .. } =>\n"
+         "            collect_default_expr_value_binders(ctx, elements, remap)",
+         "HExpr::ListLit { elements, .. } |\n"
+         "        HExpr::TupleLit { elements, .. } =>\n"
+         "            collect_default_expr_value_binders(ctx, elements, remap)"),
     )
     for label, source_name, anchor, replacement in mutations:
         if sources[source_name].count(anchor) < 1:

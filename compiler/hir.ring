@@ -666,20 +666,29 @@ fn validate_hir_arm(
     pop_hir_validation_scope(scope)
 }
 
+fn validate_hir_local_binding(
+    name: Str, def_id: Int?, init: HExpr,
+    mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    validate_hir_expr(init, seen, scope)
+    if name != "_" {
+        let id = required_hir_def_id(
+            def_id, "local binding '${name}'")
+        validate_hir_binder(seen, id, "local binding '${name}'")
+        bind_hir_validation_scope(scope, name, id)
+    }
+}
+
 fn validate_hir_stmt(
     stmt: HStmt, mut seen: Set<Int>, mut scope: HirValidationScope
 ) {
     match stmt {
-        HStmt::Let { name, def_id, init, .. } |
-        HStmt::Var { name, def_id, init, .. } => {
-            validate_hir_expr(init, seen, scope)
-            if name != "_" {
-                let id = required_hir_def_id(
-                    def_id, "local binding '${name}'")
-                validate_hir_binder(seen, id, "local binding '${name}'")
-                bind_hir_validation_scope(scope, name, id)
-            }
-        },
+        HStmt::Let { name, def_id, init, .. } =>
+            validate_hir_local_binding(
+                name, def_id, init, seen, scope),
+        HStmt::Var { name, def_id, init, .. } =>
+            validate_hir_local_binding(
+                name, def_id, init, seen, scope),
         HStmt::Assign { target, value, .. } => {
             validate_hir_expr(target, seen, scope)
             validate_hir_expr(value, seen, scope)
@@ -753,6 +762,27 @@ fn validate_hir_stmt(
     }
 }
 
+fn validate_hir_field_values(
+    fields: List<HStructFieldInit>, spread: HExpr?,
+    mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    for field in fields {
+        validate_hir_expr(field.value, seen, scope)
+    }
+    match spread {
+        some(value) => validate_hir_expr(value, seen, scope),
+        none => {}
+    }
+}
+
+fn validate_hir_expr_values(
+    values: List<HExpr>, mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    for value in values {
+        validate_hir_expr(value, seen, scope)
+    }
+}
+
 fn validate_hir_expr(
     expr: HExpr, mut seen: Set<Int>, mut scope: HirValidationScope
 ) {
@@ -772,16 +802,10 @@ fn validate_hir_expr(
         },
         HExpr::FieldAccess { receiver, .. } =>
             validate_hir_expr(receiver, seen, scope),
-        HExpr::StructLit { fields, spread, .. } |
-        HExpr::NamedVariantConstruct { fields, spread, .. } => {
-            for field in fields {
-                validate_hir_expr(field.value, seen, scope)
-            }
-            match spread {
-                some(value) => validate_hir_expr(value, seen, scope),
-                none => {}
-            }
-        },
+        HExpr::StructLit { fields, spread, .. } =>
+            validate_hir_field_values(fields, spread, seen, scope),
+        HExpr::NamedVariantConstruct { fields, spread, .. } =>
+            validate_hir_field_values(fields, spread, seen, scope),
         HExpr::MatchExpr { scrutinee, arms, .. } => {
             validate_hir_expr(scrutinee, seen, scope)
             for arm in arms {
@@ -852,12 +876,10 @@ fn validate_hir_expr(
             validate_hir_expr(start, seen, scope)
             validate_hir_expr(end, seen, scope)
         },
-        HExpr::ListLit { elements, .. } |
-        HExpr::TupleLit { elements, .. } => {
-            for element in elements {
-                validate_hir_expr(element, seen, scope)
-            }
-        },
+        HExpr::ListLit { elements, .. } =>
+            validate_hir_expr_values(elements, seen, scope),
+        HExpr::TupleLit { elements, .. } =>
+            validate_hir_expr_values(elements, seen, scope),
         HExpr::IndexExpr { receiver, index, .. } => {
             validate_hir_expr(receiver, seen, scope)
             validate_hir_expr(index, seen, scope)
