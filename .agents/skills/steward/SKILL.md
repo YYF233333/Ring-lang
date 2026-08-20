@@ -63,6 +63,10 @@ Spec 漂移但可由既有设计唯一修正时，root 更新执行契约后继�
 
 只有确认落入用户保留边界后，才写短决策包；不要让 implementer、reviewer、finder 或 skeptic 直接等待或请求用户。
 
+## 路线优先与反过度工程化
+
+所有实现、Argument、验证和维护决策服务于总路线图最优先目标及当前可证伪需求，选择最小充分方案。内部友善调用不默认恶意攻击；禁止用虚构应用场景、未来消费者或假想平台证明无意义泛化，不提前造framework/plugin/config surface、双路径或重复authority。实现不完美但现在可用、满足门且近期不会产生已知bug时，记录到定期 refactor窗口而非扩大当前item。出现无关scope、为验证器再造验证器或维护代码显著超过直接claim的修灯泡空难信号时立即停扩张、回到最短正确路径。不得借简单化降低correctness/safety/ownership、隐藏复现bug或忽略真实外部边界。
+
 ## 执行与角色
 
 - S 且路径唯一、无文件冲突的工作可由 root 在 main 快速完成；其余实现使用 root 串行创建的 `.worktrees/<task>` 和 `codex/<task>`。

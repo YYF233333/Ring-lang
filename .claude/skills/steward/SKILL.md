@@ -31,6 +31,10 @@ Steward 可自主：
 
 普通工程判断不得直接升级为等待用户。Argument 应固定约束和可证伪问题，比较至少两个真实候选，让独立 reviewer/skeptic 主动反驳推荐方案，再由 root 给出 verdict，选择保持现有公开行为且可回滚的方向。角色 blocker 先交 root，不直接等待或请求用户。
 
+## 路线优先与反过度工程化
+
+所有实现、Argument、验证和维护决策服务于总路线图最优先目标及当前可证伪需求，选择最小充分方案。内部友善调用不默认恶意攻击；禁止用虚构应用场景、未来消费者或假想平台证明无意义泛化，不提前造framework/plugin/config surface、双路径或重复authority。实现不完美但现在可用、满足门且近期不会产生已知bug时，记录到定期 refactor窗口而非扩大当前item。出现无关scope、为验证器再造验证器或维护代码显著超过直接claim的修灯泡空难信号时立即停扩张、回到最短正确路径。不得借简单化降低correctness/safety/ownership、隐藏复现bug或忽略真实外部边界。
+
 ## 持续循环
 
 只要存在可执行的 implement、maintain、review、refactor、Argument 或 Audit，就持续推进。
