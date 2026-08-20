@@ -882,6 +882,11 @@ fn identity_event_pair_key(event: CIdentityEvent) -> Str {
     "${event.edge_id}:${event.index}"
 }
 
+fn identity_owned_slot_key(frame: Str, slot: Str) -> Str {
+    // Collision-free encoding of the (owning frame, raw C slot) pair.
+    "${frame.len()}:${frame}:${slot}"
+}
+
 fn identity_event_same_identity(a: CIdentityEvent, b: CIdentityEvent) -> Bool {
     a.domain == b.domain &&
     a.def_id == b.def_id &&
@@ -947,8 +952,10 @@ fn validate_identity_ledger(ctx: CCtx) {
                             store_indices.insert(event.edge_id, indices)
                         }
                     }
-                    if event.domain == "exact" { exact_slots.insert(event.source_slot) }
-                    else { name_only_slots.insert(event.source_slot) }
+                    let owned_source = identity_owned_slot_key(
+                        event.parent_frame, event.source_slot)
+                    if event.domain == "exact" { exact_slots.insert(owned_source) }
+                    else { name_only_slots.insert(owned_source) }
                 } else {
                     if extracts.contains_key(pair_key) {
                         panic("C identity ledger: duplicate capture extract ${pair_key}")
@@ -962,25 +969,42 @@ fn validate_identity_ledger(ctx: CCtx) {
                             extract_indices.insert(event.edge_id, indices)
                         }
                     }
-                    if event.domain == "exact" { exact_slots.insert(event.dest_slot) }
-                    else { name_only_slots.insert(event.dest_slot) }
+                    let owned_dest = identity_owned_slot_key(
+                        event.child_frame, event.dest_slot)
+                    if event.domain == "exact" { exact_slots.insert(owned_dest) }
+                    else { name_only_slots.insert(owned_dest) }
                 }
             } else {
                 if event.kind == "dict-receiver-load" || event.kind == "effect-receiver-load" {
                     if event.load_id <= 0 || event.index <= 0 ||
-                       event.source_slot == "" || event.dest_slot == "" {
+                       event.parent_frame == "" || event.source_slot == "" ||
+                       event.dest_slot == "" {
                         panic("C identity ledger: receiver load has invalid id/index")
+                    }
+                    if event.kind == "dict-receiver-load" {
+                        if event.domain != "name-only" && event.domain != "static" &&
+                           event.domain != "computed" {
+                            panic("C identity ledger: dict receiver has forbidden '${event.domain}' domain")
+                        }
+                    } else {
+                        if event.domain != "name-only" &&
+                           event.domain != "default-evidence" &&
+                           event.domain != "computed" {
+                            panic("C identity ledger: effect receiver has forbidden '${event.domain}' domain")
+                        }
                     }
                     if loads.contains_key(event.load_id) {
                         panic("C identity ledger: duplicate receiver load ${event.load_id}")
                     }
                     loads.insert(event.load_id, event)
-                    if event.domain == "exact" { exact_slots.insert(event.source_slot) }
-                    if event.domain == "name-only" { name_only_slots.insert(event.source_slot) }
+                    let owned_source = identity_owned_slot_key(
+                        event.parent_frame, event.source_slot)
+                    if event.domain == "exact" { exact_slots.insert(owned_source) }
+                    if event.domain == "name-only" { name_only_slots.insert(owned_source) }
                 } else {
                     if event.kind == "closure-call" {
-                        if event.arity <= 0 || event.source_slot == "" ||
-                           event.dest_slot == "" {
+                        if event.arity <= 0 || event.parent_frame == "" ||
+                           event.source_slot == "" || event.dest_slot == "" {
                             panic("C identity ledger: closure call has non-positive arity")
                         }
                         if event.load_id > 0 {
@@ -990,8 +1014,10 @@ fn validate_identity_ledger(ctx: CCtx) {
                             }
                             load_call_counts.insert(event.load_id, prior + 1)
                         }
-                        if event.domain == "exact" { exact_slots.insert(event.source_slot) }
-                        if event.domain == "name-only" { name_only_slots.insert(event.source_slot) }
+                        let owned_source = identity_owned_slot_key(
+                            event.parent_frame, event.source_slot)
+                        if event.domain == "exact" { exact_slots.insert(owned_source) }
+                        if event.domain == "name-only" { name_only_slots.insert(owned_source) }
                     } else {
                         panic("C identity ledger: unknown event kind '${event.kind}'")
                     }
@@ -1013,7 +1039,10 @@ fn validate_identity_ledger(ctx: CCtx) {
             some(found) => found,
             none => panic("C identity ledger: capture references missing edge ${store.edge_id}")
         }
-        if store.parent_frame != edge.parent_frame ||
+        if store.dest_slot != edge.source_slot ||
+           store.parent_frame != edge.parent_frame ||
+           store.child_frame != edge.child_frame ||
+           extract.parent_frame != edge.parent_frame ||
            extract.child_frame != edge.child_frame {
             panic("C identity ledger: capture frame mismatch '${pair_key}'")
         }
@@ -1058,7 +1087,10 @@ fn validate_identity_ledger(ctx: CCtx) {
         let mut matched_call = false
         for event in ctx.identity_events {
             if event.kind == "closure-call" && event.load_id == load_id {
-                if event.source_slot != load.dest_slot {
+                if event.parent_frame != load.parent_frame ||
+                   event.source_slot != load.dest_slot ||
+                   event.domain != "computed" ||
+                   event.producer != load.kind {
                     panic("C identity ledger: load/call slot mismatch ${load_id}")
                 }
                 matched_call = true

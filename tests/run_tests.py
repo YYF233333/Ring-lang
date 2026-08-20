@@ -57,6 +57,7 @@ COMPILER_ARTIFACT_CACHE = (
 )
 COMPILER_CACHE_ENV = "RING_TEST_COMPILER_CACHE"
 IDENTITY_CANDIDATE_ENV = "RING_IDENTITY_CANDIDATE_EXE"
+IDENTITY_EVIDENCE_ROOT_ENV = "RING_IDENTITY_EVIDENCE_ROOT"
 COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-anchor-cache.v3"
 COMPILER_CACHE_VERSION = 3
 COMPILER_CACHE_POISON_SCHEMA = "ring.test-runner-compiler-anchor-poison.v1"
@@ -3494,8 +3495,8 @@ def validate_identity_ledger_relations(
     extracts: dict[Tuple[int, int], IdentityLedgerEvent] = {}
     loads: dict[int, IdentityLedgerEvent] = {}
     load_calls: dict[int, List[IdentityLedgerEvent]] = {}
-    exact_slots: set[str] = set()
-    name_only_slots: set[str] = set()
+    exact_slots: set[Tuple[str, str]] = set()
+    name_only_slots: set[Tuple[str, str]] = set()
 
     for expected_id, event in enumerate(events, 1):
         if event.event_id != expected_id:
@@ -3536,33 +3537,50 @@ def validate_identity_ledger_relations(
             if key in target:
                 errors.append(f"duplicate {event.kind} {key}")
             target[key] = event
-            identity_slot = (
-                event.source_slot if event.kind == "capture-store"
-                else event.dest_slot)
-            (exact_slots if event.domain == "exact" else name_only_slots).add(
-                identity_slot)
+            if event.kind == "capture-store":
+                identity_slot = (event.parent_frame, event.source_slot)
+            else:
+                identity_slot = (event.child_frame, event.dest_slot)
+            if event.domain == "exact":
+                exact_slots.add(identity_slot)
+            elif event.domain == "name-only":
+                name_only_slots.add(identity_slot)
         elif event.kind in {"dict-receiver-load", "effect-receiver-load"}:
             if (
                 event.load_id <= 0 or event.index <= 0
-                or not event.source_slot or not event.dest_slot
+                or not event.parent_frame or not event.source_slot
+                or not event.dest_slot
             ):
                 errors.append(f"receiver load {event.event_id} has invalid id/index")
+            if event.kind == "dict-receiver-load" and event.domain not in {
+                "name-only", "static", "computed",
+            }:
+                errors.append(
+                    f"dict receiver {event.event_id} has {event.domain} domain")
+            if event.kind == "effect-receiver-load" and event.domain not in {
+                "name-only", "default-evidence", "computed",
+            }:
+                errors.append(
+                    f"effect receiver {event.event_id} has {event.domain} domain")
             if event.load_id in loads:
                 errors.append(f"duplicate receiver load {event.load_id}")
             loads[event.load_id] = event
             if event.domain == "exact":
-                exact_slots.add(event.source_slot)
+                exact_slots.add((event.parent_frame, event.source_slot))
             if event.domain == "name-only":
-                name_only_slots.add(event.source_slot)
+                name_only_slots.add((event.parent_frame, event.source_slot))
         elif event.kind == "closure-call":
-            if event.arity <= 0 or not event.source_slot or not event.dest_slot:
+            if (
+                event.arity <= 0 or not event.parent_frame
+                or not event.source_slot or not event.dest_slot
+            ):
                 errors.append(f"closure call {event.event_id} has invalid arity")
             if event.load_id > 0:
                 load_calls.setdefault(event.load_id, []).append(event)
             if event.domain == "exact":
-                exact_slots.add(event.source_slot)
+                exact_slots.add((event.parent_frame, event.source_slot))
             if event.domain == "name-only":
-                name_only_slots.add(event.source_slot)
+                name_only_slots.add((event.parent_frame, event.source_slot))
 
     for key, store in stores.items():
         extract = extracts.get(key)
@@ -3580,7 +3598,10 @@ def validate_identity_ledger_relations(
         if edge is None:
             errors.append(f"capture {key} references missing edge")
         elif (
-            store.parent_frame != edge.parent_frame
+            store.dest_slot != edge.source_slot
+            or store.parent_frame != edge.parent_frame
+            or store.child_frame != edge.child_frame
+            or extract.parent_frame != edge.parent_frame
             or extract.child_frame != edge.child_frame
         ):
             errors.append(f"capture frame/edge mismatch {key}")
@@ -3599,14 +3620,20 @@ def validate_identity_ledger_relations(
         calls = load_calls.get(load_id, [])
         if len(calls) != 1:
             errors.append(f"receiver load {load_id} consumed {len(calls)} times")
-        elif calls[0].source_slot != load.dest_slot:
+        elif (
+            calls[0].parent_frame != load.parent_frame
+            or calls[0].source_slot != load.dest_slot
+            or calls[0].domain != "computed"
+            or calls[0].producer != load.kind
+        ):
             errors.append(f"receiver load/call slot mismatch {load_id}")
     for load_id in load_calls:
         if load_id not in loads:
             errors.append(f"closure call references missing load {load_id}")
     aliases = exact_slots & name_only_slots
     if aliases:
-        errors.append(f"exact/name-only raw slot alias: {sorted(aliases)}")
+        errors.append(
+            f"exact/name-only owned-slot alias: {sorted(aliases)}")
     return errors
 
 
@@ -3614,13 +3641,13 @@ def identity_ledger_mutation_matrix_errors() -> List[str]:
     """Every registered ledger corruption must be killed without C parsing."""
     events = [
         IdentityLedgerEvent(1, "capture-extract", 1, 0, "parent", "child_a",
-                            "exact", 41, "x", "", "env", "r_x_a", 1, 0),
+                            "exact", 41, "x", "", "env", "r_exact_a", 1, 0),
         IdentityLedgerEvent(2, "capture-extract", 2, 0, "parent", "child_b",
-                            "exact", 41, "x", "", "env", "r_x_b", 1, 0),
+                            "exact", 41, "x", "", "env", "r_exact_b", 1, 0),
         IdentityLedgerEvent(3, "capture-store", 1, 0, "parent", "child_a",
-                            "exact", 41, "x", "", "r_x", "t_env_a", 1, 0),
+                            "exact", 41, "x", "", "r_shared", "t_env_a", 1, 0),
         IdentityLedgerEvent(4, "capture-store", 2, 0, "parent", "child_b",
-                            "exact", 41, "x", "", "r_x", "t_env_b", 1, 0),
+                            "exact", 41, "x", "", "r_shared", "t_env_b", 1, 0),
         IdentityLedgerEvent(5, "closure-edge", 1, 0, "parent", "child_a",
                             "fresh", -1, "", "closure-edge:child_a",
                             "t_env_a", "t_cl_a", 0, 0),
@@ -3629,16 +3656,22 @@ def identity_ledger_mutation_matrix_errors() -> List[str]:
                             "t_env_b", "t_cl_b", 0, 0),
         IdentityLedgerEvent(7, "dict-receiver-load", 0, 1, "child_a", "",
                             "name-only", -1, "__ring_T_Ord", "",
-                            "r___ring_T_Ord", "t_method", 1, 0),
+                            "r_shared", "t_method", 1, 0),
         IdentityLedgerEvent(8, "closure-call", 0, 1, "child_a", "",
                             "computed", -1, "", "dict-receiver-load",
                             "t_method", "t_result", 0, 2),
-        IdentityLedgerEvent(9, "closure-call", 0, 0, "parent", "",
-                            "exact", 41, "x", "", "r_x", "t_exact", 0, 1),
-        IdentityLedgerEvent(10, "closure-call", 0, 0, "parent", "",
+        IdentityLedgerEvent(9, "effect-receiver-load", 0, 2, "child_b", "",
+                            "default-evidence", -1, "__ring_default_E", "",
+                            "r_effect", "t_effect", 1, 0),
+        IdentityLedgerEvent(10, "closure-call", 0, 2, "child_b", "",
+                            "computed", -1, "", "effect-receiver-load",
+                            "t_effect", "t_effect_result", 0, 2),
+        IdentityLedgerEvent(11, "closure-call", 0, 0, "parent", "",
+                            "exact", 41, "x", "", "r_shared", "t_exact", 0, 1),
+        IdentityLedgerEvent(12, "closure-call", 0, 0, "parent", "",
                             "name-only", -1, "__ring_T_Ord", "",
                             "r___ring_T_Ord", "t_name", 0, 1),
-        IdentityLedgerEvent(11, "closure-call", 0, 0, "parent", "",
+        IdentityLedgerEvent(13, "closure-call", 0, 0, "parent", "",
                             "computed", -1, "", "expression-closure",
                             "t_expr", "t_computed", 0, 1),
     ]
@@ -3659,17 +3692,39 @@ def identity_ledger_mutation_matrix_errors() -> List[str]:
             rows[0], canonical_key="wrong"))),
         ("wrong index", lambda rows: rows.__setitem__(2, replace(
             rows[2], index=2))),
-        ("slot alias", lambda rows: rows.__setitem__(2, replace(
-            rows[2], source_slot="r___ring_T_Ord"))),
+        ("same-frame cross-domain slot alias", lambda rows: rows.__setitem__(0,
+            replace(rows[0], dest_slot="r_shared"))),
+        ("wrong closure env", lambda rows: rows.__setitem__(2, replace(
+            rows[2], dest_slot="t_env_b"))),
+        ("store parent frame", lambda rows: rows.__setitem__(2, replace(
+            rows[2], parent_frame="wrong_parent"))),
+        ("store child frame", lambda rows: rows.__setitem__(2, replace(
+            rows[2], child_frame="wrong_child"))),
+        ("extract parent frame", lambda rows: rows.__setitem__(0, replace(
+            rows[0], parent_frame="wrong_parent"))),
+        ("extract child frame", lambda rows: rows.__setitem__(0, replace(
+            rows[0], child_frame="wrong_child"))),
         ("wrong edge", lambda rows: rows.__setitem__(2, replace(
             rows[2], edge_id=2))),
         ("sibling cross-pair", lambda rows: rows.__setitem__(0, replace(
             rows[0], edge_id=2))),
+        ("dict exact domain", lambda rows: rows.__setitem__(6, replace(
+            rows[6], domain="exact", def_id=73, canonical_key="dict_local"))),
+        ("dict effect-only domain", lambda rows: rows.__setitem__(6, replace(
+            rows[6], domain="default-evidence"))),
+        ("effect exact domain", lambda rows: rows.__setitem__(8, replace(
+            rows[8], domain="exact", def_id=74, canonical_key="effect_local"))),
+        ("effect dict-only domain", lambda rows: rows.__setitem__(8, replace(
+            rows[8], domain="static"))),
         ("load orphan", lambda rows: rows.pop(7)),
         ("call orphan", lambda rows: rows.__setitem__(7, replace(
             rows[7], load_id=77))),
-        ("zero arity", lambda rows: rows.__setitem__(8, replace(
-            rows[8], arity=0))),
+        ("load/call frame", lambda rows: rows.__setitem__(7, replace(
+            rows[7], parent_frame="other_child"))),
+        ("load/call producer", lambda rows: rows.__setitem__(7, replace(
+            rows[7], producer="effect-receiver-load"))),
+        ("zero arity", lambda rows: rows.__setitem__(10, replace(
+            rows[10], arity=0))),
         ("nondeterministic order", lambda rows: rows.__setitem__(slice(0, 2),
             [rows[1], rows[0]])),
     )
@@ -4755,6 +4810,53 @@ def identity_ledger_contract_errors(
                     f"{function_name}: atomic C/event token {token!r} "
                     f"matched {body.count(token)} times")
 
+    receiver_body, receiver_error = extract_ring_function_body(
+        cexpr, "emit_c_receiver_load")
+    if receiver_error:
+        errors.append(receiver_error)
+    else:
+        for token in (
+            'domain != "name-only" && domain != "static" && domain != "computed"',
+            'domain != "name-only" && domain != "default-evidence" &&',
+            'domain != "computed"',
+            "dict receiver has forbidden '${domain}' identity domain",
+            "effect receiver has forbidden '${domain}' identity domain",
+        ):
+            if token not in receiver_body:
+                errors.append(
+                    f"emit_c_receiver_load: role/domain guard missing {token!r}")
+        domain_anchor = "let domain = c_ref_domain(receiver)"
+        emit_anchor = 'c_emit(ctx, "${dest} = ((void**)${source_name})[${index}];")'
+        if domain_anchor in receiver_body and emit_anchor in receiver_body and (
+                receiver_body.index(domain_anchor) > receiver_body.index(emit_anchor)):
+            errors.append("receiver role/domain validation occurs after C emission")
+
+    relation_body, relation_error = extract_ring_function_body(
+        cctx, "validate_identity_ledger")
+    if relation_error:
+        errors.append(relation_error)
+    else:
+        for token in (
+            'event.domain != "name-only" && event.domain != "static" &&',
+            'event.domain != "name-only" &&\n'
+            '                           event.domain != "default-evidence" &&',
+            "store.dest_slot != edge.source_slot",
+            "store.parent_frame != edge.parent_frame",
+            "store.child_frame != edge.child_frame",
+            "extract.parent_frame != edge.parent_frame",
+            "extract.child_frame != edge.child_frame",
+            "event.parent_frame != load.parent_frame",
+            "event.producer != load.kind",
+        ):
+            if token not in relation_body:
+                errors.append(
+                    f"validate_identity_ledger: relation guard missing {token!r}")
+    if cctx.count("identity_owned_slot_key(") != 5:
+        errors.append(
+            "identity ledger must derive exactly four frame-qualified slot uses")
+    if '"${frame.len()}:${frame}:${slot}"' not in cctx:
+        errors.append("identity ledger owned-slot key lost its frame component")
+
     record_calls = (
         ("c_record_capture_extract(", "emit_c_capture_extract"),
         ("c_record_capture_store(", "emit_c_capture_store"),
@@ -4857,21 +4959,58 @@ def identity_ledger_contract_errors(
         "if ledger_path.exists()",
         "create_one_shot_archive(case_root, archive_path)",
         "canonicalize_identity_stdout_root(",
+        'IDENTITY_EVIDENCE_ROOT_ENV = "RING_IDENTITY_EVIDENCE_ROOT"',
+        "evidence_root, evidence_error = identity_checkpoint_evidence_root()",
+        "identity_candidate_verify_rc_errors(\n        candidate, evidence_root, evidence_log)",
+        "default_body_identity_generated_c_errors(\n            candidate, evidence_root, evidence_log)",
+        "audit_one_shot_attempt(evidence_dir)",
+        "archive_sha256",
     )
     for token in runner_tokens:
         if token not in runner:
             errors.append(f"H+T runner contract missing {token!r}")
+    evidence_anchor = (
+        "evidence_root, evidence_error = identity_checkpoint_evidence_root()")
+    verify_anchor = "verify_errors = identity_candidate_verify_rc_errors("
+    if evidence_anchor in runner and verify_anchor in runner and (
+            runner.index(evidence_anchor) > runner.index(verify_anchor)):
+        errors.append("candidate command can precede evidence-root authority")
+    if re.search(
+        r"(?m)^    evidence_root, evidence_error = "
+        r"identity_checkpoint_evidence_root\(\)\n"
+        r"    if evidence_error is not None:$",
+        runner,
+    ) is None:
+        errors.append("identity checkpoint lacks executable evidence-root guard")
+    if re.search(
+        r"(?m)^        create_one_shot_archive\(case_root, archive_path\)\n"
+        r"        archive_sha256 = _sha256_file\(archive_path\)$",
+        runner,
+    ) is None:
+        errors.append("identity candidate lacks executable exclusive archive path")
+    for rejected in (
+        "TemporaryDirectory" + '(prefix="ring_identity_ledger_"',
+        "TemporaryDirectory" + '(prefix="ring_identity_rc_"',
+    ):
+        if rejected in runner:
+            errors.append("identity candidate evidence regained auto-cleanup root")
 
+    provenance_contract = sources.get("provenance_contract", "")
     for rejected in (
         "parse_c_function_provenance_facts",
         "analyze_two_level_provenance_c",
         "_parse_uniform_closure_call_statement",
+        "valid_two_level_c",
     ):
-        if re.search(
-            rf"(?m)^def\s+{re.escape(rejected)}\s*\(",
-            runner,
+        for source_label, source in (
+            ("runner", runner), ("provenance contract", provenance_contract),
         ):
-            errors.append(f"rejected F parser remains active: {rejected}")
+            if re.search(
+                rf"(?m)^def\s+{re.escape(rejected)}\s*\(", source
+            ):
+                errors.append(
+                    f"rejected F parser remains active in {source_label}: "
+                    f"{rejected}")
 
     h_t_functions = (
         ("cctx", "c_ref_domain"),
@@ -5901,10 +6040,14 @@ class IdentityCandidateArtifacts:
     object_bytes: bytes
     ledger_bytes: Optional[bytes]
     verdict: dict[str, Any]
+    audit: dict[str, Any]
+    archive_path: Path
+    archive_sha256: str
 
 
 def run_identity_candidate_mode(
-    ring_exe: str, fixture: str, case_root: Path, *, ledger: bool,
+    ring_exe: str, fixture: str, case_root: Path, evidence_log: List[str],
+    *, ledger: bool,
 ) -> Tuple[Optional[IdentityCandidateArtifacts], Optional[str]]:
     mode = "on" if ledger else "off"
     out_dir = case_root / "out"
@@ -5969,27 +6112,55 @@ def run_identity_candidate_mode(
         reviewed_env=tuple(sorted(environment.items())),
         limits=limits,
     )
+    verdict: Optional[dict[str, Any]] = None
+    wrapper_error: Optional[str] = None
     try:
         verdict = run_one_shot(spec, result_validator=validate_artifacts)
     except Exception as exc:
-        return None, f"{mode} B-188 one-shot wrapper failed: {exc}"
+        wrapper_error = str(exc)
+    audit = audit_one_shot_attempt(evidence_dir)
+    archive_path = case_root.parent / f"{case_root.name}.tar"
+    archive_error: Optional[str] = None
+    try:
+        create_one_shot_archive(case_root, archive_path)
+        archive_sha256 = _sha256_file(archive_path)
+    except Exception as exc:
+        archive_error = str(exc)
+        archive_sha256 = "unavailable"
+    archive_detail = (
+        f"sha256={archive_sha256}" if archive_error is None
+        else f"error={archive_error}")
+    evidence_log.append(
+        f"{case_root.name}:raw={evidence_dir};audit={audit['state']}/"
+        f"{audit['status']};archive={archive_path};{archive_detail}")
+    if wrapper_error is not None:
+        return None, (
+            f"{mode} B-188 wrapper failed: {wrapper_error}; raw={evidence_dir}; "
+            f"archive={archive_path}; {archive_detail}")
+    assert verdict is not None
     if verdict["status"] != "success":
         return None, (
             f"{mode} candidate failed as {verdict['classification']}; "
-            f"raw={evidence_dir}")
-    audit = audit_one_shot_attempt(evidence_dir)
+            f"raw={evidence_dir}; archive={archive_path}; "
+            f"{archive_detail}")
     if audit["state"] != "complete" or audit["status"] != "success":
-        return None, f"{mode} one-shot recovery audit failed: {audit}"
+        return None, (
+            f"{mode} one-shot recovery audit failed: {audit}; "
+            f"archive={archive_path}; archive_sha256={archive_sha256}")
+    if archive_error is not None:
+        return None, (
+            f"cannot archive {mode} identity artifacts: {archive_error}; "
+            f"raw={evidence_dir}")
     try:
         stdout = (evidence_dir / "stdout.raw").read_bytes()
         stderr = (evidence_dir / "stderr.raw").read_bytes()
         c_bytes = c_path.read_bytes()
         object_bytes = object_path.read_bytes()
         ledger_bytes = ledger_path.read_bytes() if ledger else None
-        archive_path = case_root.parent / f"{case_root.name}.tar"
-        create_one_shot_archive(case_root, archive_path)
-    except (OSError, RuntimeError) as exc:
-        return None, f"cannot retain/archive {mode} identity artifacts: {exc}"
+    except OSError as exc:
+        return None, (
+            f"cannot read retained {mode} identity artifacts: {exc}; "
+            f"raw={evidence_dir}; archive={archive_path}")
     return IdentityCandidateArtifacts(
         mode=mode,
         case_root=case_root,
@@ -5999,78 +6170,85 @@ def run_identity_candidate_mode(
         object_bytes=object_bytes,
         ledger_bytes=ledger_bytes,
         verdict=verdict,
+        audit=audit,
+        archive_path=archive_path,
+        archive_sha256=archive_sha256,
     ), None
 
 
-def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
+def default_body_identity_generated_c_errors(
+    ring_exe: str, evidence_root: Path, evidence_log: List[str],
+) -> List[str]:
     """Run off/on/on H+T acceptance through durable one-shot receipts."""
     errors: List[str] = []
     fixture = "tests/cases/provenance_b_capture_identity.ring"
     candidate_before = _sha256_file(Path(ring_exe))
-    with tempfile.TemporaryDirectory(prefix="ring_identity_ledger_") as tmpdir:
-        parent = Path(tmpdir)
-        runs: List[IdentityCandidateArtifacts] = []
-        for case_name, ledger in (("off", False), ("on1", True), ("on2", True)):
-            case_root = identity_candidate_case_root(parent, case_name)
-            artifacts, run_error = run_identity_candidate_mode(
-                ring_exe, fixture, case_root, ledger=ledger)
-            if run_error:
-                errors.append(run_error)
-                return errors
-            assert artifacts is not None
-            runs.append(artifacts)
-        off, on1, on2 = runs
+    runs: List[IdentityCandidateArtifacts] = []
+    for case_name, ledger in (("off", False), ("on1", True), ("on2", True)):
+        try:
+            case_root = identity_candidate_case_root(evidence_root, case_name)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+            return errors
+        artifacts, run_error = run_identity_candidate_mode(
+            ring_exe, fixture, case_root, evidence_log, ledger=ledger)
+        if run_error:
+            errors.append(run_error)
+            return errors
+        assert artifacts is not None
+        runs.append(artifacts)
+    off, on1, on2 = runs
 
-        for label, left, right in (
+    for label, left, right in (
             ("off/on1 C", off.c_bytes, on1.c_bytes),
             ("on1/on2 C", on1.c_bytes, on2.c_bytes),
             ("off/on1 object", off.object_bytes, on1.object_bytes),
             ("on1/on2 object", on1.object_bytes, on2.object_bytes),
             ("off/on1 stderr", off.stderr, on1.stderr),
             ("on1/on2 stderr", on1.stderr, on2.stderr),
-        ):
-            if left != right:
-                errors.append(f"identity ledger changed {label} bytes")
+    ):
+        if left != right:
+            errors.append(f"identity ledger changed {label} bytes")
 
-        canonical_stdout: List[bytes] = []
-        for run in runs:
-            canonical, canonical_error = canonicalize_identity_stdout_root(
-                run.stdout, run.case_root, expected_count=1)
-            if canonical_error:
-                errors.append(f"{run.mode} stdout identity: {canonical_error}")
-                continue
-            assert canonical is not None
-            canonical_stdout.append(canonical)
-        if len(canonical_stdout) == 3 and not (
-                canonical_stdout[0] == canonical_stdout[1] == canonical_stdout[2]):
-            errors.append("identity ledger changed non-path stdout diagnostics")
+    canonical_stdout: List[bytes] = []
+    for run in runs:
+        canonical, canonical_error = canonicalize_identity_stdout_root(
+            run.stdout, run.case_root, expected_count=1)
+        if canonical_error:
+            errors.append(f"{run.mode} stdout identity: {canonical_error}")
+            continue
+        assert canonical is not None
+        canonical_stdout.append(canonical)
+    if len(canonical_stdout) == 3 and not (
+            canonical_stdout[0] == canonical_stdout[1] == canonical_stdout[2]):
+        errors.append("identity ledger changed non-path stdout diagnostics")
 
-        if off.ledger_bytes is not None:
-            errors.append("off mode unexpectedly retained ledger bytes")
-        if on1.ledger_bytes is None or on2.ledger_bytes is None:
-            errors.append("on mode omitted ledger bytes")
-        elif on1.ledger_bytes != on2.ledger_bytes:
-            errors.append("identity ledger bytes/hash are nondeterministic")
-        else:
-            ledger_events, ledger_errors = parse_identity_ledger(on1.ledger_bytes)
-            errors.extend(ledger_errors)
-            if ledger_events is not None:
-                domains = {event.domain for event in ledger_events}
-                for required in ("exact", "name-only", "computed", "fresh"):
-                    if required not in domains:
-                        errors.append(
-                            f"identity ledger fixture omitted {required} domain")
-                keys = {event.canonical_key for event in ledger_events}
-                for required_key in (
-                    "__ring_T_Ord", "__ring_self_ProvenanceTrait", "__ring_ev_E"):
-                    if required_key not in keys:
-                        errors.append(
-                            f"identity ledger omitted receiver key {required_key}")
-            ledger_path_token = str(on1.case_root).encode("utf-8")
-            for label, data in (
-                ("C", on1.c_bytes), ("object", on1.object_bytes)):
-                if b"RING-C-IDENTITY-LEDGER" in data or ledger_path_token in data:
-                    errors.append(f"identity ledger path/content leaked into {label}")
+    if off.ledger_bytes is not None:
+        errors.append("off mode unexpectedly retained ledger bytes")
+    if on1.ledger_bytes is None or on2.ledger_bytes is None:
+        errors.append("on mode omitted ledger bytes")
+    elif on1.ledger_bytes != on2.ledger_bytes:
+        errors.append("identity ledger bytes/hash are nondeterministic")
+    else:
+        ledger_events, ledger_errors = parse_identity_ledger(on1.ledger_bytes)
+        errors.extend(ledger_errors)
+        if ledger_events is not None:
+            domains = {event.domain for event in ledger_events}
+            for required in ("exact", "name-only", "computed", "fresh"):
+                if required not in domains:
+                    errors.append(
+                        f"identity ledger fixture omitted {required} domain")
+            keys = {event.canonical_key for event in ledger_events}
+            for required_key in (
+                "__ring_T_Ord", "__ring_self_ProvenanceTrait", "__ring_ev_E"):
+                if required_key not in keys:
+                    errors.append(
+                        f"identity ledger omitted receiver key {required_key}")
+        ledger_path_token = str(on1.case_root).encode("utf-8")
+        for label, data in (
+            ("C", on1.c_bytes), ("object", on1.object_bytes)):
+            if b"RING-C-IDENTITY-LEDGER" in data or ledger_path_token in data:
+                errors.append(f"identity ledger path/content leaked into {label}")
 
     if _sha256_file(Path(ring_exe)) != candidate_before:
         errors.append("candidate executable changed across off/on ledger runs")
@@ -6097,6 +6275,7 @@ def identity_checkpoint_source_errors() -> List[str]:
         "provenance_fixture": (
             REPO / "tests" / "cases" / "provenance_b_capture_identity.ring"
         ),
+        "provenance_contract": REPO / "tests" / "test_provenance_b_contract.py",
     }
     sources: dict[str, str] = {}
     errors: List[str] = []
@@ -6126,6 +6305,31 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("capture store atomic event", "cexpr",
          "c_record_capture_store(\n        ctx, edge, identity, source_name, env_name, index)",
          "c_record_capture_store(\n        ctx, edge, identity, source_name, source_name, index)"),
+        ("dict receiver atomic domain guard", "cexpr",
+         'domain != "name-only" && domain != "static" && domain != "computed"',
+         "false"),
+        ("effect receiver atomic domain guard", "cexpr",
+         'domain != "name-only" && domain != "default-evidence" &&',
+         "false &&"),
+        ("dict receiver ledger domain guard", "cctx",
+         'event.domain != "name-only" && event.domain != "static" &&',
+         "false &&"),
+        ("effect receiver ledger domain guard", "cctx",
+         'event.domain != "name-only" &&\n'
+         '                           event.domain != "default-evidence" &&',
+         "false &&\n                           false &&"),
+        ("capture edge environment", "cctx",
+         "store.dest_slot != edge.source_slot",
+         "store.dest_slot == edge.source_slot"),
+        ("capture store child frame", "cctx",
+         "store.child_frame != edge.child_frame",
+         "store.child_frame == edge.child_frame"),
+        ("capture extract parent frame", "cctx",
+         "extract.parent_frame != edge.parent_frame",
+         "extract.parent_frame == edge.parent_frame"),
+        ("frame-qualified exact/name-only slots", "cctx",
+         '"${frame.len()}:${frame}:${slot}"',
+         'slot'),
         ("name-only census current-frame filter", "cexpr",
          "// registered before its actual use.  c_resolve_dict_ref is the loud\n"
          "        // authority if no local/outer slot exists at that use point.\n"
@@ -6286,6 +6490,15 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("hidden flag value path", "cli",
          'arg == "--internal-c-identity-ledger"',
          'arg.starts_with("--internal-c-identity-ledger=")'),
+        ("candidate evidence-root authority", "runner",
+         "evidence_root, evidence_error = identity_checkpoint_evidence_root()\n"
+         "    if evidence_error is not None:",
+         "evidence_root, evidence_error = Path(tempfile.gettempdir()), None\n"
+         "    if evidence_error is not None:"),
+        ("candidate evidence archive", "runner",
+         "create_one_shot_archive(case_root, archive_path)\n"
+         "        archive_sha256 = _sha256_file(archive_path)",
+         "archive_sha256 = 'not-retained'"),
         ("verifier exact lookup", "verify", "ctx.def_ids[i] == def_id",
          "ctx.names[i] == name"),
         ("or-pattern shared slot", "cexpr", "bind_c_root_pattern_after_success(",
@@ -6348,57 +6561,85 @@ IDENTITY_CANDIDATE_RC_FIXTURES = (
 )
 
 
-def identity_candidate_verify_rc_errors(ring_exe: str) -> List[str]:
+def identity_candidate_verify_rc_errors(
+    ring_exe: str, evidence_root: Path, evidence_log: List[str],
+) -> List[str]:
     errors: List[str] = []
     environment = dict(_controlled_environment(ring_exe))
-    with tempfile.TemporaryDirectory(prefix="ring_identity_rc_") as tmpdir:
-        parent = Path(tmpdir)
-        for index, fixture in enumerate(IDENTITY_CANDIDATE_RC_FIXTURES):
-            evidence_dir = parent / f"case-{index}"
+    try:
+        parent = identity_candidate_case_root(evidence_root, "verify-rc")
+    except RuntimeError as exc:
+        return [str(exc)]
+    for index, fixture in enumerate(IDENTITY_CANDIDATE_RC_FIXTURES):
+        evidence_dir = parent / f"case-{index}"
+        try:
             evidence_dir.mkdir(parents=False, exist_ok=False)
-            argv = (
-                str(Path(ring_exe).resolve()), "check",
-                str((REPO / fixture).resolve()), "--verify-rc",
-            )
-            spec = OneShotSpec(
-                evidence_dir=evidence_dir.resolve(),
-                gate_id=f"identity-verify-rc-{index}",
-                argv=argv,
-                reviewed_argv=argv,
-                cwd=REPO.resolve(),
-                env=environment,
-                reviewed_env=tuple(sorted(environment.items())),
-                limits=OneShotLimits(
-                    wall_seconds=60,
-                    stdout_cap_bytes=1024 * 1024,
-                    stderr_cap_bytes=1024 * 1024,
-                    job_memory_bytes=(
-                        12 * 1024 * 1024 * 1024 if os.name == "nt" else None),
-                    active_process_limit=(5 if os.name == "nt" else None),
-                ),
-            )
-            try:
-                verdict = run_one_shot(spec)
-            except Exception as exc:
-                errors.append(
-                    f"candidate verify-rc wrapper failed for {fixture}: {exc}")
-                continue
-            if verdict["status"] != "success":
-                errors.append(
-                    f"candidate verify-rc failed for {fixture}: "
-                    f"{verdict['classification']}; raw={evidence_dir}")
-            else:
-                audit = audit_one_shot_attempt(evidence_dir)
-                if audit["state"] != "complete" or audit["status"] != "success":
-                    errors.append(
-                        f"candidate verify-rc audit failed for {fixture}: {audit}")
-                    continue
-                archive_path = parent / f"case-{index}.tar"
-                try:
-                    create_one_shot_archive(evidence_dir, archive_path)
-                except Exception as exc:
-                    errors.append(
-                        f"candidate verify-rc archive failed for {fixture}: {exc}")
+        except OSError as exc:
+            errors.append(
+                f"cannot create verify-rc evidence root {evidence_dir}: {exc}")
+            return errors
+        argv = (
+            str(Path(ring_exe).resolve()), "check",
+            str((REPO / fixture).resolve()), "--verify-rc",
+        )
+        spec = OneShotSpec(
+            evidence_dir=evidence_dir.resolve(),
+            gate_id=f"identity-verify-rc-{index}",
+            argv=argv,
+            reviewed_argv=argv,
+            cwd=REPO.resolve(),
+            env=environment,
+            reviewed_env=tuple(sorted(environment.items())),
+            limits=OneShotLimits(
+                wall_seconds=60,
+                stdout_cap_bytes=1024 * 1024,
+                stderr_cap_bytes=1024 * 1024,
+                job_memory_bytes=(
+                    12 * 1024 * 1024 * 1024 if os.name == "nt" else None),
+                active_process_limit=(5 if os.name == "nt" else None),
+            ),
+        )
+        verdict: Optional[dict[str, Any]] = None
+        wrapper_error: Optional[str] = None
+        try:
+            verdict = run_one_shot(spec)
+        except Exception as exc:
+            wrapper_error = str(exc)
+        audit = audit_one_shot_attempt(evidence_dir)
+        archive_path = evidence_root / f"verify-rc-{index}.tar"
+        archive_error: Optional[str] = None
+        try:
+            create_one_shot_archive(evidence_dir, archive_path)
+            archive_hash = _sha256_file(archive_path)
+        except Exception as exc:
+            archive_error = str(exc)
+            archive_hash = "unavailable"
+        archive_detail = (
+            f"sha256={archive_hash}" if archive_error is None
+            else f"error={archive_error}")
+        evidence_log.append(
+            f"verify-rc-{index}:raw={evidence_dir};audit={audit['state']}/"
+            f"{audit['status']};archive={archive_path};{archive_detail}")
+        if wrapper_error is not None:
+            errors.append(
+                f"candidate verify-rc wrapper failed for {fixture}: "
+                f"{wrapper_error}; raw={evidence_dir}; archive={archive_path}; "
+                f"{archive_detail}")
+            continue
+        assert verdict is not None
+        if verdict["status"] != "success":
+            errors.append(
+                f"candidate verify-rc failed for {fixture}: "
+                f"{verdict['classification']}; raw={evidence_dir}; "
+                f"archive={archive_path}; archive_sha256={archive_hash}")
+        if audit["state"] != "complete" or audit["status"] != "success":
+            errors.append(
+                f"candidate verify-rc audit failed for {fixture}: {audit}; "
+                f"archive={archive_path}; archive_sha256={archive_hash}")
+        if archive_error is not None:
+            errors.append(
+                f"candidate verify-rc archive failed for {fixture}: "
+                f"{archive_error}; raw={evidence_dir}")
     return errors
 
 
@@ -6433,6 +6674,40 @@ def identity_checkpoint_candidate_identity(
     return str(resolved), digest, None
 
 
+def identity_checkpoint_evidence_root(
+) -> Tuple[Optional[Path], Optional[str]]:
+    raw = os.environ.get(IDENTITY_EVIDENCE_ROOT_ENV)
+    if raw is None:
+        return None, f"{IDENTITY_EVIDENCE_ROOT_ENV} is required with candidate"
+    if not raw:
+        return None, f"{IDENTITY_EVIDENCE_ROOT_ENV} is empty"
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        return None, f"{IDENTITY_EVIDENCE_ROOT_ENV} must be an absolute path"
+    try:
+        if candidate.is_symlink():
+            return None, f"{IDENTITY_EVIDENCE_ROOT_ENV} must not be a symlink"
+        resolved = candidate.resolve(strict=True)
+        if candidate != resolved:
+            return None, (
+                f"{IDENTITY_EVIDENCE_ROOT_ENV} must be the exact canonical path")
+        mode = resolved.stat().st_mode
+        if not stat.S_ISDIR(mode):
+            return None, f"{IDENTITY_EVIDENCE_ROOT_ENV} is not a directory"
+        temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
+        if resolved == temp_root or temp_root in resolved.parents:
+            return None, (
+                f"{IDENTITY_EVIDENCE_ROOT_ENV} must be outside TemporaryDirectory")
+        inventory = sorted(path.name for path in resolved.iterdir())
+    except OSError as exc:
+        return None, f"cannot validate {IDENTITY_EVIDENCE_ROOT_ENV}: {exc}"
+    if inventory:
+        return None, (
+            f"{IDENTITY_EVIDENCE_ROOT_ENV} must be initially empty; "
+            f"found {inventory}")
+    return resolved, None
+
+
 def identity_checkpoint_errors() -> Tuple[List[str], str]:
     errors = identity_checkpoint_source_errors()
     candidate, digest, candidate_error = identity_checkpoint_candidate_identity()
@@ -6442,11 +6717,20 @@ def identity_checkpoint_errors() -> Tuple[List[str], str]:
     if candidate is None:
         return errors, f"{IDENTITY_CANDIDATE_ENV}=unset; source/mutation only"
     assert digest is not None
-    detail = f"candidate={candidate}; sha256={digest}"
-    verify_errors = identity_candidate_verify_rc_errors(candidate)
+    evidence_root, evidence_error = identity_checkpoint_evidence_root()
+    if evidence_error is not None:
+        errors.append(evidence_error)
+        return errors, (
+            f"candidate={candidate}; sha256={digest}; "
+            f"{IDENTITY_EVIDENCE_ROOT_ENV}=invalid")
+    assert evidence_root is not None
+    evidence_log: List[str] = []
+    verify_errors = identity_candidate_verify_rc_errors(
+        candidate, evidence_root, evidence_log)
     errors.extend(verify_errors)
     if not verify_errors:
-        errors.extend(default_body_identity_generated_c_errors(candidate))
+        errors.extend(default_body_identity_generated_c_errors(
+            candidate, evidence_root, evidence_log))
     post_candidate, post_digest, post_error = (
         identity_checkpoint_candidate_identity())
     if post_error is not None:
@@ -6454,6 +6738,9 @@ def identity_checkpoint_errors() -> Tuple[List[str], str]:
             f"candidate identity unavailable after generated-C gate: {post_error}")
     elif post_candidate != candidate or post_digest != digest:
         errors.append("candidate executable identity changed during generated-C gate")
+    detail = (
+        f"candidate={candidate}; sha256={digest}; "
+        f"evidence_root={evidence_root}; evidence=[{' | '.join(evidence_log)}]")
     return errors, detail
 
 

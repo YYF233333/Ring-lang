@@ -1838,6 +1838,21 @@ pub fn emit_c_receiver_load(
     mut ctx: CCtx, receiver: CTypedRef, index: Int, role: Str
 ) -> CTypedRef {
     if index <= 0 { panic("C codegen: receiver load index must be positive") }
+    let domain = c_ref_domain(receiver)
+    if role == "dict" {
+        if domain != "name-only" && domain != "static" && domain != "computed" {
+            panic("C codegen: dict receiver has forbidden '${domain}' identity domain")
+        }
+    } else {
+        if role == "effect" {
+            if domain != "name-only" && domain != "default-evidence" &&
+               domain != "computed" {
+                panic("C codegen: effect receiver has forbidden '${domain}' identity domain")
+            }
+        } else {
+            panic("C codegen: unknown receiver-load role '${role}'")
+        }
+    }
     let source_name = c_ref_c_name(receiver)
     let dest = fresh_tmp(ctx)
     let load_id = c_fresh_load_id(ctx)
