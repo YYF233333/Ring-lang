@@ -1213,28 +1213,29 @@ fn push_c_exact_capture(
     params: List<HParam>, mut captures: List<CCapture>
 ) {
     if c_exact_capture_param_is_bound(def_id, params) { return }
-    let exact_slot = match c_exact_value_slot(ctx, name, def_id) {
-        some(found) => found,
+    match c_exact_value_slot(ctx, name, def_id) {
+        some(exact_slot) => {
+            for existing in captures {
+                match existing.provenance {
+                    CCaptureProvenance::Exact { reference } => {
+                        if c_ref_def_id(reference) == def_id { return }
+                    },
+                    CCaptureProvenance::NameOnly { reference: _reference } => {}
+                }
+            }
+            captures.push(CCapture {
+                provenance: CCaptureProvenance::Exact {
+                    reference: c_ref_exact(exact_slot)
+                },
+                extern_typed: extern_typed
+            })
+        },
         none => {
             // Not free in the enclosing frame: it is lambda-local or global.
             // Exact use-time lookup remains fail-closed for a malformed local.
             return
         }
     }
-    for existing in captures {
-        match existing.provenance {
-            CCaptureProvenance::Exact { reference } => {
-                if c_ref_def_id(reference) == def_id { return }
-            },
-            CCaptureProvenance::NameOnly { reference: _reference } => {}
-        }
-    }
-    captures.push(CCapture {
-        provenance: CCaptureProvenance::Exact {
-            reference: c_ref_exact(exact_slot)
-        },
-        extern_typed: extern_typed
-    })
 }
 
 fn consider_c_exact_reference(

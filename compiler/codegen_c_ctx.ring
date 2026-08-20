@@ -533,10 +533,16 @@ pub fn c_name_only_slot_key(slot: CNameOnlySlotRef) -> Str { slot.canonical_key 
 pub fn c_local_def_ref(
     mut ctx: CCtx, ring_name: Str, def_id: Int?
 ) -> CExactSlotRef {
+    if ring_name == "" {
+        panic("C codegen: exact local has an empty source name")
+    }
     let exact_def_id = match def_id {
         some(id) => id,
         none => panic(
             "C codegen: exact local '${ring_name}' has no DefId")
+    }
+    if exact_def_id == -1 {
+        panic("C codegen: exact local '${ring_name}' has sentinel DefId")
     }
     if ctx.value_slots_by_def_id.contains_key(exact_def_id) {
         panic("C codegen: duplicate local DefId ${exact_def_id}")
@@ -558,6 +564,9 @@ pub fn c_local_def(
 }
 
 pub fn c_local_ref(mut ctx: CCtx, ring_name: Str) -> CNameOnlySlotRef {
+    if ring_name == "" {
+        panic("C codegen: name-only local has an empty canonical key")
+    }
     let cname = c_unique_local(ctx, ring_name)
     ctx.cur_decls.push("    void* ${cname} = NULL;")
     ctx.named_values.insert(ring_name, cname)
@@ -577,10 +586,16 @@ pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
 pub fn c_param_def_ref(
     mut ctx: CCtx, ring_name: Str, def_id: Int?
 ) -> CExactSlotRef {
+    if ring_name == "" {
+        panic("C codegen: exact parameter has an empty source name")
+    }
     let exact_def_id = match def_id {
         some(id) => id,
         none => panic(
             "C codegen: exact parameter '${ring_name}' has no DefId")
+    }
+    if exact_def_id == -1 {
+        panic("C codegen: exact parameter '${ring_name}' has sentinel DefId")
     }
     if ctx.value_slots_by_def_id.contains_key(exact_def_id) {
         panic("C codegen: duplicate parameter DefId ${exact_def_id}")
@@ -601,6 +616,9 @@ pub fn c_param_def(
 }
 
 pub fn c_param_ref(mut ctx: CCtx, ring_name: Str) -> CNameOnlySlotRef {
+    if ring_name == "" {
+        panic("C codegen: name-only parameter has an empty canonical key")
+    }
     let cname = c_unique_local(ctx, ring_name)
     ctx.named_values.insert(ring_name, cname)
     let slot = CNameOnlySlotRef {
@@ -635,6 +653,9 @@ pub fn c_exact_value_slot(
 pub fn c_register_name_only_ref(
     mut ctx: CCtx, name: Str, c_name: Str
 ) -> CNameOnlySlotRef {
+    if name == "" || c_name == "" {
+        panic("C codegen: name-only registration has an empty key/slot")
+    }
     let slot = CNameOnlySlotRef {
         c_name: c_name, canonical_key: name
     }
@@ -665,63 +686,110 @@ pub fn c_name_only_value(ctx: CCtx, name: Str) -> CNameOnlySlotRef? {
     ctx.name_only_slots.get(name)
 }
 
+fn validate_identity_domain_shape(
+    domain: Str, def_id: Int, canonical_key: Str, producer: Str
+) {
+    if domain == "exact" {
+        if def_id == -1 || canonical_key == "" || producer != "" {
+            panic("C identity: malformed Exact domain shape")
+        }
+    } else {
+        if domain == "name-only" || domain == "static" ||
+           domain == "default-evidence" {
+            if def_id != -1 || canonical_key == "" || producer != "" {
+                panic("C identity: malformed keyed domain shape '${domain}'")
+            }
+        } else {
+            if domain == "computed" || domain == "fresh" {
+                if def_id != -1 || canonical_key != "" || producer == "" {
+                    panic("C identity: malformed produced domain shape '${domain}'")
+                }
+            } else {
+                panic("C identity: unknown domain '${domain}'")
+            }
+        }
+    }
+}
+
+fn validate_c_typed_ref(reference: CTypedRef) -> CTypedRef {
+    if reference.c_name == "" || reference.load_id < 0 {
+        panic("C identity: typed reference has an empty slot/invalid load id")
+    }
+    match reference.kind {
+        CRefKind::Exact { source_name, def_id } =>
+            validate_identity_domain_shape("exact", def_id, source_name, ""),
+        CRefKind::NameOnly { canonical_key } =>
+            validate_identity_domain_shape("name-only", -1, canonical_key, ""),
+        CRefKind::Static { canonical_key } =>
+            validate_identity_domain_shape("static", -1, canonical_key, ""),
+        CRefKind::DefaultEvidence { canonical_key } =>
+            validate_identity_domain_shape(
+                "default-evidence", -1, canonical_key, ""),
+        CRefKind::Computed { producer } =>
+            validate_identity_domain_shape("computed", -1, "", producer),
+        CRefKind::Fresh { producer } =>
+            validate_identity_domain_shape("fresh", -1, "", producer)
+    }
+    reference
+}
+
 pub fn c_ref_exact(slot: CExactSlotRef) -> CTypedRef {
-    CTypedRef {
+    validate_c_typed_ref(CTypedRef {
         c_name: slot.c_name,
         kind: CRefKind::Exact {
             source_name: slot.source_name, def_id: slot.def_id
         },
         load_id: 0
-    }
+    })
 }
 
 pub fn c_ref_name_only(slot: CNameOnlySlotRef) -> CTypedRef {
-    CTypedRef {
+    validate_c_typed_ref(CTypedRef {
         c_name: slot.c_name,
         kind: CRefKind::NameOnly { canonical_key: slot.canonical_key },
         load_id: 0
-    }
+    })
 }
 
 pub fn c_ref_static(c_name: Str, canonical_key: Str) -> CTypedRef {
-    CTypedRef {
+    validate_c_typed_ref(CTypedRef {
         c_name: c_name,
         kind: CRefKind::Static { canonical_key: canonical_key },
         load_id: 0
-    }
+    })
 }
 
 pub fn c_ref_default_evidence(c_name: Str, canonical_key: Str) -> CTypedRef {
-    CTypedRef {
+    validate_c_typed_ref(CTypedRef {
         c_name: c_name,
         kind: CRefKind::DefaultEvidence { canonical_key: canonical_key },
         load_id: 0
-    }
+    })
 }
 
 pub fn c_ref_computed(c_name: Str, producer: Str) -> CTypedRef {
-    CTypedRef {
+    validate_c_typed_ref(CTypedRef {
         c_name: c_name,
         kind: CRefKind::Computed { producer: producer },
         load_id: 0
-    }
+    })
 }
 
 pub fn c_ref_fresh(c_name: Str, producer: Str) -> CTypedRef {
-    CTypedRef {
+    validate_c_typed_ref(CTypedRef {
         c_name: c_name,
         kind: CRefKind::Fresh { producer: producer },
         load_id: 0
-    }
+    })
 }
 
 pub fn c_ref_loaded(c_name: Str, producer: Str, load_id: Int) -> CTypedRef {
     if load_id <= 0 { panic("C codegen: loaded reference has invalid load id") }
-    CTypedRef {
+    validate_c_typed_ref(CTypedRef {
         c_name: c_name,
         kind: CRefKind::Computed { producer: producer },
         load_id: load_id
-    }
+    })
 }
 
 pub fn c_ref_c_name(reference: CTypedRef) -> Str { reference.c_name }
@@ -894,9 +962,62 @@ fn identity_event_same_identity(a: CIdentityEvent, b: CIdentityEvent) -> Bool {
     a.producer == b.producer
 }
 
-fn identity_domain_is_known(domain: Str) -> Bool {
-    domain == "exact" || domain == "name-only" || domain == "static" ||
-    domain == "default-evidence" || domain == "computed" || domain == "fresh"
+fn validate_identity_event_shape(event: CIdentityEvent) {
+    validate_identity_domain_shape(
+        event.domain, event.def_id, event.canonical_key, event.producer)
+    if event.kind == "closure-edge" {
+        if event.domain != "fresh" ||
+           event.producer != "closure-edge:${event.child_frame}" {
+            panic("C identity ledger: closure edge has invalid Fresh provenance")
+        }
+        return
+    }
+    if event.kind == "capture-store" || event.kind == "capture-extract" {
+        if event.domain != "exact" && event.domain != "name-only" {
+            panic("C identity ledger: capture has non-slot domain '${event.domain}'")
+        }
+        return
+    }
+    if event.kind == "dict-receiver-load" {
+        if event.domain != "name-only" && event.domain != "static" &&
+           event.domain != "computed" {
+            panic("C identity ledger: dict receiver has forbidden '${event.domain}' domain")
+        }
+        return
+    }
+    if event.kind == "effect-receiver-load" {
+        if event.domain != "name-only" &&
+           event.domain != "default-evidence" &&
+           event.domain != "computed" {
+            panic("C identity ledger: effect receiver has forbidden '${event.domain}' domain")
+        }
+        return
+    }
+    if event.kind == "closure-call" {
+        if event.domain != "exact" && event.domain != "name-only" &&
+           event.domain != "computed" {
+            panic("C identity ledger: closure call has forbidden '${event.domain}' domain")
+        }
+        if event.domain == "exact" || event.domain == "name-only" {
+            if event.load_id != 0 {
+                panic("C identity ledger: slot closure call carries a load id")
+            }
+        } else {
+            let receiver_load = event.producer == "dict-receiver-load" ||
+                event.producer == "effect-receiver-load"
+            if event.load_id > 0 {
+                if receiver_load == false {
+                    panic("C identity ledger: loaded closure call has invalid producer")
+                }
+            } else {
+                if event.load_id < 0 || receiver_load {
+                    panic("C identity ledger: computed closure call has invalid load shape")
+                }
+            }
+        }
+        return
+    }
+    panic("C identity ledger: unknown event kind '${event.kind}'")
 }
 
 fn validate_identity_ledger(ctx: CCtx) {
@@ -916,9 +1037,7 @@ fn validate_identity_ledger(ctx: CCtx) {
             panic("C identity ledger: event order drift at ${event.event_id}, expected ${expected_event_id}")
         }
         expected_event_id = expected_event_id + 1
-        if identity_domain_is_known(event.domain) == false {
-            panic("C identity ledger: unknown domain '${event.domain}'")
-        }
+        validate_identity_event_shape(event)
 
         if event.kind == "closure-edge" {
             if event.edge_id <= 0 || event.parent_frame == "" || event.child_frame == "" ||
@@ -934,9 +1053,6 @@ fn validate_identity_ledger(ctx: CCtx) {
                 if event.edge_id <= 0 || event.index <= 0 ||
                    event.source_slot == "" || event.dest_slot == "" {
                     panic("C identity ledger: capture has invalid edge/index")
-                }
-                if event.domain != "exact" && event.domain != "name-only" {
-                    panic("C identity ledger: capture has non-slot domain '${event.domain}'")
                 }
                 let pair_key = identity_event_pair_key(event)
                 if event.kind == "capture-store" {
@@ -980,18 +1096,6 @@ fn validate_identity_ledger(ctx: CCtx) {
                        event.parent_frame == "" || event.source_slot == "" ||
                        event.dest_slot == "" {
                         panic("C identity ledger: receiver load has invalid id/index")
-                    }
-                    if event.kind == "dict-receiver-load" {
-                        if event.domain != "name-only" && event.domain != "static" &&
-                           event.domain != "computed" {
-                            panic("C identity ledger: dict receiver has forbidden '${event.domain}' domain")
-                        }
-                    } else {
-                        if event.domain != "name-only" &&
-                           event.domain != "default-evidence" &&
-                           event.domain != "computed" {
-                            panic("C identity ledger: effect receiver has forbidden '${event.domain}' domain")
-                        }
                     }
                     if loads.contains_key(event.load_id) {
                         panic("C identity ledger: duplicate receiver load ${event.load_id}")

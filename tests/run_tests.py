@@ -3383,14 +3383,83 @@ class IdentityLedgerEvent:
     arity: int
 
 
-_LEDGER_DOMAINS = {
-    "exact", "name-only", "static", "default-evidence", "computed", "fresh",
-}
 _LEDGER_KINDS = {
     "capture-extract", "capture-store", "closure-edge",
     "dict-receiver-load", "effect-receiver-load", "closure-call",
 }
 _LEDGER_ESCAPES = {"25": "%", "7C": "|", "0A": "\n", "0D": "\r"}
+
+
+def identity_ledger_event_shape_errors(
+    event: IdentityLedgerEvent,
+) -> List[str]:
+    errors: List[str] = []
+    if event.domain == "exact":
+        if (
+            event.def_id == -1 or not event.canonical_key
+            or event.producer
+        ):
+            errors.append(f"exact event {event.event_id} has malformed shape")
+    elif event.domain in {"name-only", "static", "default-evidence"}:
+        if (
+            event.def_id != -1 or not event.canonical_key
+            or event.producer
+        ):
+            errors.append(
+                f"keyed event {event.event_id} has malformed {event.domain} shape")
+    elif event.domain in {"computed", "fresh"}:
+        if (
+            event.def_id != -1 or event.canonical_key
+            or not event.producer
+        ):
+            errors.append(
+                f"produced event {event.event_id} has malformed {event.domain} shape")
+    else:
+        errors.append(f"unknown event domain {event.domain!r}")
+
+    if event.kind == "closure-edge":
+        if (
+            event.domain != "fresh"
+            or event.producer != f"closure-edge:{event.child_frame}"
+        ):
+            errors.append(
+                f"closure edge {event.event_id} lacks exact Fresh provenance")
+    elif event.kind in {"capture-store", "capture-extract"}:
+        if event.domain not in {"exact", "name-only"}:
+            errors.append(f"capture {event.event_id} has {event.domain} domain")
+    elif event.kind == "dict-receiver-load":
+        if event.domain not in {"name-only", "static", "computed"}:
+            errors.append(
+                f"dict receiver {event.event_id} has {event.domain} domain")
+    elif event.kind == "effect-receiver-load":
+        if event.domain not in {
+            "name-only", "default-evidence", "computed",
+        }:
+            errors.append(
+                f"effect receiver {event.event_id} has {event.domain} domain")
+    elif event.kind == "closure-call":
+        if event.domain not in {"exact", "name-only", "computed"}:
+            errors.append(
+                f"closure call {event.event_id} has {event.domain} domain")
+        elif event.domain in {"exact", "name-only"}:
+            if event.load_id != 0:
+                errors.append(
+                    f"slot closure call {event.event_id} carries a load id")
+        else:
+            receiver_load = event.producer in {
+                "dict-receiver-load", "effect-receiver-load",
+            }
+            if event.load_id > 0 and not receiver_load:
+                errors.append(
+                    f"loaded closure call {event.event_id} has wrong producer")
+            if event.load_id <= 0 and (
+                event.load_id < 0 or receiver_load
+            ):
+                errors.append(
+                    f"computed closure call {event.event_id} has wrong load shape")
+    else:
+        errors.append(f"unknown event kind {event.kind!r}")
+    return errors
 
 
 def _ledger_escape(value: str) -> str:
@@ -3502,17 +3571,9 @@ def validate_identity_ledger_relations(
         if event.event_id != expected_id:
             errors.append(
                 f"event order/id drift {event.event_id} != {expected_id}")
+        errors.extend(identity_ledger_event_shape_errors(event))
         if event.kind not in _LEDGER_KINDS:
-            errors.append(f"unknown event kind {event.kind!r}")
             continue
-        if event.domain not in _LEDGER_DOMAINS:
-            errors.append(f"unknown event domain {event.domain!r}")
-        if event.domain == "exact" and (
-                event.def_id < 0 or not event.canonical_key):
-            errors.append(f"exact event {event.event_id} lacks DefId/key")
-        if event.domain == "name-only" and (
-                event.def_id != -1 or not event.canonical_key):
-            errors.append(f"name-only event {event.event_id} has invalid identity")
 
         if event.kind == "closure-edge":
             if (
@@ -3530,8 +3591,6 @@ def validate_identity_ledger_relations(
                 or not event.source_slot or not event.dest_slot
             ):
                 errors.append(f"capture {event.event_id} has invalid edge/index")
-            if event.domain not in {"exact", "name-only"}:
-                errors.append(f"capture {event.event_id} has {event.domain} domain")
             key = (event.edge_id, event.index)
             target = stores if event.kind == "capture-store" else extracts
             if key in target:
@@ -3552,16 +3611,6 @@ def validate_identity_ledger_relations(
                 or not event.dest_slot
             ):
                 errors.append(f"receiver load {event.event_id} has invalid id/index")
-            if event.kind == "dict-receiver-load" and event.domain not in {
-                "name-only", "static", "computed",
-            }:
-                errors.append(
-                    f"dict receiver {event.event_id} has {event.domain} domain")
-            if event.kind == "effect-receiver-load" and event.domain not in {
-                "name-only", "default-evidence", "computed",
-            }:
-                errors.append(
-                    f"effect receiver {event.event_id} has {event.domain} domain")
             if event.load_id in loads:
                 errors.append(f"duplicate receiver load {event.load_id}")
             loads[event.load_id] = event
@@ -3666,12 +3715,24 @@ def identity_ledger_mutation_matrix_errors() -> List[str]:
         IdentityLedgerEvent(10, "closure-call", 0, 2, "child_b", "",
                             "computed", -1, "", "effect-receiver-load",
                             "t_effect", "t_effect_result", 0, 2),
-        IdentityLedgerEvent(11, "closure-call", 0, 0, "parent", "",
+        IdentityLedgerEvent(11, "dict-receiver-load", 0, 3, "parent", "",
+                            "static", -1, "__Int_Ord", "",
+                            "ring___Int_Ord", "t_static", 1, 0),
+        IdentityLedgerEvent(12, "closure-call", 0, 3, "parent", "",
+                            "computed", -1, "", "dict-receiver-load",
+                            "t_static", "t_static_result", 0, 2),
+        IdentityLedgerEvent(13, "dict-receiver-load", 0, 4, "parent", "",
+                            "computed", -1, "", "wrapped-dict:Int:Ord",
+                            "t_wrapped", "t_wrapped_method", 1, 0),
+        IdentityLedgerEvent(14, "closure-call", 0, 4, "parent", "",
+                            "computed", -1, "", "dict-receiver-load",
+                            "t_wrapped_method", "t_wrapped_result", 0, 2),
+        IdentityLedgerEvent(15, "closure-call", 0, 0, "parent", "",
                             "exact", 41, "x", "", "r_shared", "t_exact", 0, 1),
-        IdentityLedgerEvent(12, "closure-call", 0, 0, "parent", "",
+        IdentityLedgerEvent(16, "closure-call", 0, 0, "parent", "",
                             "name-only", -1, "__ring_T_Ord", "",
                             "r___ring_T_Ord", "t_name", 0, 1),
-        IdentityLedgerEvent(13, "closure-call", 0, 0, "parent", "",
+        IdentityLedgerEvent(17, "closure-call", 0, 0, "parent", "",
                             "computed", -1, "", "expression-closure",
                             "t_expr", "t_computed", 0, 1),
     ]
@@ -3690,6 +3751,10 @@ def identity_ledger_mutation_matrix_errors() -> List[str]:
             rows[0], def_id=99))),
         ("wrong key", lambda rows: rows.__setitem__(0, replace(
             rows[0], canonical_key="wrong"))),
+        ("Exact sentinel DefId", lambda rows: rows.__setitem__(0, replace(
+            rows[0], def_id=-1))),
+        ("Exact producer", lambda rows: rows.__setitem__(0, replace(
+            rows[0], producer="forged"))),
         ("wrong index", lambda rows: rows.__setitem__(2, replace(
             rows[2], index=2))),
         ("same-frame cross-domain slot alias", lambda rows: rows.__setitem__(0,
@@ -3716,6 +3781,25 @@ def identity_ledger_mutation_matrix_errors() -> List[str]:
             rows[8], domain="exact", def_id=74, canonical_key="effect_local"))),
         ("effect dict-only domain", lambda rows: rows.__setitem__(8, replace(
             rows[8], domain="static"))),
+        ("empty NameOnly key", lambda rows: rows.__setitem__(6, replace(
+            rows[6], canonical_key=""))),
+        ("empty Static key", lambda rows: rows.__setitem__(10, replace(
+            rows[10], canonical_key=""))),
+        ("Static producer", lambda rows: rows.__setitem__(10, replace(
+            rows[10], producer="forged"))),
+        ("empty DefaultEvidence key", lambda rows: rows.__setitem__(8, replace(
+            rows[8], canonical_key=""))),
+        ("empty Computed producer", lambda rows: rows.__setitem__(12, replace(
+            rows[12], producer=""))),
+        ("Computed key", lambda rows: rows.__setitem__(12, replace(
+            rows[12], canonical_key="forged"))),
+        ("empty Fresh producer", lambda rows: rows.__setitem__(4, replace(
+            rows[4], producer=""))),
+        ("Fresh key", lambda rows: rows.__setitem__(4, replace(
+            rows[4], canonical_key="forged"))),
+        ("Exact closure edge", lambda rows: rows.__setitem__(4, replace(
+            rows[4], domain="exact", def_id=41, canonical_key="x",
+            producer=""))),
         ("load orphan", lambda rows: rows.pop(7)),
         ("call orphan", lambda rows: rows.__setitem__(7, replace(
             rows[7], load_id=77))),
@@ -3723,8 +3807,19 @@ def identity_ledger_mutation_matrix_errors() -> List[str]:
             rows[7], parent_frame="other_child"))),
         ("load/call producer", lambda rows: rows.__setitem__(7, replace(
             rows[7], producer="effect-receiver-load"))),
-        ("zero arity", lambda rows: rows.__setitem__(10, replace(
-            rows[10], arity=0))),
+        ("loaded call non-receiver producer", lambda rows: rows.__setitem__(7,
+            replace(rows[7], producer="expression-closure"))),
+        ("slot call load id", lambda rows: rows.__setitem__(14, replace(
+            rows[14], load_id=99))),
+        ("zero-load receiver producer", lambda rows: rows.__setitem__(16,
+            replace(rows[16], producer="dict-receiver-load"))),
+        ("negative computed load", lambda rows: rows.__setitem__(16,
+            replace(rows[16], load_id=-1))),
+        ("Fresh closure call", lambda rows: rows.__setitem__(14, replace(
+            rows[14], domain="fresh", def_id=-1, canonical_key="",
+            producer="closure-edge:child_a"))),
+        ("zero arity", lambda rows: rows.__setitem__(14, replace(
+            rows[14], arity=0))),
         ("nondeterministic order", lambda rows: rows.__setitem__(slice(0, 2),
             [rows[1], rows[0]])),
     )
@@ -4761,6 +4856,9 @@ def identity_ledger_contract_errors(
         "Map<Int, CExactSlotRef>",
         "Map<Str, CNameOnlySlotRef>",
         "pub fn c_ref_loaded(",
+        "fn validate_identity_domain_shape(",
+        "fn validate_c_typed_ref(",
+        "fn validate_identity_event_shape(",
         "pub fn c_identity_ledger_text(",
         "validate_identity_ledger(ctx)",
     )
@@ -4775,6 +4873,36 @@ def identity_ledger_contract_errors(
             r"pub fn gen_c_closure_call\s*\(\s*mut ctx: CCtx,\s*"
             r"closure_ref: CTypedRef,", cexpr):
         errors.append("gen_c_closure_call regained an untyped/raw overload")
+
+    domain_shape_body, domain_shape_error = extract_ring_function_body(
+        cctx, "validate_identity_domain_shape")
+    if domain_shape_error:
+        errors.append(domain_shape_error)
+    else:
+        for token in (
+            'def_id == -1 || canonical_key == "" || producer != ""',
+            'def_id != -1 || canonical_key == "" || producer != ""',
+            'def_id != -1 || canonical_key != "" || producer == ""',
+        ):
+            if token not in domain_shape_body:
+                errors.append(
+                    f"validate_identity_domain_shape: missing {token!r}")
+    typed_ref_body, typed_ref_error = extract_ring_function_body(
+        cctx, "validate_c_typed_ref")
+    if typed_ref_error:
+        errors.append(typed_ref_error)
+    else:
+        for token in (
+            'reference.c_name == "" || reference.load_id < 0',
+            'validate_identity_domain_shape("exact", def_id, source_name, "")',
+            'validate_identity_domain_shape("name-only", -1, canonical_key, "")',
+            'validate_identity_domain_shape("static", -1, canonical_key, "")',
+            '"default-evidence", -1, canonical_key, ""',
+            'validate_identity_domain_shape("computed", -1, "", producer)',
+            'validate_identity_domain_shape("fresh", -1, "", producer)',
+        ):
+            if token not in typed_ref_body:
+                errors.append(f"validate_c_typed_ref: missing {token!r}")
 
     atomic_helpers = {
         "emit_c_capture_extract": (
@@ -4831,15 +4959,35 @@ def identity_ledger_contract_errors(
                 receiver_body.index(domain_anchor) > receiver_body.index(emit_anchor)):
             errors.append("receiver role/domain validation occurs after C emission")
 
+    shape_body, shape_error = extract_ring_function_body(
+        cctx, "validate_identity_event_shape")
+    if shape_error:
+        errors.append(shape_error)
+    else:
+        for token in (
+            "validate_identity_domain_shape(",
+            'event.domain != "fresh"',
+            'event.producer != "closure-edge:${event.child_frame}"',
+            'event.domain != "exact" && event.domain != "name-only"',
+            'event.domain != "name-only" && event.domain != "static" &&',
+            'event.domain != "default-evidence" &&',
+            'event.domain != "computed"',
+            'event.kind == "closure-call"',
+            'event.load_id != 0',
+            'event.load_id > 0',
+            'event.load_id < 0 || receiver_load',
+        ):
+            if token not in shape_body:
+                errors.append(
+                    f"validate_identity_event_shape: missing {token!r}")
+
     relation_body, relation_error = extract_ring_function_body(
         cctx, "validate_identity_ledger")
     if relation_error:
         errors.append(relation_error)
     else:
         for token in (
-            'event.domain != "name-only" && event.domain != "static" &&',
-            'event.domain != "name-only" &&\n'
-            '                           event.domain != "default-evidence" &&',
+            "validate_identity_event_shape(event)",
             "store.dest_slot != edge.source_slot",
             "store.parent_frame != edge.parent_frame",
             "store.child_frame != edge.child_frame",
@@ -4851,6 +4999,25 @@ def identity_ledger_contract_errors(
             if token not in relation_body:
                 errors.append(
                     f"validate_identity_ledger: relation guard missing {token!r}")
+        if re.search(
+            r"(?m)^        validate_identity_event_shape\(event\)$",
+            relation_body,
+        ) is None:
+            errors.append("ledger loop does not execute event-shape authority")
+    if cctx.count("validate_c_typed_ref(CTypedRef {") != 7:
+        errors.append("all seven typed-reference constructors must validate shape")
+    for token in (
+        "exact local has an empty source name",
+        "exact local '${ring_name}' has sentinel DefId",
+        "name-only local has an empty canonical key",
+        "exact parameter has an empty source name",
+        "exact parameter '${ring_name}' has sentinel DefId",
+        "name-only parameter has an empty canonical key",
+        "name-only registration has an empty key/slot",
+        "typed reference has an empty slot/invalid load id",
+    ):
+        if token not in cctx:
+            errors.append(f"typed-reference constructor guard missing {token!r}")
     if cctx.count("identity_owned_slot_key(") != 5:
         errors.append(
             "identity ledger must derive exactly four frame-qualified slot uses")
@@ -4965,10 +5132,18 @@ def identity_ledger_contract_errors(
         "default_body_identity_generated_c_errors(\n            candidate, evidence_root, evidence_log)",
         "audit_one_shot_attempt(evidence_dir)",
         "archive_sha256",
+        "def identity_ledger_event_shape_errors(",
+        "errors.extend(identity_ledger_event_shape_errors(event))",
     )
     for token in runner_tokens:
         if token not in runner:
             errors.append(f"H+T runner contract missing {token!r}")
+    if re.search(
+        r"(?m)^        errors\.extend\("
+        r"identity_ledger_event_shape_errors\(event\)\)$",
+        runner,
+    ) is None:
+        errors.append("Python ledger relation bypasses event-shape authority")
     evidence_anchor = (
         "evidence_root, evidence_error = identity_checkpoint_evidence_root()")
     verify_anchor = "verify_errors = identity_candidate_verify_rc_errors("
@@ -4982,6 +5157,14 @@ def identity_ledger_contract_errors(
         runner,
     ) is None:
         errors.append("identity checkpoint lacks executable evidence-root guard")
+    if re.search(
+        r"(?m)^    errors = identity_checkpoint_source_errors\(\)\n"
+        r"    if errors:\n"
+        r"        return errors, "
+        r'"source/mutation authority failed; candidate not evaluated"$',
+        runner,
+    ) is None:
+        errors.append("identity checkpoint source authority is not fail-first")
     if re.search(
         r"(?m)^        create_one_shot_archive\(case_root, archive_path\)\n"
         r"        archive_sha256 = _sha256_file\(archive_path\)$",
@@ -5017,6 +5200,9 @@ def identity_ledger_contract_errors(
         ("cctx", "c_ref_def_id"),
         ("cctx", "c_ref_key"),
         ("cctx", "c_ref_producer"),
+        ("cctx", "validate_identity_domain_shape"),
+        ("cctx", "validate_c_typed_ref"),
+        ("cctx", "validate_identity_event_shape"),
         ("cctx", "validate_identity_ledger"),
         ("cctx", "c_identity_ledger_text"),
         ("cexpr", "emit_c_capture_extract"),
@@ -6316,8 +6502,8 @@ def identity_checkpoint_source_errors() -> List[str]:
          "false &&"),
         ("effect receiver ledger domain guard", "cctx",
          'event.domain != "name-only" &&\n'
-         '                           event.domain != "default-evidence" &&',
-         "false &&\n                           false &&"),
+         '           event.domain != "default-evidence" &&',
+         "false &&\n           false &&"),
         ("capture edge environment", "cctx",
          "store.dest_slot != edge.source_slot",
          "store.dest_slot == edge.source_slot"),
@@ -6468,6 +6654,30 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("typed name-only slot map", "cctx",
          "pub name_only_slots: Map<Str, CNameOnlySlotRef>",
          "pub name_only_slots: Map<Str, Str>"),
+        ("typed reference constructor validation", "cctx",
+         "validate_c_typed_ref(CTypedRef {",
+         "CTypedRef {"),
+        ("typed reference empty slot guard", "cctx",
+         'reference.c_name == "" || reference.load_id < 0',
+         "reference.load_id < 0"),
+        ("Exact domain shape guard", "cctx",
+         'def_id == -1 || canonical_key == "" || producer != ""',
+         "false"),
+        ("keyed domain shape guard", "cctx",
+         'def_id != -1 || canonical_key == "" || producer != ""',
+         "false"),
+        ("produced domain shape guard", "cctx",
+         'def_id != -1 || canonical_key != "" || producer == ""',
+         "false"),
+        ("Ring event shape authority", "cctx",
+         "validate_identity_event_shape(event)",
+         "if false { validate_identity_event_shape(event) }"),
+        ("closure-edge Fresh provenance", "cctx",
+         'event.producer != "closure-edge:${event.child_frame}"',
+         "false"),
+        ("Python event shape authority", "runner",
+         "errors.extend(identity_ledger_event_shape_errors(event))",
+         "errors.extend([])"),
         ("closure call atomic event", "cexpr",
          "c_record_closure_call(\n        ctx, closure_ref, closure_val, t, arg_vals.len() + 1)",
          "c_record_closure_call(\n        ctx, c_ref_computed(closure_val, \"forged\"), closure_val, t, arg_vals.len() + 1)"),
@@ -6499,6 +6709,15 @@ def identity_checkpoint_source_errors() -> List[str]:
          "create_one_shot_archive(case_root, archive_path)\n"
          "        archive_sha256 = _sha256_file(archive_path)",
          "archive_sha256 = 'not-retained'"),
+        ("candidate source fail-first", "runner",
+         "errors = identity_checkpoint_source_errors()\n"
+         "    if errors:\n"
+         "        return errors, \"source/mutation authority failed; "
+         "candidate not evaluated\"",
+         "errors = identity_checkpoint_source_errors()\n"
+         "    if false:\n"
+         "        return errors, \"source/mutation authority failed; "
+         "candidate not evaluated\""),
         ("verifier exact lookup", "verify", "ctx.def_ids[i] == def_id",
          "ctx.names[i] == name"),
         ("or-pattern shared slot", "cexpr", "bind_c_root_pattern_after_success(",
@@ -6710,6 +6929,8 @@ def identity_checkpoint_evidence_root(
 
 def identity_checkpoint_errors() -> Tuple[List[str], str]:
     errors = identity_checkpoint_source_errors()
+    if errors:
+        return errors, "source/mutation authority failed; candidate not evaluated"
     candidate, digest, candidate_error = identity_checkpoint_candidate_identity()
     if candidate_error is not None:
         errors.append(candidate_error)
