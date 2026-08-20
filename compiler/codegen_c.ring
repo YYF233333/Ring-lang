@@ -19,16 +19,17 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     type_contains_extern_handle,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef, TypeKind,
     DERIVED_HASH_SEED}
-use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
+use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo, CTypedRef,
     CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_param_def,
     c_local, c_mangle_fn,
     c_mangle_fn_with_prefix, c_mangle_method, c_sanitize, c_symbol_for_fn_key, c_symbol_fragment,
     c_line_directive,
     rt_use, rt_use_raw,
     get_or_assign_c_typeid, is_runtime_symbol, fresh_tmp, fresh_i64, fresh_dbl,
-    fresh_label, c_push_fn, c_pop_fn, c_global_cstr}
+    fresh_label, c_push_fn, c_pop_fn, c_global_cstr, c_ref_c_name,
+    c_enable_identity_ledger, c_identity_ledger_text}
 use codegen_c_expr::{gen_c_expr, emit_c_stmt, c_resolve_dict_ref,
-    ensure_c_dict_getter, gen_c_closure_call,
+    ensure_c_dict_getter, gen_c_closure_call, emit_c_receiver_load,
     emit_c_default_evidence_init}
 use effect_analysis::{extract_effect_names, collect_fn_callees}
 use resolver::{module_prefix}
@@ -39,8 +40,12 @@ use resolver::{module_prefix}
 // emit_lines: #line directive toggle (--no-c-lines disables).
 // ============================================================
 
-pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool) -> Bool {
+pub fn generate_c(
+    program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool,
+    emit_identity_ledger: Bool
+) -> Bool {
     let mut ctx = new_c_ctx(emit_lines)
+    if emit_identity_ledger { c_enable_identity_ledger(ctx) }
 
     // B-091: auto-boxed mut-cell def_ids (closure write-through capture).
     for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
@@ -222,8 +227,21 @@ pub fn generate_c_project(
 // Shared tail of both entry points: assemble the translation unit, write it
 // to disk, shell out to clang (audit #242: emit failure must exit non-zero).
 fn c_write_and_compile(ctx: CCtx, c_path: Str, o_path: Str) -> Bool {
+    // Internal-only H+T output. The runner owns a fresh single-use directory;
+    // the compiler accepts no ledger path and performs no racy existence
+    // check. Relation validation completes before this sole ledger write.
+    let identity_ledger = if ctx.identity_ledger_enabled {
+        some(c_identity_ledger_text(ctx))
+    } else {
+        none
+    }
     let text = assemble_c_file(ctx)
     write_file(c_path, text)
+    match identity_ledger {
+        some(ledger_text) => write_file(
+            "${c_path}.identity-ledger", ledger_text),
+        none => {}
+    }
 
     let rc = exec_sync("clang", ["-std=c11", "-O2", "-c", c_path, "-o", o_path])
     if rc != 0 {
@@ -844,7 +862,6 @@ fn begin_c_fn(mut ctx: CCtx, mangled: Str) -> Map<Str, Str> {
     ctx.named_values = map_new()
     ctx.name_only_slots = map_new()
     ctx.value_slots_by_def_id = map_new()
-    ctx.value_slot_names_by_def_id = map_new()
     ctx.in_function = true
     ctx.current_fn_name = mangled
     ctx.indent = 1
@@ -863,7 +880,6 @@ fn end_c_fn(mut ctx: CCtx, mangled: Str, params_str: Str, saved: Map<Str, Str>) 
     ctx.named_values = saved
     ctx.name_only_slots = map_new()
     ctx.value_slots_by_def_id = map_new()
-    ctx.value_slot_names_by_def_id = map_new()
     ctx.in_function = false
     ctx.current_fn_name = ""
 }
@@ -1960,7 +1976,7 @@ fn end_c_derived_fn(mut ctx: CCtx, d: CDerivedFn) {
 
 // Resolve an explicitly tagged derived base.  Bound bases are Simple and
 // module singleton bases are Static; spelling never selects the domain.
-fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef) -> Str {
+fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef) -> CTypedRef {
     c_resolve_dict_ref(ctx, base_dict)
 }
 
@@ -1968,27 +1984,31 @@ fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef) -> Str {
 // shared shape of the derived eq/cmp/debug dict calls.
 fn emit_c_derived_dict_call(mut ctx: CCtx, base_dict: DictRef, extra_dicts: List<DictRef>, args: List<Str>) -> Str {
     let resolved_dict = resolve_c_dict_for_derived(ctx, base_dict)
-    let cls = fresh_tmp(ctx)
-    c_emit(ctx, "${cls} = ((void**)${resolved_dict})[1];")
+    let cls_ref = emit_c_receiver_load(ctx, resolved_dict, 1, "dict")
     let mut call_args: List<Str> = []
     let mut owned_extra_dicts: List<Str> = []
     for a in args { call_args.push(a) }
     for ed in extra_dicts {
         match ed {
             DictRef::Wrapped { dict, trait_name, inner_dicts } => {
-                let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
+                let reference = c_resolve_dict_ref(ctx, DictRef::Wrapped {
                     dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
                 })
+                let value = c_ref_c_name(reference)
                 call_args.push(value)
                 owned_extra_dicts.push(value)
             },
-            DictRef::Simple(name) =>
-                call_args.push(c_resolve_dict_ref(ctx, DictRef::Simple(name))),
-            DictRef::Static(name) =>
-                call_args.push(c_resolve_dict_ref(ctx, DictRef::Static(name))),
+            DictRef::Simple(name) => {
+                let reference = c_resolve_dict_ref(ctx, DictRef::Simple(name))
+                call_args.push(c_ref_c_name(reference))
+            },
+            DictRef::Static(name) => {
+                let reference = c_resolve_dict_ref(ctx, DictRef::Static(name))
+                call_args.push(c_ref_c_name(reference))
+            },
         }
     }
-    let result = gen_c_closure_call(ctx, cls, call_args)
+    let result = gen_c_closure_call(ctx, cls_ref, call_args)
     for owned in owned_extra_dicts {
         rt_use(ctx, "ring_drop", 1)
         c_emit(ctx, "ring_drop(${owned});")

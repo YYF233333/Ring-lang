@@ -33,9 +33,9 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -70,6 +70,16 @@ STRUCTURAL_DIR = CASES_DIR / "structural"
 CODEGEN_C_SOURCE = REPO / "compiler" / "codegen_c.ring"
 NATIVE_REAL_PROGRAM = REPO / "tests" / "native" / "real_program.ring"
 NATIVE_REAL_PROGRAM_EXPECTED = NATIVE_REAL_PROGRAM.with_suffix(".expected")
+
+sys.path.insert(0, str(REPO / ".agents" / "scripts"))
+from one_shot_gate import (  # noqa: E402
+    Limits as OneShotLimits,
+    OneShotSpec,
+    ResultSchemaError as OneShotResultSchemaError,
+    audit_attempt as audit_one_shot_attempt,
+    create_archive as create_one_shot_archive,
+    run_one_shot,
+)
 
 # CLI-observable contracts that used to live in the retired in-process Node
 # harness.  Keeping them explicit prevents companion discovery from silently
@@ -3355,833 +3365,321 @@ def extract_c_function_body(c_source: str, symbol: str) -> Tuple[Optional[str], 
 
 
 @dataclass(frozen=True)
-class CEnvStoreFact:
-    container: str
+class IdentityLedgerEvent:
+    event_id: int
+    kind: str
+    edge_id: int
+    load_id: int
+    parent_frame: str
+    child_frame: str
+    domain: str
+    def_id: int
+    canonical_key: str
+    producer: str
+    source_slot: str
+    dest_slot: str
     index: int
-    source: str
-    ordinal: int
+    arity: int
 
 
-@dataclass(frozen=True)
-class CContainerLoadFact:
-    target: str
-    container: str
-    index: int
-    ordinal: int
+_LEDGER_DOMAINS = {
+    "exact", "name-only", "static", "default-evidence", "computed", "fresh",
+}
+_LEDGER_KINDS = {
+    "capture-extract", "capture-store", "closure-edge",
+    "dict-receiver-load", "effect-receiver-load", "closure-call",
+}
+_LEDGER_ESCAPES = {"25": "%", "7C": "|", "0A": "\n", "0D": "\r"}
 
 
-@dataclass(frozen=True)
-class CAllocationFact:
-    local: str
-    type_id: int
-    capture_capacity: Optional[int]
-    ordinal: int
+def _ledger_escape(value: str) -> str:
+    return (value.replace("%", "%25").replace("|", "%7C")
+            .replace("\n", "%0A").replace("\r", "%0D"))
 
 
-@dataclass(frozen=True)
-class CEnvHeaderFact:
-    environment: str
-    count: int
-    ordinal: int
-
-
-@dataclass(frozen=True)
-class CClosureConstructionFact:
-    root: str
-    environment: str
-    lambda_symbol: str
-    ordinal: int
-
-
-@dataclass(frozen=True)
-class CUniformClosureCallFact:
-    result: str
-    root: str
-    args: Tuple[str, ...]
-    ordinal: int
-
-
-@dataclass(frozen=True)
-class CLocalAssignmentFact:
-    target: str
-    source: str
-    ordinal: int
-
-
-@dataclass(frozen=True)
-class COpaqueDefinitionFact:
-    local: str
-    ordinal: int
-
-
-@dataclass(frozen=True)
-class CFunctionProvenanceFacts:
-    symbol: str
-    params: Tuple[str, ...]
-    allocations: Tuple[CAllocationFact, ...]
-    headers: Tuple[CEnvHeaderFact, ...]
-    stores: Tuple[CEnvStoreFact, ...]
-    loads: Tuple[CContainerLoadFact, ...]
-    closures: Tuple[CClosureConstructionFact, ...]
-    closure_calls: Tuple[CUniformClosureCallFact, ...]
-    assignments: Tuple[CLocalAssignmentFact, ...]
-    opaque_definitions: Tuple[COpaqueDefinitionFact, ...]
-
-
-_C_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
-_C_PTR_INDEX_RE = re.compile(
-    rf"\(\(\s*void\s*\*\s*\*\s*\)\s*({_C_IDENT})\s*\)"
-    r"\s*\[\s*([0-9]+)\s*\]"
-)
-
-
-def _parse_c_pointer_params(
-    raw_params: str, symbol: str,
-) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
-    raw = raw_params.strip()
-    if raw == "void":
-        return (), None
-    if not raw:
-        return None, f"{symbol}: empty/K&R parameter list is not accepted"
-    params: List[str] = []
-    param_re = re.compile(rf"^void\s*\*\s*({_C_IDENT})$")
-    for raw_param in raw.split(","):
-        match = param_re.fullmatch(raw_param.strip())
-        if match is None:
-            return None, (
-                f"{symbol}: unrecognized parameter declaration "
-                f"{raw_param.strip()!r}")
-        params.append(match.group(1))
-    return tuple(params), None
-
-
-def _parse_uniform_closure_call_statement(
-    statement: str, ordinal: int,
-) -> Tuple[Optional[CUniformClosureCallFact], Optional[str]]:
-    closure_casts = re.findall(
-        r"void\s*\*\s*\(\s*\*\s*\)", statement)
-    refs = [(name, int(index)) for name, index in
-            _C_PTR_INDEX_RE.findall(statement)]
-    if (
-        len(closure_casts) != 1
-        or len(refs) != 2
-        or refs[0][1] != 0
-        or refs[1] != (refs[0][0], 1)
-    ):
-        return None, f"unrecognized uniform closure-call statement: {statement}"
-    assignment = re.fullmatch(rf"({_C_IDENT})\s*=\s*(.+)", statement)
-    if assignment is None:
-        return None, f"unrecognized uniform closure-call statement: {statement}"
-    rhs = assignment.group(2)
-    skeleton_parts: List[str] = []
-    last_end = 0
-    for ref_index, match in enumerate(_C_PTR_INDEX_RE.finditer(rhs)):
-        skeleton_parts.append(rhs[last_end:match.start()])
-        skeleton_parts.append(
-            "__CLOSURE_FN__" if ref_index == 0 else "__CLOSURE_ENV__")
-        last_end = match.end()
-    skeleton_parts.append(rhs[last_end:])
-    skeleton = "".join(skeleton_parts)
-    token_re = re.compile(rf"{_C_IDENT}|[(),*]")
-    tokens: List[str] = []
-    token_end = 0
-    for match in token_re.finditer(skeleton):
-        if skeleton[token_end:match.start()].strip():
-            return None, f"unrecognized uniform closure-call statement: {statement}"
-        tokens.append(match.group(0))
-        token_end = match.end()
-    if skeleton[token_end:].strip():
-        return None, f"unrecognized uniform closure-call statement: {statement}"
-
-    cursor = 0
-
-    def accept(expected: str) -> bool:
-        nonlocal cursor
-        if cursor >= len(tokens) or tokens[cursor] != expected:
-            return False
-        cursor += 1
-        return True
-
-    if not (accept("(") and accept("(") and accept("void")
-            and accept("*") and accept("(") and accept("*")
-            and accept(")") and accept("(")):
-        return None, f"unrecognized uniform closure-call statement: {statement}"
-    type_count = 0
-    while True:
-        if not (accept("void") and accept("*")):
-            return None, f"uniform closure call has a non-void* cast type: {statement}"
-        type_count += 1
-        if cursor < len(tokens) and tokens[cursor] == ",":
-            cursor += 1
+def _ledger_unescape(value: str) -> str:
+    result: List[str] = []
+    index = 0
+    while index < len(value):
+        if value[index] != "%":
+            result.append(value[index])
+            index += 1
             continue
-        break
-    if not (accept(")") and accept(")") and accept("(")
-            and accept("__CLOSURE_FN__") and accept(")")
-            and accept(")") and accept("(")
-            and accept("__CLOSURE_ENV__")):
-        return None, f"unrecognized uniform closure-call statement: {statement}"
-    args: List[str] = []
-    while cursor < len(tokens) and tokens[cursor] == ",":
-        cursor += 1
-        if cursor >= len(tokens):
-            return None, f"uniform closure call has a missing argument: {statement}"
-        arg = tokens[cursor]
-        if re.fullmatch(_C_IDENT, arg) is None or arg.startswith("__CLOSURE_"):
-            return None, f"uniform closure call argument is not an identifier: {statement}"
-        args.append(arg)
-        cursor += 1
-    if not accept(")") or cursor != len(tokens):
-        return None, f"unrecognized uniform closure-call statement: {statement}"
-    if type_count != len(args) + 1:
-        return None, (
-            f"uniform closure call cast/argument arity mismatch "
-            f"{type_count} != {len(args) + 1}: {statement}")
-    return CUniformClosureCallFact(
-        assignment.group(1), refs[0][0], tuple(args), ordinal), None
+        if index + 2 >= len(value):
+            raise ValueError("truncated ledger escape")
+        code = value[index + 1:index + 3]
+        decoded = _LEDGER_ESCAPES.get(code)
+        if decoded is None:
+            raise ValueError(f"unknown ledger escape %{code}")
+        result.append(decoded)
+        index += 3
+    decoded_value = "".join(result)
+    if _ledger_escape(decoded_value) != value:
+        raise ValueError("non-canonical ledger escape")
+    return decoded_value
 
 
-def _balanced_c_statements(function_body: str) -> Tuple[List[str], List[str]]:
-    """Split generated C into semicolon statements outside nested parens."""
-    masked = mask_c_strings_and_comments(function_body)
-    statements: List[str] = []
+def serialize_identity_ledger(events: Sequence[IdentityLedgerEvent]) -> bytes:
+    lines = ["RING-C-IDENTITY-LEDGER|1"]
+    for event in events:
+        lines.append("|".join((
+            "E", str(event.event_id), _ledger_escape(event.kind),
+            str(event.edge_id), str(event.load_id),
+            _ledger_escape(event.parent_frame), _ledger_escape(event.child_frame),
+            _ledger_escape(event.domain), str(event.def_id),
+            _ledger_escape(event.canonical_key), _ledger_escape(event.producer),
+            _ledger_escape(event.source_slot), _ledger_escape(event.dest_slot),
+            str(event.index), str(event.arity),
+        )))
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def parse_identity_ledger(
+    data: bytes,
+) -> Tuple[Optional[Tuple[IdentityLedgerEvent, ...]], List[str]]:
     errors: List[str] = []
-    start = 0
-    paren_depth = 0
-    bracket_depth = 0
-    for index, char in enumerate(masked):
-        if char == "(":
-            paren_depth += 1
-        elif char == ")":
-            paren_depth -= 1
-            if paren_depth < 0:
-                errors.append("unbalanced ')' in generated C function")
-                paren_depth = 0
-        elif char == "[":
-            bracket_depth += 1
-        elif char == "]":
-            bracket_depth -= 1
-            if bracket_depth < 0:
-                errors.append("unbalanced ']' in generated C function")
-                bracket_depth = 0
-        elif char in "{}" and paren_depth == 0 and bracket_depth == 0:
-            start = index + 1
-        elif char == ";" and paren_depth == 0 and bracket_depth == 0:
-            statement = " ".join(masked[start:index].split())
-            if statement:
-                statements.append(statement)
-            start = index + 1
-    if paren_depth != 0 or bracket_depth != 0:
-        errors.append("unbalanced generated C statement delimiters")
-    return statements, errors
-
-
-def parse_c_function_provenance_facts(
-    c_source: str, symbol: str,
-) -> Tuple[Optional[CFunctionProvenanceFacts], List[str]]:
-    """Parse the finite generated-C closure/env grammar, failing closed."""
-    body, body_error = extract_c_function_body(c_source, symbol)
-    if body_error:
-        return None, [body_error]
-    assert body is not None
-    masked_source = mask_c_strings_and_comments(c_source)
-    signature_re = re.compile(
-        rf"(?m)^[ \t]*(?:static[ \t]+)?void[ \t]*\*[ \t]+"
-        rf"{re.escape(symbol)}[ \t]*\(([^;{{}}\n]*)\)[ \t]*\{{"
-    )
-    signatures = list(signature_re.finditer(masked_source))
-    if len(signatures) != 1:
-        return None, [
-            f"generated function {symbol} signature found {len(signatures)} times"
-        ]
-    params, params_error = _parse_c_pointer_params(
-        signatures[0].group(1), symbol)
-    if params_error:
-        return None, [params_error]
-    assert params is not None
-    statements, errors = _balanced_c_statements(body)
-
-    allocations: dict[str, CAllocationFact] = {}
-    headers: List[CEnvHeaderFact] = []
-    stores: List[CEnvStoreFact] = []
-    loads: List[CContainerLoadFact] = []
-    lambda_slots: List[Tuple[str, str, int]] = []
-    closure_calls: List[CUniformClosureCallFact] = []
-    assignments: List[CLocalAssignmentFact] = []
-    opaque_definitions: List[COpaqueDefinitionFact] = []
-
-    allocation_re = re.compile(
-        rf"^({_C_IDENT})\s*=\s*ring_alloc\s*\((.*),\s*([0-9]+)\s*\)$")
-    store_re = re.compile(
-        rf"^\(\(\s*void\s*\*\s*\*\s*\)\s*({_C_IDENT})\s*\)"
-        rf"\s*\[\s*([0-9]+)\s*\]\s*=\s*({_C_IDENT})$")
-    lambda_store_re = re.compile(
-        rf"^\(\(\s*void\s*\*\s*\*\s*\)\s*({_C_IDENT})\s*\)"
-        rf"\s*\[\s*0\s*\]\s*=\s*\(\s*void\s*\*\s*\)\s*({_C_IDENT})$")
-    load_re = re.compile(
-        rf"^({_C_IDENT})\s*=\s*\(\(\s*void\s*\*\s*\*\s*\)"
-        rf"\s*({_C_IDENT})\s*\)\s*\[\s*([0-9]+)\s*\]$")
-    assignment_re = re.compile(rf"^({_C_IDENT})\s*=\s*({_C_IDENT})$")
-    header_re = re.compile(
-        rf"^\*\(\s*int64_t\s*\*\s*\)\s*({_C_IDENT})"
-        r"\s*=\s*([0-9]+)$")
-    opaque_lhs_re = re.compile(rf"^({_C_IDENT})\s*=")
-
-    for ordinal, statement in enumerate(statements):
-        allocation = allocation_re.match(statement)
-        if allocation:
-            local = allocation.group(1)
-            if local in allocations:
-                errors.append(f"{symbol}: duplicate allocation target {local}")
-            type_id = int(allocation.group(3))
-            size_expr = allocation.group(2).strip()
-            capture_capacity: Optional[int] = None
-            if type_id == 15:
-                size_match = re.fullmatch(
-                    r"\(int64_t\)\s*\(\s*sizeof\(int64_t\)\s*\+\s*"
-                    r"([0-9]+)\s*\*\s*sizeof\(void\s*\*\)\s*\)",
-                    size_expr,
-                )
-                if size_match is None:
-                    errors.append(
-                        f"{symbol}: unrecognized type15 allocation size {size_expr}")
-                else:
-                    capture_capacity = int(size_match.group(1))
-            elif type_id == 7:
-                if re.fullmatch(
-                        r"\(int64_t\)\s*\(\s*2\s*\*\s*"
-                        r"sizeof\(void\s*\*\)\s*\)", size_expr) is None:
-                    errors.append(
-                        f"{symbol}: unrecognized type7 allocation size {size_expr}")
-            allocations[local] = CAllocationFact(
-                local, type_id, capture_capacity, ordinal)
-            continue
-        header = header_re.match(statement)
-        if header:
-            headers.append(CEnvHeaderFact(
-                header.group(1), int(header.group(2)), ordinal))
-            continue
-        lambda_store = lambda_store_re.match(statement)
-        if lambda_store:
-            lambda_slots.append((
-                lambda_store.group(1), lambda_store.group(2), ordinal))
-            continue
-        store = store_re.match(statement)
-        if store:
-            stores.append(CEnvStoreFact(
-                store.group(1), int(store.group(2)), store.group(3), ordinal))
-            continue
-        load = load_re.match(statement)
-        if load:
-            loads.append(CContainerLoadFact(
-                load.group(1), load.group(2), int(load.group(3)), ordinal))
-            continue
-
-        if re.search(r"void\s*\*\s*\(\s*\*\s*\)", statement):
-            closure_call, closure_error = (
-                _parse_uniform_closure_call_statement(statement, ordinal))
-            if closure_error:
-                errors.append(f"{symbol}: {closure_error}")
-            else:
-                assert closure_call is not None
-                closure_calls.append(closure_call)
-            continue
-        assignment = assignment_re.match(statement)
-        if assignment:
-            assignments.append(CLocalAssignmentFact(
-                assignment.group(1), assignment.group(2), ordinal))
-            continue
-        opaque_lhs = opaque_lhs_re.match(statement)
-        if opaque_lhs:
-            opaque_definitions.append(COpaqueDefinitionFact(
-                opaque_lhs.group(1), ordinal))
-
-    for fact_label, fact_keys in (
-        ("env header", [
-            (fact.environment, fact.count) for fact in headers]),
-        ("env store", [
-            (fact.container, fact.index, fact.source) for fact in stores]),
-        ("container load", [
-            (fact.target, fact.container, fact.index) for fact in loads]),
-        ("lambda slot", [
-            (root, lambda_symbol) for root, lambda_symbol, _ in lambda_slots]),
-        ("uniform closure call", [
-            (fact.result, fact.root, fact.args) for fact in closure_calls]),
-    ):
-        if len(fact_keys) != len(set(fact_keys)):
-            errors.append(f"{symbol}: duplicate {fact_label} fact")
-
-    def local_definitions(local: str) -> List[Tuple[str, int]]:
-        found: List[Tuple[str, int]] = []
-        if local in params:
-            found.append(("param", -1))
-        allocation = allocations.get(local)
-        if allocation is not None:
-            found.append(("allocation", allocation.ordinal))
-        found.extend(("load", fact.ordinal) for fact in loads
-                     if fact.target == local)
-        found.extend(("alias", fact.ordinal) for fact in assignments
-                     if fact.target == local)
-        found.extend(("call-result", fact.ordinal) for fact in closure_calls
-                     if fact.result == local)
-        found.extend(("opaque", fact.ordinal) for fact in opaque_definitions
-                     if fact.local == local)
-        return found
-
-    for call in closure_calls:
-        for arg in call.args:
-            definitions = local_definitions(arg)
-            if len(definitions) != 1 or definitions[0][1] >= call.ordinal:
-                errors.append(
-                    f"{symbol}: closure-call arg {arg} has "
-                    f"{len(definitions)} prior unique definitions")
-
-    for header in headers:
-        allocation = allocations.get(header.environment)
-        if allocation is None or allocation.type_id != 15:
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        return None, [f"identity ledger is not UTF-8: {exc}"]
+    if not text.endswith("\n"):
+        errors.append("identity ledger lacks final newline")
+    lines = text.splitlines()
+    if not lines or lines[0] != "RING-C-IDENTITY-LEDGER|1":
+        return None, ["identity ledger header/version mismatch"]
+    events: List[IdentityLedgerEvent] = []
+    for ordinal, line in enumerate(lines[1:], 1):
+        fields = line.split("|")
+        if len(fields) != 15 or fields[0] != "E":
             errors.append(
-                f"{symbol}: header targets non-type15 {header.environment}")
-
-    for environment, allocation in allocations.items():
-        if allocation.type_id != 15:
+                f"identity ledger line {ordinal} has {len(fields)} fields")
             continue
-        env_headers = [header for header in headers
-                       if header.environment == environment]
-        env_stores = [store for store in stores
-                      if store.container == environment]
-        if len(env_headers) != 1:
-            errors.append(
-                f"{symbol}: type15 {environment} has {len(env_headers)} headers")
+        try:
+            event = IdentityLedgerEvent(
+                event_id=int(fields[1]),
+                kind=_ledger_unescape(fields[2]),
+                edge_id=int(fields[3]),
+                load_id=int(fields[4]),
+                parent_frame=_ledger_unescape(fields[5]),
+                child_frame=_ledger_unescape(fields[6]),
+                domain=_ledger_unescape(fields[7]),
+                def_id=int(fields[8]),
+                canonical_key=_ledger_unescape(fields[9]),
+                producer=_ledger_unescape(fields[10]),
+                source_slot=_ledger_unescape(fields[11]),
+                dest_slot=_ledger_unescape(fields[12]),
+                index=int(fields[13]),
+                arity=int(fields[14]),
+            )
+        except (ValueError, TypeError) as exc:
+            errors.append(f"identity ledger line {ordinal}: {exc}")
             continue
-        header = env_headers[0]
-        ordered_stores = sorted(env_stores, key=lambda fact: fact.ordinal)
-        expected_indices = list(range(1, header.count + 1))
-        actual_indices = [store.index for store in ordered_stores]
-        if allocation.ordinal >= header.ordinal:
-            errors.append(f"{symbol}: type15 {environment} header precedes allocation")
-        if allocation.capture_capacity != header.count:
-            errors.append(
-                f"{symbol}: type15 {environment} allocation/header count "
-                f"{allocation.capture_capacity} != {header.count}")
-        if actual_indices != expected_indices:
-            errors.append(
-                f"{symbol}: type15 {environment} stores {actual_indices}, "
-                f"expected {expected_indices}")
-        if any(store.ordinal <= header.ordinal for store in ordered_stores):
-            errors.append(f"{symbol}: type15 {environment} store precedes header")
-        for store in ordered_stores:
-            definitions = local_definitions(store.source)
-            if len(definitions) != 1 or definitions[0][1] >= store.ordinal:
-                errors.append(
-                    f"{symbol}: type15 {environment}[{store.index}] source "
-                    f"{store.source} lacks one prior definition")
-
-    closures: List[CClosureConstructionFact] = []
-    for root, allocation in allocations.items():
-        if allocation.type_id != 7:
-            continue
-        root_lambdas = [(lambda_symbol, ordinal)
-                        for slot_root, lambda_symbol, ordinal in lambda_slots
-                        if slot_root == root]
-        root_stores = [store for store in stores if store.container == root]
-        if (
-            len(root_lambdas) != 1
-            or len(root_stores) != 1
-            or root_stores[0].index != 1
-        ):
-            errors.append(
-                f"{symbol}: closure root {root} has "
-                f"{len(root_lambdas)} lambda slots/{len(root_stores)} generic slots")
-            continue
-        lambda_symbol, lambda_ordinal = root_lambdas[0]
-        env_store = root_stores[0]
-        environment = env_store.source
-        environment_allocation = allocations.get(environment)
-        if environment_allocation is None or environment_allocation.type_id != 15:
-            errors.append(
-                f"{symbol}: closure root {root} environment {environment} "
-                "is not a type-15 allocation")
-            continue
-        env_headers = [header for header in headers
-                       if header.environment == environment]
-        env_capture_stores = [store for store in stores
-                              if store.container == environment]
-        env_ready = max(
-            [environment_allocation.ordinal]
-            + [header.ordinal for header in env_headers]
-            + [store.ordinal for store in env_capture_stores])
-        if not (
-            env_ready < allocation.ordinal
-            < lambda_ordinal < env_store.ordinal
-        ):
-            errors.append(
-                f"{symbol}: closure root {root} layout/order is not "
-                "env-ready < alloc < slot0 < slot1")
-            continue
-        closures.append(CClosureConstructionFact(
-            root, environment, lambda_symbol, allocation.ordinal))
-
-    type7_roots = {local for local, allocation in allocations.items()
-                   if allocation.type_id == 7}
-    for slot_root, _, _ in lambda_slots:
-        if slot_root not in type7_roots:
-            errors.append(f"{symbol}: orphan lambda slot on {slot_root}")
-    if len(closures) != len(type7_roots):
-        errors.append(
-            f"{symbol}: parsed {len(closures)} closures for "
-            f"{len(type7_roots)} type7 allocations")
-    for environment, allocation in allocations.items():
-        if allocation.type_id != 15:
-            continue
-        owners = [closure for closure in closures
-                  if closure.environment == environment]
-        if len(owners) != 1:
-            errors.append(
-                f"{symbol}: type15 {environment} has {len(owners)} closure owners")
-
+        events.append(event)
     if errors:
         return None, errors
-    return CFunctionProvenanceFacts(
-        symbol=symbol,
-        params=params,
-        allocations=tuple(allocations.values()),
-        headers=tuple(headers),
-        stores=tuple(stores),
-        loads=tuple(loads),
-        closures=tuple(closures),
-        closure_calls=tuple(closure_calls),
-        assignments=tuple(assignments),
-        opaque_definitions=tuple(opaque_definitions),
-    ), []
+    relation_errors = validate_identity_ledger_relations(events)
+    if relation_errors:
+        return None, relation_errors
+    if serialize_identity_ledger(events) != data:
+        return None, ["identity ledger bytes are not canonical/deterministic"]
+    return tuple(events), []
 
 
-def analyze_two_level_provenance_c(
-    c_source: str, parent_symbol: str, label: str,
+def validate_identity_ledger_relations(
+    events: Sequence[IdentityLedgerEvent],
 ) -> List[str]:
-    """Prove exact/evidence roles and parent→outer→inner slot lineage."""
     errors: List[str] = []
+    edges: dict[int, IdentityLedgerEvent] = {}
+    stores: dict[Tuple[int, int], IdentityLedgerEvent] = {}
+    extracts: dict[Tuple[int, int], IdentityLedgerEvent] = {}
+    loads: dict[int, IdentityLedgerEvent] = {}
+    load_calls: dict[int, List[IdentityLedgerEvent]] = {}
+    exact_slots: set[str] = set()
+    name_only_slots: set[str] = set()
 
-    def parse(symbol: str) -> Optional[CFunctionProvenanceFacts]:
-        facts, fact_errors = parse_c_function_provenance_facts(c_source, symbol)
-        errors.extend(f"{label}: {error}" for error in fact_errors)
-        return facts
-
-    parent = parse(parent_symbol)
-    if parent is None:
-        return errors
-
-    def lambda_environment(
-        facts: CFunctionProvenanceFacts, stage: str,
-    ) -> Optional[str]:
-        if len(facts.params) != 1:
+    for expected_id, event in enumerate(events, 1):
+        if event.event_id != expected_id:
             errors.append(
-                f"{label}: {stage} lambda ABI has {len(facts.params)} params, "
-                "expected exactly one environment receiver")
-            return None
-        return facts.params[0]
+                f"event order/id drift {event.event_id} != {expected_id}")
+        if event.kind not in _LEDGER_KINDS:
+            errors.append(f"unknown event kind {event.kind!r}")
+            continue
+        if event.domain not in _LEDGER_DOMAINS:
+            errors.append(f"unknown event domain {event.domain!r}")
+        if event.domain == "exact" and (
+                event.def_id < 0 or not event.canonical_key):
+            errors.append(f"exact event {event.event_id} lacks DefId/key")
+        if event.domain == "name-only" and (
+                event.def_id != -1 or not event.canonical_key):
+            errors.append(f"name-only event {event.event_id} has invalid identity")
 
-    def definitions(
-        facts: CFunctionProvenanceFacts, local: str,
-    ) -> List[Tuple[str, int, Optional[str]]]:
-        found: List[Tuple[str, int, Optional[str]]] = []
-        if local in facts.params:
-            found.append(("param", -1, None))
-        for allocation in facts.allocations:
-            if allocation.local == local:
-                found.append(("allocation", allocation.ordinal, None))
-        for load in facts.loads:
-            if load.target == local:
-                found.append(("load", load.ordinal, load.container))
-        for assignment in facts.assignments:
-            if assignment.target == local:
-                found.append(("alias", assignment.ordinal, assignment.source))
-        for call in facts.closure_calls:
-            if call.result == local:
-                found.append(("call-result", call.ordinal, call.root))
-        for opaque in facts.opaque_definitions:
-            if opaque.local == local:
-                found.append(("opaque", opaque.ordinal, None))
-        return found
+        if event.kind == "closure-edge":
+            if (
+                event.edge_id <= 0 or not event.parent_frame
+                or not event.child_frame or not event.source_slot
+                or not event.dest_slot
+            ):
+                errors.append(f"malformed closure edge {event.event_id}")
+            if event.edge_id in edges:
+                errors.append(f"duplicate closure edge {event.edge_id}")
+            edges[event.edge_id] = event
+        elif event.kind in {"capture-store", "capture-extract"}:
+            if (
+                event.edge_id <= 0 or event.index <= 0
+                or not event.source_slot or not event.dest_slot
+            ):
+                errors.append(f"capture {event.event_id} has invalid edge/index")
+            if event.domain not in {"exact", "name-only"}:
+                errors.append(f"capture {event.event_id} has {event.domain} domain")
+            key = (event.edge_id, event.index)
+            target = stores if event.kind == "capture-store" else extracts
+            if key in target:
+                errors.append(f"duplicate {event.kind} {key}")
+            target[key] = event
+            identity_slot = (
+                event.source_slot if event.kind == "capture-store"
+                else event.dest_slot)
+            (exact_slots if event.domain == "exact" else name_only_slots).add(
+                identity_slot)
+        elif event.kind in {"dict-receiver-load", "effect-receiver-load"}:
+            if (
+                event.load_id <= 0 or event.index <= 0
+                or not event.source_slot or not event.dest_slot
+            ):
+                errors.append(f"receiver load {event.event_id} has invalid id/index")
+            if event.load_id in loads:
+                errors.append(f"duplicate receiver load {event.load_id}")
+            loads[event.load_id] = event
+            if event.domain == "exact":
+                exact_slots.add(event.source_slot)
+            if event.domain == "name-only":
+                name_only_slots.add(event.source_slot)
+        elif event.kind == "closure-call":
+            if event.arity <= 0 or not event.source_slot or not event.dest_slot:
+                errors.append(f"closure call {event.event_id} has invalid arity")
+            if event.load_id > 0:
+                load_calls.setdefault(event.load_id, []).append(event)
+            if event.domain == "exact":
+                exact_slots.add(event.source_slot)
+            if event.domain == "name-only":
+                name_only_slots.add(event.source_slot)
 
-    def unique_reaching_definition(
-        facts: CFunctionProvenanceFacts, local: str,
-        use_ordinal: int, stage: str,
-    ) -> Optional[Tuple[str, int, Optional[str]]]:
-        found = definitions(facts, local)
-        if len(found) != 1:
-            errors.append(
-                f"{label}: {stage} local {local} has "
-                f"{len(found)} definitions, expected one")
-            return None
-        definition = found[0]
-        if definition[1] >= use_ordinal:
-            errors.append(
-                f"{label}: {stage} local {local} is used before its definition")
-            return None
-        return definition
-
-    def resolve_alias_at(
-        facts: CFunctionProvenanceFacts, local: str,
-        use_ordinal: int, stage: str,
-    ) -> Optional[str]:
-        seen: set[str] = set()
-        current = local
-        current_use = use_ordinal
-        while True:
-            if current in seen:
-                errors.append(f"{label}: {stage} alias cycle at {current}")
-                return None
-            seen.add(current)
-            definition = unique_reaching_definition(
-                facts, current, current_use, stage)
-            if definition is None:
-                return None
-            kind, ordinal, source = definition
-            if kind != "alias":
-                return current
-            assert source is not None
-            current = source
-            current_use = ordinal
-
-    outer_candidates: List[Tuple[CClosureConstructionFact,
-                                 CFunctionProvenanceFacts]] = []
-    for closure in parent.closures:
-        child = parse(closure.lambda_symbol)
-        if child is not None and child.closures:
-            outer_candidates.append((closure, child))
-    if errors:
-        return errors
-    if len(outer_candidates) != 1:
-        return [*errors, (
-            f"{label}: expected one parent→outer closure edge, found "
-            f"{len(outer_candidates)}")]
-    outer_closure, outer = outer_candidates[0]
-    if len(outer.closures) != 1:
-        return [*errors, (
-            f"{label}: expected one outer→inner closure edge, found "
-            f"{len(outer.closures)}")]
-    inner_closure = outer.closures[0]
-    inner = parse(inner_closure.lambda_symbol)
-    if inner is None or errors:
-        return errors
-
-    outer_env_param = lambda_environment(outer, "outer")
-    inner_env_param = lambda_environment(inner, "inner")
-    if outer_env_param is None or inner_env_param is None:
-        return errors
-    if inner.closures:
-        errors.append(
-            f"{label}: inner lambda unexpectedly constructs "
-            f"{len(inner.closures)} closures")
-        return errors
-
-    inner_extractions = [
-        load for load in inner.loads if load.container == inner_env_param]
-    extraction_by_local: dict[str, List[CContainerLoadFact]] = {}
-    for extraction in inner_extractions:
-        extraction_by_local.setdefault(extraction.target, []).append(extraction)
-    call_roots = {call.root for call in inner.closure_calls}
-    exact_candidates = [
-        call for call in inner.closure_calls
-        if call.root in extraction_by_local]
-    evidence_candidates = [
-        load
-        for load in inner.loads
+    for key, store in stores.items():
+        extract = extracts.get(key)
+        if extract is None:
+            errors.append(f"capture store {key} has no extract")
+            continue
         if (
-            load.container != inner_env_param
-            and load.container in extraction_by_local
-            and load.target in call_roots
-        )
-    ]
-    if len(exact_candidates) != 1:
-        errors.append(
-            f"{label}: expected one extracted direct closure root, found "
-            f"{len(exact_candidates)}")
-    if len(evidence_candidates) != 1:
-        errors.append(
-            f"{label}: expected one extracted evidence container→method root, "
-            f"found {len(evidence_candidates)}")
-    if errors:
-        return errors
-    exact_call = exact_candidates[0]
-    method_load = evidence_candidates[0]
-    exact_local = exact_call.root
-    evidence_local = method_load.container
-    method_local = method_load.target
-    if method_load.index <= 0:
-        errors.append(f"{label}: evidence method load uses non-positive slot")
-    if exact_local == evidence_local:
-        return [f"{label}: exact closure and evidence container share one root"]
-    if method_local == exact_local:
-        return [f"{label}: evidence method closure aliases exact closure root"]
-    evidence_calls = [
-        call for call in inner.closure_calls if call.root == method_local]
-    if len(evidence_calls) != 1:
-        errors.append(
-            f"{label}: evidence method root {method_local} has "
-            f"{len(evidence_calls)} uniform calls")
-    expected_call_roots = [exact_local, method_local]
-    actual_call_roots = [call.root for call in inner.closure_calls]
-    if (
-        len(actual_call_roots) != 2
-        or sorted(actual_call_roots) != sorted(expected_call_roots)
-    ):
-        errors.append(
-            f"{label}: inner call-root inventory is {actual_call_roots}, "
-            f"expected {expected_call_roots}")
-    if errors:
-        return errors
-    evidence_call = evidence_calls[0]
-
-    exact_definition = unique_reaching_definition(
-        inner, exact_local, exact_call.ordinal, "inner exact call")
-    evidence_definition = unique_reaching_definition(
-        inner, evidence_local, method_load.ordinal, "inner evidence container")
-    method_definition = unique_reaching_definition(
-        inner, method_local, evidence_call.ordinal, "inner method closure")
-    if (
-        exact_definition is None
-        or evidence_definition is None
-        or method_definition is None
-    ):
-        return errors
-    if exact_definition[0] != "load" or exact_definition[2] != inner_env_param:
-        errors.append(f"{label}: exact call root is not an env extraction")
-    if evidence_definition[0] != "load" or evidence_definition[2] != inner_env_param:
-        errors.append(f"{label}: evidence container is not an env extraction")
-    if (
-        method_definition[0] != "load"
-        or method_definition[2] != evidence_local
-        or method_definition[1] != method_load.ordinal
-    ):
-        errors.append(
-            f"{label}: method root lacks one exact container-load definition")
-    if errors:
-        return errors
-
-    def unique_extraction(
-        facts: CFunctionProvenanceFacts, environment_param: str,
-        local: str, stage: str,
-    ) -> Optional[CContainerLoadFact]:
-        matches = [load for load in facts.loads
-                   if load.container == environment_param and load.target == local]
-        if len(matches) != 1:
-            errors.append(
-                f"{label}: {stage} local {local} has "
-                f"{len(matches)} env extractions")
-            return None
-        if matches[0].index <= 0:
-            errors.append(
-                f"{label}: {stage} local {local} uses non-positive env slot")
-            return None
-        definition = unique_reaching_definition(
-            facts, local, matches[0].ordinal + 1, stage)
-        if definition is None or definition[0] != "load":
-            return None
-        return matches[0]
-
-    def unique_store(
-        facts: CFunctionProvenanceFacts, environment: str,
-        index: int, stage: str,
-    ) -> Optional[CEnvStoreFact]:
-        matches = [store for store in facts.stores
-                   if store.container == environment and store.index == index]
-        if len(matches) != 1:
-            errors.append(
-                f"{label}: {stage} env {environment}[{index}] has "
-                f"{len(matches)} stores")
-            return None
-        store = matches[0]
-        environment_definition = unique_reaching_definition(
-            facts, environment, store.ordinal, f"{stage} environment")
-        source_definition = unique_reaching_definition(
-            facts, store.source, store.ordinal, f"{stage} source")
-        if (
-            environment_definition is None
-            or environment_definition[0] != "allocation"
-            or source_definition is None
+            store.domain, store.def_id, store.canonical_key, store.producer
+        ) != (
+            extract.domain, extract.def_id, extract.canonical_key,
+            extract.producer,
         ):
-            return None
-        return store
-
-    def trace(local: str, role: str) -> Optional[Tuple[str, int, int, int]]:
-        inner_extract = unique_extraction(
-            inner, inner_env_param, local, f"inner {role}")
-        if inner_extract is None:
-            return None
-        outer_store = unique_store(
-            outer, inner_closure.environment, inner_extract.index,
-            f"outer→inner {role}")
-        if outer_store is None:
-            return None
-        outer_extract = unique_extraction(
-            outer, outer_env_param, outer_store.source, f"outer {role}")
-        if outer_extract is None:
-            return None
-        parent_store = unique_store(
-            parent, outer_closure.environment, outer_extract.index,
-            f"parent→outer {role}")
-        if parent_store is None:
-            return None
-        return (
-            parent_store.source, inner_extract.index,
-            outer_extract.index, parent_store.ordinal)
-
-    exact_trace = trace(exact_local, "exact")
-    evidence_trace = trace(evidence_local, "evidence")
-    if exact_trace is None or evidence_trace is None or errors:
-        return errors
-    exact_terminal, exact_inner_index, exact_parent_index, exact_parent_use = exact_trace
-    evidence_terminal, evidence_inner_index, evidence_parent_index, evidence_parent_use = evidence_trace
-    if exact_inner_index == evidence_inner_index:
-        errors.append(f"{label}: exact/evidence share inner env index")
-    if exact_parent_index == evidence_parent_index:
-        errors.append(f"{label}: exact/evidence share parent env index")
-
-    exact_origin = resolve_alias_at(
-        parent, exact_terminal, exact_parent_use, "parent exact")
-    evidence_origin = resolve_alias_at(
-        parent, evidence_terminal, evidence_parent_use, "parent evidence")
-    if exact_origin is None or evidence_origin is None:
-        return errors
-    closure_roots = {closure.root for closure in parent.closures}
-    if exact_origin not in closure_roots or exact_origin == outer_closure.root:
-        errors.append(
-            f"{label}: exact lineage does not end at a local closure pair")
-    if evidence_origin not in parent.params:
-        errors.append(
-            f"{label}: evidence lineage does not end at a parent input")
-    if evidence_origin in closure_roots:
-        errors.append(
-            f"{label}: evidence lineage ends at a constructed closure")
-    if exact_origin == evidence_origin:
-        errors.append(f"{label}: exact/evidence parent origins alias")
-
-    if len(parent.closures) != 2 or closure_roots != {
-            outer_closure.root, exact_origin}:
-        errors.append(
-            f"{label}: parent closure inventory does not equal outer+exact")
-    if len(parent.closure_calls) != 1:
-        errors.append(
-            f"{label}: parent uniform-call inventory has "
-            f"{len(parent.closure_calls)} roots")
-    else:
-        parent_call_origin = resolve_alias_at(
-            parent, parent.closure_calls[0].root,
-            parent.closure_calls[0].ordinal, "parent outer call")
-        if parent_call_origin != outer_closure.root:
+            errors.append(f"capture identity mismatch {key}")
+        edge = edges.get(store.edge_id)
+        if edge is None:
+            errors.append(f"capture {key} references missing edge")
+        elif (
+            store.parent_frame != edge.parent_frame
+            or extract.child_frame != edge.child_frame
+        ):
+            errors.append(f"capture frame/edge mismatch {key}")
+    for key in extracts:
+        if key not in stores:
+            errors.append(f"capture extract {key} has no store")
+    for edge_id in edges:
+        store_indices = sorted(index for edge, index in stores if edge == edge_id)
+        extract_indices = sorted(index for edge, index in extracts if edge == edge_id)
+        expected = list(range(1, len(store_indices) + 1))
+        if store_indices != expected or extract_indices != expected:
             errors.append(
-                f"{label}: parent uniform call does not target outer closure")
-    if len(outer.closure_calls) != 1:
-        errors.append(
-            f"{label}: outer uniform-call inventory has "
-            f"{len(outer.closure_calls)} roots")
-    else:
-        outer_call_origin = resolve_alias_at(
-            outer, outer.closure_calls[0].root,
-            outer.closure_calls[0].ordinal, "outer inner call")
-        if outer_call_origin != inner_closure.root:
-            errors.append(
-                f"{label}: outer uniform call does not target inner closure")
+                f"edge {edge_id} capture indices drifted: "
+                f"{store_indices}/{extract_indices}")
+    for load_id, load in loads.items():
+        calls = load_calls.get(load_id, [])
+        if len(calls) != 1:
+            errors.append(f"receiver load {load_id} consumed {len(calls)} times")
+        elif calls[0].source_slot != load.dest_slot:
+            errors.append(f"receiver load/call slot mismatch {load_id}")
+    for load_id in load_calls:
+        if load_id not in loads:
+            errors.append(f"closure call references missing load {load_id}")
+    aliases = exact_slots & name_only_slots
+    if aliases:
+        errors.append(f"exact/name-only raw slot alias: {sorted(aliases)}")
+    return errors
+
+
+def identity_ledger_mutation_matrix_errors() -> List[str]:
+    """Every registered ledger corruption must be killed without C parsing."""
+    events = [
+        IdentityLedgerEvent(1, "capture-extract", 1, 0, "parent", "child_a",
+                            "exact", 41, "x", "", "env", "r_x_a", 1, 0),
+        IdentityLedgerEvent(2, "capture-extract", 2, 0, "parent", "child_b",
+                            "exact", 41, "x", "", "env", "r_x_b", 1, 0),
+        IdentityLedgerEvent(3, "capture-store", 1, 0, "parent", "child_a",
+                            "exact", 41, "x", "", "r_x", "t_env_a", 1, 0),
+        IdentityLedgerEvent(4, "capture-store", 2, 0, "parent", "child_b",
+                            "exact", 41, "x", "", "r_x", "t_env_b", 1, 0),
+        IdentityLedgerEvent(5, "closure-edge", 1, 0, "parent", "child_a",
+                            "fresh", -1, "", "closure-edge:child_a",
+                            "t_env_a", "t_cl_a", 0, 0),
+        IdentityLedgerEvent(6, "closure-edge", 2, 0, "parent", "child_b",
+                            "fresh", -1, "", "closure-edge:child_b",
+                            "t_env_b", "t_cl_b", 0, 0),
+        IdentityLedgerEvent(7, "dict-receiver-load", 0, 1, "child_a", "",
+                            "name-only", -1, "__ring_T_Ord", "",
+                            "r___ring_T_Ord", "t_method", 1, 0),
+        IdentityLedgerEvent(8, "closure-call", 0, 1, "child_a", "",
+                            "computed", -1, "", "dict-receiver-load",
+                            "t_method", "t_result", 0, 2),
+        IdentityLedgerEvent(9, "closure-call", 0, 0, "parent", "",
+                            "exact", 41, "x", "", "r_x", "t_exact", 0, 1),
+        IdentityLedgerEvent(10, "closure-call", 0, 0, "parent", "",
+                            "name-only", -1, "__ring_T_Ord", "",
+                            "r___ring_T_Ord", "t_name", 0, 1),
+        IdentityLedgerEvent(11, "closure-call", 0, 0, "parent", "",
+                            "computed", -1, "", "expression-closure",
+                            "t_expr", "t_computed", 0, 1),
+    ]
+    errors: List[str] = []
+    parsed, valid_errors = parse_identity_ledger(
+        serialize_identity_ledger(events))
+    if valid_errors or parsed is None:
+        return ["valid identity ledger fixture rejected: " + "; ".join(valid_errors)]
+
+    mutations: Tuple[Tuple[str, Callable[[List[IdentityLedgerEvent]], None]], ...] = (
+        ("missing store", lambda rows: rows.pop(2)),
+        ("duplicate event", lambda rows: rows.insert(1, rows[0])),
+        ("swap domain", lambda rows: rows.__setitem__(2, replace(
+            rows[2], domain="name-only", def_id=-1, canonical_key="x"))),
+        ("wrong DefId", lambda rows: rows.__setitem__(0, replace(
+            rows[0], def_id=99))),
+        ("wrong key", lambda rows: rows.__setitem__(0, replace(
+            rows[0], canonical_key="wrong"))),
+        ("wrong index", lambda rows: rows.__setitem__(2, replace(
+            rows[2], index=2))),
+        ("slot alias", lambda rows: rows.__setitem__(2, replace(
+            rows[2], source_slot="r___ring_T_Ord"))),
+        ("wrong edge", lambda rows: rows.__setitem__(2, replace(
+            rows[2], edge_id=2))),
+        ("sibling cross-pair", lambda rows: rows.__setitem__(0, replace(
+            rows[0], edge_id=2))),
+        ("load orphan", lambda rows: rows.pop(7)),
+        ("call orphan", lambda rows: rows.__setitem__(7, replace(
+            rows[7], load_id=77))),
+        ("zero arity", lambda rows: rows.__setitem__(8, replace(
+            rows[8], arity=0))),
+        ("nondeterministic order", lambda rows: rows.__setitem__(slice(0, 2),
+            [rows[1], rows[0]])),
+    )
+    for label, mutate in mutations:
+        rows = list(events)
+        mutate(rows)
+        _, mutation_errors = parse_identity_ledger(
+            serialize_identity_ledger(rows))
+        if not mutation_errors:
+            errors.append(f"identity ledger mutation escaped: {label}")
     return errors
 
 
@@ -5178,11 +4676,243 @@ def run_extern_rc_oracle(ring_exe: str, temp_root: Path,
     return errors
 
 
+def identity_ledger_contract_errors(
+    sources: dict[str, str],
+) -> List[str]:
+    """Lock H+T typed authority, atomic emitters, and hidden output boundary."""
+    errors: List[str] = []
+    cctx = sources["cctx"]
+    cexpr = sources["cexpr"]
+    cgen = sources["cgen"]
+    cli = sources["cli"]
+
+    inventory = (
+        ("closure-call", cexpr.count("gen_c_closure_call(")
+         + cgen.count("gen_c_closure_call("), 10),
+        ("dict-ref", cexpr.count("c_resolve_dict_ref(")
+         + cgen.count("c_resolve_dict_ref("), 15),
+        ("evidence", cexpr.count("c_lookup_evidence("), 6),
+    )
+    for label, actual, expected in inventory:
+        if actual != expected:
+            errors.append(
+                f"H+T {label} frozen inventory {actual} != {expected}")
+
+    typed_tokens = (
+        "pub struct CExactSlotRef",
+        "pub struct CNameOnlySlotRef",
+        "pub enum CRefKind",
+        "pub struct CTypedRef",
+        "Map<Int, CExactSlotRef>",
+        "Map<Str, CNameOnlySlotRef>",
+        "pub fn c_ref_loaded(",
+        "pub fn c_identity_ledger_text(",
+        "validate_identity_ledger(ctx)",
+    )
+    for token in typed_tokens:
+        if token not in cctx:
+            errors.append(f"H+T typed authority missing {token!r}")
+    for label in ("cexpr", "cgen"):
+        if "CRefKind::" in sources[label] or re.search(
+                r"CTypedRef\s*\{\s*c_name\s*:", sources[label]):
+            errors.append(f"{label}: caller forged a typed ref variant/struct")
+    if not re.search(
+            r"pub fn gen_c_closure_call\s*\(\s*mut ctx: CCtx,\s*"
+            r"closure_ref: CTypedRef,", cexpr):
+        errors.append("gen_c_closure_call regained an untyped/raw overload")
+
+    atomic_helpers = {
+        "emit_c_capture_extract": (
+            'c_emit(ctx, "${dest_name} = ((void**)env)[${index}];")',
+            "c_record_capture_extract(\n        ctx, edge, dest, \"env\", dest_name, index)",
+        ),
+        "emit_c_capture_store": (
+            'c_emit(ctx, "((void**)${env_name})[${index}] = ${source_name};")',
+            "c_record_capture_store(\n        ctx, edge, identity, source_name, env_name, index)",
+        ),
+        "emit_c_closure_construction": (
+            'c_emit(ctx, "((void**)${cls})[0] = (void*)${lambda_name};")',
+            "c_record_closure_edge(",
+        ),
+        "emit_c_receiver_load": (
+            'c_emit(ctx, "${dest} = ((void**)${source_name})[${index}];")',
+            "c_record_receiver_load(",
+            "c_ref_loaded(",
+        ),
+        "gen_c_closure_call": (
+            'c_emit(ctx, "${t} = ((void* (*)(',
+            "c_record_closure_call(\n        ctx, closure_ref, closure_val, t, arg_vals.len() + 1)",
+        ),
+    }
+    for function_name, tokens in atomic_helpers.items():
+        body, extract_error = extract_ring_function_body(cexpr, function_name)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        for token in tokens:
+            if body.count(token) != 1:
+                errors.append(
+                    f"{function_name}: atomic C/event token {token!r} "
+                    f"matched {body.count(token)} times")
+
+    record_calls = (
+        ("c_record_capture_extract(", "emit_c_capture_extract"),
+        ("c_record_capture_store(", "emit_c_capture_store"),
+        ("c_record_closure_edge(", "emit_c_closure_construction"),
+        ("c_record_receiver_load(", "emit_c_receiver_load"),
+        ("c_record_closure_call(", "gen_c_closure_call"),
+    )
+    for token, owner in record_calls:
+        if cexpr.count(token) != 1:
+            errors.append(
+                f"H+T event {token!r} has caller-created/bypassed count "
+                f"{cexpr.count(token)}")
+        owner_body, owner_error = extract_ring_function_body(cexpr, owner)
+        if owner_error is None and token not in owner_body:
+            errors.append(f"H+T event {token!r} is not owned by {owner}")
+        if token in cgen or token in cli:
+            errors.append(f"H+T event {token!r} escaped its atomic expr helper")
+
+    for typed_map, expected_count in (
+        ("Map<Int, CExactSlotRef>", 2),
+        ("Map<Str, CNameOnlySlotRef>", 2),
+    ):
+        if cctx.count(typed_map) != expected_count:
+            errors.append(
+                f"H+T typed map {typed_map!r} count "
+                f"{cctx.count(typed_map)} != {expected_count}")
+    if re.search(
+            r"emit_c_receiver_load\s*\([^)]*,\s*0\s*,\s*\"(?:dict|effect)\"",
+            cexpr, re.DOTALL):
+        errors.append("H+T receiver load regained a zero/non-method slot")
+
+    raw_templates = (
+        ('${dest_name} = ((void**)env)[${index}]', "emit_c_capture_extract"),
+        ('((void**)${env_name})[${index}] = ${source_name}', "emit_c_capture_store"),
+        ('((void**)${source_name})[${index}]', "emit_c_receiver_load"),
+        ('((void**)${closure_val})[0]', "gen_c_closure_call"),
+    )
+    for token, owner in raw_templates:
+        if cexpr.count(token) != 1:
+            errors.append(
+                f"H+T raw critical template {token!r} bypass count "
+                f"{cexpr.count(token)} (owner {owner})")
+
+    # Computed wrapper thunks forward env slots inline but never carry source
+    # Exact/NameOnly identity. Freeze these three named exclusions so they
+    # cannot silently migrate into the source-identity route.
+    wrapper_env_token = 'fwd_args.push("((void**)env)['
+    if cexpr.count(wrapper_env_token) != 3:
+        errors.append(
+            "H+T computed wrapper env exclusion inventory must remain 3")
+    for function_name, expected in (
+        ("gen_c_dict_closure_wrapper", 1),
+        ("ensure_c_wrapped_method_thunk", 2),
+    ):
+        body, extract_error = extract_ring_function_body(cexpr, function_name)
+        if extract_error:
+            errors.append(extract_error)
+        elif body.count(wrapper_env_token) != expected:
+            errors.append(
+                f"{function_name}: computed env exclusion count drifted")
+        elif "c_record_capture_" in body:
+            errors.append(
+                f"{function_name}: computed wrapper entered source capture ledger")
+
+    if cli.count('arg == "--internal-c-identity-ledger"') != 1:
+        errors.append("hidden ledger flag is not one exact boolean parser arm")
+    if "--internal-c-identity-ledger=" in cli:
+        errors.append("hidden ledger flag regained a value/path form")
+    usage_body, usage_error = extract_ring_function_body(cli, "usage")
+    if usage_error:
+        errors.append(usage_error)
+    elif "internal-c-identity-ledger" in usage_body:
+        errors.append("internal ledger flag leaked into public usage")
+    if cli.count("--internal-c-identity-ledger is single-file only") != 1:
+        errors.append("project/multifile ledger rejection drifted")
+    if cgen.count('"${c_path}.identity-ledger"') != 1:
+        errors.append("ledger output path is not one derived fixed path")
+    if cgen.count("write_file(\n            \"${c_path}.identity-ledger\"") != 1:
+        errors.append("ledger output is not written exactly once")
+    relation_anchor = "some(c_identity_ledger_text(ctx))"
+    write_anchor = '"${c_path}.identity-ledger"'
+    if relation_anchor not in cgen or write_anchor not in cgen:
+        errors.append("ledger relation/write boundary missing")
+    elif cgen.index(relation_anchor) > cgen.index(write_anchor):
+        errors.append("ledger write can precede relation validation")
+    write_body, write_error = extract_ring_function_body(
+        cgen, "c_write_and_compile")
+    if write_error:
+        errors.append(write_error)
+    elif "file_exists" in write_body:
+        errors.append("ledger output regained a check-then-write TOCTOU")
+
+    runner = sources.get("runner", "")
+    runner_tokens = (
+        "OneShotSpec(",
+        "run_one_shot(spec, result_validator=validate_artifacts)",
+        "reviewed_argv=tuple(argv)",
+        "reviewed_env=tuple(sorted(environment.items()))",
+        "if list(out_dir.iterdir())",
+        "if ledger_path.exists()",
+        "create_one_shot_archive(case_root, archive_path)",
+        "canonicalize_identity_stdout_root(",
+    )
+    for token in runner_tokens:
+        if token not in runner:
+            errors.append(f"H+T runner contract missing {token!r}")
+
+    for rejected in (
+        "parse_c_function_provenance_facts",
+        "analyze_two_level_provenance_c",
+        "_parse_uniform_closure_call_statement",
+    ):
+        if re.search(
+            rf"(?m)^def\s+{re.escape(rejected)}\s*\(",
+            runner,
+        ):
+            errors.append(f"rejected F parser remains active: {rejected}")
+
+    h_t_functions = (
+        ("cctx", "c_ref_domain"),
+        ("cctx", "c_ref_def_id"),
+        ("cctx", "c_ref_key"),
+        ("cctx", "c_ref_producer"),
+        ("cctx", "validate_identity_ledger"),
+        ("cctx", "c_identity_ledger_text"),
+        ("cexpr", "emit_c_capture_extract"),
+        ("cexpr", "emit_c_capture_store"),
+        ("cexpr", "emit_c_closure_construction"),
+        ("cexpr", "emit_c_receiver_load"),
+        ("cexpr", "gen_c_closure_call"),
+    )
+    payload_or_pattern = re.compile(
+        r"(?m)^\s*[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*\s*"
+        r"(?:\{(?!\s*\.\.\s*\})[^{}\n]+\}|"
+        r"\(\s*(?!\s*\))[^()\n]+\))\s*\|(?!\|)")
+    for source_name, function_name in h_t_functions:
+        body, extract_error = extract_ring_function_body(
+            sources[source_name], function_name)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        if payload_or_pattern.search(mask_ring_strings_and_comments(body)):
+            errors.append(
+                f"{source_name}.{function_name}: payload-binding OrPattern "
+                "breaks tracked-gen0 crossing")
+        if function_name in ("validate_identity_ledger", "c_identity_ledger_text") and (
+                ".sort" in body or "sort_by" in body):
+            errors.append(
+                f"{source_name}.{function_name}: ledger order was sorted/reordered")
+    return errors
+
+
 def identity_checkpoint_contract_errors(
     sources: dict[str, str],
 ) -> List[str]:
     """Lock the behavior-preserving I-prime exact-slot transport."""
     errors: List[str] = []
+    errors.extend(identity_ledger_contract_errors(sources))
     required_tokens = {
         "hir": (
             "pub struct HPatternBinding",
@@ -5270,24 +5000,32 @@ def identity_checkpoint_contract_errors(
             "dictionaries remain Call.resolved_dicts",
         ),
         "cctx": (
-            "pub value_slots_by_def_id: Map<Int, Str>",
-            "pub name_only_slots: Map<Str, Str>",
-            "pub value_slot_names_by_def_id: Map<Int, Str>",
+            "pub struct CExactSlotRef",
+            "pub struct CNameOnlySlotRef",
+            "pub enum CRefKind",
+            "pub struct CTypedRef",
+            "pub value_slots_by_def_id: Map<Int, CExactSlotRef>",
+            "pub name_only_slots: Map<Str, CNameOnlySlotRef>",
             "pub fn c_local_def(",
             "pub fn c_param_def(",
             "pub fn c_value_slot(",
             "pub fn c_exact_value_slot(",
             "pub fn c_name_only_value(",
+            "pub fn c_identity_ledger_text(",
+            "validate_identity_ledger(ctx)",
+            "C identity ledger: receiver load",
             "value_slots_by_def_id: ctx.value_slots_by_def_id",
             "ctx.value_slots_by_def_id = saved.value_slots_by_def_id",
             "name_only_slots: ctx.name_only_slots",
             "ctx.name_only_slots = saved.name_only_slots",
         ),
         "cgen": (
-            "fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef)",
+            "fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef) -> CTypedRef",
             "c_resolve_dict_ref(ctx, base_dict)",
             "FieldAction::Call { base_dict, extra_dicts }",
             "c_option_some_variant(DictRef::Simple(",
+            '"${c_path}.identity-ledger"',
+            "some(c_identity_ledger_text(ctx))",
         ),
         "cexpr": (
             "let found = match def_id",
@@ -5296,11 +5034,16 @@ def identity_checkpoint_contract_errors(
             "let name_only_local_callee = match callee",
             "def_id: none",
             "c_match_name_only_slot(ctx, call_name, name)",
-            "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
+            "let closure_result = gen_c_closure_call(",
             "enum CCaptureProvenance",
-            "Exact { name: Str, def_id: Int }",
-            "NameOnly { canonical_key: Str }",
+            "Exact { reference: CTypedRef }",
+            "NameOnly { reference: CTypedRef }",
             "provenance: CCaptureProvenance",
+            "fn emit_c_capture_extract(",
+            "fn emit_c_capture_store(",
+            "fn emit_c_closure_construction(",
+            "pub fn emit_c_receiver_load(",
+            "closure_ref: CTypedRef",
             "fn consider_c_exact_reference(",
             "fn consider_c_required_name_only_capture(",
             "fn consider_c_optional_evidence_capture(",
@@ -5318,6 +5061,12 @@ def identity_checkpoint_contract_errors(
             "let val = gen_c_expr(ctx, init)",
             "DictRef::Static(dict)",
             "fresh_tmp(ctx)",
+        ),
+        "cli": (
+            'arg == "--internal-c-identity-ledger"',
+            "identity_ledger: Bool",
+            "parsed.identity_ledger)",
+            "--internal-c-identity-ledger is single-file only",
         ),
         "verify": (
             "def_ids: List<Int>",
@@ -5458,7 +5207,9 @@ def identity_checkpoint_contract_errors(
             "let name_only_local_callee = match callee",
             "def_id: none",
             "c_match_name_only_slot(ctx, call_name, name)",
-            "gen_c_closure_call(ctx, slot, arg_vals)",
+            "c_ref_exact(slot)",
+            "c_ref_name_only(matched.slot)",
+            "c_ref_computed(",
             "let raw = match callee")):
         errors.append("callable provenance chain lost an explicit route")
     elif not (
@@ -5548,13 +5299,12 @@ def identity_checkpoint_contract_errors(
     emitter_manifests = (
         ("gen_c_lambda", (
             'let mut sig_parts: List<Str> = ["void* env"]',
-            'c_emit(ctx, "${cv} = ((void**)env)[${i + 1}];")',
+            "let edge = c_new_closure_edge(ctx, lambda_name)",
+            "emit_c_capture_extract(ctx, edge, identity, dest, i + 1)",
             'c_emit(ctx, "${env} = ring_alloc((int64_t)(sizeof(int64_t) + ${captures.len()} * sizeof(void*)), 15);")',
             'c_emit(ctx, "*(int64_t*)${env} = ${captures.len()};")',
-            'c_emit(ctx, "((void**)${env})[${i + 1}] = ${cv};")',
-            'c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")',
-            'c_emit(ctx, "((void**)${cls})[0] = (void*)${lambda_name};")',
-            'c_emit(ctx, "((void**)${cls})[1] = ${env};")',
+            "emit_c_capture_store(ctx, edge, identity, env_ref, i + 1)",
+            "emit_c_closure_construction(\n        ctx, edge, env_ref, lambda_name)",
         )),
         ("gen_c_closure_call", (
             'let mut cast_tys: List<Str> = ["void*"]',
@@ -5562,18 +5312,19 @@ def identity_checkpoint_contract_errors(
             'cast_tys.push("void*")',
             'call_args.push(a)',
             'c_emit(ctx, "${t} = ((void* (*)(${cast_tys.join(", ")}))(((void**)${closure_val})[0]))(${call_args.join(", ")});")',
+            "c_record_closure_call(",
         )),
         ("gen_c_dict_dispatch_call", (
-            'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[${method_idx + 1}];")',
-            "gen_c_closure_call(ctx, cls, call_args)",
+            'emit_c_receiver_load(\n        ctx, dict_ref, method_idx + 1, "dict")',
+            "gen_c_closure_call(ctx, cls_ref, call_args)",
         )),
         ("gen_c_ord_dispatch", (
-            'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")',
-            "gen_c_closure_call(ctx, cls, [lhs, rhs])",
+            'emit_c_receiver_load(ctx, dict_ref, 1, "dict")',
+            "gen_c_closure_call(ctx, cls_ref, [lhs, rhs])",
         )),
         ("gen_c_effect_op", (
-            'c_emit(ctx, "${cl} = ((void**)${ev_val})[${idx + 1}];")',
-            "gen_c_closure_call(ctx, cl, arg_vals)",
+            'emit_c_receiver_load(\n            ctx, ev_ref, idx + 1, "effect")',
+            "gen_c_closure_call(ctx, closure_ref, arg_vals)",
         )),
     )
     for function_name, manifest in emitter_manifests:
@@ -5609,12 +5360,12 @@ def identity_checkpoint_contract_errors(
             errors.append(
                 "lambda extraction/construction must both consume capture tags")
         for token in (
-            "CCaptureProvenance::Exact { name, def_id }",
-            "CCaptureProvenance::NameOnly { canonical_key }",
-            "c_local_def(ctx, name, some(def_id))",
-            "c_local(ctx, canonical_key)",
-            "c_exact_value_slot(ctx, name, def_id)",
-            "c_name_only_value(ctx, canonical_key)",
+            "CCaptureProvenance::Exact { reference }",
+            "CCaptureProvenance::NameOnly { reference }",
+            "c_local_def_ref(",
+            "c_local_ref(ctx, c_ref_key(reference))",
+            "emit_c_capture_extract(ctx, edge, identity, dest, i + 1)",
+            "emit_c_capture_store(ctx, edge, identity, env_ref, i + 1)",
         ):
             expected_count = 2 if token.startswith(
                 "CCaptureProvenance::") else 1
@@ -5694,7 +5445,7 @@ def identity_checkpoint_contract_errors(
             or "resolve_c_static_dict" in simple_arm.group(1)
         ):
             errors.append("DictRef::Simple regained a static/name fallback")
-        if "DictRef::Static(n) => resolve_c_static_dict(ctx, n)" not in resolve_dict_body:
+        if "DictRef::Static(n) => c_ref_static(resolve_c_static_dict(ctx, n), n)" not in resolve_dict_body:
             errors.append("DictRef::Static no longer selects singleton resolution")
 
     dispatch_body, dispatch_error = extract_ring_function_body(
@@ -5873,7 +5624,6 @@ def identity_checkpoint_contract_errors(
     else:
         for domain in (
             "name_only_slots", "value_slots_by_def_id",
-            "value_slot_names_by_def_id",
         ):
             if (
                 f"{domain}: ctx.{domain}" not in push_body
@@ -6064,270 +5814,266 @@ def identity_candidate_case_root(parent: Path, case_name: str) -> Path:
     return case_root
 
 
-def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
-    """Require exact/name-only slot separation in candidate-generated C."""
+_IDENTITY_ROOT_TOKEN = b"@RING_IDENTITY_FRESH_ROOT@"
+
+
+def canonicalize_identity_stdout_root(
+    raw: bytes, fresh_root: Path, *, expected_count: int,
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """Replace exactly one reviewed fresh-root path prefix, nothing else."""
+    root_bytes = os.fsencode(str(fresh_root.resolve()))
+    occurrences: List[Tuple[int, int]] = []
+    offset = 0
+    separators = (b"/", b"\\")
+    allowed_before = b" \t='\"("
+    while True:
+        index = raw.find(root_bytes, offset)
+        if index < 0:
+            break
+        end = index + len(root_bytes)
+        before_ok = index == 0 or raw[index - 1:index] in [
+            bytes([value]) for value in allowed_before]
+        after_ok = end < len(raw) and raw[end:end + 1] in separators
+        if not before_ok or not after_ok:
+            return None, (
+                "fresh-root occurrence is not a complete path prefix at "
+                f"byte {index}")
+        occurrences.append((index, end))
+        offset = end
+    if len(occurrences) != expected_count:
+        return None, (
+            f"fresh-root replacement count {len(occurrences)} != "
+            f"{expected_count}")
+    pieces: List[bytes] = []
+    cursor = 0
+    for begin, end in occurrences:
+        pieces.append(raw[cursor:begin])
+        pieces.append(_IDENTITY_ROOT_TOKEN)
+        cursor = end
+    pieces.append(raw[cursor:])
+    return b"".join(pieces), None
+
+
+def identity_stdout_canonicalization_errors() -> List[str]:
     errors: List[str] = []
-    with tempfile.TemporaryDirectory(prefix="ring_identity_default_c_") as tmpdir:
-        case_parent = Path(tmpdir)
-        default_case_root = identity_candidate_case_root(
-            case_parent, "default-body")
-        provenance_case_root = identity_candidate_case_root(
-            case_parent, "provenance-b")
-        c_path, _, build_error = build_c_artifacts_fresh(
-            ring_exe, "tests/cases/default_body_exact_param_identity.ring",
-            default_case_root, no_c_lines=True,
-            phase_case="compiler.identity_checkpoint/default-body-c",
-        )
-        if build_error:
-            return [build_error]
-        assert c_path is not None
-        source = c_path.read_text(encoding="utf-8")
-        masked = mask_c_strings_and_comments(source)
+    root = Path("C:/fresh/identity-case")
+    root_bytes = os.fsencode(str(root.resolve()))
+    valid = b"Compiled: " + root_bytes + b"/out/case.o\n"
+    canonical, valid_error = canonicalize_identity_stdout_root(
+        valid, root, expected_count=1)
+    if valid_error or canonical is None:
+        return [f"valid fresh-root canonicalization failed: {valid_error}"]
+    expected = b"Compiled: " + _IDENTITY_ROOT_TOKEN + b"/out/case.o\n"
+    if canonical != expected:
+        errors.append("fresh-root canonicalization changed bytes outside root")
+    invalid_cases = {
+        "zero": b"Compiled: C:/elsewhere/out/case.o\n",
+        "extra": valid + valid,
+        "near-prefix": b"Compiled: " + root_bytes + b"-other/out/case.o\n",
+        "wrong-separator": b"Compiled: " + root_bytes + b"Xout/case.o\n",
+    }
+    for label, value in invalid_cases.items():
+        _, error = canonicalize_identity_stdout_root(
+            value, root, expected_count=1)
+        if error is None:
+            errors.append(f"fresh-root canonicalization mutation escaped: {label}")
+    changed_diagnostic = valid.replace(b"Compiled:", b"Changed!:")
+    changed, changed_error = canonicalize_identity_stdout_root(
+        changed_diagnostic, root, expected_count=1)
+    if changed_error or changed == canonical:
+        errors.append("non-path diagnostic mutation was normalized away")
+    unrelated = b"candidate=C:/tools/ring.exe source=C:/src/input.ring\n" + valid
+    unrelated_canonical, unrelated_error = canonicalize_identity_stdout_root(
+        unrelated, root, expected_count=1)
+    if unrelated_error or unrelated_canonical is None or not unrelated_canonical.startswith(
+            b"candidate=C:/tools/ring.exe source=C:/src/input.ring\n"):
+        errors.append("canonicalizer touched candidate/source/tool paths")
+    return errors
 
-        provenance_c_path, _, provenance_build_error = build_c_artifacts_fresh(
-            ring_exe, "tests/cases/provenance_b_capture_identity.ring",
-            provenance_case_root, no_c_lines=True,
-            phase_case="compiler.identity_checkpoint/provenance-b-c",
-        )
-        if provenance_build_error:
-            return [provenance_build_error]
-        assert provenance_c_path is not None
-        provenance_source = provenance_c_path.read_text(encoding="utf-8")
 
-    def exact_shadow_slot_errors(body: str, label: str) -> List[str]:
-        slot_errors: List[str] = []
-        if not re.search(r"\bvoid\s*\*\s*r_value_2(?:\s*=\s*NULL)?\s*;", body):
-            slot_errors.append(
-                f"{label} generated C omitted the distinct shadow declaration")
-        if len(re.findall(r"\br_value_2\s*=\s*t[0-9]+\s*;", body)) != 1:
-            slot_errors.append(
-                f"{label} generated C must assign the exact shadow slot once")
-        if not re.search(r"\bt[0-9]+\s*=\s*r_value\s*;", body):
-            slot_errors.append(
-                f"{label} generated C did not read the exact parameter slot")
-        if not re.search(
-                r"\(\(void\*\*\)t[0-9]+\)\[1\]\s*=\s*r_value_2\s*;",
-                body):
-            slot_errors.append(
-                f"{label} generated C did not capture the exact shadow slot")
-        return slot_errors
+@dataclass(frozen=True)
+class IdentityCandidateArtifacts:
+    mode: str
+    case_root: Path
+    stdout: bytes
+    stderr: bytes
+    c_bytes: bytes
+    object_bytes: bytes
+    ledger_bytes: Optional[bytes]
+    verdict: dict[str, Any]
 
-    trait_body, trait_error = extract_c_function_body(
-        source, "__ExactDefaultTrait_compute")
-    if trait_error:
-        errors.append(trait_error)
-    else:
-        errors.extend(exact_shadow_slot_errors(trait_body, "trait default"))
 
-    lambda_symbols = re.findall(
-        r"(?m)^void\*\s+(ring_c_lambda_[0-9]+)\s*"
-        r"\(void\* env, void\* r_value\)\s*\{",
-        masked,
+def run_identity_candidate_mode(
+    ring_exe: str, fixture: str, case_root: Path, *, ledger: bool,
+) -> Tuple[Optional[IdentityCandidateArtifacts], Optional[str]]:
+    mode = "on" if ledger else "off"
+    out_dir = case_root / "out"
+    evidence_dir = case_root / "one-shot"
+    try:
+        out_dir.mkdir(parents=False, exist_ok=False)
+        evidence_dir.mkdir(parents=False, exist_ok=False)
+    except OSError as exc:
+        return None, f"cannot create fresh {mode} candidate roots: {exc}"
+    if list(out_dir.iterdir()):
+        return None, f"fresh {mode} output root is not empty"
+
+    fixture_path = (REPO / fixture).resolve()
+    base = fixture_path.stem
+    c_path = out_dir / f"{base}.c"
+    object_path = out_dir / f"{base}.o"
+    ledger_path = Path(str(c_path) + ".identity-ledger")
+    if ledger_path.exists():
+        return None, f"fresh {mode} ledger unexpectedly exists"
+    clang = _resolved_executable("clang")
+    if clang is None:
+        return None, "identity candidate gate cannot resolve clang"
+    environment = dict(_controlled_environment(ring_exe, clang))
+    argv = [
+        str(Path(ring_exe).resolve()), "build", str(fixture_path),
+        "--target=c", f"--out-dir={out_dir}", "--no-c-lines",
+    ]
+    if ledger:
+        argv.append("--internal-c-identity-ledger")
+    expected_names = {c_path.name, object_path.name}
+    if ledger:
+        expected_names.add(ledger_path.name)
+
+    def validate_artifacts(_outcome: Mapping[str, Any]) -> None:
+        actual_names = {path.name for path in out_dir.iterdir()}
+        if actual_names != expected_names:
+            raise OneShotResultSchemaError(
+                f"{mode} artifact inventory {actual_names} != {expected_names}")
+        for required in (c_path, object_path):
+            if not required.is_file():
+                raise OneShotResultSchemaError(
+                    f"{mode} candidate omitted {required.name}")
+        if ledger and not ledger_path.is_file():
+            raise OneShotResultSchemaError("on candidate omitted identity ledger")
+        if not ledger and ledger_path.exists():
+            raise OneShotResultSchemaError("off candidate emitted identity ledger")
+
+    limits = OneShotLimits(
+        wall_seconds=300,
+        stdout_cap_bytes=1024 * 1024,
+        stderr_cap_bytes=1024 * 1024,
+        job_memory_bytes=(12 * 1024 * 1024 * 1024 if os.name == "nt" else None),
+        active_process_limit=(5 if os.name == "nt" else None),
     )
-    effect_bodies: List[str] = []
-    for symbol in lambda_symbols:
-        body, extract_error = extract_c_function_body(source, symbol)
-        if extract_error is None and "RING_INT(2)" in body:
-            effect_bodies.append(body)
-    if len(effect_bodies) != 1:
-        errors.append(
-            "effect default generated C expected one value+2 closure, "
-            f"found {len(effect_bodies)}")
-    else:
-        errors.extend(exact_shadow_slot_errors(
-            effect_bodies[0], "effect default"))
-
-    mixed_body, mixed_error = extract_c_function_body(
-        source, "ring_mixed_evidence_capture")
-    if mixed_error:
-        errors.append(mixed_error)
-        return errors
-
-    same_spelling = r"r___ring_T_Ord(?:_[0-9]+)?"
-    outer_stores = re.findall(
-        rf"\(\(void\*\*\)(t[0-9]+)\)\[([0-9]+)\]\s*=\s*"
-        rf"({same_spelling})\s*;",
-        mixed_body,
+    spec = OneShotSpec(
+        evidence_dir=evidence_dir.resolve(),
+        gate_id=f"identity-ledger-{mode}",
+        argv=tuple(argv),
+        reviewed_argv=tuple(argv),
+        cwd=REPO.resolve(),
+        env=environment,
+        reviewed_env=tuple(sorted(environment.items())),
+        limits=limits,
     )
-    stores_by_env: dict[str, set[str]] = {}
-    for env_name, _, value_name in outer_stores:
-        stores_by_env.setdefault(env_name, set()).add(value_name)
-    if not any(len(values) == 2 for values in stores_by_env.values()):
-        errors.append(
-            "mixed evidence capture did not store distinct same-spelled "
-            "exact and name-only values")
+    try:
+        verdict = run_one_shot(spec, result_validator=validate_artifacts)
+    except Exception as exc:
+        return None, f"{mode} B-188 one-shot wrapper failed: {exc}"
+    if verdict["status"] != "success":
+        return None, (
+            f"{mode} candidate failed as {verdict['classification']}; "
+            f"raw={evidence_dir}")
+    audit = audit_one_shot_attempt(evidence_dir)
+    if audit["state"] != "complete" or audit["status"] != "success":
+        return None, f"{mode} one-shot recovery audit failed: {audit}"
+    try:
+        stdout = (evidence_dir / "stdout.raw").read_bytes()
+        stderr = (evidence_dir / "stderr.raw").read_bytes()
+        c_bytes = c_path.read_bytes()
+        object_bytes = object_path.read_bytes()
+        ledger_bytes = ledger_path.read_bytes() if ledger else None
+        archive_path = case_root.parent / f"{case_root.name}.tar"
+        create_one_shot_archive(case_root, archive_path)
+    except (OSError, RuntimeError) as exc:
+        return None, f"cannot retain/archive {mode} identity artifacts: {exc}"
+    return IdentityCandidateArtifacts(
+        mode=mode,
+        case_root=case_root,
+        stdout=stdout,
+        stderr=stderr,
+        c_bytes=c_bytes,
+        object_bytes=object_bytes,
+        ledger_bytes=ledger_bytes,
+        verdict=verdict,
+    ), None
 
-    lambda_refs = set(re.findall(
-        r"\(\(void\*\*\)t[0-9]+\)\[0\]\s*=\s*"
-        r"\(void\*\)(ring_c_lambda_[0-9]+)\s*;",
-        mixed_body,
-    ))
-    separated_lambdas: List[str] = []
-    for symbol in lambda_refs:
-        body, extract_error = extract_c_function_body(source, symbol)
-        if extract_error is not None:
-            continue
-        condition = re.search(
-            r"RING_COND\s*\(\s*(t[0-9]+)\s*\)", body)
-        evidence = re.search(
-            rf"\(\(void\*\*\)({same_spelling})\)\[1\]", body)
-        if condition is None or evidence is None:
-            continue
-        condition_temp = condition.group(1)
-        condition_source = re.search(
-            rf"\b{re.escape(condition_temp)}\s*=\s*"
-            rf"({same_spelling})\s*;",
-            body,
-        )
-        if condition_source is None:
-            continue
-        condition_name = condition_source.group(1)
-        evidence_name = evidence.group(1)
-        if condition_name == evidence_name:
-            continue
-        extractions = {
-            name: slot for name, slot in re.findall(
-                rf"\b({same_spelling})\s*=\s*"
-                r"\(\(void\*\*\)env\)\[([0-9]+)\]\s*;",
-                body,
-            )
-        }
-        if (
-            condition_name in extractions
-            and evidence_name in extractions
-            and extractions[condition_name] != extractions[evidence_name]
+
+def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
+    """Run off/on/on H+T acceptance through durable one-shot receipts."""
+    errors: List[str] = []
+    fixture = "tests/cases/provenance_b_capture_identity.ring"
+    candidate_before = _sha256_file(Path(ring_exe))
+    with tempfile.TemporaryDirectory(prefix="ring_identity_ledger_") as tmpdir:
+        parent = Path(tmpdir)
+        runs: List[IdentityCandidateArtifacts] = []
+        for case_name, ledger in (("off", False), ("on1", True), ("on2", True)):
+            case_root = identity_candidate_case_root(parent, case_name)
+            artifacts, run_error = run_identity_candidate_mode(
+                ring_exe, fixture, case_root, ledger=ledger)
+            if run_error:
+                errors.append(run_error)
+                return errors
+            assert artifacts is not None
+            runs.append(artifacts)
+        off, on1, on2 = runs
+
+        for label, left, right in (
+            ("off/on1 C", off.c_bytes, on1.c_bytes),
+            ("on1/on2 C", on1.c_bytes, on2.c_bytes),
+            ("off/on1 object", off.object_bytes, on1.object_bytes),
+            ("on1/on2 object", on1.object_bytes, on2.object_bytes),
+            ("off/on1 stderr", off.stderr, on1.stderr),
+            ("on1/on2 stderr", on1.stderr, on2.stderr),
         ):
-            separated_lambdas.append(symbol)
-    if len(separated_lambdas) != 1:
-        errors.append(
-            "mixed evidence generated C expected one lambda with distinct "
-            "exact-condition and name-only-dict capture slots, found "
-            f"{len(separated_lambdas)}")
+            if left != right:
+                errors.append(f"identity ledger changed {label} bytes")
 
-    def lambda_refs(body: str) -> set[str]:
-        return set(re.findall(
-            r"\(\(void\*\*\)t[0-9]+\)\[0\]\s*=\s*"
-            r"\(void\*\)(ring_c_lambda_[0-9]+)\s*;",
-            body,
-        ))
+        canonical_stdout: List[bytes] = []
+        for run in runs:
+            canonical, canonical_error = canonicalize_identity_stdout_root(
+                run.stdout, run.case_root, expected_count=1)
+            if canonical_error:
+                errors.append(f"{run.mode} stdout identity: {canonical_error}")
+                continue
+            assert canonical is not None
+            canonical_stdout.append(canonical)
+        if len(canonical_stdout) == 3 and not (
+                canonical_stdout[0] == canonical_stdout[1] == canonical_stdout[2]):
+            errors.append("identity ledger changed non-path stdout diagnostics")
 
-    def same_spelling_extractions(body: str, c_prefix: str) -> dict[str, str]:
-        spelling = rf"{re.escape(c_prefix)}(?:_[0-9]+)?"
-        return {
-            name: slot for name, slot in re.findall(
-                rf"\b({spelling})\s*=\s*"
-                r"\(\(void\*\*\)env\)\[([0-9]+)\]\s*;",
-                body,
-            )
-        }
+        if off.ledger_bytes is not None:
+            errors.append("off mode unexpectedly retained ledger bytes")
+        if on1.ledger_bytes is None or on2.ledger_bytes is None:
+            errors.append("on mode omitted ledger bytes")
+        elif on1.ledger_bytes != on2.ledger_bytes:
+            errors.append("identity ledger bytes/hash are nondeterministic")
+        else:
+            ledger_events, ledger_errors = parse_identity_ledger(on1.ledger_bytes)
+            errors.extend(ledger_errors)
+            if ledger_events is not None:
+                domains = {event.domain for event in ledger_events}
+                for required in ("exact", "name-only", "computed", "fresh"):
+                    if required not in domains:
+                        errors.append(
+                            f"identity ledger fixture omitted {required} domain")
+                keys = {event.canonical_key for event in ledger_events}
+                for required_key in (
+                    "__ring_T_Ord", "__ring_self_ProvenanceTrait", "__ring_ev_E"):
+                    if required_key not in keys:
+                        errors.append(
+                            f"identity ledger omitted receiver key {required_key}")
+            ledger_path_token = str(on1.case_root).encode("utf-8")
+            for label, data in (
+                ("C", on1.c_bytes), ("object", on1.object_bytes)):
+                if b"RING-C-IDENTITY-LEDGER" in data or ledger_path_token in data:
+                    errors.append(f"identity ledger path/content leaked into {label}")
 
-    def has_distinct_env_stores(body: str, c_prefix: str) -> bool:
-        spelling = rf"{re.escape(c_prefix)}(?:_[0-9]+)?"
-        groups: dict[str, set[str]] = {}
-        for env_name, value_name in re.findall(
-                rf"\(\(void\*\*\)(t[0-9]+)\)\[[0-9]+\]\s*=\s*"
-                rf"({spelling})\s*;",
-                body):
-            groups.setdefault(env_name, set()).add(value_name)
-        return any(len(values) >= 2 for values in groups.values())
-
-    def two_level_provenance_errors(
-        parent_symbol: str, c_prefix: str, label: str,
-    ) -> List[str]:
-        nested_errors: List[str] = []
-        parent, parent_error = extract_c_function_body(
-            provenance_source, parent_symbol)
-        if parent_error:
-            return [parent_error]
-        if not has_distinct_env_stores(parent, c_prefix):
-            nested_errors.append(
-                f"{label}: parent did not store exact/name-only peers")
-        outer_candidates: List[Tuple[str, str]] = []
-        for symbol in lambda_refs(parent):
-            body, extract_error = extract_c_function_body(
-                provenance_source, symbol)
-            if extract_error is None and len(lambda_refs(body)) > 0:
-                outer_candidates.append((symbol, body))
-        if len(outer_candidates) != 1:
-            nested_errors.append(
-                f"{label}: expected one outer forwarding lambda, found "
-                f"{len(outer_candidates)}")
-            return nested_errors
-        _, outer = outer_candidates[0]
-        outer_extractions = same_spelling_extractions(outer, c_prefix)
-        if len(outer_extractions) < 2 or len(set(outer_extractions.values())) < 2:
-            nested_errors.append(
-                f"{label}: outer lambda collapsed exact/name-only extraction")
-        if not has_distinct_env_stores(outer, c_prefix):
-            nested_errors.append(
-                f"{label}: outer lambda did not forward both provenances")
-
-        inner_candidates: List[str] = []
-        for symbol in lambda_refs(outer):
-            body, extract_error = extract_c_function_body(
-                provenance_source, symbol)
-            if extract_error is None:
-                inner_candidates.append(body)
-        if len(inner_candidates) != 1:
-            nested_errors.append(
-                f"{label}: expected one inner lambda, found "
-                f"{len(inner_candidates)}")
-            return nested_errors
-        inner = inner_candidates[0]
-        inner_extractions = same_spelling_extractions(inner, c_prefix)
-        if len(inner_extractions) < 2 or len(set(inner_extractions.values())) < 2:
-            nested_errors.append(
-                f"{label}: inner lambda collapsed exact/name-only extraction")
-            return nested_errors
-
-        nested_errors.extend(analyze_two_level_provenance_c(
-            provenance_source, parent_symbol, label))
-        if "ring___ring_T_Ord(" in inner:
-            nested_errors.append(
-                f"{label}: exact local call fell through to module function")
-        return nested_errors
-
-    for parent_symbol, c_prefix, label in (
-        ("ring_nested_trait_collision", "r___ring_T_Ord", "trait evidence"),
-        ("__ProvenanceTrait_combined", "r___ring_self_ProvenanceTrait",
-         "default self evidence"),
-        ("ring_nested_effect_collision", "r___ring_ev_E", "effect evidence"),
-    ):
-        errors.extend(two_level_provenance_errors(
-            parent_symbol, c_prefix, label))
-
-    direct_global_body, direct_global_error = extract_c_function_body(
-        provenance_source, "ring_direct_global_with_ord_evidence")
-    if direct_global_error:
-        errors.append(direct_global_error)
-    else:
-        evidence_receiver = re.search(
-            r"\(\(void\*\*\)r___ring_T_Ord(?:_[0-9]+)?\)\[[0-9]+\]",
-            direct_global_body,
-        )
-        if evidence_receiver is None:
-            errors.append(
-                "direct global generic function did not use Ord evidence")
-        if "ring___ring_T_Ord(" not in direct_global_body:
-            errors.append(
-                "Ord evidence shadowed the exact top-level direct call")
-
-    main_body, main_error = extract_c_function_body(
-        provenance_source, "ring_main")
-    if main_error:
-        errors.append(main_error)
-    elif "ring___ring_T_Ord(" not in main_body:
-        errors.append("module function collision lost direct/global call")
-
-    dict_body, dict_error = extract_c_function_body(
-        provenance_source, "ring_dynamic_static_dict_collision")
-    if dict_error:
-        errors.append(dict_error)
-    elif not all(token in dict_body for token in (
-            "r___ring_dictlocal_1",
-            "ring_dict_init___ring_dictlocal_1")):
-        errors.append(
-            "dynamic Simple/static same-spelling dictionary separation missing")
+    if _sha256_file(Path(ring_exe)) != candidate_before:
+        errors.append("candidate executable changed across off/on ledger runs")
     return errors
 
 
@@ -6345,6 +6091,8 @@ def identity_checkpoint_source_errors() -> List[str]:
         "cctx": REPO / "compiler" / "codegen_c_ctx.ring",
         "cgen": REPO / "compiler" / "codegen_c.ring",
         "cexpr": REPO / "compiler" / "codegen_c_expr.ring",
+        "cli": REPO / "compiler" / "cli.ring",
+        "runner": REPO / "tests" / "run_tests.py",
         "verify": REPO / "compiler" / "verify_rc.ring",
         "provenance_fixture": (
             REPO / "tests" / "cases" / "provenance_b_capture_identity.ring"
@@ -6360,6 +6108,8 @@ def identity_checkpoint_source_errors() -> List[str]:
     if errors:
         return errors
     errors.extend(identity_checkpoint_contract_errors(sources))
+    errors.extend(identity_ledger_mutation_matrix_errors())
+    errors.extend(identity_stdout_canonicalization_errors())
 
     mutations = (
         ("Drop DefId", "hir", "Drop { name: Str, def_id: Int, ty: Type, span: Span }",
@@ -6368,18 +6118,14 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("assignment exact slot", "cexpr", "c_exact_value_slot(ctx, name, exact_def_id)",
          "ctx.named_values.get(name)"),
         ("exact local closure call", "cexpr",
-         "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
+         "ctx, c_ref_exact(slot), arg_vals",
          "let closure_result = gen_c_direct_call(ctx, name, arg_vals, dict_vals)"),
-        ("capture name-only extraction tag", "cexpr",
-         "CCaptureProvenance::NameOnly { canonical_key } =>\n"
-         "                        c_local(ctx, canonical_key)",
-         "CCaptureProvenance::NameOnly { canonical_key } =>\n"
-         "                        c_local_def(ctx, canonical_key, none)"),
-        ("capture exact extraction tag", "cexpr",
-         "CCaptureProvenance::Exact { name, def_id } =>\n"
-         "                        c_local_def(ctx, name, some(def_id))",
-         "CCaptureProvenance::Exact { name, def_id } =>\n"
-         "                        c_local(ctx, name)"),
+        ("capture extraction atomic event", "cexpr",
+         "c_record_capture_extract(\n        ctx, edge, dest, \"env\", dest_name, index)",
+         "c_record_capture_extract(\n        ctx, edge, identity, \"env\", dest_name, index)"),
+        ("capture store atomic event", "cexpr",
+         "c_record_capture_store(\n        ctx, edge, identity, source_name, env_name, index)",
+         "c_record_capture_store(\n        ctx, edge, identity, source_name, source_name, index)"),
         ("name-only census current-frame filter", "cexpr",
          "// registered before its actual use.  c_resolve_dict_ref is the loud\n"
          "        // authority if no local/outer slot exists at that use point.\n"
@@ -6450,14 +6196,14 @@ def identity_checkpoint_source_errors() -> List[str]:
          'let mut call_args: List<Str> = ["((void**)${closure_val})[1]"]',
          'let mut call_args: List<Str> = ["((void**)${closure_val})[0]"]'),
         ("dict method-load emitter grammar", "cexpr",
-         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[${method_idx + 1}];")',
-         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[0];")'),
+         'emit_c_receiver_load(\n        ctx, dict_ref, method_idx + 1, "dict")',
+         'emit_c_receiver_load(\n        ctx, dict_ref, 0, "dict")'),
         ("Ord method-load emitter grammar", "cexpr",
-         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")  // cmp = slot 0',
-         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[0];")  // broken'),
+         'emit_c_receiver_load(ctx, dict_ref, 1, "dict")',
+         'emit_c_receiver_load(ctx, dict_ref, 0, "dict")'),
         ("effect method-load emitter grammar", "cexpr",
-         'c_emit(ctx, "${cl} = ((void**)${ev_val})[${idx + 1}];")',
-         'c_emit(ctx, "${cl} = ((void**)${ev_val})[0];")'),
+         'emit_c_receiver_load(\n            ctx, ev_ref, idx + 1, "effect")',
+         'emit_c_receiver_load(\n            ctx, ev_ref, 0, "effect")'),
         ("resolved name-only canonical key", "cexpr",
          "canonical_key: resolved_key, slot: slot",
          "canonical_key: bare_key, slot: slot"),
@@ -6512,6 +6258,34 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("nested name-only domain restoration", "cctx",
          "ctx.name_only_slots = saved.name_only_slots",
          "ctx.name_only_slots = saved.named_values"),
+        ("typed exact slot map", "cctx",
+         "pub value_slots_by_def_id: Map<Int, CExactSlotRef>",
+         "pub value_slots_by_def_id: Map<Int, Str>"),
+        ("typed name-only slot map", "cctx",
+         "pub name_only_slots: Map<Str, CNameOnlySlotRef>",
+         "pub name_only_slots: Map<Str, Str>"),
+        ("closure call atomic event", "cexpr",
+         "c_record_closure_call(\n        ctx, closure_ref, closure_val, t, arg_vals.len() + 1)",
+         "c_record_closure_call(\n        ctx, c_ref_computed(closure_val, \"forged\"), closure_val, t, arg_vals.len() + 1)"),
+        ("ledger relation before write", "cgen",
+         "some(c_identity_ledger_text(ctx))",
+         "some(\"unvalidated-ledger\")"),
+        ("ledger single write", "cgen",
+         'some(ledger_text) => write_file(\n            "${c_path}.identity-ledger", ledger_text)',
+         'some(ledger_text) => {\n            write_file("${c_path}.identity-ledger", ledger_text)\n            write_file("${c_path}.identity-ledger", ledger_text)\n        }'),
+        ("raw capture emitter bypass", "cexpr",
+         "emit_c_capture_store(ctx, edge, identity, env_ref, i + 1)",
+         'c_emit(ctx, "((void**)${env})[${i + 1}] = ${cv};")'),
+        ("caller supplied ledger event", "cexpr",
+         "emit_c_capture_extract(ctx, edge, identity, dest, i + 1)",
+         "emit_c_capture_extract(ctx, edge, identity, dest, i + 1)\n"
+         "                c_record_capture_extract(ctx, edge, identity, \"env\", \"forged\", i + 1)"),
+        ("computed wrapper exclusion", "cexpr",
+         'fwd_args.push("((void**)env)[${i + 1}]")',
+         'fwd_args.push("BROKEN_SOURCE_IDENTITY_ENV")'),
+        ("hidden flag value path", "cli",
+         'arg == "--internal-c-identity-ledger"',
+         'arg.starts_with("--internal-c-identity-ledger=")'),
         ("verifier exact lookup", "verify", "ctx.def_ids[i] == def_id",
          "ctx.names[i] == name"),
         ("or-pattern shared slot", "cexpr", "bind_c_root_pattern_after_success(",
@@ -6576,20 +6350,55 @@ IDENTITY_CANDIDATE_RC_FIXTURES = (
 
 def identity_candidate_verify_rc_errors(ring_exe: str) -> List[str]:
     errors: List[str] = []
-    for fixture in IDENTITY_CANDIDATE_RC_FIXTURES:
-        try:
-            result = ring_check(
-                ring_exe, fixture, extra_args=["--verify-rc"],
-                phase_suite="structural",
-                phase_case=f"compiler.identity_checkpoint/verify-rc/{fixture}",
+    environment = dict(_controlled_environment(ring_exe))
+    with tempfile.TemporaryDirectory(prefix="ring_identity_rc_") as tmpdir:
+        parent = Path(tmpdir)
+        for index, fixture in enumerate(IDENTITY_CANDIDATE_RC_FIXTURES):
+            evidence_dir = parent / f"case-{index}"
+            evidence_dir.mkdir(parents=False, exist_ok=False)
+            argv = (
+                str(Path(ring_exe).resolve()), "check",
+                str((REPO / fixture).resolve()), "--verify-rc",
             )
-        except subprocess.TimeoutExpired:
-            errors.append(f"candidate verify-rc timed out: {fixture}")
-            continue
-        if result.returncode != 0:
-            output = process_output(result).strip()
-            errors.append(
-                f"candidate verify-rc failed for {fixture}: {output}")
+            spec = OneShotSpec(
+                evidence_dir=evidence_dir.resolve(),
+                gate_id=f"identity-verify-rc-{index}",
+                argv=argv,
+                reviewed_argv=argv,
+                cwd=REPO.resolve(),
+                env=environment,
+                reviewed_env=tuple(sorted(environment.items())),
+                limits=OneShotLimits(
+                    wall_seconds=60,
+                    stdout_cap_bytes=1024 * 1024,
+                    stderr_cap_bytes=1024 * 1024,
+                    job_memory_bytes=(
+                        12 * 1024 * 1024 * 1024 if os.name == "nt" else None),
+                    active_process_limit=(5 if os.name == "nt" else None),
+                ),
+            )
+            try:
+                verdict = run_one_shot(spec)
+            except Exception as exc:
+                errors.append(
+                    f"candidate verify-rc wrapper failed for {fixture}: {exc}")
+                continue
+            if verdict["status"] != "success":
+                errors.append(
+                    f"candidate verify-rc failed for {fixture}: "
+                    f"{verdict['classification']}; raw={evidence_dir}")
+            else:
+                audit = audit_one_shot_attempt(evidence_dir)
+                if audit["state"] != "complete" or audit["status"] != "success":
+                    errors.append(
+                        f"candidate verify-rc audit failed for {fixture}: {audit}")
+                    continue
+                archive_path = parent / f"case-{index}.tar"
+                try:
+                    create_one_shot_archive(evidence_dir, archive_path)
+                except Exception as exc:
+                    errors.append(
+                        f"candidate verify-rc archive failed for {fixture}: {exc}")
     return errors
 
 

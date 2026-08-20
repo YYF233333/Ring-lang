@@ -56,6 +56,58 @@ pub struct CHandleCleanup {
     pub ev_drop_vars: List<Str>
 }
 
+// H+T final-emission authority. Exact and backend name-only registrations
+// have deliberately distinct opaque slot types; callers can only erase them
+// through the leaf accessors below.
+pub struct CExactSlotRef {
+    c_name: Str,
+    source_name: Str,
+    def_id: Int
+}
+
+pub struct CNameOnlySlotRef {
+    c_name: Str,
+    canonical_key: Str
+}
+
+pub enum CRefKind {
+    Exact { source_name: Str, def_id: Int },
+    NameOnly { canonical_key: Str },
+    Static { canonical_key: Str },
+    DefaultEvidence { canonical_key: Str },
+    Computed { producer: Str },
+    Fresh { producer: Str }
+}
+
+pub struct CTypedRef {
+    c_name: Str,
+    kind: CRefKind,
+    load_id: Int
+}
+
+pub struct CClosureEdge {
+    edge_id: Int,
+    parent_frame: Str,
+    child_frame: Str
+}
+
+pub struct CIdentityEvent {
+    event_id: Int,
+    kind: Str,
+    edge_id: Int,
+    load_id: Int,
+    parent_frame: Str,
+    child_frame: Str,
+    domain: Str,
+    def_id: Int,
+    canonical_key: Str,
+    producer: Str,
+    source_slot: Str,
+    dest_slot: Str,
+    index: Int,
+    arity: Int
+}
+
 pub struct CCtx {
     // ---- module output sections (assembled by generate_c) ----
     pub globals: List<Str>,     // string-constant byte arrays + const globals
@@ -85,10 +137,9 @@ pub struct CCtx {
     // Explicit backend-only spelling domain (dict/evidence/thunk binders).
     // A source local is never admitted here merely because named_values has
     // the same spelling.
-    pub name_only_slots: Map<Str, Str>,
+    pub name_only_slots: Map<Str, CNameOnlySlotRef>,
     // Cleanup-visible HIR identity -> exact C slot and declared spelling.
-    pub value_slots_by_def_id: Map<Int, Str>,
-    pub value_slot_names_by_def_id: Map<Int, Str>,
+    pub value_slots_by_def_id: Map<Int, CExactSlotRef>,
     pub functions: Map<Str, CFnInfo>,          // C mangled name -> info
     pub fn_evidence_params: Map<Str, List<Str>>, // C mangled name -> evidence param names
     pub local_fn_effects: Map<Str, EffectRow>,
@@ -156,6 +207,14 @@ pub struct CCtx {
     // Module-wide counters for synthesised functions (deterministic order).
     pub lambda_counter: Int,
     pub dictwrap_counter: Int,
+
+    // Internal-only H+T acceptance ledger. Event order is emission order;
+    // these counters never participate in C naming or ordinary output.
+    pub identity_ledger_enabled: Bool,
+    pub identity_events: List<CIdentityEvent>,
+    pub identity_event_counter: Int,
+    pub identity_edge_counter: Int,
+    pub identity_load_counter: Int,
 
     // ---- step 6: effect handler / catch state ----
     // Effect op declarations (slot-order contract, hir::effect_op_slot).
@@ -226,7 +285,6 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         named_values: map_new(),
         name_only_slots: map_new(),
         value_slots_by_def_id: map_new(),
-        value_slot_names_by_def_id: map_new(),
         functions: map_new(),
         fn_evidence_params: map_new(),
         local_fn_effects: map_new(),
@@ -254,6 +312,11 @@ pub fn new_c_ctx(emit_lines: Bool) -> CCtx {
         fn_trait_bounds: map_new(),
         lambda_counter: 0,
         dictwrap_counter: 0,
+        identity_ledger_enabled: false,
+        identity_events: [],
+        identity_event_counter: 0,
+        identity_edge_counter: 0,
+        identity_load_counter: 0,
         effect_ops: map_new(),
         default_evidence: map_new(),
         handle_cleanup_stack: [],
@@ -459,11 +522,17 @@ pub fn fresh_label(mut ctx: CCtx, prefix: Str) -> Str {
     "__ring_${prefix}_${n}"
 }
 
+pub fn c_exact_slot_c_name(slot: CExactSlotRef) -> Str { slot.c_name }
+pub fn c_exact_slot_def_id(slot: CExactSlotRef) -> Int { slot.def_id }
+pub fn c_exact_slot_source_name(slot: CExactSlotRef) -> Str { slot.source_name }
+pub fn c_name_only_slot_c_name(slot: CNameOnlySlotRef) -> Str { slot.c_name }
+pub fn c_name_only_slot_key(slot: CNameOnlySlotRef) -> Str { slot.canonical_key }
+
 // Register a Ring local binding. Hoisted locals start null so unconditional
 // cleanup is safe on control-flow paths that never initialize the slot.
-pub fn c_local_def(
+pub fn c_local_def_ref(
     mut ctx: CCtx, ring_name: Str, def_id: Int?
-) -> Str {
+) -> CExactSlotRef {
     let exact_def_id = match def_id {
         some(id) => id,
         none => panic(
@@ -475,24 +544,39 @@ pub fn c_local_def(
     let cname = c_unique_local(ctx, ring_name)
     ctx.cur_decls.push("    void* ${cname} = NULL;")
     ctx.named_values.insert(ring_name, cname)
-    ctx.value_slots_by_def_id.insert(exact_def_id, cname)
-    ctx.value_slot_names_by_def_id.insert(exact_def_id, ring_name)
-    cname
+    let slot = CExactSlotRef {
+        c_name: cname, source_name: ring_name, def_id: exact_def_id
+    }
+    ctx.value_slots_by_def_id.insert(exact_def_id, slot)
+    slot
 }
 
-pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
+pub fn c_local_def(
+    mut ctx: CCtx, ring_name: Str, def_id: Int?
+) -> Str {
+    c_exact_slot_c_name(c_local_def_ref(ctx, ring_name, def_id))
+}
+
+pub fn c_local_ref(mut ctx: CCtx, ring_name: Str) -> CNameOnlySlotRef {
     let cname = c_unique_local(ctx, ring_name)
     ctx.cur_decls.push("    void* ${cname} = NULL;")
     ctx.named_values.insert(ring_name, cname)
-    ctx.name_only_slots.insert(ring_name, cname)
-    cname
+    let slot = CNameOnlySlotRef {
+        c_name: cname, canonical_key: ring_name
+    }
+    ctx.name_only_slots.insert(ring_name, slot)
+    slot
+}
+
+pub fn c_local(mut ctx: CCtx, ring_name: Str) -> Str {
+    c_name_only_slot_c_name(c_local_ref(ctx, ring_name))
 }
 
 // Register a Ring parameter: unique C name + name map (declared in the
 // function signature, so no hoisted decl).
-pub fn c_param_def(
+pub fn c_param_def_ref(
     mut ctx: CCtx, ring_name: Str, def_id: Int?
-) -> Str {
+) -> CExactSlotRef {
     let exact_def_id = match def_id {
         some(id) => id,
         none => panic(
@@ -503,52 +587,528 @@ pub fn c_param_def(
     }
     let cname = c_unique_local(ctx, ring_name)
     ctx.named_values.insert(ring_name, cname)
-    ctx.value_slots_by_def_id.insert(exact_def_id, cname)
-    ctx.value_slot_names_by_def_id.insert(exact_def_id, ring_name)
-    cname
+    let slot = CExactSlotRef {
+        c_name: cname, source_name: ring_name, def_id: exact_def_id
+    }
+    ctx.value_slots_by_def_id.insert(exact_def_id, slot)
+    slot
+}
+
+pub fn c_param_def(
+    mut ctx: CCtx, ring_name: Str, def_id: Int?
+) -> Str {
+    c_exact_slot_c_name(c_param_def_ref(ctx, ring_name, def_id))
+}
+
+pub fn c_param_ref(mut ctx: CCtx, ring_name: Str) -> CNameOnlySlotRef {
+    let cname = c_unique_local(ctx, ring_name)
+    ctx.named_values.insert(ring_name, cname)
+    let slot = CNameOnlySlotRef {
+        c_name: cname, canonical_key: ring_name
+    }
+    ctx.name_only_slots.insert(ring_name, slot)
+    slot
 }
 
 pub fn c_param(mut ctx: CCtx, ring_name: Str) -> Str {
-    let cname = c_unique_local(ctx, ring_name)
-    ctx.named_values.insert(ring_name, cname)
-    ctx.name_only_slots.insert(ring_name, cname)
-    cname
+    c_name_only_slot_c_name(c_param_ref(ctx, ring_name))
 }
 
-pub fn c_value_slot(ctx: CCtx, def_id: Int) -> Str? {
+pub fn c_value_slot(ctx: CCtx, def_id: Int) -> CExactSlotRef? {
     ctx.value_slots_by_def_id.get(def_id)
 }
 
 pub fn c_exact_value_slot(
     ctx: CCtx, name: Str, def_id: Int
-) -> Str? {
+) -> CExactSlotRef? {
     match ctx.value_slots_by_def_id.get(def_id) {
-        some(slot) => match ctx.value_slot_names_by_def_id.get(def_id) {
-            some(registered_name) => {
-                if registered_name != name {
-                    panic("C codegen: DefId ${def_id} names '${registered_name}', not '${name}'")
-                }
-                some(slot)
-            },
-            none => panic(
-                "C codegen: DefId ${def_id} slot has no registered spelling")
+        some(slot) => {
+            if slot.source_name != name {
+                panic("C codegen: DefId ${def_id} names '${slot.source_name}', not '${name}'")
+            }
+            some(slot)
         },
         none => none
     }
 }
 
+pub fn c_register_name_only_ref(
+    mut ctx: CCtx, name: Str, c_name: Str
+) -> CNameOnlySlotRef {
+    let slot = CNameOnlySlotRef {
+        c_name: c_name, canonical_key: name
+    }
+    ctx.name_only_slots.insert(name, slot)
+    slot
+}
+
 pub fn c_register_name_only_value(
     mut ctx: CCtx, name: Str, c_name: Str
 ) {
-    ctx.name_only_slots.insert(name, c_name)
+    let _slot = c_register_name_only_ref(ctx, name, c_name)
+}
+
+pub fn c_restore_name_only_value(
+    mut ctx: CCtx, name: Str, slot: CNameOnlySlotRef
+) {
+    if slot.canonical_key != name {
+        panic("C codegen: restored name-only key '${slot.canonical_key}' as '${name}'")
+    }
+    ctx.name_only_slots.insert(name, slot)
 }
 
 pub fn c_remove_name_only_value(mut ctx: CCtx, name: Str) {
     ctx.name_only_slots.remove(name)
 }
 
-pub fn c_name_only_value(ctx: CCtx, name: Str) -> Str? {
+pub fn c_name_only_value(ctx: CCtx, name: Str) -> CNameOnlySlotRef? {
     ctx.name_only_slots.get(name)
+}
+
+pub fn c_ref_exact(slot: CExactSlotRef) -> CTypedRef {
+    CTypedRef {
+        c_name: slot.c_name,
+        kind: CRefKind::Exact {
+            source_name: slot.source_name, def_id: slot.def_id
+        },
+        load_id: 0
+    }
+}
+
+pub fn c_ref_name_only(slot: CNameOnlySlotRef) -> CTypedRef {
+    CTypedRef {
+        c_name: slot.c_name,
+        kind: CRefKind::NameOnly { canonical_key: slot.canonical_key },
+        load_id: 0
+    }
+}
+
+pub fn c_ref_static(c_name: Str, canonical_key: Str) -> CTypedRef {
+    CTypedRef {
+        c_name: c_name,
+        kind: CRefKind::Static { canonical_key: canonical_key },
+        load_id: 0
+    }
+}
+
+pub fn c_ref_default_evidence(c_name: Str, canonical_key: Str) -> CTypedRef {
+    CTypedRef {
+        c_name: c_name,
+        kind: CRefKind::DefaultEvidence { canonical_key: canonical_key },
+        load_id: 0
+    }
+}
+
+pub fn c_ref_computed(c_name: Str, producer: Str) -> CTypedRef {
+    CTypedRef {
+        c_name: c_name,
+        kind: CRefKind::Computed { producer: producer },
+        load_id: 0
+    }
+}
+
+pub fn c_ref_fresh(c_name: Str, producer: Str) -> CTypedRef {
+    CTypedRef {
+        c_name: c_name,
+        kind: CRefKind::Fresh { producer: producer },
+        load_id: 0
+    }
+}
+
+pub fn c_ref_loaded(c_name: Str, producer: Str, load_id: Int) -> CTypedRef {
+    if load_id <= 0 { panic("C codegen: loaded reference has invalid load id") }
+    CTypedRef {
+        c_name: c_name,
+        kind: CRefKind::Computed { producer: producer },
+        load_id: load_id
+    }
+}
+
+pub fn c_ref_c_name(reference: CTypedRef) -> Str { reference.c_name }
+pub fn c_ref_load_id(reference: CTypedRef) -> Int { reference.load_id }
+
+pub fn c_ref_domain(reference: CTypedRef) -> Str {
+    match reference.kind {
+        CRefKind::Exact { .. } => "exact",
+        CRefKind::NameOnly { .. } => "name-only",
+        CRefKind::Static { .. } => "static",
+        CRefKind::DefaultEvidence { .. } => "default-evidence",
+        CRefKind::Computed { .. } => "computed",
+        CRefKind::Fresh { .. } => "fresh"
+    }
+}
+
+pub fn c_ref_def_id(reference: CTypedRef) -> Int {
+    match reference.kind {
+        CRefKind::Exact { def_id, .. } => def_id,
+        _ => -1
+    }
+}
+
+pub fn c_ref_key(reference: CTypedRef) -> Str {
+    match reference.kind {
+        CRefKind::Exact { source_name, .. } => source_name,
+        CRefKind::NameOnly { canonical_key } => canonical_key,
+        CRefKind::Static { canonical_key } => canonical_key,
+        CRefKind::DefaultEvidence { canonical_key } => canonical_key,
+        _ => ""
+    }
+}
+
+pub fn c_ref_producer(reference: CTypedRef) -> Str {
+    match reference.kind {
+        CRefKind::Computed { producer } => producer,
+        CRefKind::Fresh { producer } => producer,
+        _ => ""
+    }
+}
+
+pub fn c_new_closure_edge(mut ctx: CCtx, child_frame: Str) -> CClosureEdge {
+    let edge_id = ctx.identity_edge_counter + 1
+    ctx.identity_edge_counter = edge_id
+    if ctx.current_fn_name == "" || child_frame == "" {
+        panic("C codegen: closure edge has an empty frame")
+    }
+    CClosureEdge {
+        edge_id: edge_id,
+        parent_frame: ctx.current_fn_name,
+        child_frame: child_frame
+    }
+}
+
+pub fn c_edge_id(edge: CClosureEdge) -> Int { edge.edge_id }
+pub fn c_edge_parent(edge: CClosureEdge) -> Str { edge.parent_frame }
+pub fn c_edge_child(edge: CClosureEdge) -> Str { edge.child_frame }
+
+pub fn c_fresh_load_id(mut ctx: CCtx) -> Int {
+    let load_id = ctx.identity_load_counter + 1
+    ctx.identity_load_counter = load_id
+    load_id
+}
+
+pub fn c_enable_identity_ledger(mut ctx: CCtx) {
+    if ctx.identity_events.len() != 0 {
+        panic("C codegen: identity ledger enabled after emission began")
+    }
+    ctx.identity_ledger_enabled = true
+}
+
+fn c_push_identity_event(
+    mut ctx: CCtx, kind: Str, edge_id: Int, load_id: Int,
+    parent_frame: Str, child_frame: Str, reference: CTypedRef,
+    source_slot: Str, dest_slot: Str, index: Int, arity: Int
+) {
+    if ctx.identity_ledger_enabled == false { return }
+    let event_id = ctx.identity_event_counter + 1
+    ctx.identity_event_counter = event_id
+    ctx.identity_events.push(CIdentityEvent {
+        event_id: event_id,
+        kind: kind,
+        edge_id: edge_id,
+        load_id: load_id,
+        parent_frame: parent_frame,
+        child_frame: child_frame,
+        domain: c_ref_domain(reference),
+        def_id: c_ref_def_id(reference),
+        canonical_key: c_ref_key(reference),
+        producer: c_ref_producer(reference),
+        source_slot: source_slot,
+        dest_slot: dest_slot,
+        index: index,
+        arity: arity
+    })
+}
+
+pub fn c_record_capture_extract(
+    mut ctx: CCtx, edge: CClosureEdge, reference: CTypedRef,
+    source_slot: Str, dest_slot: Str, index: Int
+) {
+    c_push_identity_event(
+        ctx, "capture-extract", edge.edge_id, 0,
+        edge.parent_frame, edge.child_frame, reference,
+        source_slot, dest_slot, index, 0)
+}
+
+pub fn c_record_capture_store(
+    mut ctx: CCtx, edge: CClosureEdge, reference: CTypedRef,
+    source_slot: Str, dest_slot: Str, index: Int
+) {
+    c_push_identity_event(
+        ctx, "capture-store", edge.edge_id, 0,
+        edge.parent_frame, edge.child_frame, reference,
+        source_slot, dest_slot, index, 0)
+}
+
+pub fn c_record_closure_edge(
+    mut ctx: CCtx, edge: CClosureEdge, reference: CTypedRef,
+    source_slot: Str, dest_slot: Str
+) {
+    c_push_identity_event(
+        ctx, "closure-edge", edge.edge_id, 0,
+        edge.parent_frame, edge.child_frame, reference,
+        source_slot, dest_slot, 0, 0)
+}
+
+pub fn c_record_receiver_load(
+    mut ctx: CCtx, role: Str, load_id: Int, reference: CTypedRef,
+    source_slot: Str, dest_slot: Str, index: Int
+) {
+    let kind = if role == "dict" {
+        "dict-receiver-load"
+    } else {
+        if role == "effect" {
+            "effect-receiver-load"
+        } else {
+            panic("C codegen: unknown receiver-load role '${role}'")
+        }
+    }
+    c_push_identity_event(
+        ctx, kind, 0, load_id,
+        ctx.current_fn_name, "", reference,
+        source_slot, dest_slot, index, 0)
+}
+
+pub fn c_record_closure_call(
+    mut ctx: CCtx, reference: CTypedRef,
+    source_slot: Str, dest_slot: Str, arity: Int
+) {
+    c_push_identity_event(
+        ctx, "closure-call", 0, reference.load_id,
+        ctx.current_fn_name, "", reference,
+        source_slot, dest_slot, 0, arity)
+}
+
+fn identity_event_pair_key(event: CIdentityEvent) -> Str {
+    "${event.edge_id}:${event.index}"
+}
+
+fn identity_event_same_identity(a: CIdentityEvent, b: CIdentityEvent) -> Bool {
+    a.domain == b.domain &&
+    a.def_id == b.def_id &&
+    a.canonical_key == b.canonical_key &&
+    a.producer == b.producer
+}
+
+fn identity_domain_is_known(domain: Str) -> Bool {
+    domain == "exact" || domain == "name-only" || domain == "static" ||
+    domain == "default-evidence" || domain == "computed" || domain == "fresh"
+}
+
+fn validate_identity_ledger(ctx: CCtx) {
+    let mut edges: Map<Int, CIdentityEvent> = map_new()
+    let mut stores: Map<Str, CIdentityEvent> = map_new()
+    let mut extracts: Map<Str, CIdentityEvent> = map_new()
+    let mut store_indices: Map<Int, Set<Int>> = map_new()
+    let mut extract_indices: Map<Int, Set<Int>> = map_new()
+    let mut loads: Map<Int, CIdentityEvent> = map_new()
+    let mut load_call_counts: Map<Int, Int> = map_new()
+    let mut exact_slots: Set<Str> = set_new()
+    let mut name_only_slots: Set<Str> = set_new()
+    let mut expected_event_id = 1
+
+    for event in ctx.identity_events {
+        if event.event_id != expected_event_id {
+            panic("C identity ledger: event order drift at ${event.event_id}, expected ${expected_event_id}")
+        }
+        expected_event_id = expected_event_id + 1
+        if identity_domain_is_known(event.domain) == false {
+            panic("C identity ledger: unknown domain '${event.domain}'")
+        }
+
+        if event.kind == "closure-edge" {
+            if event.edge_id <= 0 || event.parent_frame == "" || event.child_frame == "" ||
+               event.source_slot == "" || event.dest_slot == "" {
+                panic("C identity ledger: malformed closure edge")
+            }
+            if edges.contains_key(event.edge_id) {
+                panic("C identity ledger: duplicate closure edge ${event.edge_id}")
+            }
+            edges.insert(event.edge_id, event)
+        } else {
+            if event.kind == "capture-store" || event.kind == "capture-extract" {
+                if event.edge_id <= 0 || event.index <= 0 ||
+                   event.source_slot == "" || event.dest_slot == "" {
+                    panic("C identity ledger: capture has invalid edge/index")
+                }
+                if event.domain != "exact" && event.domain != "name-only" {
+                    panic("C identity ledger: capture has non-slot domain '${event.domain}'")
+                }
+                let pair_key = identity_event_pair_key(event)
+                if event.kind == "capture-store" {
+                    if stores.contains_key(pair_key) {
+                        panic("C identity ledger: duplicate capture store ${pair_key}")
+                    }
+                    stores.insert(pair_key, event)
+                    match store_indices.get(event.edge_id) {
+                        some(indices) => indices.insert(event.index),
+                        none => {
+                            let mut indices: Set<Int> = set_new()
+                            indices.insert(event.index)
+                            store_indices.insert(event.edge_id, indices)
+                        }
+                    }
+                    if event.domain == "exact" { exact_slots.insert(event.source_slot) }
+                    else { name_only_slots.insert(event.source_slot) }
+                } else {
+                    if extracts.contains_key(pair_key) {
+                        panic("C identity ledger: duplicate capture extract ${pair_key}")
+                    }
+                    extracts.insert(pair_key, event)
+                    match extract_indices.get(event.edge_id) {
+                        some(indices) => indices.insert(event.index),
+                        none => {
+                            let mut indices: Set<Int> = set_new()
+                            indices.insert(event.index)
+                            extract_indices.insert(event.edge_id, indices)
+                        }
+                    }
+                    if event.domain == "exact" { exact_slots.insert(event.dest_slot) }
+                    else { name_only_slots.insert(event.dest_slot) }
+                }
+            } else {
+                if event.kind == "dict-receiver-load" || event.kind == "effect-receiver-load" {
+                    if event.load_id <= 0 || event.index <= 0 ||
+                       event.source_slot == "" || event.dest_slot == "" {
+                        panic("C identity ledger: receiver load has invalid id/index")
+                    }
+                    if loads.contains_key(event.load_id) {
+                        panic("C identity ledger: duplicate receiver load ${event.load_id}")
+                    }
+                    loads.insert(event.load_id, event)
+                    if event.domain == "exact" { exact_slots.insert(event.source_slot) }
+                    if event.domain == "name-only" { name_only_slots.insert(event.source_slot) }
+                } else {
+                    if event.kind == "closure-call" {
+                        if event.arity <= 0 || event.source_slot == "" ||
+                           event.dest_slot == "" {
+                            panic("C identity ledger: closure call has non-positive arity")
+                        }
+                        if event.load_id > 0 {
+                            let prior = match load_call_counts.get(event.load_id) {
+                                some(count) => count,
+                                none => 0
+                            }
+                            load_call_counts.insert(event.load_id, prior + 1)
+                        }
+                        if event.domain == "exact" { exact_slots.insert(event.source_slot) }
+                        if event.domain == "name-only" { name_only_slots.insert(event.source_slot) }
+                    } else {
+                        panic("C identity ledger: unknown event kind '${event.kind}'")
+                    }
+                }
+            }
+        }
+    }
+
+    for entry in stores.entries() {
+        let (pair_key, store) = entry
+        let extract = match extracts.get(pair_key) {
+            some(found) => found,
+            none => panic("C identity ledger: capture store '${pair_key}' has no extract")
+        }
+        if identity_event_same_identity(store, extract) == false {
+            panic("C identity ledger: capture identity mismatch '${pair_key}'")
+        }
+        let edge = match edges.get(store.edge_id) {
+            some(found) => found,
+            none => panic("C identity ledger: capture references missing edge ${store.edge_id}")
+        }
+        if store.parent_frame != edge.parent_frame ||
+           extract.child_frame != edge.child_frame {
+            panic("C identity ledger: capture frame mismatch '${pair_key}'")
+        }
+    }
+    for entry in extracts.entries() {
+        let (pair_key, _extract) = entry
+        if stores.contains_key(pair_key) == false {
+            panic("C identity ledger: capture extract '${pair_key}' has no store")
+        }
+    }
+    for entry in edges.entries() {
+        let (edge_id, _edge) = entry
+        let stores_for_edge = match store_indices.get(edge_id) {
+            some(indices) => indices,
+            none => set_new()
+        }
+        let extracts_for_edge = match extract_indices.get(edge_id) {
+            some(indices) => indices,
+            none => set_new()
+        }
+        if stores_for_edge.len() != extracts_for_edge.len() {
+            panic("C identity ledger: edge ${edge_id} capture count mismatch")
+        }
+        let mut index = 1
+        while index <= stores_for_edge.len() {
+            if stores_for_edge.contains(index) == false ||
+               extracts_for_edge.contains(index) == false {
+                panic("C identity ledger: edge ${edge_id} capture indices are not contiguous")
+            }
+            index = index + 1
+        }
+    }
+    for entry in loads.entries() {
+        let (load_id, load) = entry
+        let count = match load_call_counts.get(load_id) {
+            some(found) => found,
+            none => 0
+        }
+        if count != 1 {
+            panic("C identity ledger: receiver load ${load_id} consumed ${count} times")
+        }
+        let mut matched_call = false
+        for event in ctx.identity_events {
+            if event.kind == "closure-call" && event.load_id == load_id {
+                if event.source_slot != load.dest_slot {
+                    panic("C identity ledger: load/call slot mismatch ${load_id}")
+                }
+                matched_call = true
+            }
+        }
+        if matched_call == false {
+            panic("C identity ledger: receiver load ${load_id} has no call")
+        }
+    }
+    for entry in load_call_counts.entries() {
+        let (load_id, _count) = entry
+        if loads.contains_key(load_id) == false {
+            panic("C identity ledger: closure call references missing load ${load_id}")
+        }
+    }
+    for slot in exact_slots {
+        if name_only_slots.contains(slot) {
+            panic("C identity ledger: exact/name-only raw slot alias '${slot}'")
+        }
+    }
+}
+
+fn identity_ledger_escape(value: Str) -> Str {
+    value.replace("%", "%25")
+         .replace("|", "%7C")
+         .replace("\n", "%0A")
+         .replace("\r", "%0D")
+}
+
+pub fn c_identity_ledger_text(ctx: CCtx) -> Str {
+    if ctx.identity_ledger_enabled == false {
+        panic("C codegen: identity ledger requested while disabled")
+    }
+    validate_identity_ledger(ctx)
+    let mut lines: List<Str> = ["RING-C-IDENTITY-LEDGER|1"]
+    for event in ctx.identity_events {
+        lines.push([
+            "E", "${event.event_id}", identity_ledger_escape(event.kind),
+            "${event.edge_id}", "${event.load_id}",
+            identity_ledger_escape(event.parent_frame),
+            identity_ledger_escape(event.child_frame),
+            identity_ledger_escape(event.domain), "${event.def_id}",
+            identity_ledger_escape(event.canonical_key),
+            identity_ledger_escape(event.producer),
+            identity_ledger_escape(event.source_slot),
+            identity_ledger_escape(event.dest_slot),
+            "${event.index}", "${event.arity}"
+        ].join("|"))
+    }
+    "${lines.join("\n")}\n"
 }
 
 fn c_unique_local(mut ctx: CCtx, ring_name: Str) -> Str {
@@ -577,9 +1137,8 @@ pub struct CEmitState {
     pub cur_body: List<Str>,
     pub used_locals: Set<Str>,
     pub named_values: Map<Str, Str>,
-    pub name_only_slots: Map<Str, Str>,
-    pub value_slots_by_def_id: Map<Int, Str>,
-    pub value_slot_names_by_def_id: Map<Int, Str>,
+    pub name_only_slots: Map<Str, CNameOnlySlotRef>,
+    pub value_slots_by_def_id: Map<Int, CExactSlotRef>,
     pub indent: Int,
     pub in_function: Bool,
     pub current_fn_name: Str,
@@ -603,7 +1162,6 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
         named_values: ctx.named_values,
         name_only_slots: ctx.name_only_slots,
         value_slots_by_def_id: ctx.value_slots_by_def_id,
-        value_slot_names_by_def_id: ctx.value_slot_names_by_def_id,
         indent: ctx.indent,
         in_function: ctx.in_function,
         current_fn_name: ctx.current_fn_name,
@@ -619,7 +1177,6 @@ pub fn c_push_fn(mut ctx: CCtx, fn_name: Str) -> CEmitState {
     ctx.named_values = map_new()
     ctx.name_only_slots = map_new()
     ctx.value_slots_by_def_id = map_new()
-    ctx.value_slot_names_by_def_id = map_new()
     ctx.indent = 1
     ctx.in_function = true
     ctx.current_fn_name = fn_name
@@ -646,7 +1203,6 @@ pub fn c_pop_fn(mut ctx: CCtx, c_name: Str, params_str: Str, saved: CEmitState) 
     ctx.named_values = saved.named_values
     ctx.name_only_slots = saved.name_only_slots
     ctx.value_slots_by_def_id = saved.value_slots_by_def_id
-    ctx.value_slot_names_by_def_id = saved.value_slot_names_by_def_id
     ctx.indent = saved.indent
     ctx.in_function = saved.in_function
     ctx.current_fn_name = saved.current_fn_name

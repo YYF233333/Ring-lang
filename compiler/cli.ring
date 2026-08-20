@@ -124,6 +124,15 @@ pub fn cli_main() {
 
     // Multi-file mode
     if ast.uses.len() > 0 {
+        if parsed.identity_ledger {
+            eprintln("Error: --internal-c-identity-ledger is single-file only")
+            timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+            timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+            timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
+            timing.finish_command(false)
+            exit_process(1)
+            return
+        }
         // B-104 D2: static RC leak/UAF verification (post-perceus HIR linear
         // check; --verify-rc on the `check` command).  Runs the same per-module
         // perceus_transform as native compilation, then verify_rc_program.
@@ -191,6 +200,14 @@ pub fn cli_main() {
 
     // Single-file mode
     timing.skip_phase(PHASE_PROJECT_MODULE_LOAD_PARSE)
+    if parsed.identity_ledger && parsed.command != "build" {
+        eprintln("Error: --internal-c-identity-ledger requires single-file build")
+        timing.skip_phase(PHASE_TYPE_EFFECT_CHECK_LOWER)
+        timing.skip_phase(PHASE_RESOURCE_PLAN_VERIFY)
+        timing.finish_command(false)
+        exit_process(1)
+        return
+    }
     let check_start = timing.start_phase()
     let sink = new_collecting_sink()
     let check_result = check_single(ast, sink)
@@ -266,7 +283,9 @@ pub fn cli_main() {
             } else {
                 file_path.replace(".ring", ".o")
             }
-            let build_ok = generate_c(rc_program, c_path, o_path, parsed.c_lines)
+            let build_ok = generate_c(
+                rc_program, c_path, o_path, parsed.c_lines,
+                parsed.identity_ledger)
             timing.finish_command(build_ok)
             if build_ok == false {
                 exit_process(1)
@@ -293,6 +312,7 @@ struct CliArgs {
     out_dir_set: Bool,
     target: Str,
     c_lines: Bool,
+    identity_ledger: Bool,
     verify_rc: Bool,
     verify_strict: Bool,
     rc_mutate: Str,
@@ -329,6 +349,7 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
     let mut out_dir_set = false
     let mut target = "c"
     let mut c_lines = true
+    let mut identity_ledger = false
     let mut verify_rc = false
     let mut verify_strict = false
     let mut rc_mutate = ""
@@ -353,6 +374,9 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
                         // (human-readable generated C; default keeps them so
                         // sanitizer/debugger reports point at .ring sources).
                         c_lines = false
+                    } else {
+                    if arg == "--internal-c-identity-ledger" {
+                        identity_ledger = true
                     } else {
                     if arg.starts_with("--rc-mutate=") {
                         // TEST-ONLY (B-104 D2 negative tests): degrade the RC
@@ -391,6 +415,7 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
                         }
                     }
                     }
+                    }
                 }
             }
         }
@@ -408,6 +433,7 @@ fn parse_cli_args(raw_args: List<Str>) -> CliArgs {
         out_dir_set: out_dir_set,
         target: target,
         c_lines: c_lines,
+        identity_ledger: identity_ledger,
         verify_rc: verify_rc,
         verify_strict: verify_strict,
         rc_mutate: rc_mutate,
