@@ -9,12 +9,14 @@ outcomes, writes verdicts, audits recovery state, and archives evidence.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import importlib.util
 import json
 import os
 import re
 import secrets
+import signal
 import subprocess
 import sys
 import tarfile
@@ -236,7 +238,7 @@ class OneShotSpec:
     reviewed_argv: tuple[str, ...]
     cwd: Path
     env: Mapping[str, str]
-    reviewed_env_keys: tuple[str, ...]
+    reviewed_env: tuple[tuple[str, str], ...]
     limits: Limits
     success_exit_codes: tuple[int, ...] = (0,)
 
@@ -288,11 +290,24 @@ def _validate_spec(spec: OneShotSpec) -> tuple[dict[str, Any], dict[str, str]]:
         raise ContractError("success_exit_codes must be non-empty integers")
 
     env = dict(spec.env)
-    reviewed = list(spec.reviewed_env_keys)
-    if len(reviewed) != len(set(reviewed)) or reviewed != sorted(reviewed):
-        raise ContractError("reviewed_env_keys must be unique and sorted")
-    if set(env) != set(reviewed):
-        raise ContractError("child env keys differ from the reviewed allowlist")
+    reviewed_pairs = list(spec.reviewed_env)
+    if not all(
+        isinstance(pair, tuple)
+        and len(pair) == 2
+        and isinstance(pair[0], str)
+        and isinstance(pair[1], str)
+        for pair in reviewed_pairs
+    ):
+        raise ContractError("reviewed_env must contain exact (name, value) pairs")
+    reviewed = [pair[0] for pair in reviewed_pairs]
+    if (
+        len(reviewed) != len(set(reviewed))
+        or reviewed_pairs != sorted(reviewed_pairs, key=lambda pair: pair[0])
+    ):
+        raise ContractError("reviewed_env pairs must have unique sorted names")
+    reviewed_env = dict(reviewed_pairs)
+    if env != reviewed_env:
+        raise ContractError("child env differs from the exact reviewed env values")
     for key, value in env.items():
         if ENV_NAME_RE.fullmatch(key) is None:
             raise ContractError(f"environment name is invalid: {key!r}")
@@ -813,6 +828,16 @@ class _PrefixSink:
         }
 
 
+def _posix_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def _run_non_windows_job(
     argv: Sequence[str],
     *,
@@ -823,6 +848,8 @@ def _run_non_windows_job(
     limits: Limits,
 ) -> dict[str, Any]:
     _validate_platform_support(limits)
+    if os.name == "nt":
+        raise ContractError("portable process-group adapter requires POSIX")
     stdout_sink = _PrefixSink(stdout_path, STDOUT_NAME, limits.stdout_cap_bytes)
     stderr_sink = _PrefixSink(stderr_path, STDERR_NAME, limits.stderr_cap_bytes)
     stdout_sink.open()
@@ -837,12 +864,50 @@ def _run_non_windows_job(
     threads: list[threading.Thread] = []
     timed_out = False
     launch_error: str | None = None
+    infrastructure_errors: list[str] = []
+    pgid: int | None = None
+    group_kill_reason: str | None = None
+    group_quiesced = False
+    descendant_leak = False
     started_ns = time.perf_counter_ns()
+
+    def kill_group(reason: str) -> None:
+        nonlocal group_kill_reason
+        if pgid is None:
+            return
+        if pgid == os.getpgrp():
+            infrastructure_errors.append(
+                "refused to signal the parent process group"
+            )
+            return
+        if group_kill_reason is None:
+            group_kill_reason = reason
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            infrastructure_errors.append(
+                f"killpg({reason}): {type(exc).__name__}: {exc}"
+            )
+
+    def wait_group_quiescence() -> bool:
+        if pgid is None:
+            return True
+        deadline = time.monotonic() + 5
+        while _posix_group_exists(pgid):
+            if time.monotonic() >= deadline:
+                infrastructure_errors.append(
+                    "process group did not quiesce within 5 seconds"
+                )
+                return False
+            time.sleep(limits.poll_ms / 1000)
+        return True
 
     def reader(stream, sink: _PrefixSink, label: str) -> None:
         try:
             while True:
-                chunk = stream.read(65536)
+                chunk = os.read(stream.fileno(), 65536)
                 if not chunk:
                     break
                 sink.consume(chunk)
@@ -854,14 +919,6 @@ def _run_non_windows_job(
             sink.error = message
             thread_errors.append(message)
             stop.set()
-        finally:
-            try:
-                sink.seal()
-            except BaseException as exc:
-                message = f"{label}-seal: {type(exc).__name__}: {exc}"
-                sink.error = message
-                thread_errors.append(message)
-                stop.set()
 
     try:
         process = subprocess.Popen(
@@ -872,7 +929,19 @@ def _run_non_windows_job(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             close_fds=True,
+            start_new_session=True,
         )
+        pgid = process.pid
+        try:
+            observed_pgid = os.getpgid(process.pid)
+            if observed_pgid != pgid:
+                raise ContractError(
+                    f"new-session pgid mismatch {observed_pgid} != {pgid}"
+                )
+        except ProcessLookupError:
+            # A very short root may already be a zombie; its session/group ID
+            # remains the root PID for descendant cleanup.
+            pass
         assert process.stdout is not None and process.stderr is not None
         threads = [
             threading.Thread(
@@ -891,20 +960,58 @@ def _run_non_windows_job(
         deadline = time.monotonic() + limits.wall_seconds
         while process.poll() is None:
             if stop.is_set():
-                process.kill()
+                kill_group(
+                    "output-cap"
+                    if stdout_sink.truncated or stderr_sink.truncated
+                    else "stream-stop"
+                )
                 break
             if time.monotonic() >= deadline:
                 timed_out = True
-                process.kill()
+                kill_group("timeout")
                 break
             time.sleep(limits.poll_ms / 1000)
         process.wait(timeout=5)
+        if _posix_group_exists(pgid):
+            if group_kill_reason is None:
+                descendant_leak = True
+                infrastructure_errors.append(
+                    "root exited while descendants survived in its process group"
+                )
+                kill_group("surviving-descendants")
+            group_quiesced = wait_group_quiescence()
+        else:
+            group_quiesced = True
     except BaseException as exc:
-        launch_error = f"{type(exc).__name__}: {exc}"
-        if process is not None and process.poll() is None:
-            process.kill()
-            process.wait(timeout=5)
+        message = f"{type(exc).__name__}: {exc}"
+        if process is None:
+            launch_error = message
+        else:
+            infrastructure_errors.append(message)
+            kill_group("adapter-exception")
+            try:
+                process.wait(timeout=5)
+            except BaseException as wait_exc:
+                infrastructure_errors.append(
+                    f"root wait: {type(wait_exc).__name__}: {wait_exc}"
+                )
+            group_quiesced = wait_group_quiescence()
     finally:
+        if process is not None and pgid is not None and _posix_group_exists(pgid):
+            if group_kill_reason is None:
+                descendant_leak = True
+                infrastructure_errors.append(
+                    "cleanup found surviving descendants in the process group"
+                )
+            kill_group("final-cleanup")
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except BaseException as exc:
+                    infrastructure_errors.append(
+                        f"final root wait: {type(exc).__name__}: {exc}"
+                    )
+            group_quiesced = wait_group_quiescence()
         for thread in threads:
             thread.join(timeout=5)
         if process is not None:
@@ -925,6 +1032,13 @@ def _run_non_windows_job(
                     sink.seal()
                 except BaseException as exc:
                     thread_errors.append(f"seal: {type(exc).__name__}: {exc}")
+        for sink in (stdout_sink, stderr_sink):
+            try:
+                sink.seal()
+            except BaseException as exc:
+                message = f"final-seal: {type(exc).__name__}: {exc}"
+                sink.error = message
+                thread_errors.append(message)
     alive = [thread.name for thread in threads if thread.is_alive()]
     thread_error = (
         "; ".join(thread_errors)
@@ -950,12 +1064,20 @@ def _run_non_windows_job(
             (sink.error for sink in (stdout_sink, stderr_sink) if sink.error), None
         ),
         "thread_error": thread_error,
-        "infrastructure_error": None,
+        "infrastructure_error": (
+            "; ".join(dict.fromkeys(infrastructure_errors))
+            if infrastructure_errors
+            else None
+        ),
         "measurements": {
             "wall_ns": time.perf_counter_ns() - started_ns,
             "process_count": None,
             "peak_job_memory_bytes": None,
             "thread_count": len(threads),
+            "process_group_id": pgid,
+            "process_group_quiesced": group_quiesced,
+            "process_group_kill_reason": group_kill_reason,
+            "surviving_descendant_detected": descendant_leak,
         },
         "streams": {
             "stdout": stdout_sink.record(),

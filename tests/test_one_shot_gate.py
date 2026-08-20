@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import gc
 import json
 import os
 import sys
@@ -22,6 +23,13 @@ MIB = 1024 * 1024
 
 
 def sanitized_env() -> dict[str, str]:
+    if os.name != "nt":
+        return {
+            "PATH": os.pathsep.join(
+                (str(Path(sys.executable).resolve().parent), "/usr/bin", "/bin")
+            ),
+            "PYTHONIOENCODING": "utf-8",
+        }
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
     return {
         "PATH": os.pathsep.join(
@@ -50,7 +58,7 @@ def make_spec(
         if processes is None:
             processes = 1
     env = sanitized_env()
-    argv = (sys.executable, "-c", code)
+    argv = (str(Path(sys.executable).resolve()), "-c", code)
     return gate.OneShotSpec(
         evidence_dir=evidence_dir.resolve(),
         gate_id=gate_id,
@@ -58,7 +66,7 @@ def make_spec(
         reviewed_argv=argv,
         cwd=REPO_ROOT.resolve(),
         env=env,
-        reviewed_env_keys=tuple(sorted(env)),
+        reviewed_env=tuple(sorted(env.items())),
         limits=gate.Limits(
             wall_seconds=wall_seconds,
             stdout_cap_bytes=stdout_cap,
@@ -237,10 +245,12 @@ class OneShotGateTests(unittest.TestCase):
             warm = base / "warm"
             warm.mkdir()
             gate.run_one_shot(make_spec(warm, "pass"))
+            gc.collect()
             before = windows_job.current_process_handle_count()
             steady = base / "steady"
             steady.mkdir()
             gate.run_one_shot(make_spec(steady, "pass"))
+            gc.collect()
             self.assertEqual(windows_job.current_process_handle_count(), before)
 
     def test_pipe_and_thread_faults_have_distinct_durable_verdicts(self) -> None:
@@ -275,6 +285,7 @@ class OneShotGateTests(unittest.TestCase):
             self.assertTrue(verdict["streams"]["stderr"]["fsynced"])
             self.assertEqual(gate.audit_attempt(root)["state"], "complete")
 
+    @unittest.skipIf(os.name == "nt", "native POSIX process groups required")
     def test_non_windows_adapter_uses_shared_schema_when_caps_not_requested(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "attempt"
@@ -311,6 +322,92 @@ class OneShotGateTests(unittest.TestCase):
                     "raw_size": (root / gate.STDOUT_NAME).stat().st_size,
                 },
             )
+
+    @unittest.skipIf(os.name == "nt", "native POSIX process groups required")
+    def test_posix_timeout_kills_grandchild_holding_pipes(self) -> None:
+        grandchild = "import time;time.sleep(30)"
+        code = (
+            "import subprocess,sys,time\n"
+            f"p=subprocess.Popen([sys.executable,'-c',{grandchild!r}])\n"
+            "print(p.pid,flush=True)\n"
+            "time.sleep(30)\n"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            verdict = gate.run_one_shot(
+                make_spec(root, code, wall_seconds=0.15),
+                _adapter=gate._run_non_windows_job,
+            )
+            self.assertEqual(verdict["classification"], "timeout")
+            pid = int((root / gate.STDOUT_NAME).read_text().strip())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            self.assertTrue(
+                verdict["measurements"]["process_group_quiesced"]
+            )
+            self.assertEqual(
+                verdict["measurements"]["process_group_kill_reason"], "timeout"
+            )
+
+    @unittest.skipIf(os.name == "nt", "native POSIX process groups required")
+    def test_posix_output_cap_kills_grandchild_holding_pipes(self) -> None:
+        grandchild = (
+            "import sys,time;"
+            "sys.stdout.buffer.write(b'Z'*8192);sys.stdout.flush();time.sleep(30)"
+        )
+        code = (
+            "import subprocess,sys,time\n"
+            f"p=subprocess.Popen([sys.executable,'-c',{grandchild!r}])\n"
+            "print(p.pid,file=sys.stderr,flush=True)\n"
+            "time.sleep(30)\n"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            verdict = gate.run_one_shot(
+                make_spec(root, code, stdout_cap=41, stderr_cap=128),
+                _adapter=gate._run_non_windows_job,
+            )
+            self.assertEqual(verdict["classification"], "output_limit")
+            self.assertEqual((root / gate.STDOUT_NAME).read_bytes(), b"Z" * 41)
+            pid = int((root / gate.STDERR_NAME).read_text().strip())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            self.assertTrue(
+                verdict["measurements"]["process_group_quiesced"]
+            )
+            self.assertEqual(
+                verdict["measurements"]["process_group_kill_reason"],
+                "output-cap",
+            )
+
+    @unittest.skipIf(os.name == "nt", "native POSIX process groups required")
+    def test_posix_normal_root_exit_with_descendant_is_failure_and_cleanup(self) -> None:
+        grandchild = "import time;time.sleep(30)"
+        code = (
+            "import subprocess,sys\n"
+            f"p=subprocess.Popen([sys.executable,'-c',{grandchild!r}])\n"
+            "print(p.pid,flush=True)\n"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            verdict = gate.run_one_shot(
+                make_spec(root, code), _adapter=gate._run_non_windows_job
+            )
+            self.assertEqual(verdict["classification"], "infrastructure_error")
+            self.assertTrue(
+                verdict["measurements"]["surviving_descendant_detected"]
+            )
+            self.assertEqual(
+                verdict["measurements"]["process_group_kill_reason"],
+                "surviving-descendants",
+            )
+            pid = int((root / gate.STDOUT_NAME).read_text().strip())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            self.assertEqual(gate.audit_attempt(root)["state"], "complete")
 
     def test_parent_crash_attempt_only_is_consumed_unknown_and_no_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -415,7 +512,7 @@ class OneShotGateTests(unittest.TestCase):
                 **{
                     **spec.__dict__,
                     "env": secret_env,
-                    "reviewed_env_keys": tuple(sorted(secret_env)),
+                    "reviewed_env": tuple(sorted(secret_env.items())),
                 }
             )
             with self.assertRaisesRegex(gate.ContractError, "secret-like"):
@@ -429,6 +526,17 @@ class OneShotGateTests(unittest.TestCase):
                 with self.assertRaisesRegex(gate.ContractError, "cannot prove"):
                     gate.prepare_attempt(non_windows_spec)
             self.assertEqual(list(non_windows_root.iterdir()), [])
+
+    def test_mutating_allowed_env_value_after_spec_creation_fails_before_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            spec = make_spec(root, "pass")
+            self.assertIsInstance(spec.env, dict)
+            spec.env["PATH"] = spec.env["PATH"] + os.pathsep + "unreviewed"
+            with self.assertRaisesRegex(gate.ContractError, "exact reviewed env values"):
+                gate.prepare_attempt(spec)
+            self.assertEqual(list(root.iterdir()), [])
 
 
 if __name__ == "__main__":
