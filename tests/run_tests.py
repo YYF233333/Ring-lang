@@ -5117,6 +5117,26 @@ def identity_ledger_contract_errors(
         errors.append("ledger output regained a check-then-write TOCTOU")
 
     runner = sources.get("runner", "")
+    candidate_mode_match = re.search(
+        r"(?ms)^def run_identity_candidate_mode\(.*?"
+        r"(?=^def default_body_identity_generated_c_errors\()",
+        runner,
+    )
+    if candidate_mode_match is None:
+        errors.append("cannot isolate run_identity_candidate_mode source")
+    else:
+        candidate_mode_source = candidate_mode_match.group(0)
+        for token in (
+            "environment = dict(os.environ)",
+            "environment.pop(IDENTITY_CANDIDATE_ENV, None)",
+            "environment.pop(IDENTITY_EVIDENCE_ROOT_ENV, None)",
+        ):
+            if candidate_mode_source.count(token) != 1:
+                errors.append(
+                    f"run_identity_candidate_mode env authority missing {token!r}")
+        if "_controlled_environment" in candidate_mode_source:
+            errors.append(
+                "run_identity_candidate_mode rebuilt a controlled nested environment")
     runner_tokens = (
         "OneShotSpec(",
         "run_one_shot(spec, result_validator=validate_artifacts)",
@@ -6256,7 +6276,9 @@ def run_identity_candidate_mode(
     clang = _resolved_executable("clang")
     if clang is None:
         return None, "identity candidate gate cannot resolve clang"
-    environment = dict(_controlled_environment(ring_exe, clang))
+    environment = dict(os.environ)
+    environment.pop(IDENTITY_CANDIDATE_ENV, None)
+    environment.pop(IDENTITY_EVIDENCE_ROOT_ENV, None)
     argv = [
         str(Path(ring_exe).resolve()), "build", str(fixture_path),
         "--target=c", f"--out-dir={out_dir}", "--no-c-lines",
@@ -6709,6 +6731,11 @@ def identity_checkpoint_source_errors() -> List[str]:
          "create_one_shot_archive(case_root, archive_path)\n"
          "        archive_sha256 = _sha256_file(archive_path)",
          "archive_sha256 = 'not-retained'"),
+        ("nested candidate inherits reviewed outer environment", "runner",
+         "    environment = dict(os.environ)\n"
+         "    environment.pop(IDENTITY_CANDIDATE_ENV, None)\n"
+         "    environment.pop(IDENTITY_EVIDENCE_ROOT_ENV, None)",
+         "    environment = dict(_controlled_environment(ring_exe, clang))"),
         ("candidate source fail-first", "runner",
          "errors = identity_checkpoint_source_errors()\n"
          "    if errors:\n"
