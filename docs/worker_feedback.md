@@ -13,3 +13,5 @@
 - `[里程碑]` 2026-08-19：用户固定双 session 协作：Discussion 负责用户对话、high-level 路线与方向监督，可 idle 等待唤醒；Steward 负责持续实现、验证与仓库健康。两者通过 compact peer message 协作，并以 main mutation lease 串行提交，禁止并发改共享 checkout。
 
 - `[里程碑]` 2026-08-20：用户要求当前 #268/#269 ownership 主线完成后安排 repository 文档漂移复核；B-187 将以 current/historical/future 边界清理退役后端、完成流水、失效路径/命令、重复与矛盾真值，涉及公开语义或路线的内容另交决策，不在 cleanup 中偷渡。
+
+- `[全局阻塞]` 2026-08-20：H+T authority `9585309c` 的唯一 construction launcher在 B-188 attempt前 exit 1，按 no-retry 门永久停止；B-189 证明 outer first-writer 必须有用户明确接受的有限 trust root。当前推荐 A-root（exact CPython `-I -S` tiny bootstrap），备选 C-root（native supervisor）或 Freeze；拍板并写入治理真值前，所有 one-shot、I′ construction、S′/A′及 canonical 后续队列均冻结。

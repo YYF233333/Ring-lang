@@ -770,7 +770,7 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 
 **验收**：inventory 100% 有结论与证据锚；所有保留的本地路径/命令/Markdown link 可解析，C-only 构建/测试说明与当前入口一致；活动看板、audit、Inbox、handoff、CLAUDE/design/lang-spec 无已知状态/依赖冲突；retired backend 不再作为现行 oracle/依赖，完成流水不占活动真值；`python .agents/scripts/validate_workflow.py` 与适用的文档/link/example checks 通过；独立 reviewer 以 `current / historical / future` 三类边界主动寻找误删与漏删。
 
-### B-189 Outer invocation one-shot failure evidence authority [infra] [P1] [M] [judgment] [planning]
+### B-189 Outer invocation one-shot failure evidence authority [infra] [P1] [M] [judgment] [waiting-feedback]
 
 2026-08-20 H+T authority `9585309c` 的唯一 fresh-construction launcher在进入 B-188 `one_shot_gate` attempt前即因 Python dynamic-import初始化失败而 exit 1；无 child、attempt、raw/verdict或 artifact。该命令按预注册门永久停止且不得修 import 重跑。B-188 已证明的边界只从 supervisor 内 child 开始，不能覆盖最外层 interpreter/launcher/import/config/schema failure；在本项完成前，所有 one-shot probe/build/bootstrap/acceptance 全局冻结。
 
