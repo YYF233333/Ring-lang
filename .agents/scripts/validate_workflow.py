@@ -66,6 +66,39 @@ class TextContract:
     ordered: tuple[str, ...] = ()
 
 
+MACRO_CHECKIN_CONTRACT = TextContract(
+    "low-noise five-part macro check-in",
+    (
+        ("低噪声",),
+        ("当前总门",),
+        ("已获得的 durable claim",),
+        ("下一道可证伪验收门",),
+        ("全局风险",),
+        ("需要用户拍板",),
+        ("不报告 subagent", "不要呈现 subagent", "subagent/命令等待"),
+        ("命令进度", "命令仍在运行", "命令等待"),
+        ("原始日志",),
+        ("实现流水",),
+        ("[决策]",),
+        ("[里程碑]",),
+        ("[全局阻塞]",),
+    ),
+    (
+        "向用户汇报 subagent",
+        "默认汇报 subagent",
+        "逐项汇报命令",
+        "每个已完成的 item 至少应该有一条",
+    ),
+    (
+        "当前总门",
+        "已获得的 durable claim",
+        "下一道可证伪验收门",
+        "全局风险",
+        "需要用户拍板",
+    ),
+)
+
+
 STEWARD_BEHAVIOR_CONTRACTS = (
     TextContract(
         "waiting-feedback backfill",
@@ -95,29 +128,7 @@ STEWARD_BEHAVIOR_CONTRACTS = (
             "保留 branch/commit",
         ),
     ),
-    TextContract(
-        "low-noise four-part check-in",
-        (
-            ("低噪声",),
-            ("待拍板", "需要拍板"),
-            ("已完成结果",),
-            ("仓库健康",),
-            ("下一步", "接下来会自主推进"),
-            ("不报告 subagent", "不要呈现 subagent"),
-            ("命令进度", "命令仍在运行", "命令等待"),
-            ("原始日志",),
-            ("实现流水",),
-            ("[决策]",),
-            ("[里程碑]",),
-            ("[全局阻塞]",),
-        ),
-        (
-            "向用户汇报 subagent",
-            "默认汇报 subagent",
-            "逐项汇报命令",
-            "每个已完成的 item 至少应该有一条",
-        ),
-    ),
+    MACRO_CHECKIN_CONTRACT,
     TextContract(
         "Argument with independent refutation and root verdict",
         (
@@ -390,7 +401,7 @@ CODEX_CONTEXT_LEASE = TextContract(
 )
 
 DISCUSSION_CONTRACT = TextContract(
-    "Discussion decision boundary and summary",
+    "Discussion decision boundary",
     (
         ("用户保留决定",),
         ("语言公开语义",),
@@ -403,12 +414,7 @@ DISCUSSION_CONTRACT = TextContract(
         ("waiting-feedback",),
         ("[里程碑]",),
         ("[全局阻塞]",),
-        ("低噪声",),
-        ("需要拍板",),
-        ("已完成结果",),
-        ("仓库健康",),
-        ("下一步自主方向",),
-        ("不要呈现 subagent",),
+        ("不要呈现 subagent", "subagent/命令等待"),
     ),
     (
         "所有设计决策必须有用户明确确认",
@@ -915,6 +921,7 @@ class WorkflowValidator:
             REPOSITORY_CONVERGENCE_CONTRACT,
             B186_RESOURCE_CROSSING_CONTRACT,
             PAIRED_WORKFLOW_CONTRACT,
+            MACRO_CHECKIN_CONTRACT,
         ):
             for error in check_text_contract(text, contract):
                 self.errors.append(f"docs/workflow.md: {error}")
@@ -996,6 +1003,7 @@ class WorkflowValidator:
                 elif skill_name == "discussion":
                     for contract in (
                         DISCUSSION_CONTRACT,
+                        MACRO_CHECKIN_CONTRACT,
                         GUARANTEE_BOUNDARY_CONTRACT,
                         DISCUSSION_PAIR_CONTRACT,
                     ):
@@ -1241,7 +1249,8 @@ waiting-feedback item 达到 clean checkpoint commit，且测试状态与必要 
 可以释放 worktree，
 但必须保留 branch/commit；未达到时保留 worktree 或先 checkpoint。
 只有全部有价值工作耗尽或全局阻塞时才停止。
-保持低噪声 check-in：待拍板、已完成结果、仓库健康、下一步。
+宏观 check-in 保持低噪声：
+当前总门、已获得的 durable claim、下一道可证伪验收门、全局风险、需要用户拍板。
 默认不报告 subagent 等待、命令进度、原始日志或逐文件实现流水。
 Steward Inbox 只保存 [决策]、[里程碑] 和 [全局阻塞]。
 Argument 比较至少两个真实候选，由独立 reviewer 主动攻击推荐方案，
@@ -1522,7 +1531,8 @@ def run_self_tests() -> list[str]:
     )
 
     bad_checkin = GOOD_STEWARD_FIXTURE.replace(
-        "保持低噪声 check-in：待拍板、已完成结果、仓库健康、下一步。\n"
+        "宏观 check-in 保持低噪声：\n"
+        "当前总门、已获得的 durable claim、下一道可证伪验收门、全局风险、需要用户拍板。\n"
         "默认不报告 subagent 等待、命令进度、原始日志或逐文件实现流水。",
         "向用户汇报 subagent、逐项汇报命令和全部实现过程。",
     )
@@ -1532,7 +1542,21 @@ def run_self_tests() -> list[str]:
             lambda: check_text_contract(
                 bad_checkin, STEWARD_BEHAVIOR_CONTRACTS[1]
             ),
-            "low-noise four-part check-in",
+            "low-noise five-part macro check-in",
+        )
+    )
+
+    bad_checkin_order = GOOD_STEWARD_FIXTURE.replace(
+        "当前总门、已获得的 durable claim、下一道可证伪验收门、全局风险、需要用户拍板。",
+        "需要用户拍板、当前总门、全局风险、已获得的 durable claim、下一道可证伪验收门。",
+    )
+    failures.extend(
+        deterministic_failure(
+            "macro check-in order fixture",
+            lambda: check_text_contract(
+                bad_checkin_order, MACRO_CHECKIN_CONTRACT
+            ),
+            "low-noise five-part macro check-in",
         )
     )
 

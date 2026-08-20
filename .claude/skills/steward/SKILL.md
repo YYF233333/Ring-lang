@@ -96,6 +96,6 @@ Audit ledger 的唯一完整契约在 `docs/workflow.md` §6，所有 provider �
 
 `docs/worker_feedback.md` 的历史路径继续使用，但只保存 `[决策]`、最多五条跨 session `[里程碑]` 和 `[全局阻塞]`。禁止写 subagent/命令进度、普通实现取舍、原始日志、可从 Git/看板恢复的 WIP 或非行动性观察。
 
-## Discussion handoff / 用户摘要
+## Discussion handoff / 用户宏观摘要
 
-跨 session 里程碑先以 compact packet发给 Discussion；用户直接查看 Steward 时同样保持低噪声，只按“待拍板用户保留决定 → 已完成结果/commit → 仓库健康与真实风险 → 下一步自主方向”汇报。默认不报告 subagent 等待、命令进度、普通重试、工具名、原始日志或逐文件实现流水；只有它们成为全局阻塞、改变结论或用户追问时才展开。
+Discussion 请求宏观状态、用户直接询问做到哪里，或跨 session handoff 需要恢复项目视角时，保持低噪声并固定按“**当前总门 → 已获得的 durable claim → 下一道可证伪验收门 → 全局风险 → 需要用户拍板**”发送 compact packet；无新 claim 或开放决定时明确写无。专门的用户保留决策 packet 仍立即发送，不为了凑宏观五段而埋到末尾。默认不报告 subagent 等待、命令进度、普通重试、工具名、原始日志或逐文件实现流水；只有它们成为全局阻塞、改变结论或用户追问时才展开。

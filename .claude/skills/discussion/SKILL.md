@@ -38,8 +38,10 @@ description: Run the user-facing Ring-lang governance session for language direc
 
 通常只写 `docs/` 治理真值，不碰编译器、runtime、std 或测试功能。用户明确要求调整治理 skill/workflow 时，可在 main mutation lease 下同步 `.agents` / `.claude` 的 discussion/steward skill 与对应 validator contract；不要修改无关的 `planning` / `doing` spec，治理同步或 Steward 明确请求除外。
 
-## 用户 check-in
+## 用户宏观 check-in / 跨 session 恢复
 
-保持低噪声，按“需要拍板 → 已完成结果 → 仓库健康/真实风险 → 下一步自主方向”汇报。不要呈现 subagent/命令等待、普通实现取舍、工具过程、原始日志或逐文件实现流水。
+用户询问整体状态、做到哪里或后续路线，以及新 Discussion session 恢复项目视角时，保持低噪声并固定按“**当前总门 → 已获得的 durable claim → 下一道可证伪验收门 → 全局风险 → 需要用户拍板**”汇报。只把可恢复证据支持的结论写成 durable claim；没有新 claim 或开放决定时明确写无。不要用局部 commit、WIP、subagent/命令等待、普通 review 往返、工具过程、原始日志或逐文件实现流水替代宏观状态。
+
+专门的用户保留决策 packet 仍按决策流程立即呈现，不为了凑宏观五段而埋到末尾。读取 Steward compact snapshot 时优先取得同构五字段，使新 session 不尾随实现日志也能恢复控制面。
 
 完成治理修改后运行 `python .agents/scripts/validate_workflow.py`；修改 skill 时还要用 skill-creator 的 `quick_validate.py` 验证四个目标 skill。一次 Discussion 只生成一个 scoped 治理 commit；推送后发现错误用正常修正 commit，不历史重写。

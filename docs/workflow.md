@@ -287,16 +287,19 @@ python .agents/scripts/audit_ledger.py --repo <repo> record --trigger-id <stable
 
 禁止把实现日志、十几个细枝末节或“subagent 还在跑”包装成决策。多个相关问题合并为一个 decision dossier，避免逐条打断用户。
 
-## 8. 用户 check-in 摘要
+## 8. 用户宏观 check-in / 跨 session 状态摘要
 
-用户上线时按以下顺序，保持短：
+用户询问“项目做到哪里、后面做什么、整体运行状态”或新 Discussion session 恢复项目视角时，Discussion 与 Steward 的状态 packet 固定按以下顺序，保持短：
 
-1. **需要拍板**：只列开放决策、推荐和影响；
-2. **已完成**：按用户可感知结果和 commit，不复述实现过程；
-3. **仓库健康**：测试/CI/固定点状态与真正风险；
-4. **下一步**：Steward 将自主推进的 1–3 个方向。
+1. **当前总门**：只给 canonical 路线中的当前 gate 与子阶段，不用局部 commit 流水替代；
+2. **已获得的 durable claim**：只列已有可恢复 commit / receipt / CI / fixed-point 证据支持、后续可以依赖的结论；没有新结论时明确写无，不把 WIP 或一次偶然通过升级成 claim；
+3. **下一道可证伪验收门**：写清下一个会改变阶段状态的 pass/fail 条件，不展开普通实现步骤；
+4. **全局风险**：列当前 critical、资源/TCB/仓库健康风险与 claim 边界，不混入局部 review 往返；
+5. **需要用户拍板**：只列开放的用户保留决定、推荐与影响；没有则明确写无。
 
-默认不报告：
+专门的用户保留决策 packet 仍按 §7 立即呈现，不为了凑宏观五段而埋到状态摘要末尾。Steward 向 Discussion 提供宏观状态或跨 session handoff 时使用同一字段，使新 session 无需读取实现日志即可恢复控制面。
+
+默认不报告 subagent/命令等待、普通实现取舍、工具过程、原始日志或逐文件实现流水；包括：
 
 - 正在等待哪个 subagent；
 - 哪条命令尚未结束；
