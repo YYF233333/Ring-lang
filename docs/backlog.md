@@ -770,6 +770,19 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 
 **验收**：inventory 100% 有结论与证据锚；所有保留的本地路径/命令/Markdown link 可解析，C-only 构建/测试说明与当前入口一致；活动看板、audit、Inbox、handoff、CLAUDE/design/lang-spec 无已知状态/依赖冲突；retired backend 不再作为现行 oracle/依赖，完成流水不占活动真值；`python .agents/scripts/validate_workflow.py` 与适用的文档/link/example checks 通过；独立 reviewer 以 `current / historical / future` 三类边界主动寻找误删与漏删。
 
+### B-189 Outer invocation one-shot failure evidence authority [infra] [P1] [M] [judgment] [planning]
+
+2026-08-20 H+T authority `9585309c` 的唯一 fresh-construction launcher在进入 B-188 `one_shot_gate` attempt前即因 Python dynamic-import初始化失败而 exit 1；无 child、attempt、raw/verdict或 artifact。该命令按预注册门永久停止且不得修 import 重跑。B-188 已证明的边界只从 supervisor 内 child 开始，不能覆盖最外层 interpreter/launcher/import/config/schema failure；在本项完成前，所有 one-shot probe/build/bootstrap/acceptance 全局冻结。
+
+**Argument 目标**：选择一个从最外层 invocation 起生效的 failure-evidence authority，必须在任何仓库模块 import、配置解析、schema/dataclass初始化或被测 child 启动前，原子创建不可覆盖 attempt，并把 launcher/interpreter bootstrap 的 stdout/stderr/crash与后续 child evidence纳入同一 no-retry transaction。候选至少比较：
+
+1. **最小 outer envelope**：独立、stdlib-only、无仓库 import 的固定入口先 O_EXCL 创建 attempt/raw launcher streams，再在受控边界内加载 `one_shot_gate` 并转交；import/config/schema异常由 envelope直接封存。需证明 Python interpreter/site/脚本语法失败的边界及跨平台等价性。
+2. **OS-native invocation authority**：由 PowerShell/POSIX shell或小型原生 supervisor在 Python之外创建 attempt/raw并启动受限 core；需比较新增平台脚本/TCB、quoting/env/process-tree、跨平台一致性与维护成本。
+
+“修 dynamic import 后重跑958”“再写一个后验parser”“只靠 child exit/behavior/RC”“允许失败后retry”均不是候选。若等强方案需要新的永久依赖/显著 acceptance TCB、降低 no-retry/evidence门或重排 I′→S′→A′，形成用户决策包，不自行实施。
+
+**共同硬约束 / 验收**：outer attempt先于任何仓库 import/config/schema；launcher与child raw streams、stage/argv/tool/env identity、resource measurements、success/failure/crash verdict均O_EXCL+fsync+hash并可恢复；attempt-only crash为 consumed/incomplete/unknown且无retry入口。故意注入 module import、dataclass/schema、脚本语法、interpreter/site、env/argv、parent thread/pipe与child失败，每例均保留精确最外层raw evidence；missing/tampered raw只能得 incomplete/unknown。旧958 archive永久保留且不作为新候选输入；workflow/health、Windows与真实POSIX对抗review通过。
+
 ### B-179 project manifest 与可复现 dependency lock [feature] [P2] [XL] [judgment] [queued] [after: B-175]
 
 首个 preview 允许以 entry `.ring` 文件作为 project root，不等待 registry；随后补 `ring.toml` + lockfile，把编译器/std 兼容、local/path/git dependency、feature/capability 与构建输入变为可复现真值。Registry、账号、签名服务与付费托管不在本项。

@@ -4,10 +4,11 @@
   "max_dirty_worktrees": 2,
   "max_main_ahead": 10,
   "max_unpushed_age_hours": 24,
-  "board_items": ["B-176", "B-180", "#268", "#269"],
+  "board_items": ["B-176", "B-180", "B-189", "#268", "#269"],
   "board_item_authorities": {
     "B-176": "codex/ownership-sprime-first",
     "B-180": "codex/ownership-sprime-first",
+    "B-189": "main",
     "#268": "codex/ownership-sprime-first",
     "#269": "codex/ownership-sprime-first"
   },
@@ -15,7 +16,7 @@
     {
       "name": "main",
       "role": "governance",
-      "active_items": [],
+      "active_items": ["B-189"],
       "checkpoint": "086237823e3eacb1a30934bd48e438c20f6e457c"
     },
     {
