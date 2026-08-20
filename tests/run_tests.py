@@ -3359,6 +3359,7 @@ class CEnvStoreFact:
     container: str
     index: int
     source: str
+    ordinal: int
 
 
 @dataclass(frozen=True)
@@ -3366,6 +3367,14 @@ class CContainerLoadFact:
     target: str
     container: str
     index: int
+    ordinal: int
+
+
+@dataclass(frozen=True)
+class CAllocationFact:
+    local: str
+    type_id: int
+    ordinal: int
 
 
 @dataclass(frozen=True)
@@ -3373,24 +3382,28 @@ class CClosureConstructionFact:
     root: str
     environment: str
     lambda_symbol: str
+    ordinal: int
 
 
 @dataclass(frozen=True)
 class CUniformClosureCallFact:
     result: str
     root: str
+    ordinal: int
 
 
 @dataclass(frozen=True)
 class CLocalAssignmentFact:
     target: str
     source: str
+    ordinal: int
 
 
 @dataclass(frozen=True)
 class CFunctionProvenanceFacts:
     symbol: str
     params: Tuple[str, ...]
+    allocations: Tuple[CAllocationFact, ...]
     stores: Tuple[CEnvStoreFact, ...]
     loads: Tuple[CContainerLoadFact, ...]
     closures: Tuple[CClosureConstructionFact, ...]
@@ -3462,10 +3475,10 @@ def parse_c_function_provenance_facts(
         rf"\bvoid\s*\*\s*({_C_IDENT})\b", signatures[0].group(1)))
     statements, errors = _balanced_c_statements(body)
 
-    allocations: dict[str, int] = {}
+    allocations: dict[str, CAllocationFact] = {}
     stores: List[CEnvStoreFact] = []
     loads: List[CContainerLoadFact] = []
-    lambda_slots: List[Tuple[str, str]] = []
+    lambda_slots: List[Tuple[str, str, int]] = []
     closure_calls: List[CUniformClosureCallFact] = []
     assignments: List[CLocalAssignmentFact] = []
 
@@ -3481,70 +3494,93 @@ def parse_c_function_provenance_facts(
         rf"^({_C_IDENT})\s*=\s*\(\(\s*void\s*\*\s*\*\s*\)"
         rf"\s*({_C_IDENT})\s*\)\s*\[\s*([0-9]+)\s*\]$")
     assignment_re = re.compile(rf"^({_C_IDENT})\s*=\s*({_C_IDENT})$")
-    lhs_re = re.compile(rf"^({_C_IDENT})\s*=")
+    uniform_skeleton_re = re.compile(
+        rf"^({_C_IDENT})\s*=\s*"
+        r"\(\(\s*void\s*\*\s*\(\s*\*\s*\)\s*\([^()]*\)\s*\)"
+        r"\s*\(\s*__CLOSURE_FN__\s*\)\s*\)"
+        r"\s*\(\s*__CLOSURE_ENV__(?:\s*,.*)?\)$"
+    )
 
-    for statement in statements:
+    for ordinal, statement in enumerate(statements):
         allocation = allocation_re.match(statement)
         if allocation:
             local = allocation.group(1)
             if local in allocations:
                 errors.append(f"{symbol}: duplicate allocation target {local}")
-            allocations[local] = int(allocation.group(3))
+            allocations[local] = CAllocationFact(
+                local, int(allocation.group(3)), ordinal)
             continue
         lambda_store = lambda_store_re.match(statement)
         if lambda_store:
-            lambda_slots.append((lambda_store.group(1), lambda_store.group(2)))
+            lambda_slots.append((
+                lambda_store.group(1), lambda_store.group(2), ordinal))
             continue
         store = store_re.match(statement)
         if store:
             stores.append(CEnvStoreFact(
-                store.group(1), int(store.group(2)), store.group(3)))
+                store.group(1), int(store.group(2)), store.group(3), ordinal))
             continue
         load = load_re.match(statement)
         if load:
             loads.append(CContainerLoadFact(
-                load.group(1), load.group(2), int(load.group(3))))
+                load.group(1), load.group(2), int(load.group(3)), ordinal))
             continue
 
-        has_closure_cast = re.search(
-            r"void\s*\*\s*\(\s*\*\s*\)", statement) is not None
-        if has_closure_cast:
-            lhs = lhs_re.match(statement)
+        closure_casts = re.findall(
+            r"void\s*\*\s*\(\s*\*\s*\)", statement)
+        if closure_casts:
             refs = [(name, int(index)) for name, index in
                     _C_PTR_INDEX_RE.findall(statement)]
+            skeleton_parts: List[str] = []
+            last_end = 0
+            for ref_index, match in enumerate(_C_PTR_INDEX_RE.finditer(statement)):
+                skeleton_parts.append(statement[last_end:match.start()])
+                skeleton_parts.append(
+                    "__CLOSURE_FN__" if ref_index == 0
+                    else "__CLOSURE_ENV__")
+                last_end = match.end()
+            skeleton_parts.append(statement[last_end:])
+            skeleton = "".join(skeleton_parts)
+            full_match = uniform_skeleton_re.fullmatch(skeleton)
             if (
-                lhs is None
-                or len(refs) < 2
+                len(closure_casts) != 1
+                or len(refs) != 2
                 or refs[0][1] != 0
                 or refs[1] != (refs[0][0], 1)
+                or full_match is None
             ):
                 errors.append(
                     f"{symbol}: unrecognized uniform closure-call statement: "
                     f"{statement}")
             else:
                 closure_calls.append(CUniformClosureCallFact(
-                    lhs.group(1), refs[0][0]))
+                    full_match.group(1), refs[0][0], ordinal))
             continue
         assignment = assignment_re.match(statement)
         if assignment:
             assignments.append(CLocalAssignmentFact(
-                assignment.group(1), assignment.group(2)))
+                assignment.group(1), assignment.group(2), ordinal))
 
-    for fact_label, facts in (
-        ("env store", stores),
-        ("container load", loads),
-        ("lambda slot", lambda_slots),
-        ("uniform closure call", closure_calls),
-        ("local assignment", assignments),
+    for fact_label, fact_keys in (
+        ("env store", [
+            (fact.container, fact.index, fact.source) for fact in stores]),
+        ("container load", [
+            (fact.target, fact.container, fact.index) for fact in loads]),
+        ("lambda slot", [
+            (root, lambda_symbol) for root, lambda_symbol, _ in lambda_slots]),
+        ("uniform closure call", [
+            (fact.result, fact.root) for fact in closure_calls]),
+        ("local assignment", [
+            (fact.target, fact.source) for fact in assignments]),
     ):
-        if len(facts) != len(set(facts)):
+        if len(fact_keys) != len(set(fact_keys)):
             errors.append(f"{symbol}: duplicate {fact_label} fact")
 
     closures: List[CClosureConstructionFact] = []
-    for root, type_id in allocations.items():
-        if type_id != 7:
+    for root, allocation in allocations.items():
+        if allocation.type_id != 7:
             continue
-        root_lambdas = [lambda_symbol for slot_root, lambda_symbol in lambda_slots
+        root_lambdas = [lambda_symbol for slot_root, lambda_symbol, _ in lambda_slots
                         if slot_root == root]
         root_envs = [store.source for store in stores
                      if store.container == root and store.index == 1]
@@ -3554,19 +3590,21 @@ def parse_c_function_provenance_facts(
                 f"{len(root_lambdas)} lambda slots/{len(root_envs)} env slots")
             continue
         environment = root_envs[0]
-        if allocations.get(environment) != 15:
+        environment_allocation = allocations.get(environment)
+        if environment_allocation is None or environment_allocation.type_id != 15:
             errors.append(
                 f"{symbol}: closure root {root} environment {environment} "
                 "is not a type-15 allocation")
             continue
         closures.append(CClosureConstructionFact(
-            root, environment, root_lambdas[0]))
+            root, environment, root_lambdas[0], allocation.ordinal))
 
     if errors:
         return None, errors
     return CFunctionProvenanceFacts(
         symbol=symbol,
         params=params,
+        allocations=tuple(allocations.values()),
         stores=tuple(stores),
         loads=tuple(loads),
         closures=tuple(closures),
@@ -3590,6 +3628,76 @@ def analyze_two_level_provenance_c(
     if parent is None:
         return errors
 
+    def lambda_environment(
+        facts: CFunctionProvenanceFacts, stage: str,
+    ) -> Optional[str]:
+        if len(facts.params) != 1:
+            errors.append(
+                f"{label}: {stage} lambda ABI has {len(facts.params)} params, "
+                "expected exactly one environment receiver")
+            return None
+        return facts.params[0]
+
+    def definitions(
+        facts: CFunctionProvenanceFacts, local: str,
+    ) -> List[Tuple[str, int, Optional[str]]]:
+        found: List[Tuple[str, int, Optional[str]]] = []
+        if local in facts.params:
+            found.append(("param", -1, None))
+        for allocation in facts.allocations:
+            if allocation.local == local:
+                found.append(("allocation", allocation.ordinal, None))
+        for load in facts.loads:
+            if load.target == local:
+                found.append(("load", load.ordinal, load.container))
+        for assignment in facts.assignments:
+            if assignment.target == local:
+                found.append(("alias", assignment.ordinal, assignment.source))
+        for call in facts.closure_calls:
+            if call.result == local:
+                found.append(("call-result", call.ordinal, call.root))
+        return found
+
+    def unique_reaching_definition(
+        facts: CFunctionProvenanceFacts, local: str,
+        use_ordinal: int, stage: str,
+    ) -> Optional[Tuple[str, int, Optional[str]]]:
+        found = definitions(facts, local)
+        if len(found) != 1:
+            errors.append(
+                f"{label}: {stage} local {local} has "
+                f"{len(found)} definitions, expected one")
+            return None
+        definition = found[0]
+        if definition[1] >= use_ordinal:
+            errors.append(
+                f"{label}: {stage} local {local} is used before its definition")
+            return None
+        return definition
+
+    def resolve_alias_at(
+        facts: CFunctionProvenanceFacts, local: str,
+        use_ordinal: int, stage: str,
+    ) -> Optional[str]:
+        seen: set[str] = set()
+        current = local
+        current_use = use_ordinal
+        while True:
+            if current in seen:
+                errors.append(f"{label}: {stage} alias cycle at {current}")
+                return None
+            seen.add(current)
+            definition = unique_reaching_definition(
+                facts, current, current_use, stage)
+            if definition is None:
+                return None
+            kind, ordinal, source = definition
+            if kind != "alias":
+                return current
+            assert source is not None
+            current = source
+            current_use = ordinal
+
     outer_candidates: List[Tuple[CClosureConstructionFact,
                                  CFunctionProvenanceFacts]] = []
     for closure in parent.closures:
@@ -3612,22 +3720,34 @@ def analyze_two_level_provenance_c(
     if inner is None or errors:
         return errors
 
-    inner_extractions = [load for load in inner.loads if load.container == "env"]
+    outer_env_param = lambda_environment(outer, "outer")
+    inner_env_param = lambda_environment(inner, "inner")
+    if outer_env_param is None or inner_env_param is None:
+        return errors
+    if inner.closures:
+        errors.append(
+            f"{label}: inner lambda unexpectedly constructs "
+            f"{len(inner.closures)} closures")
+        return errors
+
+    inner_extractions = [
+        load for load in inner.loads if load.container == inner_env_param]
     extraction_by_local: dict[str, List[CContainerLoadFact]] = {}
     for extraction in inner_extractions:
         extraction_by_local.setdefault(extraction.target, []).append(extraction)
     call_roots = {call.root for call in inner.closure_calls}
-    exact_candidates = sorted(
-        local for local in extraction_by_local if local in call_roots)
-    evidence_candidates = sorted({
-        (load.container, load.target)
+    exact_candidates = [
+        call for call in inner.closure_calls
+        if call.root in extraction_by_local]
+    evidence_candidates = [
+        load
         for load in inner.loads
         if (
-            load.container != "env"
+            load.container != inner_env_param
             and load.container in extraction_by_local
             and load.target in call_roots
         )
-    })
+    ]
     if len(exact_candidates) != 1:
         errors.append(
             f"{label}: expected one extracted direct closure root, found "
@@ -3638,32 +3758,74 @@ def analyze_two_level_provenance_c(
             f"found {len(evidence_candidates)}")
     if errors:
         return errors
-    exact_local = exact_candidates[0]
-    evidence_local, method_local = evidence_candidates[0]
+    exact_call = exact_candidates[0]
+    method_load = evidence_candidates[0]
+    exact_local = exact_call.root
+    evidence_local = method_load.container
+    method_local = method_load.target
     if exact_local == evidence_local:
         return [f"{label}: exact closure and evidence container share one root"]
     if method_local == exact_local:
         return [f"{label}: evidence method closure aliases exact closure root"]
-    calls_by_root: dict[str, int] = {}
-    for call in inner.closure_calls:
-        calls_by_root[call.root] = calls_by_root.get(call.root, 0) + 1
-    for role, root in (("exact", exact_local), ("evidence", method_local)):
-        if calls_by_root.get(root) != 1:
-            errors.append(
-                f"{label}: {role} root {root} has "
-                f"{calls_by_root.get(root, 0)} uniform calls")
+    evidence_calls = [
+        call for call in inner.closure_calls if call.root == method_local]
+    if len(evidence_calls) != 1:
+        errors.append(
+            f"{label}: evidence method root {method_local} has "
+            f"{len(evidence_calls)} uniform calls")
+    expected_call_roots = [exact_local, method_local]
+    actual_call_roots = [call.root for call in inner.closure_calls]
+    if (
+        len(actual_call_roots) != 2
+        or sorted(actual_call_roots) != sorted(expected_call_roots)
+    ):
+        errors.append(
+            f"{label}: inner call-root inventory is {actual_call_roots}, "
+            f"expected {expected_call_roots}")
+    if errors:
+        return errors
+    evidence_call = evidence_calls[0]
+
+    exact_definition = unique_reaching_definition(
+        inner, exact_local, exact_call.ordinal, "inner exact call")
+    evidence_definition = unique_reaching_definition(
+        inner, evidence_local, method_load.ordinal, "inner evidence container")
+    method_definition = unique_reaching_definition(
+        inner, method_local, evidence_call.ordinal, "inner method closure")
+    if (
+        exact_definition is None
+        or evidence_definition is None
+        or method_definition is None
+    ):
+        return errors
+    if exact_definition[0] != "load" or exact_definition[2] != inner_env_param:
+        errors.append(f"{label}: exact call root is not an env extraction")
+    if evidence_definition[0] != "load" or evidence_definition[2] != inner_env_param:
+        errors.append(f"{label}: evidence container is not an env extraction")
+    if (
+        method_definition[0] != "load"
+        or method_definition[2] != evidence_local
+        or method_definition[1] != method_load.ordinal
+    ):
+        errors.append(
+            f"{label}: method root lacks one exact container-load definition")
     if errors:
         return errors
 
     def unique_extraction(
-        facts: CFunctionProvenanceFacts, local: str, stage: str,
+        facts: CFunctionProvenanceFacts, environment_param: str,
+        local: str, stage: str,
     ) -> Optional[CContainerLoadFact]:
         matches = [load for load in facts.loads
-                   if load.container == "env" and load.target == local]
+                   if load.container == environment_param and load.target == local]
         if len(matches) != 1:
             errors.append(
                 f"{label}: {stage} local {local} has "
                 f"{len(matches)} env extractions")
+            return None
+        definition = unique_reaching_definition(
+            facts, local, matches[0].ordinal + 1, stage)
+        if definition is None or definition[0] != "load":
             return None
         return matches[0]
 
@@ -3678,10 +3840,22 @@ def analyze_two_level_provenance_c(
                 f"{label}: {stage} env {environment}[{index}] has "
                 f"{len(matches)} stores")
             return None
-        return matches[0]
+        store = matches[0]
+        environment_definition = unique_reaching_definition(
+            facts, environment, store.ordinal, f"{stage} environment")
+        source_definition = unique_reaching_definition(
+            facts, store.source, store.ordinal, f"{stage} source")
+        if (
+            environment_definition is None
+            or environment_definition[0] != "allocation"
+            or source_definition is None
+        ):
+            return None
+        return store
 
-    def trace(local: str, role: str) -> Optional[Tuple[str, int, int]]:
-        inner_extract = unique_extraction(inner, local, f"inner {role}")
+    def trace(local: str, role: str) -> Optional[Tuple[str, int, int, int]]:
+        inner_extract = unique_extraction(
+            inner, inner_env_param, local, f"inner {role}")
         if inner_extract is None:
             return None
         outer_store = unique_store(
@@ -3690,7 +3864,7 @@ def analyze_two_level_provenance_c(
         if outer_store is None:
             return None
         outer_extract = unique_extraction(
-            outer, outer_store.source, f"outer {role}")
+            outer, outer_env_param, outer_store.source, f"outer {role}")
         if outer_extract is None:
             return None
         parent_store = unique_store(
@@ -3698,39 +3872,25 @@ def analyze_two_level_provenance_c(
             f"parent→outer {role}")
         if parent_store is None:
             return None
-        return parent_store.source, inner_extract.index, outer_extract.index
+        return (
+            parent_store.source, inner_extract.index,
+            outer_extract.index, parent_store.ordinal)
 
     exact_trace = trace(exact_local, "exact")
     evidence_trace = trace(evidence_local, "evidence")
     if exact_trace is None or evidence_trace is None or errors:
         return errors
-    exact_terminal, exact_inner_index, exact_parent_index = exact_trace
-    evidence_terminal, evidence_inner_index, evidence_parent_index = evidence_trace
+    exact_terminal, exact_inner_index, exact_parent_index, exact_parent_use = exact_trace
+    evidence_terminal, evidence_inner_index, evidence_parent_index, evidence_parent_use = evidence_trace
     if exact_inner_index == evidence_inner_index:
         errors.append(f"{label}: exact/evidence share inner env index")
     if exact_parent_index == evidence_parent_index:
         errors.append(f"{label}: exact/evidence share parent env index")
 
-    def resolve_parent_alias(local: str) -> Optional[str]:
-        seen: set[str] = set()
-        current = local
-        while True:
-            if current in seen:
-                errors.append(f"{label}: parent alias cycle at {current}")
-                return None
-            seen.add(current)
-            matches = [assignment.source for assignment in parent.assignments
-                       if assignment.target == current]
-            if len(matches) > 1:
-                errors.append(
-                    f"{label}: parent local {current} has duplicate aliases")
-                return None
-            if not matches:
-                return current
-            current = matches[0]
-
-    exact_origin = resolve_parent_alias(exact_terminal)
-    evidence_origin = resolve_parent_alias(evidence_terminal)
+    exact_origin = resolve_alias_at(
+        parent, exact_terminal, exact_parent_use, "parent exact")
+    evidence_origin = resolve_alias_at(
+        parent, evidence_terminal, evidence_parent_use, "parent evidence")
     if exact_origin is None or evidence_origin is None:
         return errors
     closure_roots = {closure.root for closure in parent.closures}
@@ -3745,6 +3905,33 @@ def analyze_two_level_provenance_c(
             f"{label}: evidence lineage ends at a constructed closure")
     if exact_origin == evidence_origin:
         errors.append(f"{label}: exact/evidence parent origins alias")
+
+    if len(parent.closures) != 2 or closure_roots != {
+            outer_closure.root, exact_origin}:
+        errors.append(
+            f"{label}: parent closure inventory does not equal outer+exact")
+    if len(parent.closure_calls) != 1:
+        errors.append(
+            f"{label}: parent uniform-call inventory has "
+            f"{len(parent.closure_calls)} roots")
+    else:
+        parent_call_origin = resolve_alias_at(
+            parent, parent.closure_calls[0].root,
+            parent.closure_calls[0].ordinal, "parent outer call")
+        if parent_call_origin != outer_closure.root:
+            errors.append(
+                f"{label}: parent uniform call does not target outer closure")
+    if len(outer.closure_calls) != 1:
+        errors.append(
+            f"{label}: outer uniform-call inventory has "
+            f"{len(outer.closure_calls)} roots")
+    else:
+        outer_call_origin = resolve_alias_at(
+            outer, outer.closure_calls[0].root,
+            outer.closure_calls[0].ordinal, "outer inner call")
+        if outer_call_origin != inner_closure.root:
+            errors.append(
+                f"{label}: outer uniform call does not target inner closure")
     return errors
 
 
