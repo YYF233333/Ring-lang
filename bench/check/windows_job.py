@@ -9,8 +9,10 @@ set is a 10 ms sample and is deliberately reported with coverage metadata.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import os
 import subprocess
+import threading
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -20,13 +22,19 @@ from typing import Mapping, Sequence
 CREATE_SUSPENDED = 0x00000004
 CREATE_UNICODE_ENVIRONMENT = 0x00000400
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
+JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
 JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
 JOB_OBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION = 8
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+JOB_OBJECT_ASSOCIATE_COMPLETION_PORT_INFORMATION = 7
+JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT = 3
+JOB_OBJECT_MSG_JOB_MEMORY_LIMIT = 10
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_VM_READ = 0x0010
 ERROR_MORE_DATA = 234
 STILL_ACTIVE = 259
+WAIT_TIMEOUT = 258
 
 
 class JobMeasurementError(RuntimeError):
@@ -107,6 +115,12 @@ if os.name == "nt":
             ("PrivateUsage", SIZE_T),
         ]
 
+    class JOBOBJECT_ASSOCIATE_COMPLETION_PORT(ctypes.Structure):
+        _fields_ = [
+            ("CompletionKey", ctypes.c_void_p),
+            ("CompletionPort", wintypes.HANDLE),
+        ]
+
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     psapi = ctypes.WinDLL("psapi", use_last_error=True)
 
@@ -150,6 +164,21 @@ if os.name == "nt":
         wintypes.DWORD,
     ]
     psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+    kernel32.CreateIoCompletionPort.argtypes = [
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        ULONG_PTR,
+        wintypes.DWORD,
+    ]
+    kernel32.CreateIoCompletionPort.restype = wintypes.HANDLE
+    kernel32.GetQueuedCompletionStatus.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(ULONG_PTR),
+        ctypes.POINTER(ctypes.c_void_p),
+        wintypes.DWORD,
+    ]
+    kernel32.GetQueuedCompletionStatus.restype = wintypes.BOOL
 
 
 def _require_windows() -> None:
@@ -315,6 +344,505 @@ def _coverage_ns(intervals: list[tuple[int, int]], start_ns: int, end_ns: int) -
 
 def _signed_exit_code(code: int) -> int:
     return ctypes.c_int32(code).value
+
+
+def _new_bounded_job(
+    memory_limit: int | None, process_limit: int | None
+) -> tuple[int, int]:
+    """Create one limited Job plus its completion port, with query-back."""
+
+    _require_windows()
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise _winerror("CreateJobObjectW failed")
+    port: int | None = None
+    try:
+        flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        if memory_limit is not None:
+            flags |= JOB_OBJECT_LIMIT_JOB_MEMORY
+            limits.JobMemoryLimit = memory_limit
+        if process_limit is not None:
+            flags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            limits.BasicLimitInformation.ActiveProcessLimit = process_limit
+        limits.BasicLimitInformation.LimitFlags = flags
+        if not kernel32.SetInformationJobObject(
+            job,
+            JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        ):
+            raise _winerror("SetInformationJobObject(limits) failed")
+
+        invalid_handle = wintypes.HANDLE(-1).value
+        completion = kernel32.CreateIoCompletionPort(
+            invalid_handle, None, ULONG_PTR(0), 1
+        )
+        if not completion:
+            raise _winerror("CreateIoCompletionPort failed")
+        port = int(completion)
+        association = JOBOBJECT_ASSOCIATE_COMPLETION_PORT()
+        association.CompletionKey = ctypes.c_void_p(0xB188)
+        association.CompletionPort = completion
+        if not kernel32.SetInformationJobObject(
+            job,
+            JOB_OBJECT_ASSOCIATE_COMPLETION_PORT_INFORMATION,
+            ctypes.byref(association),
+            ctypes.sizeof(association),
+        ):
+            raise _winerror("SetInformationJobObject(completion port) failed")
+
+        observed = _query_extended_limits(int(job))
+        if int(observed.BasicLimitInformation.LimitFlags) != flags:
+            raise JobMeasurementError("bounded Job limit flags failed query-back")
+        if memory_limit is not None and int(observed.JobMemoryLimit) != memory_limit:
+            raise JobMeasurementError("bounded Job memory limit failed query-back")
+        if process_limit is not None and int(
+            observed.BasicLimitInformation.ActiveProcessLimit
+        ) != process_limit:
+            raise JobMeasurementError("bounded Job process limit failed query-back")
+        return int(job), port
+    except BaseException:
+        if port is not None:
+            _close_handle(port)
+        _close_handle(int(job))
+        raise
+
+
+def _drain_job_messages(port: int) -> list[int]:
+    messages: list[int] = []
+    while True:
+        message = wintypes.DWORD()
+        completion_key = ULONG_PTR()
+        overlapped = ctypes.c_void_p()
+        ok = kernel32.GetQueuedCompletionStatus(
+            port,
+            ctypes.byref(message),
+            ctypes.byref(completion_key),
+            ctypes.byref(overlapped),
+            0,
+        )
+        if not ok:
+            error = ctypes.get_last_error()
+            if error == WAIT_TIMEOUT:
+                return messages
+            raise _winerror("GetQueuedCompletionStatus failed")
+        messages.append(int(message.value))
+
+
+class _RawPrefixSink:
+    def __init__(self, path: Path, relative_path: str, cap: int) -> None:
+        self.path = path
+        self.relative_path = relative_path
+        self.cap = cap
+        self.captured = 0
+        self.seen = 0
+        self.truncated = False
+        self.fsynced = False
+        self.error: str | None = None
+        self.digest = hashlib.sha256()
+        self._descriptor: int | None = None
+
+    def open_exclusive(self) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_BINARY
+        self._descriptor = os.open(self.path, flags, 0o600)
+
+    def consume(self, chunk: bytes) -> None:
+        self.seen += len(chunk)
+        remaining = self.cap - self.captured
+        prefix = chunk[: max(0, remaining)]
+        if prefix:
+            if self._descriptor is None:
+                raise OSError("raw sink is closed")
+            view = memoryview(prefix)
+            offset = 0
+            while offset < len(view):
+                written = os.write(self._descriptor, view[offset:])
+                if written <= 0:
+                    raise OSError(f"raw write made no progress: {written}")
+                self.digest.update(view[offset : offset + written])
+                offset += written
+            self.captured += len(prefix)
+        if len(chunk) > len(prefix):
+            self.truncated = True
+
+    def seal(self) -> None:
+        if self._descriptor is not None:
+            os.fsync(self._descriptor)
+            os.close(self._descriptor)
+            self._descriptor = None
+            self.fsynced = True
+
+    def record(self) -> dict[str, object]:
+        return {
+            "path": self.relative_path,
+            "captured_size": self.captured,
+            "sha256": self.digest.hexdigest(),
+            "bytes_seen": self.seen,
+            "cap_bytes": self.cap,
+            "truncated_at_cap": self.truncated,
+            "fsynced": self.fsynced,
+            "error": self.error,
+        }
+
+
+def run_one_shot_job(
+    argv: Sequence[str],
+    *,
+    cwd: str | os.PathLike[str],
+    env: Mapping[str, str],
+    stdout_path: str | os.PathLike[str],
+    stderr_path: str | os.PathLike[str],
+    limits,
+) -> dict[str, object]:
+    """Run a durable one-shot child under hard Windows Job limits.
+
+    Raw stream files are O_EXCL-created before CreateProcess and are fsynced
+    before this function returns, including every failure path.
+    """
+
+    _require_windows()
+    if not argv or not all(isinstance(part, str) and part for part in argv):
+        raise ValueError("argv must be non-empty strings")
+    if limits.wall_seconds <= 0 or limits.poll_ms != 10:
+        raise ValueError("invalid one-shot timing limits")
+
+    stdout_sink = _RawPrefixSink(Path(stdout_path), "stdout.raw", limits.stdout_cap_bytes)
+    stderr_sink = _RawPrefixSink(Path(stderr_path), "stderr.raw", limits.stderr_cap_bytes)
+    stdout_sink.open_exclusive()
+    try:
+        stderr_sink.open_exclusive()
+    except BaseException:
+        stdout_sink.seal()
+        raise
+
+    job: int | None = None
+    completion_port: int | None = None
+    process_handle: int | None = None
+    thread_handle: int | None = None
+    child_fds: list[int] = []
+    unowned_parent_fds: set[int] = set()
+    stream_threads: list[threading.Thread] = []
+    process_assigned = False
+    process_finished = False
+    timed_out = False
+    memory_limit_hit = False
+    process_limit_hit = False
+    launch_error: str | None = None
+    infrastructure_errors: list[str] = []
+    thread_errors: list[str] = []
+    job_messages: list[int] = []
+    peak_tree_working_set = 0
+    sampled_process_peak = 0
+    started_ns = time.perf_counter_ns()
+    exit_code: int | None = None
+    process_count: dict[str, int] = {"total": 0, "active": 0, "terminated": 0}
+    peak_job_commit: int | None = None
+
+    stop_event = threading.Event()
+
+    def stream_reader(fd: int, sink: _RawPrefixSink, label: str) -> None:
+        try:
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                sink.consume(chunk)
+                if sink.truncated:
+                    stop_event.set()
+                    break
+        except BaseException as exc:
+            message = f"{label}: {type(exc).__name__}: {exc}"
+            sink.error = message
+            thread_errors.append(message)
+            stop_event.set()
+        finally:
+            try:
+                os.close(fd)
+            except OSError as exc:
+                message = f"{label}-pipe-close: {type(exc).__name__}: {exc}"
+                sink.error = message
+                thread_errors.append(message)
+                stop_event.set()
+            try:
+                sink.seal()
+            except BaseException as exc:
+                message = f"{label}-raw-seal: {type(exc).__name__}: {exc}"
+                sink.error = message
+                thread_errors.append(message)
+                stop_event.set()
+
+    def terminate_job(code: int) -> None:
+        if job is not None and not kernel32.TerminateJobObject(job, code):
+            infrastructure_errors.append(str(_winerror("TerminateJobObject failed")))
+
+    try:
+        job, completion_port = _new_bounded_job(
+            limits.job_memory_bytes, limits.active_process_limit
+        )
+        with open(os.devnull, "rb", buffering=0) as stdin_file:
+            stdout_read, stdout_write = os.pipe()
+            stderr_read, stderr_write = os.pipe()
+            child_fds = [stdout_write, stderr_write]
+            unowned_parent_fds = {stdout_read, stderr_read}
+            child_handles = [
+                msvcrt.get_osfhandle(stdin_file.fileno()),
+                msvcrt.get_osfhandle(stdout_write),
+                msvcrt.get_osfhandle(stderr_write),
+            ]
+            parent_handles = [
+                msvcrt.get_osfhandle(stdout_read),
+                msvcrt.get_osfhandle(stderr_read),
+            ]
+            for handle in child_handles:
+                os.set_handle_inheritable(handle, True)
+            for handle in parent_handles:
+                os.set_handle_inheritable(handle, False)
+            startup = subprocess.STARTUPINFO()
+            startup.dwFlags |= _winapi.STARTF_USESTDHANDLES
+            startup.hStdInput, startup.hStdOutput, startup.hStdError = child_handles
+            startup.lpAttributeList = {"handle_list": child_handles}
+            try:
+                hp, ht, _pid, _tid = _winapi.CreateProcess(
+                    argv[0],
+                    subprocess.list2cmdline(list(argv)),
+                    None,
+                    None,
+                    True,
+                    CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                    dict(env),
+                    os.fspath(cwd),
+                    startup,
+                )
+                process_handle = int(hp)
+                thread_handle = int(ht)
+            except BaseException as exc:
+                launch_error = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                for handle in child_handles:
+                    try:
+                        os.set_handle_inheritable(handle, False)
+                    except OSError:
+                        pass
+            for fd in child_fds:
+                os.close(fd)
+            child_fds.clear()
+            if not kernel32.AssignProcessToJobObject(job, process_handle):
+                launch_error = str(_winerror("AssignProcessToJobObject failed"))
+                _winapi.TerminateProcess(process_handle, 127)
+                raise JobMeasurementError(launch_error)
+            process_assigned = True
+
+            for label, fd, sink in (
+                ("stdout", stdout_read, stdout_sink),
+                ("stderr", stderr_read, stderr_sink),
+            ):
+                thread = threading.Thread(
+                    name=f"one-shot-{label}",
+                    target=stream_reader,
+                    args=(fd, sink, label),
+                    daemon=True,
+                )
+                thread.start()
+                unowned_parent_fds.remove(fd)
+                stream_threads.append(thread)
+
+            resumed = kernel32.ResumeThread(thread_handle)
+            _close_handle(thread_handle)
+            thread_handle = None
+            if resumed == 0xFFFFFFFF:
+                launch_error = str(_winerror("ResumeThread failed"))
+                raise JobMeasurementError(launch_error)
+
+            started_ns = time.perf_counter_ns()
+            deadline_ns = started_ns + int(limits.wall_seconds * 1_000_000_000)
+            killed = False
+            kill_deadline_ns: int | None = None
+            while True:
+                if completion_port is not None:
+                    try:
+                        messages = _drain_job_messages(completion_port)
+                        job_messages.extend(messages)
+                        if JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT in messages:
+                            process_limit_hit = True
+                            stop_event.set()
+                        if JOB_OBJECT_MSG_JOB_MEMORY_LIMIT in messages:
+                            memory_limit_hit = True
+                            stop_event.set()
+                    except JobMeasurementError as exc:
+                        infrastructure_errors.append(str(exc))
+                        stop_event.set()
+
+                try:
+                    pids = _job_pids(job)
+                    sampled_process_peak = max(sampled_process_peak, len(pids))
+                    tree_working_set = 0
+                    for pid in pids:
+                        handle = process_handle if len(pids) == 1 else _open_process(pid)
+                        if handle is None:
+                            infrastructure_errors.append(
+                                f"working set unavailable for pid {pid}"
+                            )
+                            continue
+                        memory = _memory_info(handle)
+                        if handle != process_handle:
+                            _close_handle(handle)
+                        if memory is None:
+                            infrastructure_errors.append(
+                                f"working set query failed for pid {pid}"
+                            )
+                        else:
+                            tree_working_set += int(memory.WorkingSetSize)
+                    peak_tree_working_set = max(
+                        peak_tree_working_set, tree_working_set
+                    )
+                except JobMeasurementError as exc:
+                    infrastructure_errors.append(str(exc))
+                    stop_event.set()
+
+                accounting_now = _query_accounting(job).BasicInfo
+                root_done = (
+                    _winapi.WaitForSingleObject(process_handle, 0)
+                    == _winapi.WAIT_OBJECT_0
+                )
+                if root_done and accounting_now.ActiveProcesses == 0:
+                    process_finished = True
+                    break
+                now_ns = time.perf_counter_ns()
+                if now_ns >= deadline_ns and not timed_out:
+                    timed_out = True
+                    stop_event.set()
+                if stop_event.is_set() and not killed:
+                    killed = True
+                    terminate_job(124)
+                    kill_deadline_ns = now_ns + 5_000_000_000
+                if killed and kill_deadline_ns is not None and now_ns >= kill_deadline_ns:
+                    infrastructure_errors.append(
+                        "Job did not quiesce within 5 seconds after termination"
+                    )
+                    break
+                time.sleep(limits.poll_ms / 1000)
+    except BaseException as exc:
+        if launch_error is None:
+            infrastructure_errors.append(f"{type(exc).__name__}: {exc}")
+        if process_assigned:
+            terminate_job(127)
+    finally:
+        if process_assigned and not process_finished:
+            terminate_job(127)
+        for fd in child_fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        for fd in unowned_parent_fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if thread_handle is not None:
+            _close_handle(thread_handle)
+            thread_handle = None
+        for thread in stream_threads:
+            thread.join(timeout=5)
+        alive = [thread.name for thread in stream_threads if thread.is_alive()]
+        if alive:
+            thread_errors.append(f"threads did not quiesce: {alive}")
+        for sink in (stdout_sink, stderr_sink):
+            try:
+                sink.seal()
+            except BaseException as exc:
+                message = f"raw-seal: {type(exc).__name__}: {exc}"
+                sink.error = message
+                thread_errors.append(message)
+
+        if job is not None:
+            try:
+                if completion_port is not None:
+                    messages = _drain_job_messages(completion_port)
+                    job_messages.extend(messages)
+                    process_limit_hit = process_limit_hit or (
+                        JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT in messages
+                    )
+                    memory_limit_hit = memory_limit_hit or (
+                        JOB_OBJECT_MSG_JOB_MEMORY_LIMIT in messages
+                    )
+                accounting = _query_accounting(job)
+                extended = _query_extended_limits(job)
+                process_count = {
+                    "total": int(accounting.BasicInfo.TotalProcesses),
+                    "active": int(accounting.BasicInfo.ActiveProcesses),
+                    "terminated": int(accounting.BasicInfo.TotalTerminatedProcesses),
+                }
+                peak_job_commit = int(extended.PeakJobMemoryUsed)
+            except BaseException as exc:
+                infrastructure_errors.append(f"final Job query: {type(exc).__name__}: {exc}")
+        if process_handle is not None:
+            try:
+                exit_code = _signed_exit_code(
+                    _winapi.GetExitCodeProcess(process_handle)
+                )
+            except BaseException as exc:
+                infrastructure_errors.append(
+                    f"GetExitCodeProcess: {type(exc).__name__}: {exc}"
+                )
+            _close_handle(process_handle)
+        if completion_port is not None:
+            _close_handle(completion_port)
+        if job is not None:
+            _close_handle(job)
+
+    pipe_error = next(
+        (sink.error for sink in (stdout_sink, stderr_sink) if sink.error), None
+    )
+    thread_error = "; ".join(thread_errors) if thread_errors else None
+    infrastructure_error = (
+        "; ".join(dict.fromkeys(infrastructure_errors))
+        if infrastructure_errors
+        else None
+    )
+    return {
+        "adapter": "windows-job-v1",
+        "support": {
+            "wall": "enforced",
+            "output": "enforced",
+            "job_memory": (
+                "enforced" if limits.job_memory_bytes is not None else "not-requested"
+            ),
+            "active_process": (
+                "enforced"
+                if limits.active_process_limit is not None
+                else "not-requested"
+            ),
+        },
+        "stage": "child-sealed",
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "memory_limit_hit": memory_limit_hit,
+        "process_limit_hit": process_limit_hit,
+        "output_limit_hit": stdout_sink.truncated or stderr_sink.truncated,
+        "launch_error": launch_error,
+        "pipe_error": pipe_error,
+        "thread_error": thread_error,
+        "infrastructure_error": infrastructure_error,
+        "measurements": {
+            "wall_ns": time.perf_counter_ns() - started_ns,
+            "peak_tree_working_set_bytes": peak_tree_working_set,
+            "peak_job_commit_bytes": peak_job_commit,
+            "sampled_process_peak": sampled_process_peak,
+            "process_count": process_count,
+            "job_messages": job_messages,
+            "thread_count": len(stream_threads),
+            "threads_quiesced": not any(
+                thread.is_alive() for thread in stream_threads
+            ),
+        },
+        "streams": {
+            "stdout": stdout_sink.record(),
+            "stderr": stderr_sink.record(),
+        },
+    }
 
 
 def run_in_job(

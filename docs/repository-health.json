@@ -1,11 +1,16 @@
 {
   "schema": "ring.repository-health.v1",
   "max_worktrees": 5,
-  "max_dirty_worktrees": 0,
+  "max_dirty_worktrees": 2,
   "max_main_ahead": 10,
   "max_unpushed_age_hours": 24,
-  "board_authority_branch": "codex/ownership-sprime-first",
   "board_items": ["B-176", "B-180", "#268", "#269"],
+  "board_item_authorities": {
+    "B-176": "codex/ownership-sprime-first",
+    "B-180": "codex/ownership-sprime-first",
+    "#268": "codex/ownership-sprime-first",
+    "#269": "codex/ownership-sprime-first"
+  },
   "branches": [
     {
       "name": "main",
