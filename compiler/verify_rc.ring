@@ -103,7 +103,8 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
     is_rc_excluded_type, type_contains_extern_handle,
     is_borrow_returning_call, is_fresh_owned_bool_value,
-    is_nullary_variant_ctor_ident, is_materialized_fn_value}
+    is_nullary_variant_ctor_ident, is_materialized_fn_value,
+    is_exact_direct_call_ident}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
     sink_arg_indices, is_variant_constructor_call, expr_diverges, stmt_diverges,
     is_scalar_type, is_owned_slot_result_call, is_owned_slot_result_callee,
@@ -665,10 +666,24 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
         },
 
         HExpr::Call { callee, args, ty, .. } => {
-            // ANF materialises every fresh callee (including checker-marked
-            // wrappers and Call-produced closures). Any owned callee still
-            // inline here is therefore a fatal accounting gap.
-            v_borrow(callee, "", ctx)
+            // A final-zonk marked syntactic Ident uses the direct ABI and is
+            // not a wrapper value in Call.callee position.  The exact DefId
+            // must remain global: a local/capture marker is an invariant bug,
+            // never permission to skip its ownership account.
+            if is_exact_direct_call_ident(callee) {
+                let direct_def_id = match callee {
+                    HExpr::Ident { def_id: some(id), .. } => id,
+                    _ => panic("RC verifier direct-call marker lost exact Ident")
+                }
+                if v_lookup(ctx, direct_def_id) >= 0 {
+                    panic("RC verifier direct-call marker DefId ${direct_def_id} is local/captured")
+                }
+            } else {
+                // ANF materialises every other fresh callee (including
+                // Call-produced closures). Any owned callee still inline is
+                // therefore a fatal accounting gap.
+                let _ = v_borrow(callee, "", ctx)
+            }
             let ctor = is_variant_constructor_call(callee, ty)
             let sinks = sink_arg_indices(callee, args.len())
             let owned_slot_result = args.len() == 2 && is_owned_slot_result_callee(callee)

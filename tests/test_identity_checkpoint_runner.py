@@ -22,6 +22,9 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
                 runner, "identity_checkpoint_source_errors", return_value=[]
             ) as source_oracle,
             patch.object(
+                runner, "identity_candidate_verify_rc_errors"
+            ) as verify_oracle,
+            patch.object(
                 runner, "default_body_identity_generated_c_errors"
             ) as generated_oracle,
         ):
@@ -30,6 +33,7 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIn("source/mutation only", detail)
         source_oracle.assert_called_once_with()
+        verify_oracle.assert_not_called()
         generated_oracle.assert_not_called()
 
     def test_set_candidate_invokes_exact_hashed_executable(self) -> None:
@@ -39,6 +43,17 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
             candidate.write_bytes(candidate_bytes)
             resolved = str(candidate.resolve(strict=True))
             expected_hash = hashlib.sha256(candidate_bytes).hexdigest()
+            events = []
+
+            def verify_candidate(path: str) -> list[str]:
+                self.assertEqual(path, resolved)
+                events.append("verify")
+                return []
+
+            def generate_candidate(path: str) -> list[str]:
+                self.assertEqual(path, resolved)
+                events.append("generated-c")
+                return []
 
             with (
                 patch.dict(
@@ -50,8 +65,12 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
                     runner, "identity_checkpoint_source_errors", return_value=[]
                 ) as source_oracle,
                 patch.object(
+                    runner, "identity_candidate_verify_rc_errors",
+                    side_effect=verify_candidate,
+                ) as verify_oracle,
+                patch.object(
                     runner, "default_body_identity_generated_c_errors",
-                    return_value=[],
+                    side_effect=generate_candidate,
                 ) as generated_oracle,
             ):
                 errors, detail = runner.identity_checkpoint_errors()
@@ -59,7 +78,9 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIn(f"candidate={resolved}", detail)
         self.assertIn(f"sha256={expected_hash}", detail)
+        self.assertEqual(events, ["verify", "generated-c"])
         source_oracle.assert_called_once_with()
+        verify_oracle.assert_called_once_with(resolved)
         generated_oracle.assert_called_once_with(resolved)
 
     def test_candidate_mutation_during_generated_gate_fails_closed(self) -> None:
@@ -81,6 +102,10 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
                 ),
                 patch.object(
                     runner, "identity_checkpoint_source_errors", return_value=[]
+                ),
+                patch.object(
+                    runner, "identity_candidate_verify_rc_errors",
+                    return_value=[],
                 ),
                 patch.object(
                     runner, "default_body_identity_generated_c_errors",
@@ -117,6 +142,9 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
                             return_value=[],
                         ),
                         patch.object(
+                            runner, "identity_candidate_verify_rc_errors",
+                        ) as verify_oracle,
+                        patch.object(
                             runner,
                             "default_body_identity_generated_c_errors",
                         ) as generated_oracle,
@@ -125,7 +153,36 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
 
                     self.assertTrue(
                         any(expected in error for error in errors), errors)
+                    verify_oracle.assert_not_called()
                     generated_oracle.assert_not_called()
+
+    def test_verify_rc_failure_stops_generated_c_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            candidate = Path(tmpdir) / "candidate.exe"
+            candidate.write_bytes(b"candidate")
+            resolved = str(candidate.resolve(strict=True))
+            with (
+                patch.dict(
+                    os.environ,
+                    {runner.IDENTITY_CANDIDATE_ENV: resolved},
+                    clear=True,
+                ),
+                patch.object(
+                    runner, "identity_checkpoint_source_errors", return_value=[]
+                ),
+                patch.object(
+                    runner, "identity_candidate_verify_rc_errors",
+                    return_value=["verify failed"],
+                ) as verify_oracle,
+                patch.object(
+                    runner, "default_body_identity_generated_c_errors",
+                ) as generated_oracle,
+            ):
+                errors, _ = runner.identity_checkpoint_errors()
+
+        self.assertIn("verify failed", errors)
+        verify_oracle.assert_called_once_with(resolved)
+        generated_oracle.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1005,6 +1005,15 @@ pub fn is_nullary_variant_ctor_ident(expr: HExpr) -> Bool {
 // direct-ABI wrapper closure (some([]) is the explicit zero-bound marker).
 // Control-flow wrappers preserve that fact only when every value-producing path
 // yields the same fresh callable. Perceus and verify_rc share this predicate.
+pub fn is_exact_direct_call_ident(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Ident {
+            def_id: some(_), dict_closure_dicts: some(_), ..
+        } => true,
+        _ => false
+    }
+}
+
 pub fn is_materialized_fn_value(expr: HExpr) -> Bool {
     match expr {
         HExpr::Ident { dict_closure_dicts, .. } => dict_closure_dicts.is_some(),

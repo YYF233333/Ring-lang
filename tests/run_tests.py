@@ -4363,6 +4363,8 @@ def identity_checkpoint_contract_errors(
             "pub fn validate_hir_binder_def_ids",
             "fn validate_hir_local_reference(",
             "block_local_init(stmts, id)",
+            "pub fn is_exact_direct_call_ident(",
+            "def_id: some(_), dict_closure_dicts: some(_)",
             "pub dict_ref: DictRef",
             "Call { base_dict: DictRef, extra_dicts: List<DictRef> }",
         ),
@@ -4433,7 +4435,7 @@ def identity_checkpoint_contract_errors(
             "def_id: slot.def_id",
             "validate_hir_binder_def_ids(transformed)",
             "mutate_drop_identity_capture(anf_program)",
-            "HExpr::Ident { dict_closure_dicts: some(_), .. }",
+            "is_exact_direct_call_ident(normalized)",
             "dictionaries remain Call.resolved_dicts",
         ),
         "cctx": (
@@ -4495,6 +4497,9 @@ def identity_checkpoint_contract_errors(
             "ctx.kinds[idx] == K_BORROW || ctx.kinds[idx] == K_CAPTURE",
             "for binding in arm.bindings",
             "def_id, \"assignment '${name}'\"",
+            "if is_exact_direct_call_ident(callee)",
+            "v_lookup(ctx, direct_def_id) >= 0",
+            "direct-call marker DefId",
         ),
         "provenance_fixture": (
             "fn __ring_T_Ord(mut value: Int)",
@@ -5025,13 +5030,49 @@ def identity_checkpoint_contract_errors(
     if anf_callee_error:
         errors.append(anf_callee_error)
     elif not all(token in anf_callee_body for token in (
-            "HExpr::Ident { dict_closure_dicts: some(_), .. }",
+            "is_exact_direct_call_ident(normalized)",
             "return normalized",
             "is_materializable_fn_value(normalized, externs)")):
         errors.append("ANF no longer preserves marked syntactic direct callees")
     elif anf_callee_body.index("return normalized") > anf_callee_body.index(
             "is_materializable_fn_value(normalized, externs)"):
         errors.append("ANF direct marker is checked after materialization")
+
+    direct_predicate_body, direct_predicate_error = extract_ring_function_body(
+        sources["hir"], "is_exact_direct_call_ident")
+    if direct_predicate_error:
+        errors.append(direct_predicate_error)
+    elif not all(token in direct_predicate_body for token in (
+            "HExpr::Ident {",
+            "def_id: some(_), dict_closure_dicts: some(_)",
+            "=> true",
+            "_ => false")):
+        errors.append("direct-call predicate is broader than exact marked Ident")
+
+    verify_expr_body, verify_expr_error = extract_ring_function_body(
+        sources["verify"], "v_expr")
+    if verify_expr_error:
+        errors.append(verify_expr_error)
+    else:
+        call_start = verify_expr_body.find("HExpr::Call { callee, args, ty, .. }")
+        call_end = verify_expr_body.find("HExpr::FieldAccess", call_start)
+        if call_start < 0 or call_end < 0:
+            errors.append("verify_rc Call accounting arm is missing")
+        else:
+            call_arm = verify_expr_body[call_start:call_end]
+            required_call_tokens = (
+                "if is_exact_direct_call_ident(callee)",
+                "HExpr::Ident { def_id: some(id), .. } => id",
+                "v_lookup(ctx, direct_def_id) >= 0",
+                "direct-call marker DefId ${direct_def_id} is local/captured",
+                "} else {",
+                "v_borrow(callee, \"\", ctx)",
+            )
+            if not all(token in call_arm for token in required_call_tokens):
+                errors.append("verify_rc direct Call context guard drifted")
+            elif call_arm.index("is_exact_direct_call_ident(callee)") > call_arm.index(
+                    "v_borrow(callee, \"\", ctx)"):
+                errors.append("verify_rc checks direct marker after callee borrow")
 
     for function_name, required in (
         ("check_effect_decl", (
@@ -5496,12 +5537,23 @@ def identity_checkpoint_source_errors() -> List[str]:
          "dict_closure_dicts: some([]), ty: getter_ty",
          "dict_closure_dicts: none, ty: getter_ty"),
         ("ANF marked direct preservation", "perceus",
-         "HExpr::Ident { dict_closure_dicts: some(_), .. } => {\n"
-         "            return normalized\n"
-         "        }",
-         "HExpr::Ident { dict_closure_dicts: some(_), .. } => {\n"
-         "            return anf_materialize(normalized, hoists, counter)\n"
-         "        }"),
+         "if is_exact_direct_call_ident(normalized) {\n"
+         "        return normalized\n"
+         "    }",
+         "if is_exact_direct_call_ident(normalized) {\n"
+         "        return anf_materialize(normalized, hoists, counter)\n"
+         "    }"),
+        ("direct predicate exact marker shape", "hir",
+         "def_id: some(_), dict_closure_dicts: some(_), ..",
+         ".."),
+        ("verifier direct Call context guard", "verify",
+         "if is_exact_direct_call_ident(callee) {",
+         "if false {"),
+        ("verifier direct marker local-slot guard", "verify",
+         "if v_lookup(ctx, direct_def_id) >= 0 {\n"
+         "                    panic(\"RC verifier direct-call marker DefId ${direct_def_id} is local/captured\")\n"
+         "                }",
+         "if false {}"),
         ("exact callee miss panic", "cexpr",
          "none => panic(\n"
          "                    \"C codegen: exact local callee '${name}' DefId ${id} has no slot\")",
@@ -5617,6 +5669,33 @@ def identity_checkpoint_source_errors() -> List[str]:
     return errors
 
 
+IDENTITY_CANDIDATE_RC_FIXTURES = (
+    "tests/cases/provenance_b_capture_identity.ring",
+    "tests/cases/local_closure_exact_call.ring",
+    "tests/cases/drop_nullary_variant_ctor_repeat.ring",
+    "tests/cases/golden/generic_extern_fn_value_bound.ring",
+)
+
+
+def identity_candidate_verify_rc_errors(ring_exe: str) -> List[str]:
+    errors: List[str] = []
+    for fixture in IDENTITY_CANDIDATE_RC_FIXTURES:
+        try:
+            result = ring_check(
+                ring_exe, fixture, extra_args=["--verify-rc"],
+                phase_suite="structural",
+                phase_case=f"compiler.identity_checkpoint/verify-rc/{fixture}",
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(f"candidate verify-rc timed out: {fixture}")
+            continue
+        if result.returncode != 0:
+            output = process_output(result).strip()
+            errors.append(
+                f"candidate verify-rc failed for {fixture}: {output}")
+    return errors
+
+
 def identity_checkpoint_candidate_identity(
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve and hash the explicitly selected I-prime candidate compiler."""
@@ -5658,7 +5737,10 @@ def identity_checkpoint_errors() -> Tuple[List[str], str]:
         return errors, f"{IDENTITY_CANDIDATE_ENV}=unset; source/mutation only"
     assert digest is not None
     detail = f"candidate={candidate}; sha256={digest}"
-    errors.extend(default_body_identity_generated_c_errors(candidate))
+    verify_errors = identity_candidate_verify_rc_errors(candidate)
+    errors.extend(verify_errors)
+    if not verify_errors:
+        errors.extend(default_body_identity_generated_c_errors(candidate))
     post_candidate, post_digest, post_error = (
         identity_checkpoint_candidate_identity())
     if post_error is not None:
