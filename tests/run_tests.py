@@ -3354,6 +3354,400 @@ def extract_c_function_body(c_source: str, symbol: str) -> Tuple[Optional[str], 
     return c_source[open_index + 1:close_index], None
 
 
+@dataclass(frozen=True)
+class CEnvStoreFact:
+    container: str
+    index: int
+    source: str
+
+
+@dataclass(frozen=True)
+class CContainerLoadFact:
+    target: str
+    container: str
+    index: int
+
+
+@dataclass(frozen=True)
+class CClosureConstructionFact:
+    root: str
+    environment: str
+    lambda_symbol: str
+
+
+@dataclass(frozen=True)
+class CUniformClosureCallFact:
+    result: str
+    root: str
+
+
+@dataclass(frozen=True)
+class CLocalAssignmentFact:
+    target: str
+    source: str
+
+
+@dataclass(frozen=True)
+class CFunctionProvenanceFacts:
+    symbol: str
+    params: Tuple[str, ...]
+    stores: Tuple[CEnvStoreFact, ...]
+    loads: Tuple[CContainerLoadFact, ...]
+    closures: Tuple[CClosureConstructionFact, ...]
+    closure_calls: Tuple[CUniformClosureCallFact, ...]
+    assignments: Tuple[CLocalAssignmentFact, ...]
+
+
+_C_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
+_C_PTR_INDEX_RE = re.compile(
+    rf"\(\(\s*void\s*\*\s*\*\s*\)\s*({_C_IDENT})\s*\)"
+    r"\s*\[\s*([0-9]+)\s*\]"
+)
+
+
+def _balanced_c_statements(function_body: str) -> Tuple[List[str], List[str]]:
+    """Split generated C into semicolon statements outside nested parens."""
+    masked = mask_c_strings_and_comments(function_body)
+    statements: List[str] = []
+    errors: List[str] = []
+    start = 0
+    paren_depth = 0
+    bracket_depth = 0
+    for index, char in enumerate(masked):
+        if char == "(":
+            paren_depth += 1
+        elif char == ")":
+            paren_depth -= 1
+            if paren_depth < 0:
+                errors.append("unbalanced ')' in generated C function")
+                paren_depth = 0
+        elif char == "[":
+            bracket_depth += 1
+        elif char == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                errors.append("unbalanced ']' in generated C function")
+                bracket_depth = 0
+        elif char in "{}" and paren_depth == 0 and bracket_depth == 0:
+            start = index + 1
+        elif char == ";" and paren_depth == 0 and bracket_depth == 0:
+            statement = " ".join(masked[start:index].split())
+            if statement:
+                statements.append(statement)
+            start = index + 1
+    if paren_depth != 0 or bracket_depth != 0:
+        errors.append("unbalanced generated C statement delimiters")
+    return statements, errors
+
+
+def parse_c_function_provenance_facts(
+    c_source: str, symbol: str,
+) -> Tuple[Optional[CFunctionProvenanceFacts], List[str]]:
+    """Parse the finite generated-C closure/env grammar, failing closed."""
+    body, body_error = extract_c_function_body(c_source, symbol)
+    if body_error:
+        return None, [body_error]
+    assert body is not None
+    masked_source = mask_c_strings_and_comments(c_source)
+    signature_re = re.compile(
+        rf"(?m)^[ \t]*(?:static[ \t]+)?void[ \t]*\*[ \t]+"
+        rf"{re.escape(symbol)}[ \t]*\(([^;{{}}\n]*)\)[ \t]*\{{"
+    )
+    signatures = list(signature_re.finditer(masked_source))
+    if len(signatures) != 1:
+        return None, [
+            f"generated function {symbol} signature found {len(signatures)} times"
+        ]
+    params = tuple(re.findall(
+        rf"\bvoid\s*\*\s*({_C_IDENT})\b", signatures[0].group(1)))
+    statements, errors = _balanced_c_statements(body)
+
+    allocations: dict[str, int] = {}
+    stores: List[CEnvStoreFact] = []
+    loads: List[CContainerLoadFact] = []
+    lambda_slots: List[Tuple[str, str]] = []
+    closure_calls: List[CUniformClosureCallFact] = []
+    assignments: List[CLocalAssignmentFact] = []
+
+    allocation_re = re.compile(
+        rf"^({_C_IDENT})\s*=\s*ring_alloc\s*\((.*),\s*([0-9]+)\s*\)$")
+    store_re = re.compile(
+        rf"^\(\(\s*void\s*\*\s*\*\s*\)\s*({_C_IDENT})\s*\)"
+        rf"\s*\[\s*([0-9]+)\s*\]\s*=\s*({_C_IDENT})$")
+    lambda_store_re = re.compile(
+        rf"^\(\(\s*void\s*\*\s*\*\s*\)\s*({_C_IDENT})\s*\)"
+        rf"\s*\[\s*0\s*\]\s*=\s*\(\s*void\s*\*\s*\)\s*({_C_IDENT})$")
+    load_re = re.compile(
+        rf"^({_C_IDENT})\s*=\s*\(\(\s*void\s*\*\s*\*\s*\)"
+        rf"\s*({_C_IDENT})\s*\)\s*\[\s*([0-9]+)\s*\]$")
+    assignment_re = re.compile(rf"^({_C_IDENT})\s*=\s*({_C_IDENT})$")
+    lhs_re = re.compile(rf"^({_C_IDENT})\s*=")
+
+    for statement in statements:
+        allocation = allocation_re.match(statement)
+        if allocation:
+            local = allocation.group(1)
+            if local in allocations:
+                errors.append(f"{symbol}: duplicate allocation target {local}")
+            allocations[local] = int(allocation.group(3))
+            continue
+        lambda_store = lambda_store_re.match(statement)
+        if lambda_store:
+            lambda_slots.append((lambda_store.group(1), lambda_store.group(2)))
+            continue
+        store = store_re.match(statement)
+        if store:
+            stores.append(CEnvStoreFact(
+                store.group(1), int(store.group(2)), store.group(3)))
+            continue
+        load = load_re.match(statement)
+        if load:
+            loads.append(CContainerLoadFact(
+                load.group(1), load.group(2), int(load.group(3))))
+            continue
+
+        has_closure_cast = re.search(
+            r"void\s*\*\s*\(\s*\*\s*\)", statement) is not None
+        if has_closure_cast:
+            lhs = lhs_re.match(statement)
+            refs = [(name, int(index)) for name, index in
+                    _C_PTR_INDEX_RE.findall(statement)]
+            if (
+                lhs is None
+                or len(refs) < 2
+                or refs[0][1] != 0
+                or refs[1] != (refs[0][0], 1)
+            ):
+                errors.append(
+                    f"{symbol}: unrecognized uniform closure-call statement: "
+                    f"{statement}")
+            else:
+                closure_calls.append(CUniformClosureCallFact(
+                    lhs.group(1), refs[0][0]))
+            continue
+        assignment = assignment_re.match(statement)
+        if assignment:
+            assignments.append(CLocalAssignmentFact(
+                assignment.group(1), assignment.group(2)))
+
+    for fact_label, facts in (
+        ("env store", stores),
+        ("container load", loads),
+        ("lambda slot", lambda_slots),
+        ("uniform closure call", closure_calls),
+        ("local assignment", assignments),
+    ):
+        if len(facts) != len(set(facts)):
+            errors.append(f"{symbol}: duplicate {fact_label} fact")
+
+    closures: List[CClosureConstructionFact] = []
+    for root, type_id in allocations.items():
+        if type_id != 7:
+            continue
+        root_lambdas = [lambda_symbol for slot_root, lambda_symbol in lambda_slots
+                        if slot_root == root]
+        root_envs = [store.source for store in stores
+                     if store.container == root and store.index == 1]
+        if len(root_lambdas) != 1 or len(root_envs) != 1:
+            errors.append(
+                f"{symbol}: closure root {root} has "
+                f"{len(root_lambdas)} lambda slots/{len(root_envs)} env slots")
+            continue
+        environment = root_envs[0]
+        if allocations.get(environment) != 15:
+            errors.append(
+                f"{symbol}: closure root {root} environment {environment} "
+                "is not a type-15 allocation")
+            continue
+        closures.append(CClosureConstructionFact(
+            root, environment, root_lambdas[0]))
+
+    if errors:
+        return None, errors
+    return CFunctionProvenanceFacts(
+        symbol=symbol,
+        params=params,
+        stores=tuple(stores),
+        loads=tuple(loads),
+        closures=tuple(closures),
+        closure_calls=tuple(closure_calls),
+        assignments=tuple(assignments),
+    ), []
+
+
+def analyze_two_level_provenance_c(
+    c_source: str, parent_symbol: str, label: str,
+) -> List[str]:
+    """Prove exact/evidence roles and parent→outer→inner slot lineage."""
+    errors: List[str] = []
+
+    def parse(symbol: str) -> Optional[CFunctionProvenanceFacts]:
+        facts, fact_errors = parse_c_function_provenance_facts(c_source, symbol)
+        errors.extend(f"{label}: {error}" for error in fact_errors)
+        return facts
+
+    parent = parse(parent_symbol)
+    if parent is None:
+        return errors
+
+    outer_candidates: List[Tuple[CClosureConstructionFact,
+                                 CFunctionProvenanceFacts]] = []
+    for closure in parent.closures:
+        child = parse(closure.lambda_symbol)
+        if child is not None and child.closures:
+            outer_candidates.append((closure, child))
+    if errors:
+        return errors
+    if len(outer_candidates) != 1:
+        return [*errors, (
+            f"{label}: expected one parent→outer closure edge, found "
+            f"{len(outer_candidates)}")]
+    outer_closure, outer = outer_candidates[0]
+    if len(outer.closures) != 1:
+        return [*errors, (
+            f"{label}: expected one outer→inner closure edge, found "
+            f"{len(outer.closures)}")]
+    inner_closure = outer.closures[0]
+    inner = parse(inner_closure.lambda_symbol)
+    if inner is None or errors:
+        return errors
+
+    inner_extractions = [load for load in inner.loads if load.container == "env"]
+    extraction_by_local: dict[str, List[CContainerLoadFact]] = {}
+    for extraction in inner_extractions:
+        extraction_by_local.setdefault(extraction.target, []).append(extraction)
+    call_roots = {call.root for call in inner.closure_calls}
+    exact_candidates = sorted(
+        local for local in extraction_by_local if local in call_roots)
+    evidence_candidates = sorted({
+        (load.container, load.target)
+        for load in inner.loads
+        if (
+            load.container != "env"
+            and load.container in extraction_by_local
+            and load.target in call_roots
+        )
+    })
+    if len(exact_candidates) != 1:
+        errors.append(
+            f"{label}: expected one extracted direct closure root, found "
+            f"{len(exact_candidates)}")
+    if len(evidence_candidates) != 1:
+        errors.append(
+            f"{label}: expected one extracted evidence container→method root, "
+            f"found {len(evidence_candidates)}")
+    if errors:
+        return errors
+    exact_local = exact_candidates[0]
+    evidence_local, method_local = evidence_candidates[0]
+    if exact_local == evidence_local:
+        return [f"{label}: exact closure and evidence container share one root"]
+    if method_local == exact_local:
+        return [f"{label}: evidence method closure aliases exact closure root"]
+    calls_by_root: dict[str, int] = {}
+    for call in inner.closure_calls:
+        calls_by_root[call.root] = calls_by_root.get(call.root, 0) + 1
+    for role, root in (("exact", exact_local), ("evidence", method_local)):
+        if calls_by_root.get(root) != 1:
+            errors.append(
+                f"{label}: {role} root {root} has "
+                f"{calls_by_root.get(root, 0)} uniform calls")
+    if errors:
+        return errors
+
+    def unique_extraction(
+        facts: CFunctionProvenanceFacts, local: str, stage: str,
+    ) -> Optional[CContainerLoadFact]:
+        matches = [load for load in facts.loads
+                   if load.container == "env" and load.target == local]
+        if len(matches) != 1:
+            errors.append(
+                f"{label}: {stage} local {local} has "
+                f"{len(matches)} env extractions")
+            return None
+        return matches[0]
+
+    def unique_store(
+        facts: CFunctionProvenanceFacts, environment: str,
+        index: int, stage: str,
+    ) -> Optional[CEnvStoreFact]:
+        matches = [store for store in facts.stores
+                   if store.container == environment and store.index == index]
+        if len(matches) != 1:
+            errors.append(
+                f"{label}: {stage} env {environment}[{index}] has "
+                f"{len(matches)} stores")
+            return None
+        return matches[0]
+
+    def trace(local: str, role: str) -> Optional[Tuple[str, int, int]]:
+        inner_extract = unique_extraction(inner, local, f"inner {role}")
+        if inner_extract is None:
+            return None
+        outer_store = unique_store(
+            outer, inner_closure.environment, inner_extract.index,
+            f"outer→inner {role}")
+        if outer_store is None:
+            return None
+        outer_extract = unique_extraction(
+            outer, outer_store.source, f"outer {role}")
+        if outer_extract is None:
+            return None
+        parent_store = unique_store(
+            parent, outer_closure.environment, outer_extract.index,
+            f"parent→outer {role}")
+        if parent_store is None:
+            return None
+        return parent_store.source, inner_extract.index, outer_extract.index
+
+    exact_trace = trace(exact_local, "exact")
+    evidence_trace = trace(evidence_local, "evidence")
+    if exact_trace is None or evidence_trace is None or errors:
+        return errors
+    exact_terminal, exact_inner_index, exact_parent_index = exact_trace
+    evidence_terminal, evidence_inner_index, evidence_parent_index = evidence_trace
+    if exact_inner_index == evidence_inner_index:
+        errors.append(f"{label}: exact/evidence share inner env index")
+    if exact_parent_index == evidence_parent_index:
+        errors.append(f"{label}: exact/evidence share parent env index")
+
+    def resolve_parent_alias(local: str) -> Optional[str]:
+        seen: set[str] = set()
+        current = local
+        while True:
+            if current in seen:
+                errors.append(f"{label}: parent alias cycle at {current}")
+                return None
+            seen.add(current)
+            matches = [assignment.source for assignment in parent.assignments
+                       if assignment.target == current]
+            if len(matches) > 1:
+                errors.append(
+                    f"{label}: parent local {current} has duplicate aliases")
+                return None
+            if not matches:
+                return current
+            current = matches[0]
+
+    exact_origin = resolve_parent_alias(exact_terminal)
+    evidence_origin = resolve_parent_alias(evidence_terminal)
+    if exact_origin is None or evidence_origin is None:
+        return errors
+    closure_roots = {closure.root for closure in parent.closures}
+    if exact_origin not in closure_roots or exact_origin == outer_closure.root:
+        errors.append(
+            f"{label}: exact lineage does not end at a local closure pair")
+    if evidence_origin not in parent.params:
+        errors.append(
+            f"{label}: evidence lineage does not end at a parent input")
+    if evidence_origin in closure_roots:
+        errors.append(
+            f"{label}: evidence lineage ends at a constructed closure")
+    if exact_origin == evidence_origin:
+        errors.append(f"{label}: exact/evidence parent origins alias")
+    return errors
+
+
 def extract_c_switch_cases(
     function_body: str,
 ) -> Tuple[dict[str, str], Optional[str]]:
@@ -5406,22 +5800,8 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
                 f"{label}: inner lambda collapsed exact/name-only extraction")
             return nested_errors
 
-        spelling = rf"{re.escape(c_prefix)}(?:_[0-9]+)?"
-        evidence_names = set(re.findall(
-            rf"\(\(void\*\*\)({spelling})\)\[[0-9]+\]", inner))
-        exact_names: set[str] = set()
-        closure_temps = set(re.findall(
-            r"\(\(void\*\*\)(t[0-9]+)\)\[0\]", inner))
-        for temp_name, source_name in re.findall(
-                rf"\b(t[0-9]+)\s*=\s*({spelling})\s*;", inner):
-            if temp_name in closure_temps:
-                exact_names.add(source_name)
-        if not any(
-                exact_name != evidence_name
-                for exact_name in exact_names
-                for evidence_name in evidence_names):
-            nested_errors.append(
-                f"{label}: exact closure use aliases name-only evidence receiver")
+        nested_errors.extend(analyze_two_level_provenance_c(
+            provenance_source, parent_symbol, label))
         if "ring___ring_T_Ord(" in inner:
             nested_errors.append(
                 f"{label}: exact local call fell through to module function")

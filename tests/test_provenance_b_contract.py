@@ -10,6 +10,68 @@ if str(TESTS_DIR) not in sys.path:
 import run_tests as runner
 
 
+def valid_two_level_c() -> str:
+    return r"""
+void* seed_fn(void* env) {
+    return RING_UNIT;
+}
+
+void* inner_fn(void* env) {
+    /* Decoy: bad = ((void* (*)(void*))(((void**)wrong)[1]))(((void**)wrong)[0]); */
+    const char* ignored = "((void**)also_wrong)[0]";
+    void* exact_leaf;
+    void* evidence_leaf;
+    void* method_leaf;
+    void* exact_result;
+    void* evidence_result;
+    exact_leaf = ((void**)env)[1];
+    evidence_leaf = ((void**)env)[2];
+    exact_result = ((void* (*)(void*))(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1]);
+    method_leaf = ((void**)evidence_leaf)[3];
+    evidence_result =
+        ((void* (*)(void*))(((void**)method_leaf)[0]))
+        (((void**)method_leaf)[1]);
+    return evidence_result;
+}
+
+void* outer_fn(void* env) {
+    void* exact_forward;
+    void* evidence_forward;
+    void* inner_env;
+    void* inner_pair;
+    exact_forward = ((void**)env)[1];
+    evidence_forward = ((void**)env)[2];
+    inner_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);
+    ((void**)inner_env)[1] = exact_forward;
+    ((void**)inner_env)[2] = evidence_forward;
+    inner_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);
+    ((void**)inner_pair)[0] = (void*)inner_fn;
+    ((void**)inner_pair)[1] = inner_env;
+    return inner_pair;
+}
+
+void* parent_root(void* input_capsule) {
+    void* seed_env;
+    void* seed_pair;
+    void* exact_local;
+    void* outer_env;
+    void* outer_pair;
+    seed_env = ring_alloc((int64_t)sizeof(int64_t), 15);
+    seed_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);
+    ((void**)seed_pair)[0] = (void*)seed_fn;
+    ((void**)seed_pair)[1] = seed_env;
+    exact_local = seed_pair;
+    outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);
+    ((void**)outer_env)[1] = exact_local;
+    ((void**)outer_env)[2] = input_capsule;
+    outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);
+    ((void**)outer_pair)[0] = (void*)outer_fn;
+    ((void**)outer_pair)[1] = outer_env;
+    return outer_pair;
+}
+"""
+
+
 class ProvenanceBContractTests(unittest.TestCase):
     def test_registered_source_and_mutation_inventory(self) -> None:
         self.assertEqual(runner.identity_checkpoint_source_errors(), [])
@@ -23,6 +85,68 @@ class ProvenanceBContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8").splitlines()
         self.assertEqual(
             expected, ["15", "15", "true", "7", "12", "true"])
+
+    def test_two_level_fact_analyzer_accepts_direct_and_method_roots(self) -> None:
+        self.assertEqual(
+            runner.analyze_two_level_provenance_c(
+                valid_two_level_c(), "parent_root", "synthetic"),
+            [],
+        )
+
+    def test_two_level_fact_analyzer_rejects_adversarial_matrix(self) -> None:
+        valid = valid_two_level_c()
+        mutations = {
+            "same inner index": valid.replace(
+                "evidence_leaf = ((void**)env)[2];",
+                "evidence_leaf = ((void**)env)[1];",
+            ),
+            "exact via evidence container": valid.replace(
+                "(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1])",
+                "(((void**)evidence_leaf)[0]))(((void**)evidence_leaf)[1])",
+                1,
+            ),
+            "evidence load from exact root": valid.replace(
+                "method_leaf = ((void**)evidence_leaf)[3];",
+                "method_leaf = ((void**)exact_leaf)[3];",
+            ),
+            "swapped parent lineage": valid.replace(
+                "((void**)outer_env)[1] = exact_local;\n"
+                "    ((void**)outer_env)[2] = input_capsule;",
+                "((void**)outer_env)[1] = input_capsule;\n"
+                "    ((void**)outer_env)[2] = exact_local;",
+            ),
+            "missing exact root": valid.replace(
+                "    exact_result = ((void* (*)(void*))(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1]);\n",
+                "",
+            ),
+            "ambiguous direct roots": valid.replace(
+                "    method_leaf = ((void**)evidence_leaf)[3];",
+                "    exact_result = ((void* (*)(void*))(((void**)evidence_leaf)[0]))(((void**)evidence_leaf)[1]);\n"
+                "    method_leaf = ((void**)evidence_leaf)[3];",
+            ),
+            "duplicate store index": valid.replace(
+                "    ((void**)outer_env)[1] = exact_local;",
+                "    ((void**)outer_env)[1] = exact_local;\n"
+                "    ((void**)outer_env)[1] = input_capsule;",
+            ),
+            "old temp-copy assumption": valid.replace(
+                "    exact_result = ((void* (*)(void*))(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1]);",
+                "    copied_leaf = exact_leaf;\n"
+                "    exact_result = ((void* (*)(void*))(((void**)copied_leaf)[0]))(((void**)copied_leaf)[1]);",
+            ),
+            "unrecognized closure call": valid.replace(
+                "(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1])",
+                "(((void**)exact_leaf)[1]))(((void**)exact_leaf)[0])",
+                1,
+            ),
+        }
+        for name, mutated in mutations.items():
+            with self.subTest(name=name):
+                self.assertTrue(
+                    runner.analyze_two_level_provenance_c(
+                        mutated, "parent_root", name),
+                    name,
+                )
 
 
 if __name__ == "__main__":
