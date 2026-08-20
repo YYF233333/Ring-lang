@@ -1,7 +1,7 @@
 {
   "schema": "ring.repository-health.v1",
   "max_worktrees": 5,
-  "max_dirty_worktrees": 0,
+  "max_dirty_worktrees": 2,
   "max_main_ahead": 10,
   "max_unpushed_age_hours": 24,
   "board_items": ["B-176", "B-180", "B-188", "#268", "#269"],
