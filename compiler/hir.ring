@@ -27,6 +27,12 @@ pub fn synthetic_def_id(base: Int, ordinal: Int) -> Int {
     base - ordinal
 }
 
+pub fn is_synthetic_dict_def_id(def_id: Int) -> Bool {
+    def_id < SYNTHETIC_DICT_DEF_ID_BASE &&
+        def_id > SYNTHETIC_DICT_DEF_ID_BASE -
+            SYNTHETIC_DEF_ID_NAMESPACE_SIZE
+}
+
 // Callable values installed directly by builtins.ring rather than parsed from
 // a Decl. Checker provenance and both native backends must consume this one
 // list so a newly added checker-only callable cannot drift across phases.

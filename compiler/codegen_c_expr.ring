@@ -22,7 +22,7 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HStringInterpPart,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value, variant_ctor_name, compare_by_first,
     trait_dict_name, trait_bound_param_name, evidence_param_name,
     effect_name_from_evidence_param, is_extern_handle_type,
-    slot_bridge_runtime_name}
+    slot_bridge_runtime_name, is_synthetic_dict_def_id}
 use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEmitState, CHandleCleanup, c_emit, c_raw,
     fresh_tmp, fresh_i64, fresh_dbl, fresh_label, c_local, c_local_def,
     c_param, c_param_def, c_value_slot, c_exact_value_slot,
@@ -4079,14 +4079,18 @@ fn gen_c_index_expr(mut ctx: CCtx, receiver: HExpr, index: HExpr) -> Str {
 // Statement dispatch
 // ============================================================
 
+fn c_is_name_only_dict_def_id(def_id: Int?) -> Bool {
+    match def_id {
+        some(id) => is_synthetic_dict_def_id(id),
+        none => false
+    }
+}
+
 pub fn emit_c_stmt(mut ctx: CCtx, stmt: HStmt) {
     match stmt {
         HStmt::Let { name, def_id, init, span, .. } => {
             c_line_directive(ctx, span)
-            let is_name_only_dict = match init {
-                HExpr::DictConstruct { .. } => true,
-                _ => false
-            }
+            let is_name_only_dict = c_is_name_only_dict_def_id(def_id)
             let val = gen_c_expr(ctx, init)
             let cv = c_local_def(ctx, name, def_id)
             if is_name_only_dict {

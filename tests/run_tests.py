@@ -4358,6 +4358,7 @@ def identity_checkpoint_contract_errors(
             "SYNTHETIC_DICT_DEF_ID_BASE",
             "SYNTHETIC_ANF_DEF_ID_BASE",
             "SYNTHETIC_RC_DEF_ID_BASE",
+            "pub fn is_synthetic_dict_def_id(",
             "pub fn validate_hir_binder_def_ids",
             "fn validate_hir_local_reference(",
             "block_local_init(stmts, id)",
@@ -4426,7 +4427,9 @@ def identity_checkpoint_contract_errors(
             "bind_c_root_pattern_after_success(",
             "C codegen: Drop '${name}' has no exact DefId slot",
             "C codegen: assignment '${name}' has no exact DefId",
-            "let is_name_only_dict = match init",
+            "fn c_is_name_only_dict_def_id(",
+            "let is_name_only_dict = c_is_name_only_dict_def_id(def_id)",
+            "let val = gen_c_expr(ctx, init)",
         ),
         "verify": (
             "def_ids: List<Int>",
@@ -4482,6 +4485,25 @@ def identity_checkpoint_contract_errors(
             "c_exact_value_slot(ctx, name, id)",
             "gen_c_closure_call(ctx, slot, arg_vals)")):
         errors.append("exact local callable no longer takes the closure ABI path")
+
+    stmt_body, stmt_error = extract_ring_function_body(
+        sources["cexpr"], "emit_c_stmt")
+    if stmt_error:
+        errors.append(stmt_error)
+    elif not all(token in stmt_body for token in (
+            "let is_name_only_dict = c_is_name_only_dict_def_id(def_id)",
+            "let val = gen_c_expr(ctx, init)")):
+        errors.append("Dict alias provenance is not derived from exact synthetic DefId")
+    elif stmt_body.count("gen_c_expr(ctx, init)") != 2:
+        # One Let and one Var arm; the Let arm must have no second init read.
+        errors.append("statement lowering changed the exact one-read-per-init contract")
+
+    dict_id_body, dict_id_error = extract_ring_function_body(
+        sources["cexpr"], "c_is_name_only_dict_def_id")
+    if dict_id_error:
+        errors.append(dict_id_error)
+    elif "is_synthetic_dict_def_id(id)" not in dict_id_body:
+        errors.append("Dict name-only provenance is not the synthetic DefId namespace")
 
     mut_flags_body, mut_flags_error = extract_ring_function_body(
         sources["cexpr"], "c_lookup_call_mut_flags")
@@ -4613,7 +4635,13 @@ def identity_checkpoint_contract_errors(
         "perceus": ("DROP_PRODUCER_NOOP_NONE", "is_option_none_ctor_ident"),
         "hir": ("OwnershipMetadata", "Take {"),
         "cctx": ("exact_value_names", "name_only_values"),
-        "cexpr": ('starts_with("__ring_dictlocal_")',),
+        "cexpr": (
+            'starts_with("__ring_dictlocal_")',
+            "let is_name_only_dict = match init",
+            "c_is_name_only_dict_init",
+            "init_for_classification",
+            "init_for_codegen",
+        ),
     }
     for label, tokens in forbidden.items():
         for token in tokens:
@@ -4714,6 +4742,12 @@ def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[st
         ("exact local closure call", "cexpr",
          "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
          "let closure_result = gen_c_direct_call(ctx, name, arg_vals, dict_vals)"),
+        ("synthetic Dict provenance", "cexpr",
+         "is_synthetic_dict_def_id(id)",
+         "is_synthetic_anf_def_id(id)"),
+        ("Let Dict DefId routing", "cexpr",
+         "let is_name_only_dict = c_is_name_only_dict_def_id(def_id)",
+         "let is_name_only_dict = false"),
         ("exact local mut-flag isolation", "cexpr",
          "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n                    return none",
          "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n                    return ctx.fn_mut_params.get(name)"),
