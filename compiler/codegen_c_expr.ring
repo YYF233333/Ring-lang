@@ -1075,7 +1075,10 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap) => {
-                let cv = c_local_def(ctx, cap.name, cap.def_id)
+                let cv = match cap.def_id {
+                    some(id) => c_local_def(ctx, cap.name, some(id)),
+                    none => c_local(ctx, cap.name)
+                }
                 c_emit(ctx, "${cv} = ((void**)env)[${i + 1}];")
             },
             none => {},

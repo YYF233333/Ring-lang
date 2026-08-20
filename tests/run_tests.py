@@ -56,6 +56,7 @@ COMPILER_ARTIFACT_CACHE = (
     Path(tempfile.gettempdir()) / "ring-lang-compiler-anchor-cache-v3"
 )
 COMPILER_CACHE_ENV = "RING_TEST_COMPILER_CACHE"
+IDENTITY_CANDIDATE_ENV = "RING_IDENTITY_CANDIDATE_EXE"
 COMPILER_CACHE_SCHEMA = "ring.test-runner-compiler-anchor-cache.v3"
 COMPILER_CACHE_VERSION = 3
 COMPILER_CACHE_POISON_SCHEMA = "ring.test-runner-compiler-anchor-poison.v1"
@@ -4422,6 +4423,8 @@ def identity_checkpoint_contract_errors(
             "some(id) => match c_exact_value_slot(ctx, name, id)",
             "let exact_local_callee = match callee",
             "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
+            "some(id) => c_local_def(ctx, cap.name, some(id))",
+            "none => c_local(ctx, cap.name)",
             "fn c_lookup_call_mut_flags(",
             "fn c_pattern_local(",
             "bind_c_root_pattern_after_success(",
@@ -4566,6 +4569,25 @@ def identity_checkpoint_contract_errors(
     elif stmt_body.count("gen_c_expr(ctx, init)") != 2:
         # One Let and one Var arm; the Let arm must have no second init read.
         errors.append("statement lowering changed the exact one-read-per-init contract")
+
+    lambda_body, lambda_error = extract_ring_function_body(
+        sources["cexpr"], "gen_c_lambda")
+    if lambda_error:
+        errors.append(lambda_error)
+    else:
+        capture_registration = (
+            "let cv = match cap.def_id {\n"
+            "                    some(id) => c_local_def("
+            "ctx, cap.name, some(id)),\n"
+            "                    none => c_local(ctx, cap.name)\n"
+            "                }")
+        if lambda_body.count(capture_registration) != 1:
+            errors.append(
+                "lambda capture extraction does not split exact and "
+                "name-only registration")
+        if "c_local_def(ctx, cap.name, cap.def_id)" in lambda_body:
+            errors.append(
+                "lambda capture extraction routes missing DefId through exact local")
 
     dict_id_body, dict_id_error = extract_ring_function_body(
         sources["cexpr"], "c_is_name_only_dict_def_id")
@@ -4776,10 +4798,69 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
     else:
         errors.extend(exact_shadow_slot_errors(
             effect_bodies[0], "effect default"))
+
+    mixed_body, mixed_error = extract_c_function_body(
+        source, "ring_mixed_evidence_capture")
+    if mixed_error:
+        errors.append(mixed_error)
+        return errors
+
+    same_spelling = r"r___ring_T_Ord(?:_[0-9]+)?"
+    outer_stores = re.findall(
+        rf"\(\(void\*\*\)(t[0-9]+)\)\[([0-9]+)\]\s*=\s*"
+        rf"({same_spelling})\s*;",
+        mixed_body,
+    )
+    stores_by_env: dict[str, set[str]] = {}
+    for env_name, _, value_name in outer_stores:
+        stores_by_env.setdefault(env_name, set()).add(value_name)
+    if not any(len(values) == 2 for values in stores_by_env.values()):
+        errors.append(
+            "mixed evidence capture did not store distinct same-spelled "
+            "exact and name-only values")
+
+    lambda_refs = set(re.findall(
+        r"\(\(void\*\*\)t[0-9]+\)\[0\]\s*=\s*"
+        r"\(void\*\)(ring_c_lambda_[0-9]+)\s*;",
+        mixed_body,
+    ))
+    separated_lambdas: List[str] = []
+    for symbol in lambda_refs:
+        body, extract_error = extract_c_function_body(source, symbol)
+        if extract_error is not None:
+            continue
+        condition = re.search(
+            rf"RING_COND\s*\(\s*({same_spelling})\s*\)", body)
+        evidence = re.search(
+            rf"\(\(void\*\*\)({same_spelling})\)\[1\]", body)
+        if condition is None or evidence is None:
+            continue
+        condition_name = condition.group(1)
+        evidence_name = evidence.group(1)
+        if condition_name == evidence_name:
+            continue
+        extractions = {
+            name: slot for name, slot in re.findall(
+                rf"\b({same_spelling})\s*=\s*"
+                r"\(\(void\*\*\)env\)\[([0-9]+)\]\s*;",
+                body,
+            )
+        }
+        if (
+            condition_name in extractions
+            and evidence_name in extractions
+            and extractions[condition_name] != extractions[evidence_name]
+        ):
+            separated_lambdas.append(symbol)
+    if len(separated_lambdas) != 1:
+        errors.append(
+            "mixed evidence generated C expected one lambda with distinct "
+            "exact-condition and name-only-dict capture slots, found "
+            f"{len(separated_lambdas)}")
     return errors
 
 
-def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[str]:
+def identity_checkpoint_source_errors() -> List[str]:
     paths = {
         "hir": REPO / "compiler" / "hir.ring",
         "infer": REPO / "compiler" / "infer.ring",
@@ -4811,6 +4892,9 @@ def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[st
         ("exact local closure call", "cexpr",
          "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
          "let closure_result = gen_c_direct_call(ctx, name, arg_vals, dict_vals)"),
+        ("name-only lambda capture extraction", "cexpr",
+         "none => c_local(ctx, cap.name)",
+         "none => c_local_def(ctx, cap.name, none)"),
         ("synthetic Dict provenance", "cexpr",
          "is_synthetic_dict_def_id(id)",
          "is_synthetic_anf_def_id(id)"),
@@ -4873,9 +4957,59 @@ def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[st
         mutated[source_name] = sources[source_name].replace(anchor, replacement, 1)
         if not identity_checkpoint_contract_errors(mutated):
             errors.append(f"mutation {label} escaped exact-slot source oracle")
-    if ring_exe is not None:
-        errors.extend(default_body_identity_generated_c_errors(ring_exe))
     return errors
+
+
+def identity_checkpoint_candidate_identity(
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Resolve and hash the explicitly selected I-prime candidate compiler."""
+    raw = os.environ.get(IDENTITY_CANDIDATE_ENV)
+    if raw is None:
+        return None, None, None
+    if not raw:
+        return None, None, f"{IDENTITY_CANDIDATE_ENV} is empty"
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        return None, None, f"{IDENTITY_CANDIDATE_ENV} must be an absolute path"
+    try:
+        resolved = candidate.resolve(strict=True)
+        before = resolved.stat()
+        if not stat.S_ISREG(before.st_mode):
+            return None, None, (
+                f"{IDENTITY_CANDIDATE_ENV} is not a regular file: {resolved}")
+        digest = _sha256_file(resolved)
+        after = resolved.stat()
+    except OSError as exc:
+        return None, None, (
+            f"cannot resolve/hash {IDENTITY_CANDIDATE_ENV}: {exc}")
+    if (
+        before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+    ):
+        return None, None, (
+            f"{IDENTITY_CANDIDATE_ENV} changed while hashing: {resolved}")
+    return str(resolved), digest, None
+
+
+def identity_checkpoint_errors() -> Tuple[List[str], str]:
+    errors = identity_checkpoint_source_errors()
+    candidate, digest, candidate_error = identity_checkpoint_candidate_identity()
+    if candidate_error is not None:
+        errors.append(candidate_error)
+        return errors, f"{IDENTITY_CANDIDATE_ENV}=invalid"
+    if candidate is None:
+        return errors, f"{IDENTITY_CANDIDATE_ENV}=unset; source/mutation only"
+    assert digest is not None
+    detail = f"candidate={candidate}; sha256={digest}"
+    errors.extend(default_body_identity_generated_c_errors(candidate))
+    post_candidate, post_digest, post_error = (
+        identity_checkpoint_candidate_identity())
+    if post_error is not None:
+        errors.append(
+            f"candidate identity unavailable after generated-C gate: {post_error}")
+    elif post_candidate != candidate or post_digest != digest:
+        errors.append("candidate executable identity changed during generated-C gate")
+    return errors, detail
 
 
 def run_structural(ring_exe: str, collector: ResultCollector, *,
@@ -4891,10 +5025,11 @@ def run_structural(ring_exe: str, collector: ResultCollector, *,
 
     identity_label = "compiler.identity_checkpoint"
     if matches_filter(identity_label, name_filter):
-        identity_errors = identity_checkpoint_source_errors(ring_exe)
+        identity_errors, identity_detail = identity_checkpoint_errors()
+        detail_parts = [identity_detail, *identity_errors]
         collector.add(TestResult(
             TestResult.PASS if not identity_errors else TestResult.FAIL,
-            suite, identity_label, "; ".join(identity_errors)))
+            suite, identity_label, "; ".join(detail_parts)))
 
     jobs = []
     for case_name, entry, fixtures in C_LINE_BUILD_CASES:
