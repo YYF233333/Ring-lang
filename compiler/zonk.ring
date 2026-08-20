@@ -7,7 +7,7 @@ use hir::{HExpr, HStmt, HParam, HMatchArm, HEffectHandler,
     hexpr_type, hexpr_effects, hexpr_span}
 use union_find::{UnionFind}
 use env::{apply_subst, apply_subst_row}
-use infer_ctx::{InferCtx, value_binding_kind}
+use infer_ctx::{InferCtx, value_binding_kind, has_variant_ctor_origin_def_id}
 use infer_helpers::{resolve_value_ident}
 
 pub struct ZonkCtx {
@@ -400,6 +400,24 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
     }
 }
 
+fn mark_zonk_direct_callee(ident: HExpr) -> HExpr {
+    match ident {
+        HExpr::Ident { .. } => HExpr::Ident {
+            ..ident, dict_closure_dicts: some([])
+        },
+        _ => panic("zonk: direct callee marker requires Ident")
+    }
+}
+
+fn clear_zonk_local_callee_marker(ident: HExpr) -> HExpr {
+    match ident {
+        HExpr::Ident { .. } => HExpr::Ident {
+            ..ident, dict_closure_dicts: none
+        },
+        _ => panic("zonk: local callee marker requires Ident")
+    }
+}
+
 fn zonk_direct_callee(ctx: ZonkCtx, callee: HExpr) -> HExpr {
     match callee {
         HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, .. } => {
@@ -416,7 +434,20 @@ fn zonk_direct_callee(ctx: ZonkCtx, callee: HExpr) -> HExpr {
                     match value_binding_kind(resolver, def_id) {
                         ValueBindingKind::ConstGetter =>
                             resolve_value_ident(resolver, ident, ctx.subst),
-                        _ => ident
+                        ValueBindingKind::DirectCallable =>
+                            mark_zonk_direct_callee(ident),
+                        ValueBindingKind::ExternCallable =>
+                            mark_zonk_direct_callee(ident),
+                        ValueBindingKind::LocalBorrow => match def_id {
+                            some(id) => {
+                                if has_variant_ctor_origin_def_id(resolver, id) {
+                                    mark_zonk_direct_callee(ident)
+                                } else {
+                                    clear_zonk_local_callee_marker(ident)
+                                }
+                            },
+                            none => clear_zonk_local_callee_marker(ident)
+                        }
                     }
                 },
                 none => ident

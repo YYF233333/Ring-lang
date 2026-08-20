@@ -712,7 +712,9 @@ fn c_match_name_only_slot(
 // #B-087 gap 5 port: mut value-type args are passed as a shared CELL.
 fn c_lookup_call_mut_flags(ctx: CCtx, callee: HExpr) -> List<Bool>? {
     match callee {
-        HExpr::Ident { name, resolved_name, def_id, .. } => {
+        HExpr::Ident {
+            name, resolved_name, def_id, dict_closure_dicts, ..
+        } => {
             let call_name = match resolved_name {
                 some(rn) => rn,
                 none => name,
@@ -720,8 +722,15 @@ fn c_lookup_call_mut_flags(ctx: CCtx, callee: HExpr) -> List<Bool>? {
             // Local closures carry their own callable ABI. They must not
             // inherit mut-parameter metadata from a same-spelled module fn.
             match def_id {
-                some(id) => if c_exact_value_slot(ctx, name, id).is_some() {
-                    return none
+                some(id) => match c_exact_value_slot(ctx, name, id) {
+                    some(_) => { return none },
+                    none => match dict_closure_dicts {
+                        // Marked declaration/constructor: module mut metadata
+                        // is authoritative after the exact-local miss.
+                        some(_) => {},
+                        // Unmarked exact local: gen_c_call will fail loud.
+                        none => { return none }
+                    }
                 },
                 none => match c_match_name_only_slot(ctx, call_name, name) {
                     some(_) => { return none },
@@ -2538,7 +2547,18 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
                 "RING_UNIT"
             } else { closure_result }
         },
-        none => {}
+        none => match callee {
+            HExpr::Ident {
+                name, def_id: some(id), dict_closure_dicts, ..
+            } => match dict_closure_dicts {
+                // Final zonk proved a direct declaration/constructor.
+                some(_) => {},
+                // A DefId-bearing local may never fall through by spelling.
+                none => panic(
+                    "C codegen: exact local callee '${name}' DefId ${id} has no slot")
+            },
+            _ => {}
+        }
     }
 
 

@@ -1196,6 +1196,15 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
 // pair/env is scope-end-dropped after the immediate invocation.
 fn anf_callee(callee: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
     let normalized = anf_borrow(callee, hoists, externs, counter)
+    match normalized {
+        // Final zonk marks syntactic Direct/Extern/ctor Idents.  Their
+        // dictionaries remain Call.resolved_dicts; materialising this Ident
+        // would incorrectly switch the direct ABI to a closure wrapper.
+        HExpr::Ident { dict_closure_dicts: some(_), .. } => {
+            return normalized
+        },
+        _ => {}
+    }
     if is_materializable_fn_value(normalized, externs) || anf_should_materialize(normalized, externs) {
         anf_materialize(normalized, hoists, counter)
     } else {

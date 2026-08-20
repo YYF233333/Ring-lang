@@ -21,7 +21,8 @@ class ProvenanceBContractTests(unittest.TestCase):
             / "cases"
             / "provenance_b_capture_identity.expected"
         ).read_text(encoding="utf-8").splitlines()
-        self.assertEqual(expected, ["15", "true", "7", "12", "true"])
+        self.assertEqual(
+            expected, ["15", "15", "true", "7", "12", "true"])
 
 
 if __name__ == "__main__":

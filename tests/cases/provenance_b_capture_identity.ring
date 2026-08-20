@@ -3,6 +3,10 @@ fn __ring_T_Ord(mut value: Int) -> Int {
     value
 }
 
+fn direct_global_with_ord_evidence<T: Ord>(left: T, right: T) -> Int {
+    if left < right { __ring_T_Ord(5) } else { 0 }
+}
+
 fn nested_trait_collision<T: Ord>(left: T, right: T) -> Bool {
     let __ring_T_Ord = fn(value: Int) -> Int { value + 1 }
     let outer = fn() -> Bool {
@@ -81,6 +85,7 @@ fn dynamic_static_dict_collision<T: Eq>(left: T, right: T) -> Bool {
 
 fn main() {
     print(__ring_T_Ord(5))
+    print(direct_global_with_ord_evidence(1, 2))
     print(nested_trait_collision(1, 2))
     print(ProvenanceCarrier {}.combined())
     let effect_value = handle {

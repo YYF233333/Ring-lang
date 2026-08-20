@@ -4395,6 +4395,7 @@ def identity_checkpoint_contract_errors(
             "ctx.env.bind(authority.name, authority.scheme)",
             "canonical or-pattern binding has no exact DefId",
             "or-pattern alternative binding has no exact DefId",
+            "pub fn has_variant_ctor_origin_def_id(",
         ),
         "dict": (
             "synthetic_def_id(",
@@ -4408,6 +4409,16 @@ def identity_checkpoint_contract_errors(
             "TraitDispatch::Direct { dict: dict, extra_dicts: [] }",
             "DictRef::Simple(param) =>",
             "TraitDispatch::Dict { param: param }",
+            "dict_closure_dicts: some([]), ty: getter_ty",
+        ),
+        "zonk": (
+            "fn mark_zonk_direct_callee(",
+            "fn clear_zonk_local_callee_marker(",
+            "dict_closure_dicts: some([])",
+            "ValueBindingKind::DirectCallable =>",
+            "ValueBindingKind::ExternCallable =>",
+            "has_variant_ctor_origin_def_id(resolver, id)",
+            "clear_zonk_local_callee_marker(ident)",
         ),
         "derive": (
             "base_dict: DictRef::Simple(",
@@ -4422,6 +4433,8 @@ def identity_checkpoint_contract_errors(
             "def_id: slot.def_id",
             "validate_hir_binder_def_ids(transformed)",
             "mutate_drop_identity_capture(anf_program)",
+            "HExpr::Ident { dict_closure_dicts: some(_), .. }",
+            "dictionaries remain Call.resolved_dicts",
         ),
         "cctx": (
             "pub value_slots_by_def_id: Map<Int, Str>",
@@ -4459,6 +4472,9 @@ def identity_checkpoint_contract_errors(
             "fn consider_c_required_name_only_capture(",
             "fn consider_c_optional_evidence_capture(",
             "C codegen: bound dictionary",
+            "Final zonk proved a direct declaration/constructor",
+            "A DefId-bearing local may never fall through by spelling",
+            "exact local callee",
             "fn c_lookup_call_mut_flags(",
             "fn c_pattern_local(",
             "bind_c_root_pattern_after_success(",
@@ -4482,6 +4498,7 @@ def identity_checkpoint_contract_errors(
         ),
         "provenance_fixture": (
             "fn __ring_T_Ord(mut value: Int)",
+            "fn direct_global_with_ord_evidence<T: Ord>",
             "fn nested_trait_collision<T: Ord>",
             "let __ring_T_Ord = fn(value: Int)",
             "let __ring_self_ProvenanceTrait = fn()",
@@ -4614,6 +4631,16 @@ def identity_checkpoint_contract_errors(
         < call_body.index("let raw = match callee")
     ):
         errors.append("callable exact/name-only/global precedence drifted")
+    elif not all(token in call_body for token in (
+            "def_id: some(id), dict_closure_dicts",
+            "some(_) => {}",
+            "A DefId-bearing local may never fall through by spelling",
+            "exact local callee '${name}' DefId ${id} has no slot")):
+        errors.append("exact callee miss is not marker-gated/fail-loud")
+    elif call_body.index(
+            "exact local callee '${name}' DefId ${id} has no slot") > call_body.index(
+            "let name_only_local_callee = match callee"):
+        errors.append("exact callee miss panic occurs after a name/global route")
 
     direct_body, direct_error = extract_ring_function_body(
         sources["cexpr"], "gen_c_direct_call")
@@ -4624,6 +4651,63 @@ def identity_checkpoint_contract_errors(
         or "c_match_name_only_slot" in direct_body
     ):
         errors.append("direct/global call regained ambient name-only lookup")
+
+    zonk_direct_body, zonk_direct_error = extract_ring_function_body(
+        sources["zonk"], "zonk_direct_callee")
+    if zonk_direct_error:
+        errors.append(zonk_direct_error)
+    elif not all(token in zonk_direct_body for token in (
+            "ValueBindingKind::DirectCallable =>\n"
+            "                            mark_zonk_direct_callee(ident)",
+            "ValueBindingKind::ExternCallable =>\n"
+            "                            mark_zonk_direct_callee(ident)",
+            "ValueBindingKind::LocalBorrow => match def_id",
+            "has_variant_ctor_origin_def_id(resolver, id)",
+            "mark_zonk_direct_callee(ident)",
+            "clear_zonk_local_callee_marker(ident)",
+            "else {\n"
+            "                                    clear_zonk_local_callee_marker(ident)\n"
+            "                                }",
+            "none => clear_zonk_local_callee_marker(ident)")):
+        errors.append("final zonk direct/extern/ctor marker authority drifted")
+
+    marker_body, marker_error = extract_ring_function_body(
+        sources["zonk"], "mark_zonk_direct_callee")
+    if marker_error:
+        errors.append(marker_error)
+    elif (
+        "dict_closure_dicts: some([])" not in marker_body
+        or "resolved_name" in marker_body
+    ):
+        errors.append("direct callee marker regained spelling-based authority")
+
+    clear_marker_body, clear_marker_error = extract_ring_function_body(
+        sources["zonk"], "clear_zonk_local_callee_marker")
+    if clear_marker_error:
+        errors.append(clear_marker_error)
+    elif "dict_closure_dicts: none" not in clear_marker_body:
+        errors.append("LocalBorrow direct callee can retain a direct marker")
+
+    resolve_value_body, resolve_value_error = extract_ring_function_body(
+        sources["infer_helpers"], "resolve_value_ident")
+    if resolve_value_error:
+        errors.append(resolve_value_error)
+    elif not all(token in resolve_value_body for token in (
+            "ValueBindingKind::ConstGetter",
+            "dict_closure_dicts: some([]), ty: getter_ty",
+            "callee: getter")):
+        errors.append("ConstGetter synthetic direct Call lacks explicit marker")
+
+    map_index_body, map_index_error = extract_ring_function_body(
+        sources["infer"], "infer_index_expr")
+    if map_index_error:
+        errors.append(map_index_error)
+    elif not all(token in map_index_body for token in (
+            "let callee_name = map_index_helper_identity()",
+            "def_id: callee_scheme.def_id, dict_closure_dicts: none",
+            "callee: callee",
+            "resolved_dicts: resolved_dicts")):
+        errors.append("map index helper bypasses exact final-zonk marker authority")
 
     stmt_body, stmt_error = extract_ring_function_body(
         sources["cexpr"], "emit_c_stmt")
@@ -4836,22 +4920,28 @@ def identity_checkpoint_contract_errors(
             errors.append(
                 f"{function_name}: type-variable FieldAction base is not Simple")
 
+    direct_fixture_contract = (
+        "fn direct_global_with_ord_evidence<T: Ord>(left: T, right: T) -> Int {\n"
+        "    if left < right { __ring_T_Ord(5) } else { 0 }\n"
+        "}")
+    if sources["provenance_fixture"].count(direct_fixture_contract) != 1:
+        errors.append(
+            "direct global/evidence fixture regained a same-named local or lost a route")
+
     mut_flags_body, mut_flags_error = extract_ring_function_body(
         sources["cexpr"], "c_lookup_call_mut_flags")
     if mut_flags_error:
         errors.append(mut_flags_error)
     else:
-        local_gate = "c_exact_value_slot(ctx, name, id).is_some()"
-        exact_gate_block = (
-            "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n"
-            "                    return none"
-        )
+        exact_slot_lookup = "c_exact_value_slot(ctx, name, id)"
         module_lookup = "ctx.fn_mut_params.get(resolved_key)"
         if (
-            local_gate not in mut_flags_body
-            or exact_gate_block not in mut_flags_body
+            exact_slot_lookup not in mut_flags_body
+            or "none => match dict_closure_dicts" not in mut_flags_body
+            or "Unmarked exact local: gen_c_call will fail loud" not in mut_flags_body
+            or "none => { return none }" not in mut_flags_body
             or "c_match_name_only_slot(ctx, call_name, name)" not in mut_flags_body
-            or mut_flags_body.index(local_gate) > mut_flags_body.index(module_lookup)
+            or mut_flags_body.index(exact_slot_lookup) > mut_flags_body.index(module_lookup)
             or mut_flags_body.index(
                 "c_match_name_only_slot(ctx, call_name, name)")
                 > mut_flags_body.index(module_lookup)
@@ -4929,6 +5019,19 @@ def identity_checkpoint_contract_errors(
             "let mut index = names.len()", "index = index - 1",
             "def_id: slot.def_id")):
         errors.append("Perceus cleanup is not reverse-order exact-slot")
+
+    anf_callee_body, anf_callee_error = extract_ring_function_body(
+        sources["perceus"], "anf_callee")
+    if anf_callee_error:
+        errors.append(anf_callee_error)
+    elif not all(token in anf_callee_body for token in (
+            "HExpr::Ident { dict_closure_dicts: some(_), .. }",
+            "return normalized",
+            "is_materializable_fn_value(normalized, externs)")):
+        errors.append("ANF no longer preserves marked syntactic direct callees")
+    elif anf_callee_body.index("return normalized") > anf_callee_body.index(
+            "is_materializable_fn_value(normalized, externs)"):
+        errors.append("ANF direct marker is checked after materialization")
 
     for function_name, required in (
         ("check_effect_decl", (
@@ -5272,6 +5375,22 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
         errors.extend(two_level_provenance_errors(
             parent_symbol, c_prefix, label))
 
+    direct_global_body, direct_global_error = extract_c_function_body(
+        provenance_source, "ring_direct_global_with_ord_evidence")
+    if direct_global_error:
+        errors.append(direct_global_error)
+    else:
+        evidence_receiver = re.search(
+            r"\(\(void\*\*\)r___ring_T_Ord(?:_[0-9]+)?\)\[[0-9]+\]",
+            direct_global_body,
+        )
+        if evidence_receiver is None:
+            errors.append(
+                "direct global generic function did not use Ord evidence")
+        if "ring___ring_T_Ord(" not in direct_global_body:
+            errors.append(
+                "Ord evidence shadowed the exact top-level direct call")
+
     main_body, main_error = extract_c_function_body(
         provenance_source, "ring_main")
     if main_error:
@@ -5298,6 +5417,7 @@ def identity_checkpoint_source_errors() -> List[str]:
         "infer_decl": REPO / "compiler" / "infer_decl.ring",
         "infer_ctx": REPO / "compiler" / "infer_ctx.ring",
         "infer_helpers": REPO / "compiler" / "infer_helpers.ring",
+        "zonk": REPO / "compiler" / "zonk.ring",
         "derive": REPO / "compiler" / "derive.ring",
         "dict": REPO / "compiler" / "dict_lower.ring",
         "perceus": REPO / "compiler" / "perceus.ring",
@@ -5358,6 +5478,37 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("callee name-only tag", "cexpr",
          "HExpr::Ident { name, resolved_name, def_id: none, .. }",
          "HExpr::Ident { name, resolved_name, .. }"),
+        ("DirectCallable final marker", "zonk",
+         "ValueBindingKind::DirectCallable =>\n"
+         "                            mark_zonk_direct_callee(ident)",
+         "ValueBindingKind::DirectCallable => ident"),
+        ("ExternCallable final marker", "zonk",
+         "ValueBindingKind::ExternCallable =>\n"
+         "                            mark_zonk_direct_callee(ident)",
+         "ValueBindingKind::ExternCallable => ident"),
+        ("constructor exact marker", "zonk",
+         "has_variant_ctor_origin_def_id(resolver, id)",
+         "false"),
+        ("LocalBorrow marker clearing", "zonk",
+         "..ident, dict_closure_dicts: none",
+         "..ident, dict_closure_dicts: some([])"),
+        ("ConstGetter direct marker", "infer_helpers",
+         "dict_closure_dicts: some([]), ty: getter_ty",
+         "dict_closure_dicts: none, ty: getter_ty"),
+        ("ANF marked direct preservation", "perceus",
+         "HExpr::Ident { dict_closure_dicts: some(_), .. } => {\n"
+         "            return normalized\n"
+         "        }",
+         "HExpr::Ident { dict_closure_dicts: some(_), .. } => {\n"
+         "            return anf_materialize(normalized, hoists, counter)\n"
+         "        }"),
+        ("exact callee miss panic", "cexpr",
+         "none => panic(\n"
+         "                    \"C codegen: exact local callee '${name}' DefId ${id} has no slot\")",
+         "none => gen_c_direct_call(ctx, name, arg_vals, dict_vals)"),
+        ("map helper exact final-zonk authority", "infer",
+         "def_id: callee_scheme.def_id, dict_closure_dicts: none",
+         "def_id: none, dict_closure_dicts: none"),
         ("resolved name-only canonical key", "cexpr",
          "canonical_key: resolved_key, slot: slot",
          "canonical_key: bare_key, slot: slot"),
@@ -5403,8 +5554,10 @@ def identity_checkpoint_source_errors() -> List[str]:
          "let is_name_only_dict = c_is_name_only_dict_def_id(def_id)",
          "let is_name_only_dict = false"),
         ("exact local mut-flag isolation", "cexpr",
-         "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n                    return none",
-         "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n                    return ctx.fn_mut_params.get(name)"),
+         "// Unmarked exact local: gen_c_call will fail loud.\n"
+         "                        none => { return none }",
+         "// Broken: unmarked local inherits module metadata.\n"
+         "                        none => {}"),
         ("independent name-only slot map", "cctx",
          "ctx.name_only_slots.get(name)", "ctx.named_values.get(name)"),
         ("nested name-only domain restoration", "cctx",

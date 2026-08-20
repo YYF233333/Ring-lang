@@ -1145,6 +1145,10 @@ pub fn variant_ctor_origin(ctx: InferCtx, scheme: TypeScheme) -> Str? {
     }
 }
 
+pub fn has_variant_ctor_origin_def_id(ctx: InferCtx, def_id: Int) -> Bool {
+    ctx.env.types.variant_ctor_origins.contains_key(def_id)
+}
+
 fn resolve_fn_bound_dict_ref(
     current_fn_bounds: List<FnBoundsEntry>,
     id: Int, s: UnionFind, trait_name: Str
