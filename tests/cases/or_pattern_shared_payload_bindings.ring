@@ -15,7 +15,11 @@ enum NamedChoice {
 
 fn positional_value(choice: PositionalChoice) -> Int {
     match choice {
-        PositionalLeft(value) | PositionalRight(value) => value,
+        PositionalLeft(value) | PositionalRight(value) if value > 0 => {
+            let read_value = fn() -> Int { value }
+            read_value()
+        },
+        _ => -1,
     }
 }
 

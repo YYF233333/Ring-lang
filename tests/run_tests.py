@@ -4377,6 +4377,19 @@ def identity_checkpoint_contract_errors(
             "def_id: some(trait_param_def_id)",
             "def_id: some(exact_trait_def_id)",
         ),
+        "infer_ctx": (
+            "struct OrPatternBindingAuthority",
+            "fn collect_or_pattern_binding_names(",
+            "fn same_or_pattern_binding_names(",
+            "fn report_duplicate_or_pattern_bindings(",
+            "Or-pattern alternatives must bind the same variables",
+            "Pattern repeats binding '${duplicate}'",
+            "Or-pattern must contain at least one alternative",
+            "authority.scheme.ty, candidate.ty",
+            "ctx.env.bind(authority.name, authority.scheme)",
+            "canonical or-pattern binding has no exact DefId",
+            "or-pattern alternative binding has no exact DefId",
+        ),
         "dict": (
             "synthetic_def_id(",
             "SYNTHETIC_DICT_DEF_ID_BASE",
@@ -4549,6 +4562,51 @@ def identity_checkpoint_contract_errors(
                         f"{function_name}: exact default parameter contract "
                         f"{token!r} matched {body.count(token)} times")
 
+    bind_pattern_body, bind_pattern_error = extract_ring_function_body(
+        sources["infer_ctx"], "bind_pattern")
+    if bind_pattern_error:
+        errors.append(bind_pattern_error)
+    else:
+        authority_tokens = (
+            "if patterns.len() == 0",
+            "report_duplicate_or_pattern_bindings(",
+            "same_or_pattern_binding_names(",
+            "if !binding_sets_valid",
+            "fail.raise(CompileError {})",
+            "authority.scheme.ty, candidate.ty",
+            "ctx.env.bind(authority.name, authority.scheme)",
+        )
+        for token in authority_tokens:
+            if token not in bind_pattern_body:
+                errors.append(
+                    f"bind_pattern OrPattern authority missing {token!r}")
+        if "expected_names.len() > 0" in bind_pattern_body:
+            errors.append(
+                "bind_pattern incorrectly rejects legal empty binding sets")
+
+    for function_name, pattern_name in (
+        ("infer_match", "match_pattern"),
+        ("infer_catch", "catch_pattern"),
+        ("infer_if_let_from_result", "iflet_pattern"),
+    ):
+        body, extract_error = extract_ring_function_body(
+            sources["infer"], function_name)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        bind_anchor = f"bind_pattern(ctx, {pattern_name}"
+        transport_match = re.search(
+            rf"exact_pattern_bindings\s*\(\s*ctx\.env\s*,\s*"
+            rf"{re.escape(pattern_name)}\s*\)",
+            body,
+        )
+        if bind_anchor not in body or transport_match is None:
+            errors.append(
+                f"{function_name}: missing bind_pattern→exact HIR transport")
+        elif body.index(bind_anchor) > transport_match.start():
+            errors.append(
+                f"{function_name}: HIR extracts pattern IDs before authority")
+
     # I-prime is identity only: the S-prime producer split and A-prime Take /
     # ownership metadata must remain absent from this checkpoint.
     forbidden = {
@@ -4629,6 +4687,7 @@ def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[st
         "hir": REPO / "compiler" / "hir.ring",
         "infer": REPO / "compiler" / "infer.ring",
         "infer_decl": REPO / "compiler" / "infer_decl.ring",
+        "infer_ctx": REPO / "compiler" / "infer_ctx.ring",
         "dict": REPO / "compiler" / "dict_lower.ring",
         "perceus": REPO / "compiler" / "perceus.ring",
         "cctx": REPO / "compiler" / "codegen_c_ctx.ring",
@@ -4672,6 +4731,15 @@ def identity_checkpoint_source_errors(ring_exe: Optional[str] = None) -> List[st
          "def_id: none"),
         ("trait default body identity", "infer_decl", "def_id: some(exact_trait_def_id)",
          "def_id: some(ctx.env.fresh_def_id())"),
+        ("or-pattern canonical restore", "infer_ctx",
+         "ctx.env.bind(authority.name, authority.scheme)",
+         "ctx.env.bind(authority.name, candidate)"),
+        ("or-pattern type compatibility", "infer_ctx",
+         "authority.scheme.ty, candidate.ty",
+         "authority.scheme.ty, authority.scheme.ty"),
+        ("or-pattern duplicate rejection", "infer_ctx",
+         "if report_duplicate_or_pattern_bindings(\n                        ctx.sink, duplicates, span) {",
+         "if false {"),
         ("nested scope", "infer", "infer_scoped_block(ctx, expr, some(subst))",
          "infer_block(ctx, expr, some(subst))"),
     )
