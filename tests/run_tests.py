@@ -4830,12 +4830,20 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
         if extract_error is not None:
             continue
         condition = re.search(
-            rf"RING_COND\s*\(\s*({same_spelling})\s*\)", body)
+            r"RING_COND\s*\(\s*(t[0-9]+)\s*\)", body)
         evidence = re.search(
             rf"\(\(void\*\*\)({same_spelling})\)\[1\]", body)
         if condition is None or evidence is None:
             continue
-        condition_name = condition.group(1)
+        condition_temp = condition.group(1)
+        condition_source = re.search(
+            rf"\b{re.escape(condition_temp)}\s*=\s*"
+            rf"({same_spelling})\s*;",
+            body,
+        )
+        if condition_source is None:
+            continue
+        condition_name = condition_source.group(1)
         evidence_name = evidence.group(1)
         if condition_name == evidence_name:
             continue

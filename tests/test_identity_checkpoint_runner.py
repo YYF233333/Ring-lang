@@ -62,6 +62,71 @@ class IdentityCheckpointRunnerTests(unittest.TestCase):
         source_oracle.assert_called_once_with()
         generated_oracle.assert_called_once_with(resolved)
 
+    def test_candidate_mutation_during_generated_gate_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            candidate = Path(tmpdir) / "candidate.exe"
+            candidate.write_bytes(b"candidate before gate")
+            resolved = str(candidate.resolve(strict=True))
+
+            def mutate_candidate(path: str) -> list[str]:
+                self.assertEqual(path, resolved)
+                candidate.write_bytes(b"candidate changed during gate")
+                return []
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {runner.IDENTITY_CANDIDATE_ENV: resolved},
+                    clear=True,
+                ),
+                patch.object(
+                    runner, "identity_checkpoint_source_errors", return_value=[]
+                ),
+                patch.object(
+                    runner, "default_body_identity_generated_c_errors",
+                    side_effect=mutate_candidate,
+                ) as generated_oracle,
+            ):
+                errors, _ = runner.identity_checkpoint_errors()
+
+        self.assertIn(
+            "candidate executable identity changed during generated-C gate",
+            errors,
+        )
+        generated_oracle.assert_called_once_with(resolved)
+
+    def test_invalid_candidate_identity_never_runs_generated_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cases = (
+                ("", "is empty"),
+                ("relative-candidate.exe", "must be an absolute path"),
+                (str(root / "missing.exe"), "cannot resolve/hash"),
+                (str(root), "is not a regular file"),
+            )
+            for raw, expected in cases:
+                with self.subTest(candidate=raw):
+                    with (
+                        patch.dict(
+                            os.environ,
+                            {runner.IDENTITY_CANDIDATE_ENV: raw},
+                            clear=True,
+                        ),
+                        patch.object(
+                            runner, "identity_checkpoint_source_errors",
+                            return_value=[],
+                        ),
+                        patch.object(
+                            runner,
+                            "default_body_identity_generated_c_errors",
+                        ) as generated_oracle,
+                    ):
+                        errors, _ = runner.identity_checkpoint_errors()
+
+                    self.assertTrue(
+                        any(expected in error for error in errors), errors)
+                    generated_oracle.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
