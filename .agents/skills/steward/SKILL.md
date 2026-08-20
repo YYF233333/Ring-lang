@@ -119,13 +119,16 @@ Audit ledger 的唯一完整契约在 `docs/workflow.md` §6，所有 provider �
 - handoff 至少记录 snapshot/base、scoped ownership、关键 invariant/决定、当前 diff/commit、测试证据、残留风险和下一验收门。
 - 禁止设置固定 token 数 hard stop，也不得因上下文切换丢弃未闭环 finding 或测试状态。
 
-## Discussion handoff / 用户摘要
+## Discussion handoff / 用户宏观摘要
 
-跨 session 里程碑先以 compact packet 发给 Discussion；用户直接查看 Steward 时同样保持低噪声，只按以下顺序报告：
+Discussion 请求宏观状态、用户直接询问做到哪里，或跨 session handoff 需要恢复项目视角时，以 compact packet 固定按以下顺序报告：
 
-1. 待拍板的用户保留决定、推荐和被阻塞范围；
-2. 已完成结果与 commit；
-3. 仓库健康、测试/CI/bootstrap 真值和真实风险；
-4. 接下来会自主推进的 1–3 个方向。
+1. **当前总门**：canonical 路线中的 gate 与子阶段；
+2. **已获得的 durable claim**：可恢复 commit / receipt / CI / fixed-point 证据支持、后续可依赖的结论；
+3. **下一道可证伪验收门**：下一个会改变阶段状态的 pass/fail 条件；
+4. **全局风险**：critical、资源/TCB/仓库健康风险与 claim 边界；
+5. **需要用户拍板**：开放的用户保留决定、推荐和影响；无则明确写无。
+
+专门的用户保留决策 packet 仍立即发送，不为了凑宏观五段而埋到末尾。单一里程碑可保持 compact，但不得用局部实现流水冒充宏观状态。
 
 默认不报告 subagent 等待、命令仍在运行、普通重试、工具名、原始日志或逐文件实现流水；只有它们成为全局阻塞、改变结论或用户追问时才展开。
