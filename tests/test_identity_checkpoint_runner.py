@@ -15,6 +15,22 @@ import run_tests as runner
 
 
 class IdentityCheckpointRunnerTests(unittest.TestCase):
+    def test_candidate_case_roots_are_distinct_exclusive_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parent = Path(tmpdir)
+            default_root = runner.identity_candidate_case_root(
+                parent, "default-body")
+            provenance_root = runner.identity_candidate_case_root(
+                parent, "provenance-b")
+
+            self.assertTrue(default_root.is_dir())
+            self.assertTrue(provenance_root.is_dir())
+            self.assertNotEqual(default_root, provenance_root)
+            with self.assertRaisesRegex(
+                RuntimeError, "cannot create identity candidate case root"
+            ):
+                runner.identity_candidate_case_root(parent, "default-body")
+
     def test_unset_candidate_runs_source_oracle_only(self) -> None:
         with (
             patch.dict(os.environ, {}, clear=True),

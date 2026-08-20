@@ -5175,13 +5175,33 @@ def identity_checkpoint_contract_errors(
     return errors
 
 
+def identity_candidate_case_root(parent: Path, case_name: str) -> Path:
+    """Create one exclusive candidate-gate root; never share/fallback."""
+    case_root = parent / case_name
+    try:
+        case_root.mkdir(parents=False, exist_ok=False)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot create identity candidate case root {case_root}: {exc}"
+        ) from exc
+    if not case_root.is_dir():
+        raise RuntimeError(
+            f"identity candidate case root is not a directory: {case_root}")
+    return case_root
+
+
 def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
     """Require exact/name-only slot separation in candidate-generated C."""
     errors: List[str] = []
     with tempfile.TemporaryDirectory(prefix="ring_identity_default_c_") as tmpdir:
+        case_parent = Path(tmpdir)
+        default_case_root = identity_candidate_case_root(
+            case_parent, "default-body")
+        provenance_case_root = identity_candidate_case_root(
+            case_parent, "provenance-b")
         c_path, _, build_error = build_c_artifacts_fresh(
             ring_exe, "tests/cases/default_body_exact_param_identity.ring",
-            Path(tmpdir), no_c_lines=True,
+            default_case_root, no_c_lines=True,
             phase_case="compiler.identity_checkpoint/default-body-c",
         )
         if build_error:
@@ -5192,7 +5212,7 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
 
         provenance_c_path, _, provenance_build_error = build_c_artifacts_fresh(
             ring_exe, "tests/cases/provenance_b_capture_identity.ring",
-            Path(tmpdir) / "provenance-b", no_c_lines=True,
+            provenance_case_root, no_c_lines=True,
             phase_case="compiler.identity_checkpoint/provenance-b-c",
         )
         if provenance_build_error:
