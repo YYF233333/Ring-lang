@@ -121,6 +121,33 @@ def board_heading_errors(
     return errors
 
 
+def dirty_worktree_errors(
+    rows: list[dict[str, str]],
+    dirty_paths: list[str],
+    configured: dict[str, dict[str, Any]],
+    max_dirty: int,
+) -> list[str]:
+    errors: list[str] = []
+    if len(dirty_paths) > max_dirty:
+        errors.append(f"dirty worktree limit exceeded: {dirty_paths}")
+    dirty_set = set(dirty_paths)
+    for row in rows:
+        if row["path"] not in dirty_set:
+            continue
+        branch = row.get("branch", "")
+        config = configured.get(branch)
+        if (
+            config is None
+            or config.get("role") != "authority"
+            or not config.get("active_items")
+        ):
+            errors.append(
+                f"dirty worktree has no active authority mapping: "
+                f"{row['path']} ({branch or 'detached'})"
+            )
+    return errors
+
+
 def validate(repo: Path, config: dict[str, Any], *, local: bool,
              allow_origin_lag: bool) -> dict[str, Any]:
     errors: list[str] = []
@@ -153,8 +180,8 @@ def validate(repo: Path, config: dict[str, Any], *, local: bool,
     for row in rows:
         if git(repo, "-C", row["path"], "status", "--porcelain"):
             dirty.append(row["path"])
-    if len(dirty) > int(config.get("max_dirty_worktrees", 0)):
-        errors.append(f"dirty worktree limit exceeded: {dirty}")
+    errors.extend(dirty_worktree_errors(
+        rows, dirty, configured, int(config.get("max_dirty_worktrees", 0))))
 
     for name, row in configured.items():
         checkpoint = row.get("checkpoint")

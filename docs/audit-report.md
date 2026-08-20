@@ -137,6 +137,8 @@
 
 **OrPattern public-semantics verdict（2026-08-20 用户选择 A，适用于 I′ 与未来 GADT）**：每个 alternative 必须各自恰好一次绑定相同的非 `_` 变量集合；同名绑定的类型、可变性与 ownership mode 必须兼容，并共享一个 canonical DefId/slot。绑定集合不同、单支重复绑定或同名类型不兼容均 E0301，禁止 common-definite/隐藏 alternative-local bindings。GADT 类型等式兼容是另一道独立门：`Lit(_) | Add(_, _)` 可因空绑定集合且同为 T=Int 合并，`Lit(n) | Add(a,b)` 即使等式兼容也必须拆 arm或改用 `_`。I′ 的 `bind_pattern` 是该集合/类型/canonical identity 的唯一 authority；下游不得复制 name-only gate或为 backend 回退。
 
+**I′ final-emission proof-boundary verdict（2026-08-20 用户批准 H+T）**：静态 Exact/NameOnly 全链、局部 verifier 与 behavior fixture不能替代最终 C emission 证据；F hand-parser 已被 return-cast / non-env slot 假绿反例永久否决，G pinned clang AST one-shot 则停在 validator-worker failure 且 child stderr 未持久化，内部原因保持 unknown，不得重跑、追认或离线猜测。用户批准唯一等强候选 H+T：现有 exact/name-only map 改持不可混用的 typed refs，critical capture/dict/effect/closure leaf helper从同一 typed operand原子构造 C line 与 ledger event；ledger以唯一 parent closure edge逐条证明 env store/extract、receiver load/call 的 domain、slot、index与顺序，missing tag/key/ID fail loud。该 serializer/relation-checker 是永久 internal-only acceptance TCB，无外部依赖、无 runtime/公开语义变化；隐藏 single-file exclusive flag 的 off/on C、object、诊断必须字节一致，ledger重复 hash稳定，mutation覆盖 raw emitter漏接、caller独立造 event、重复/缺失 edge与 tag/key/slot/index破坏。B-188 完成并证明 failure evidence 可恢复前不得启动首次 one-shot；sealed candidate不复用，fresh candidate之后仍跑原 C/RC/ASan/self-host/12 GiB fixed point完整门。任一 critical raw emission绕过helper、ledger不稳定、off-mode漂移、需扩到 HIR/Perceus/runtime或资源门失败即停止重新routing。T-alone因降低 final-emission claim被拒绝；停止I′提前A′因路线与12 GiB风险重新汇合被拒绝。
+
 发现者：#268 第二轮 oracle 复核
 
 ### #244 checker 级 mangling 歧义：用户 enum 遮蔽 prelude 类型时 impl 方法同名碰撞 [medium] [judgment] [open]

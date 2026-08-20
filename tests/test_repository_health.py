@@ -54,6 +54,42 @@ class RepositoryHealthBoardAuthorityTests(unittest.TestCase):
             ["main/authority board drift: B-188 (codex/evidence)"],
         )
 
+    def test_dirty_worktree_requires_active_authority_mapping(self) -> None:
+        rows = [
+            {"path": "C:/repo", "branch": "main", "head": "a"},
+            {"path": "C:/repo/active", "branch": "codex/active", "head": "b"},
+            {"path": "C:/repo/evidence", "branch": "codex/evidence", "head": "c"},
+        ]
+        configured = {
+            "main": {"role": "governance", "active_items": []},
+            "codex/active": {"role": "authority", "active_items": ["B-188"]},
+            "codex/evidence": {"role": "evidence", "active_items": []},
+        }
+        self.assertEqual(
+            health.dirty_worktree_errors(
+                rows, ["C:/repo/active"], configured, 2),
+            [],
+        )
+        errors = health.dirty_worktree_errors(
+            rows, ["C:/repo", "C:/repo/evidence"], configured, 2)
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(all("no active authority mapping" in error
+                            for error in errors), errors)
+
+    def test_dirty_worktree_limit_is_independent_of_mapping(self) -> None:
+        rows = [
+            {"path": "C:/repo/a", "branch": "codex/a", "head": "a"},
+            {"path": "C:/repo/b", "branch": "codex/b", "head": "b"},
+        ]
+        configured = {
+            "codex/a": {"role": "authority", "active_items": ["B-1"]},
+            "codex/b": {"role": "authority", "active_items": ["B-2"]},
+        }
+        errors = health.dirty_worktree_errors(
+            rows, ["C:/repo/a", "C:/repo/b"], configured, 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("dirty worktree limit exceeded", errors[0])
+
 
 if __name__ == "__main__":
     unittest.main()
