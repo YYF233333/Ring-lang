@@ -494,6 +494,7 @@ def run_one_shot_job(
     stdout_path: str | os.PathLike[str],
     stderr_path: str | os.PathLike[str],
     limits,
+    cleanup_armed_callback=None,
 ) -> dict[str, object]:
     """Run a durable one-shot child under hard Windows Job limits.
 
@@ -647,6 +648,17 @@ def run_one_shot_job(
                 thread.start()
                 unowned_parent_fds.remove(fd)
                 stream_threads.append(thread)
+
+            if cleanup_armed_callback is not None:
+                cleanup_armed_callback(
+                    {
+                        "adapter": "windows-job-v1",
+                        "cleanup": "kill-on-job-close",
+                        "root_pid": _pid,
+                        "process_assigned": True,
+                        "target_resumed": False,
+                    }
+                )
 
             resumed = kernel32.ResumeThread(thread_handle)
             _close_handle(thread_handle)
