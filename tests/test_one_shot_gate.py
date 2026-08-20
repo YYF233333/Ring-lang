@@ -441,6 +441,30 @@ class OneShotGateTests(unittest.TestCase):
             self.assertEqual((root / gate.STDERR_NAME).read_bytes(), b"schema-err\n")
             self.assertEqual(gate.audit_attempt(root)["state"], "complete")
 
+    def test_successful_result_schema_stage_audits_complete(self) -> None:
+        validations = []
+
+        def accept(outcome) -> None:
+            self.assertEqual(outcome["exit_code"], 0)
+            validations.append("accepted")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            verdict = gate.run_one_shot(
+                make_spec(root, "print('schema-success')"),
+                result_validator=accept,
+            )
+            self.assertEqual(validations, ["accepted"])
+            self.assertEqual(verdict["stage"], "result-schema")
+            self.assertEqual(verdict["classification"], "success")
+            self.assertEqual(verdict["status"], "success")
+            audit = gate.audit_attempt(root)
+            self.assertEqual(audit["state"], "complete", audit)
+            self.assertEqual(audit["status"], "success", audit)
+            self.assertEqual(audit["classification"], "success", audit)
+            self.assertEqual(audit["errors"], [])
+
     def test_recovery_rejects_missing_and_tampered_raw(self) -> None:
         for mutation in ("missing", "tampered"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:

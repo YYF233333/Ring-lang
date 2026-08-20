@@ -2604,6 +2604,11 @@ def audit_attempt(evidence_dir: Path) -> dict[str, Any]:
     if verdict["classification"] == "schema_error":
         if preliminary != "success" or verdict["stage"] != "result-schema":
             result["errors"].append("schema_error lacks a successful child/schema stage")
+    elif verdict["classification"] == "success" and verdict["stage"] == "result-schema":
+        if preliminary != "success":
+            result["errors"].append(
+                "successful result-schema verdict lacks a successful child"
+            )
     else:
         if verdict["classification"] != preliminary:
             result["errors"].append("verdict classification contradicts child facts")
