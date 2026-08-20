@@ -99,6 +99,31 @@ MACRO_CHECKIN_CONTRACT = TextContract(
 )
 
 
+ANTI_OVERENGINEERING_CONTRACT = TextContract(
+    "roadmap-first anti-overengineering gate",
+    (
+        ("总路线图最优先目标",),
+        ("当前可证伪",),
+        ("最小充分",),
+        ("恶意攻击",),
+        ("虚构应用场景",),
+        ("无意义泛化",),
+        ("定期 refactor",),
+        ("近期不会产生已知",),
+        ("修灯泡空难",),
+        ("correctness",),
+        ("safety",),
+        ("ownership",),
+        ("真实外部边界",),
+    ),
+    (
+        "默认内部调用者恶意",
+        "为未来可能需求先泛化",
+        "顺手重构整个仓库",
+    ),
+)
+
+
 STEWARD_BEHAVIOR_CONTRACTS = (
     TextContract(
         "waiting-feedback backfill",
@@ -208,6 +233,7 @@ STEWARD_BEHAVIOR_CONTRACTS = (
             "最后把 `waiting-feedback` 转回 `queued`",
         ),
     ),
+    ANTI_OVERENGINEERING_CONTRACT,
     TextContract(
         "long-command exact wait then short completion waits",
         (
@@ -324,6 +350,7 @@ B186_BACKLOG_CONTRACT = TextContract(
         ("`B-176` 保持 queued",),
         ("B-180",),
         ("runner anchor-object cache",),
+        ("B-190",),
         ("worktree",),
         ("paired-session",),
         ("22 GiB crossing 路线已永久关闭",),
@@ -333,6 +360,7 @@ B186_BACKLOG_CONTRACT = TextContract(
         "Canonical dependency chain",
         "#268/#269 -> B-176/B-180",
         "B-176/B-180",
+        "B-190",
         "remaining correctness/ABI",
         "B-183",
         "B-174/B-177/B-175",
@@ -922,6 +950,7 @@ class WorkflowValidator:
             B186_RESOURCE_CROSSING_CONTRACT,
             PAIRED_WORKFLOW_CONTRACT,
             MACRO_CHECKIN_CONTRACT,
+            ANTI_OVERENGINEERING_CONTRACT,
         ):
             for error in check_text_contract(text, contract):
                 self.errors.append(f"docs/workflow.md: {error}")
@@ -1004,6 +1033,7 @@ class WorkflowValidator:
                     for contract in (
                         DISCUSSION_CONTRACT,
                         MACRO_CHECKIN_CONTRACT,
+                        ANTI_OVERENGINEERING_CONTRACT,
                         GUARANTEE_BOUNDARY_CONTRACT,
                         DISCUSSION_PAIR_CONTRACT,
                     ):
@@ -1252,6 +1282,10 @@ waiting-feedback item 达到 clean checkpoint commit，且测试状态与必要 
 宏观 check-in 保持低噪声：
 当前总门、已获得的 durable claim、下一道可证伪验收门、全局风险、需要用户拍板。
 默认不报告 subagent 等待、命令进度、原始日志或逐文件实现流水。
+所有决策服务于总路线图最优先目标和当前可证伪需求，选择最小充分方案。
+内部友善边界不默认恶意攻击，不用虚构应用场景支持无意义泛化。
+实现现在可用且近期不会产生已知bug时，留到定期 refactor。
+发现修灯泡空难式scope扩张立即停止；简单化不降低correctness/safety/ownership或真实外部边界。
 Steward Inbox 只保存 [决策]、[里程碑] 和 [全局阻塞]。
 Argument 比较至少两个真实候选，由独立 reviewer 主动攻击推荐方案，
 再由 root 给出 verdict。语言公开语义属于用户保留决定，保持现有公开行为。
@@ -1304,7 +1338,7 @@ gen2 -> gen3，只有 C byte-identical 且 #268/#269 全部门通过才关闭。
 
 GOOD_B186_BACKLOG_FIXTURE = """
 Canonical dependency chain: #268/#269 -> B-176/B-180 ->
-remaining correctness/ABI -> B-183 -> B-174/B-177/B-175.
+B-190 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175.
 B-186 recovery gate 已由 main 与 CI 32262726058 完成。
 `B-176` 保持 queued；B-180 只保留 runner anchor-object cache。
 worktree 不超过 5，origin/main push gate 生效。
@@ -1560,6 +1594,23 @@ def run_self_tests() -> list[str]:
         )
     )
 
+    bad_overengineering = GOOD_STEWARD_FIXTURE.replace(
+        "所有决策服务于总路线图最优先目标和当前可证伪需求，选择最小充分方案。\n"
+        "内部友善边界不默认恶意攻击，不用虚构应用场景支持无意义泛化。\n"
+        "实现现在可用且近期不会产生已知bug时，留到定期 refactor。\n"
+        "发现修灯泡空难式scope扩张立即停止；简单化不降低correctness/safety/ownership或真实外部边界。",
+        "默认内部调用者恶意，为未来可能需求先泛化，并顺手重构整个仓库。",
+    )
+    failures.extend(
+        deterministic_failure(
+            "anti-overengineering fixture",
+            lambda: check_text_contract(
+                bad_overengineering, ANTI_OVERENGINEERING_CONTRACT
+            ),
+            "roadmap-first anti-overengineering gate",
+        )
+    )
+
     bad_argument = GOOD_STEWARD_FIXTURE.replace(
         "Argument 比较至少两个真实候选，由独立 reviewer 主动攻击推荐方案，\n"
         "再由 root 给出 verdict。语言公开语义属于用户保留决定，保持现有公开行为。",
@@ -1676,7 +1727,7 @@ def run_self_tests() -> list[str]:
     )
     bad_b186_route = GOOD_B186_BACKLOG_FIXTURE.replace(
         "#268/#269 -> B-176/B-180 ->\n"
-        "remaining correctness/ABI -> B-183 -> B-174/B-177/B-175",
+        "B-190 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175",
         "B-176/B-180 -> B-174/B-177/B-175 -> B-183 -> #268/#269",
     )
     failures.extend(

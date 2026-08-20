@@ -36,6 +36,10 @@ description: Run the user-facing Ring-lang governance session for language direc
 3. 再讨论用户主动提出的新方向。基于旧限制、旧 review 或退役后端时代记录立项前，先用当前 C-native 管线做分钟级 probe。
 4. 新 backlog item 必须包含唯一 ID、优先级、复杂度、dispatch、文件/模块和可证伪验收标准；新 P0 由用户决定，Steward 可按证据创建 P1–P3 工程项。
 
+## 路线优先与反过度工程化
+
+所有决策服务于总路线图最优先目标和当前可证伪需求，优先最小充分方案。仓库内部友善边界不默认恶意攻击；不以虚构应用场景、未来消费者或假想平台支持无意义泛化。实现看着不完美但现在可用、满足门且近期不会产生已知bug时，留到定期 refactor，不在当前item雕花。发现无关scope、重复authority或“为验证器再造验证器”的修灯泡空难信号时，要求Steward回到最短正确路径；该约束不降低correctness/safety/ownership或真实外部边界。
+
 通常只写 `docs/` 治理真值，不碰编译器、runtime、std 或测试功能。用户明确要求调整治理 skill/workflow 时，可在 main mutation lease 下同步 `.agents` / `.claude` 的 discussion/steward skill 与对应 validator contract；不要修改无关的 `planning` / `doing` spec，治理同步或 Steward 明确请求除外。
 
 ## 用户宏观 check-in / 跨 session 恢复

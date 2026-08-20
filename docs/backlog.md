@@ -15,21 +15,22 @@
 
 **近期 break 审核门**：任何修改公开语法、签名、ABI 或可观察语义的 item，在实现前必须标成“已拍板 clean break”“等待 decision dossier”或“仅内部、非 breaking”之一。已拍板的 #268/#269 ownership 真值与 B-167 调用点 evidence 采用一次性切换；旧 ownership 猜测/传播路径和创建处 evidence ABI 必须在各自原子变更中删除，不形成双轨。B-168/B-169 的探针结论，以及 B-152、B-156、B-171、B-133 和 `io` effect 拆分等潜在用户面变化，在进入实现前显式核对 break 边界；需要新的公开语义决定时仍提交 dossier。每个已拍板 break 的验收都必须列出被删除的旧路径、同步迁移的仓内消费者/规范/测试，并在旧形式仍可表达时用负例证明它不会经 alias、fallback 或旧 ABI 继续生效。
 
-Canonical dependency chain：`#268/#269 -> B-176/B-180 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175`。
+Canonical dependency chain：`#268/#269 -> B-176/B-180 -> B-190 -> remaining correctness/ABI -> B-183 -> B-174/B-177/B-175`。
 
 B-186 recovery gate 已由 `main@b29c8711` 与 GitHub Actions `32262726058`（check/test/bootstrap 全绿）完成；worktree/ref/WIP、authority、paired-session、push/CI 与 health 约束已转为 `docs/workflow.md` / `docs/repository-health.json` 的持续门，活动历史只留 Git。
 `B-176` 保持 queued；B-180 只保留 runner anchor-object cache，compiler lane 继续冻结到 #268/#269 fixed point 闭环。
 
-处理顺序固定为六道门：
+处理顺序固定为七道门：
 
 1. **B-186 Repository convergence recovery（已完成）**：worktree/ref/WIP、单一 authority、main/branch 看板、repository-health 与 push/CI 已恢复；这些约束转为持续门。
 2. **#268/#269 信任闭环**：ownership/RC/S-prime fixed point 与原完整门真正关闭前，不再启动 compiler optimization。固定 archive 只能重建精确 `DBC154…` C，无法重建 `5E862…` / `9DFD…` native-object pins，且没有另存的权威 object/recipe；因此 22 GiB crossing 路线已永久关闭且不计为已执行。新的 separability Argument 选择 `I-prime -> S-prime -> A-prime`：先在 latest main 落 behavior-preserving exact-slot identity 层，再把 exact-none NOOP producer lattice 与 S-prime 原子落地并完成自身 12 GiB fixed point，最后分 checkpoint 重放 A-prime；name-only side-domain 与直接 atomic A-prime+S-prime 均不得作为捷径。
 
 > **I′ final-emission H+T acceptance boundary（2026-08-20 用户批准）**：I′ 可增加一个永久但 internal-only 的 bounded acceptance TCB。Exact/NameOnly map 保存不可混用的 typed refs；所有 capture/dict/effect/closure critical leaf helper 必须从同一个 typed operand 原子生成实际 C line 与 ledger event，ledger 记录唯一 parent closure edge，并逐 edge 校验 store/extract、receiver load/call、domain、slot、index 与顺序。隐藏 flag 不进入公开 CLI/支持面；off/on 的 C、object 与诊断必须字节一致，相同输入 ledger hash 必须稳定，mutation 必须杀死缺失/交换的 tag、key、slot、index、edge 与 event。B-188 是首次 H+T one-shot 验收的硬前置；sealed artifact 一律不复用，fresh candidate 仍须原 runtime/RC/ASan/self-host/12 GiB fixed-point 完整门。任何 raw critical emitter 未接入、caller 可独立拼 C/event、closure edge 不唯一、ledger 不稳定、off-mode 漂移、需扩到 HIR/Perceus/runtime 或 12 GiB 失败都立即停止并重新 routing。T-alone 因不能证明 event 对应真实 raw slot而拒绝；提前 A′ 因重排路线并重新汇合资源风险而拒绝。
 3. **B-176/B-180 反馈速度**：在 post-ownership 最新 main 重做 baseline；runner 与 compiler 分 checkpoint，但原 2x 量化验收不变。compiler 只允许一个 profile-guided wave。
-4. **Remaining correctness / ABI freeze**：处理 B-162、B-164、#263、#264、#239、#244、#267、#257，再走 B-168 → B-169 → B-167 → B-152 → B-002，并完成 unsafe/Str 等 candidate gate。
-5. **B-183 repository identity / GitHub workflow**：放在 technical ABI/ownership/failure fixed point 之后、产品化之前；不再晚于 B-174 才处理。
-6. **Preview candidate**：B-174 → B-177 → B-175；随后 B-181、B-178/B-016、B-111 等证据与工具面按依赖推进。发布后能力继续按既有优先级。
+4. **B-190 全仓简化**：B-180完成并吸收B-187文档盘点后，以固定snapshot做一次有界过度设计复核与减法refactor；不做rewrite-for-perfection。
+5. **Remaining correctness / ABI freeze**：处理 B-162、B-164、#263、#264、#239、#244、#267、#257，再走 B-168 → B-169 → B-167 → B-152 → B-002，并完成 unsafe/Str 等 candidate gate。
+6. **B-183 repository identity / GitHub workflow**：放在 technical ABI/ownership/failure fixed point 之后、产品化之前；不再晚于 B-174 才处理。
+7. **Preview candidate**：B-174 → B-177 → B-175；随后 B-181、B-178/B-016、B-111 等证据与工具面按依赖推进。发布后能力继续按既有优先级。
 
 B-180 不得以早期 developer-unblock checkpoint 绕过 #268/#269 final fixed point；其已证明的 runner anchor-object cache 可保留，所有 compiler candidates 冻结。B-176 只有在最新 main 可重放完整 baseline 后才算完成。
 
@@ -511,6 +512,14 @@ compiler 内部、每进程初始化/重复 parse-check、runner/clang 调度。
 > **2026-08-19 ownership-cleanup crossing 最终裁决。** 新的 direct fixture 把 Map/Option allocation 信号提升为通用 correctness 根因：`var Option = none` 后装入 owned payload 时缺 W4/exit cleanup。bounded safe-tail 候选与独立 verifier 已通过 source-built gen1 的 runtime 1/1、RC/mutation 8/8、structural 1/1 和 parity 1/1；但该 gen1 自身仍由旧 Perceus lowering 生成，完整 gen2 在 2371.12 s 触及固定 12 GiB/typeid 8。唯一额外 construction 只把临时 mirror 的 3016-line verifier替换为同 API、调用即 panic 的 30-line fail-closed stub，仍在 2347.24 s 触及同一资源墙。两条收据都无产物，证据见 `bench/check/results/ownership-option-cleanup-20260819/s-prime-acceptance/`。不得继续删模块、提高 cap、patch generated C/runtime/typeid、重跑旧 profile或按 `unify.ring` 热点写 workaround；candidate 保留 correctness evidence，但 B-180/self-host acceptance 仍 blocked，tracked bootstrap 不更新。任何后续 crossing 必须先有新的直接 peak authority 与独立 Argument，不能把同类 size-cut 猜测当成下一刀。
 
 **整体验收**：恢复原 2x 量化门，不降级。以 post-ownership B-176 同机同 manifest 为基线，`compiler/main.ring check` median、`check --verify-rc compiler/main.ring` 与完整本地标准门 wall time 均以基线的 `<=50%` 为目标；tiny/大单文件/module check p95 不得回退 >10%。runner/compiler checkpoint 可分别验收正确性，但只有合计达到 2x 且完整 C/RC/ASan/self-host/double-bootstrap 全绿才完成 B-180。串行 oracle 与并行 runner 的 pass/fail/skip、诊断、生成 C/fixed point 必须一致，覆盖数不减少；任何原始失败必须 fail loud。
+
+### B-190 Repository overengineering audit and simplification [refactor] [P1] [XL] [judgment] [queued] [after: B-180+B-187] [before: B-183]
+
+性能专项完成后，对固定最新 main 做一次 bounded 全仓盘点，识别历史执行中混入但不再服务当前路线的复杂度；目标是减轻维护面，不是追求抽象完美或重写编译器。范围覆盖 compiler/runtime/std/tests、构建与 one-shot harness、provider adapter、活动治理入口及重复 authority；B-187 已处理的纯文档漂移只作为输入，不重复清扫。
+
+**盘点与执行**：每项只允许 `保留（当前必要）/ 删除 / 简化合并 / 延后到具体未来需求 / 用户决定`。重点核对重复真值、失效后端/probe、无消费者的 extensibility/config/plugin 层、为友善内部工具构造的恶意攻击防线、重复 parser/visitor/oracle、过度 mutation/harness、可由现有 authority直接推出的中间抽象和完成历史残留。先形成有证据的 inventory并独立反驳，再按文件冲突切成 bounded refactor waves；优先净删除、合并 authority和缩短调用链，不以 LOC 指标驱动。
+
+**约束 / 验收**：不改变公开语义、ownership/safety保证、ABI或 release门，不把“清理”变成新架构项目；当前可用、近期无已知bug而仅不够漂亮的代码允许继续保留。每个变更必须说明删除了哪个维护负担及为何不影响当前/已登记近程消费者；完整 C/RC/ASan/self-host/fixed point与workflow/health通过，独立 reviewer主动寻找误删和新重复层。一次盘点后收口，禁止 audit-until-dry或为了填满波次制造工作。
 
 ### B-183 Vorton 仓库身份与 GitHub 工作流原子迁移 [infra] [P0] [XL] [judgment] [queued] [after: B-168+B-169+B-167+B-152+B-002+B-180] [before: B-174+B-177+B-175]
 
