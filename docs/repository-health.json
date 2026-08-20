@@ -4,8 +4,14 @@
   "max_dirty_worktrees": 0,
   "max_main_ahead": 10,
   "max_unpushed_age_hours": 24,
-  "board_authority_branch": "codex/ownership-sprime-first",
   "board_items": ["B-176", "B-180", "B-188", "#268", "#269"],
+  "board_item_authorities": {
+    "B-176": "codex/ownership-sprime-first",
+    "B-180": "codex/ownership-sprime-first",
+    "B-188": "codex/one-shot-failure-evidence",
+    "#268": "codex/ownership-sprime-first",
+    "#269": "codex/ownership-sprime-first"
+  },
   "branches": [
     {
       "name": "main",

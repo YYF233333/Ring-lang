@@ -81,6 +81,46 @@ def branch_text(repo: Path, branch: str, path: str) -> str:
     return git(repo, "show", f"{branch}:{path}")
 
 
+def board_authority_errors(
+    configured_names: set[str],
+    board_items: list[str],
+    item_authorities: Any,
+    active_authorities: dict[str, str],
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(item_authorities, dict):
+        return ["board_item_authorities must be an object"]
+    expected = set(board_items)
+    actual = set(item_authorities)
+    if actual != expected:
+        errors.append(
+            "board item authority drift: "
+            f"extra={sorted(actual - expected)}, missing={sorted(expected - actual)}"
+        )
+    for item, branch in item_authorities.items():
+        if not isinstance(branch, str) or branch not in configured_names:
+            errors.append(f"board item {item} has unknown authority branch {branch!r}")
+        active_branch = active_authorities.get(item)
+        if active_branch is not None and active_branch != branch:
+            errors.append(
+                f"board item {item} authority {branch} conflicts with active "
+                f"authority {active_branch}"
+            )
+    return errors
+
+
+def board_heading_errors(
+    main_items: dict[str, str],
+    item_authorities: dict[str, str],
+    authority_items: dict[str, dict[str, str]],
+) -> list[str]:
+    errors: list[str] = []
+    for item, branch in item_authorities.items():
+        if main_items.get(item) != authority_items.get(branch, {}).get(item):
+            errors.append(f"main/authority board drift: {item} ({branch})")
+    return errors
+
+
 def validate(repo: Path, config: dict[str, Any], *, local: bool,
              allow_origin_lag: bool) -> dict[str, Any]:
     errors: list[str] = []
@@ -144,16 +184,22 @@ def validate(repo: Path, config: dict[str, Any], *, local: bool,
             f"map={sorted(authority_for)}"
         )
 
-    authority_branch = str(config.get("board_authority_branch", ""))
-    if authority_branch:
-        authority_board = "\n".join((
-            branch_text(repo, authority_branch, "docs/backlog.md"),
-            branch_text(repo, authority_branch, "docs/audit-report.md"),
-        ))
-        authority_items, _ = headings(authority_board)
-        for item in config.get("board_items", []):
-            if main_items.get(item) != authority_items.get(item):
-                errors.append(f"main/authority board drift: {item}")
+    board_items = config.get("board_items", [])
+    item_authorities = config.get("board_item_authorities")
+    errors.extend(board_authority_errors(
+        set(configured), board_items, item_authorities, authority_for))
+    if isinstance(item_authorities, dict):
+        authority_items_by_branch: dict[str, dict[str, str]] = {}
+        for branch in set(item_authorities.values()):
+            if not isinstance(branch, str) or branch not in configured:
+                continue
+            authority_board = "\n".join((
+                branch_text(repo, branch, "docs/backlog.md"),
+                branch_text(repo, branch, "docs/audit-report.md"),
+            ))
+            authority_items_by_branch[branch], _ = headings(authority_board)
+        errors.extend(board_heading_errors(
+            main_items, item_authorities, authority_items_by_branch))
 
     for name, row in configured.items():
         base = row.get("pollution_base")
