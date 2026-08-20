@@ -16,12 +16,14 @@ import json
 import os
 import re
 import secrets
+import select
 import signal
 import subprocess
 import sys
 import tarfile
 import threading
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
@@ -30,6 +32,10 @@ from typing import Any, Callable, Mapping, Sequence
 CONTRACT_VERSION = 1
 ATTEMPT_SCHEMA = "ring.one-shot.attempt.v1"
 VERDICT_SCHEMA = "ring.one-shot.verdict.v1"
+CHAINED_CONTRACT_VERSION = 2
+CHAINED_ATTEMPT_SCHEMA = "ring.one-shot.attempt.v2"
+CHAINED_VERDICT_SCHEMA = "ring.one-shot.verdict.v2"
+CHAIN_SCHEMA = "ring.one-shot.chain.v1"
 AUDIT_SCHEMA = "ring.one-shot.audit.v1"
 ARCHIVE_SCHEMA = "ring.one-shot.archive.v1"
 
@@ -231,6 +237,23 @@ class Limits:
 
 
 @dataclass(frozen=True)
+class AttemptChain:
+    outer_attempt_id: str
+    outer_attempt_sha256: str
+    plan_sha256: str
+
+    def receipt(self) -> dict[str, Any]:
+        value = {
+            "schema": CHAIN_SCHEMA,
+            "outer_attempt_id": self.outer_attempt_id,
+            "outer_attempt_sha256": self.outer_attempt_sha256,
+            "plan_sha256": self.plan_sha256,
+        }
+        _validate_chain_receipt(value, "chain")
+        return value
+
+
+@dataclass(frozen=True)
 class OneShotSpec:
     evidence_dir: Path
     gate_id: str
@@ -241,6 +264,7 @@ class OneShotSpec:
     reviewed_env: tuple[tuple[str, str], ...]
     limits: Limits
     success_exit_codes: tuple[int, ...] = (0,)
+    chain: AttemptChain | None = None
 
 
 def _validate_platform_support(limits: Limits) -> None:
@@ -288,6 +312,10 @@ def _validate_spec(spec: OneShotSpec) -> tuple[dict[str, Any], dict[str, str]]:
         type(code) is int for code in spec.success_exit_codes
     ):
         raise ContractError("success_exit_codes must be non-empty integers")
+    if spec.chain is not None:
+        if not isinstance(spec.chain, AttemptChain):
+            raise ContractError("chain must be an AttemptChain")
+        spec.chain.receipt()
 
     env = dict(spec.env)
     reviewed_pairs = list(spec.reviewed_env)
@@ -344,9 +372,13 @@ def _validate_spec(spec: OneShotSpec) -> tuple[dict[str, Any], dict[str, str]]:
 def _attempt_record(
     spec: OneShotSpec, execution: Mapping[str, Any], attempt_id: str
 ) -> dict[str, Any]:
-    return {
-        "schema": ATTEMPT_SCHEMA,
-        "contract_version": CONTRACT_VERSION,
+    record = {
+        "schema": (
+            CHAINED_ATTEMPT_SCHEMA if spec.chain is not None else ATTEMPT_SCHEMA
+        ),
+        "contract_version": (
+            CHAINED_CONTRACT_VERSION if spec.chain is not None else CONTRACT_VERSION
+        ),
         "attempt_id": attempt_id,
         "gate_id": spec.gate_id,
         "created_unix_ns": time.time_ns(),
@@ -355,6 +387,9 @@ def _attempt_record(
         "success_exit_codes": list(spec.success_exit_codes),
         "state": "attempt-created",
     }
+    if spec.chain is not None:
+        record["chain"] = spec.chain.receipt()
+    return record
 
 
 ATTEMPT_KEYS = {
@@ -367,6 +402,13 @@ ATTEMPT_KEYS = {
     "limits",
     "success_exit_codes",
     "state",
+}
+CHAINED_ATTEMPT_KEYS = ATTEMPT_KEYS | {"chain"}
+CHAIN_KEYS = {
+    "schema",
+    "outer_attempt_id",
+    "outer_attempt_sha256",
+    "plan_sha256",
 }
 
 
@@ -381,6 +423,20 @@ LIMIT_KEYS = {
     "active_process_limit",
     "poll_ms",
 }
+
+
+def _validate_chain_receipt(value: Any, label: str) -> dict[str, Any]:
+    chain = _strict_keys(value, CHAIN_KEYS, label)
+    if chain["schema"] != CHAIN_SCHEMA:
+        raise ContractError(f"{label}.schema mismatch")
+    if not isinstance(chain["outer_attempt_id"], str) or ATTEMPT_ID_RE.fullmatch(
+        chain["outer_attempt_id"]
+    ) is None:
+        raise ContractError(f"{label}.outer_attempt_id is invalid")
+    for key in ("outer_attempt_sha256", "plan_sha256"):
+        if not isinstance(chain[key], str) or HEX_64_RE.fullmatch(chain[key]) is None:
+            raise ContractError(f"{label}.{key} is invalid")
+    return chain
 
 
 def _validate_execution_receipt(value: Any, label: str) -> dict[str, Any]:
@@ -443,10 +499,17 @@ def _validate_limits_receipt(value: Any, label: str) -> dict[str, Any]:
 
 
 def _validate_attempt(value: Any) -> dict[str, Any]:
-    attempt = _strict_keys(value, ATTEMPT_KEYS, "attempt")
-    if attempt["schema"] != ATTEMPT_SCHEMA:
+    if not isinstance(value, dict):
+        raise ContractError("attempt is not an object")
+    schema = value.get("schema")
+    chained = schema == CHAINED_ATTEMPT_SCHEMA
+    expected_keys = CHAINED_ATTEMPT_KEYS if chained else ATTEMPT_KEYS
+    attempt = _strict_keys(value, expected_keys, "attempt")
+    expected_schema = CHAINED_ATTEMPT_SCHEMA if chained else ATTEMPT_SCHEMA
+    expected_version = CHAINED_CONTRACT_VERSION if chained else CONTRACT_VERSION
+    if attempt["schema"] != expected_schema:
         raise ContractError("attempt schema mismatch")
-    if attempt["contract_version"] != CONTRACT_VERSION:
+    if attempt["contract_version"] != expected_version:
         raise ContractError("attempt contract version mismatch")
     if not isinstance(attempt["attempt_id"], str) or ATTEMPT_ID_RE.fullmatch(
         attempt["attempt_id"]
@@ -467,6 +530,8 @@ def _validate_attempt(value: Any) -> dict[str, Any]:
         and all(type(code) is int for code in attempt["success_exit_codes"])
     ):
         raise ContractError("attempt success_exit_codes are invalid")
+    if chained:
+        _validate_chain_receipt(attempt["chain"], "attempt.chain")
     return attempt
 
 
@@ -651,6 +716,7 @@ VERDICT_KEYS = {
     "error",
     "created_unix_ns",
 }
+CHAINED_VERDICT_KEYS = VERDICT_KEYS | {"chain"}
 
 
 CHILD_KEYS = {
@@ -698,10 +764,17 @@ def _validate_child_receipt(value: Any, label: str) -> dict[str, Any]:
 
 
 def _validate_verdict(value: Any) -> dict[str, Any]:
-    verdict = _strict_keys(value, VERDICT_KEYS, "verdict")
-    if verdict["schema"] != VERDICT_SCHEMA:
+    if not isinstance(value, dict):
+        raise ContractError("verdict is not an object")
+    schema = value.get("schema")
+    chained = schema == CHAINED_VERDICT_SCHEMA
+    expected_keys = CHAINED_VERDICT_KEYS if chained else VERDICT_KEYS
+    verdict = _strict_keys(value, expected_keys, "verdict")
+    expected_schema = CHAINED_VERDICT_SCHEMA if chained else VERDICT_SCHEMA
+    expected_version = CHAINED_CONTRACT_VERSION if chained else CONTRACT_VERSION
+    if verdict["schema"] != expected_schema:
         raise ContractError("verdict schema mismatch")
-    if verdict["contract_version"] != CONTRACT_VERSION:
+    if verdict["contract_version"] != expected_version:
         raise ContractError("verdict contract version mismatch")
     if not isinstance(verdict["attempt_id"], str) or ATTEMPT_ID_RE.fullmatch(
         verdict["attempt_id"]
@@ -747,15 +820,25 @@ def _validate_verdict(value: Any) -> dict[str, Any]:
     )
     if not streams["stdout"]["fsynced"] or not streams["stderr"]["fsynced"]:
         raise ContractError("verdict cannot precede fsynced raw streams")
+    if chained:
+        _validate_chain_receipt(verdict["chain"], "verdict.chain")
     return verdict
 
 
 def _load_windows_adapter() -> Callable[..., dict[str, Any]]:
     global _WINDOWS_ADAPTER
-    if _WINDOWS_ADAPTER is not None:
-        return _WINDOWS_ADAPTER
     repo_root = Path(__file__).resolve().parents[2]
     path = repo_root / "bench" / "check" / "windows_job.py"
+    if _CHAIN_WINDOWS_ADAPTER_IDENTITY is not None:
+        expected = _CHAIN_WINDOWS_ADAPTER_IDENTITY
+        if (
+            os.fspath(path.resolve(strict=True)) != expected["path"]
+            or path.stat().st_size != expected["size"]
+            or _sha256_file(path) != expected["sha256"]
+        ):
+            raise ContractError("Windows adapter changed after chained plan validation")
+    if _WINDOWS_ADAPTER is not None:
+        return _WINDOWS_ADAPTER
     spec = importlib.util.spec_from_file_location("ring_windows_job", path)
     if spec is None or spec.loader is None:
         raise ContractError(f"cannot import Windows adapter {path}")
@@ -769,6 +852,7 @@ def _load_windows_adapter() -> Callable[..., dict[str, Any]]:
 
 
 _WINDOWS_ADAPTER: Callable[..., dict[str, Any]] | None = None
+_CHAIN_WINDOWS_ADAPTER_IDENTITY: dict[str, Any] | None = None
 
 
 class _PrefixSink:
@@ -838,6 +922,464 @@ def _posix_group_exists(pgid: int) -> bool:
         return True
 
 
+_POSIX_TARGET_GUARD_SOURCE = r'''import json,os,sys
+def read_all(fd):
+    chunks=[]
+    while True:
+        chunk=os.read(fd,65536)
+        if not chunk: break
+        chunks.append(chunk)
+    return b"".join(chunks)
+config_fd=int(sys.argv[1]); release_fd=int(sys.argv[2]); ready_fd=int(sys.argv[3])
+config=json.loads(read_all(config_fd).decode("ascii"))
+os.write(ready_fd,b"R")
+token=os.read(release_fd,1)
+if token != b"G": os._exit(125)
+for fd in (config_fd,release_fd,ready_fd):
+    try: os.close(fd)
+    except OSError: pass
+os.chdir(config["cwd"])
+os.execve(config["argv"][0],config["argv"],config["env"])
+'''
+
+_POSIX_WATCHDOG_SOURCE = r'''import os,signal,sys,time
+def read_all(fd):
+    chunks=[]
+    while True:
+        chunk=os.read(fd,128)
+        if not chunk: break
+        chunks.append(chunk)
+    return b"".join(chunks)
+config_fd=int(sys.argv[1]); live_fd=int(sys.argv[2]); ack_fd=int(sys.argv[3])
+raw=read_all(config_fd).strip()
+if not raw: os._exit(120)
+pgid=int(raw.decode("ascii"))
+os.killpg(pgid,0)
+os.write(ack_fd,b"A")
+for fd in (config_fd,ack_fd):
+    try: os.close(fd)
+    except OSError: pass
+token=os.read(live_fd,1)
+if token == b"D": os._exit(0)
+try: os.killpg(pgid,signal.SIGKILL)
+except ProcessLookupError: pass
+deadline=time.monotonic()+5
+while time.monotonic()<deadline:
+    try: os.killpg(pgid,0)
+    except ProcessLookupError: os._exit(0)
+    time.sleep(0.01)
+os._exit(121)
+'''
+
+
+def _write_all_fd(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    offset = 0
+    while offset < len(view):
+        written = os.write(fd, view[offset:])
+        if written <= 0:
+            raise OSError(f"pipe write made no progress: {written}")
+        offset += written
+
+
+def _read_handshake_byte(
+    fd: int, expected: bytes, deadline: float, label: str
+) -> None:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ContractError(f"{label} handshake timed out")
+        readable, _, _ = select.select([fd], [], [], min(remaining, 0.05))
+        if not readable:
+            continue
+        value = os.read(fd, 1)
+        if value != expected:
+            raise ContractError(
+                f"{label} handshake byte {value!r} != {expected!r}"
+            )
+        return
+
+
+def _run_non_windows_guarded_job(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    stdout_path: Path,
+    stderr_path: Path,
+    limits: Limits,
+    cleanup_armed_callback: Callable[[Mapping[str, Any]], None],
+) -> dict[str, Any]:
+    """Run a POSIX target behind a release guard and an outer-EOF watchdog."""
+
+    _validate_platform_support(limits)
+    if os.name == "nt":
+        raise ContractError("guarded process-group adapter requires POSIX")
+    stdout_sink = _PrefixSink(stdout_path, STDOUT_NAME, limits.stdout_cap_bytes)
+    stderr_sink = _PrefixSink(stderr_path, STDERR_NAME, limits.stderr_cap_bytes)
+    stdout_sink.open()
+    try:
+        stderr_sink.open()
+    except BaseException:
+        stdout_sink.seal()
+        raise
+
+    process: subprocess.Popen[bytes] | None = None
+    watchdog: subprocess.Popen[bytes] | None = None
+    stop = threading.Event()
+    threads: list[threading.Thread] = []
+    thread_errors: list[str] = []
+    infrastructure_errors: list[str] = []
+    launch_error: str | None = None
+    pgid: int | None = None
+    group_kill_reason: str | None = None
+    group_quiesced = False
+    descendant_leak = False
+    timed_out = False
+    cleanup_armed = False
+    target_released = False
+    watchdog_disarmed = False
+    started_ns = time.perf_counter_ns()
+    deadline = time.monotonic() + limits.wall_seconds
+    open_fds: set[int] = set()
+    live_write: int | None = None
+
+    guard_sha = _sha256_bytes(_POSIX_TARGET_GUARD_SOURCE.encode("ascii"))
+    watchdog_sha = _sha256_bytes(_POSIX_WATCHDOG_SOURCE.encode("ascii"))
+
+    def make_pipe() -> tuple[int, int]:
+        read_fd, write_fd = os.pipe()
+        open_fds.update((read_fd, write_fd))
+        return read_fd, write_fd
+
+    def close_fd(fd: int | None) -> None:
+        if fd is None or fd not in open_fds:
+            return
+        try:
+            os.close(fd)
+        finally:
+            open_fds.discard(fd)
+
+    def kill_group(reason: str) -> None:
+        nonlocal group_kill_reason
+        if pgid is None:
+            return
+        if pgid == os.getpgrp():
+            infrastructure_errors.append("refused to signal the parent process group")
+            return
+        if group_kill_reason is None:
+            group_kill_reason = reason
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            infrastructure_errors.append(
+                f"killpg({reason}): {type(exc).__name__}: {exc}"
+            )
+
+    def wait_group_quiescence() -> bool:
+        if pgid is None:
+            return True
+        quiesce_deadline = time.monotonic() + 5
+        while _posix_group_exists(pgid):
+            if time.monotonic() >= quiesce_deadline:
+                infrastructure_errors.append(
+                    "guarded process group did not quiesce within 5 seconds"
+                )
+                return False
+            time.sleep(limits.poll_ms / 1000)
+        return True
+
+    def reader(stream, sink: _PrefixSink, label: str) -> None:
+        try:
+            while True:
+                chunk = os.read(stream.fileno(), 65536)
+                if not chunk:
+                    break
+                sink.consume(chunk)
+                if sink.truncated:
+                    stop.set()
+                    break
+        except BaseException as exc:
+            message = f"{label}: {type(exc).__name__}: {exc}"
+            sink.error = message
+            thread_errors.append(message)
+            stop.set()
+
+    try:
+        watchdog_config_read, watchdog_config_write = make_pipe()
+        live_read, live_write_local = make_pipe()
+        live_write = live_write_local
+        watchdog_ack_read, watchdog_ack_write = make_pipe()
+        watchdog = subprocess.Popen(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-B",
+                "-u",
+                "-c",
+                _POSIX_WATCHDOG_SOURCE,
+                str(watchdog_config_read),
+                str(live_read),
+                str(watchdog_ack_write),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            pass_fds=(watchdog_config_read, live_read, watchdog_ack_write),
+            start_new_session=True,
+        )
+        close_fd(watchdog_config_read)
+        close_fd(live_read)
+        close_fd(watchdog_ack_write)
+
+        guard_config_read, guard_config_write = make_pipe()
+        release_read, release_write = make_pipe()
+        guard_ready_read, guard_ready_write = make_pipe()
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-B",
+                "-u",
+                "-c",
+                _POSIX_TARGET_GUARD_SOURCE,
+                str(guard_config_read),
+                str(release_read),
+                str(guard_ready_write),
+            ],
+            cwd=cwd,
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+            pass_fds=(guard_config_read, release_read, guard_ready_write),
+            start_new_session=True,
+        )
+        pgid = process.pid
+        observed_pgid = os.getpgid(process.pid)
+        if observed_pgid != pgid:
+            raise ContractError(
+                f"guard new-session pgid mismatch {observed_pgid} != {pgid}"
+            )
+        close_fd(guard_config_read)
+        close_fd(release_read)
+        close_fd(guard_ready_write)
+
+        assert process.stdout is not None and process.stderr is not None
+        threads = [
+            threading.Thread(
+                target=reader,
+                args=(process.stdout, stdout_sink, "stdout"),
+                daemon=True,
+            ),
+            threading.Thread(
+                target=reader,
+                args=(process.stderr, stderr_sink, "stderr"),
+                daemon=True,
+            ),
+        ]
+        for thread in threads:
+            thread.start()
+
+        config_bytes = _json_bytes(
+            {"argv": list(argv), "cwd": os.fspath(cwd), "env": dict(env)}
+        )
+        _write_all_fd(guard_config_write, config_bytes)
+        close_fd(guard_config_write)
+        _read_handshake_byte(guard_ready_read, b"R", deadline, "target guard")
+        close_fd(guard_ready_read)
+        if process.poll() is not None:
+            raise ContractError("target guard exited before cleanup handshake")
+
+        _write_all_fd(watchdog_config_write, f"{pgid}\n".encode("ascii"))
+        close_fd(watchdog_config_write)
+        _read_handshake_byte(watchdog_ack_read, b"A", deadline, "watchdog")
+        close_fd(watchdog_ack_read)
+        if watchdog.poll() is not None:
+            raise ContractError("watchdog exited before cleanup handshake")
+
+        cleanup_armed_callback(
+            {
+                "adapter": "subprocess-watchdog-v1",
+                "cleanup": "outer-eof-killpg",
+                "root_pid": process.pid,
+                "process_group_id": pgid,
+                "target_resumed": False,
+                "guard_source_sha256": guard_sha,
+                "watchdog_source_sha256": watchdog_sha,
+            }
+        )
+        cleanup_armed = True
+        _write_all_fd(release_write, b"G")
+        close_fd(release_write)
+        target_released = True
+
+        while process.poll() is None:
+            if watchdog.poll() is not None:
+                infrastructure_errors.append(
+                    "cleanup watchdog exited while target group was active"
+                )
+                stop.set()
+            if stop.is_set():
+                kill_group(
+                    "output-cap"
+                    if stdout_sink.truncated or stderr_sink.truncated
+                    else "stream-stop"
+                )
+                break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                kill_group("timeout")
+                break
+            time.sleep(limits.poll_ms / 1000)
+        process.wait(timeout=5)
+        if _posix_group_exists(pgid):
+            if group_kill_reason is None:
+                descendant_leak = True
+                infrastructure_errors.append(
+                    "root exited while descendants survived in its guarded group"
+                )
+                kill_group("surviving-descendants")
+            group_quiesced = wait_group_quiescence()
+        else:
+            group_quiesced = True
+    except BaseException as exc:
+        message = f"{type(exc).__name__}: {exc}"
+        if process is None:
+            launch_error = message
+        else:
+            infrastructure_errors.append(message)
+            kill_group("guarded-adapter-exception")
+            try:
+                process.wait(timeout=5)
+            except BaseException as wait_exc:
+                infrastructure_errors.append(
+                    f"root wait: {type(wait_exc).__name__}: {wait_exc}"
+                )
+            group_quiesced = wait_group_quiescence()
+    finally:
+        if process is not None and pgid is not None and _posix_group_exists(pgid):
+            kill_group("guarded-final-cleanup")
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except BaseException as exc:
+                    infrastructure_errors.append(
+                        f"final root wait: {type(exc).__name__}: {exc}"
+                    )
+            group_quiesced = wait_group_quiescence()
+
+        close_fd(release_write if "release_write" in locals() else None)
+        if live_write is not None and live_write in open_fds:
+            try:
+                if pgid is None or group_quiesced:
+                    _write_all_fd(live_write, b"D")
+                    watchdog_disarmed = True
+            except BaseException as exc:
+                infrastructure_errors.append(
+                    f"watchdog disarm: {type(exc).__name__}: {exc}"
+                )
+            close_fd(live_write)
+
+        for fd in tuple(open_fds):
+            close_fd(fd)
+        if watchdog is not None:
+            try:
+                watchdog.wait(timeout=5)
+            except BaseException as exc:
+                infrastructure_errors.append(
+                    f"watchdog wait: {type(exc).__name__}: {exc}"
+                )
+                try:
+                    watchdog.kill()
+                    watchdog.wait(timeout=5)
+                except BaseException as kill_exc:
+                    infrastructure_errors.append(
+                        f"watchdog kill: {type(kill_exc).__name__}: {kill_exc}"
+                    )
+            if watchdog.returncode not in (0, None):
+                infrastructure_errors.append(
+                    f"cleanup watchdog exited {watchdog.returncode}"
+                )
+
+        for thread in threads:
+            thread.join(timeout=5)
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError as exc:
+                        thread_errors.append(
+                            f"pipe-close: {type(exc).__name__}: {exc}"
+                        )
+        for sink in (stdout_sink, stderr_sink):
+            try:
+                sink.seal()
+            except BaseException as exc:
+                message = f"final-seal: {type(exc).__name__}: {exc}"
+                sink.error = message
+                thread_errors.append(message)
+
+    alive = [thread.name for thread in threads if thread.is_alive()]
+    thread_error = (
+        "; ".join(thread_errors)
+        if thread_errors
+        else (f"threads did not quiesce: {alive}" if alive else None)
+    )
+    return {
+        "adapter": "subprocess-watchdog-v1",
+        "support": {
+            "wall": "enforced",
+            "output": "enforced",
+            "job_memory": "unsupported-not-requested",
+            "active_process": "unsupported-not-requested",
+        },
+        "stage": "child-sealed",
+        "exit_code": process.returncode if process is not None else None,
+        "timed_out": timed_out,
+        "memory_limit_hit": False,
+        "process_limit_hit": False,
+        "output_limit_hit": stdout_sink.truncated or stderr_sink.truncated,
+        "launch_error": launch_error,
+        "pipe_error": next(
+            (sink.error for sink in (stdout_sink, stderr_sink) if sink.error), None
+        ),
+        "thread_error": thread_error,
+        "infrastructure_error": (
+            "; ".join(dict.fromkeys(infrastructure_errors))
+            if infrastructure_errors
+            else None
+        ),
+        "measurements": {
+            "wall_ns": time.perf_counter_ns() - started_ns,
+            "process_count": None,
+            "peak_job_memory_bytes": None,
+            "thread_count": len(threads),
+            "process_group_id": pgid,
+            "process_group_quiesced": group_quiesced,
+            "process_group_kill_reason": group_kill_reason,
+            "surviving_descendant_detected": descendant_leak,
+            "cleanup_armed": cleanup_armed,
+            "target_released": target_released,
+            "watchdog_disarmed": watchdog_disarmed,
+            "guard_source_sha256": guard_sha,
+            "watchdog_source_sha256": watchdog_sha,
+            "watchdog_pid": watchdog.pid if watchdog is not None else None,
+        },
+        "streams": {
+            "stdout": stdout_sink.record(),
+            "stderr": stderr_sink.record(),
+        },
+    }
+
+
 def _run_non_windows_job(
     argv: Sequence[str],
     *,
@@ -846,7 +1388,18 @@ def _run_non_windows_job(
     stdout_path: Path,
     stderr_path: Path,
     limits: Limits,
+    cleanup_armed_callback=None,
 ) -> dict[str, Any]:
+    if cleanup_armed_callback is not None:
+        return _run_non_windows_guarded_job(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            limits=limits,
+            cleanup_armed_callback=cleanup_armed_callback,
+        )
     _validate_platform_support(limits)
     if os.name == "nt":
         raise ContractError("portable process-group adapter requires POSIX")
@@ -1102,6 +1655,7 @@ class PreparedAttempt:
         *,
         result_validator: Callable[[Mapping[str, Any]], None] | None = None,
         _adapter: Callable[..., dict[str, Any]] | None = None,
+        _cleanup_armed: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         if self._executed:
             raise ContractError("prepared attempt has already executed")
@@ -1115,14 +1669,16 @@ class PreparedAttempt:
         outcome: dict[str, Any]
         adapter_exception: str | None = None
         try:
-            outcome = adapter(
-                self.spec.argv,
-                cwd=self.spec.cwd,
-                env=self.env,
-                stdout_path=root / STDOUT_NAME,
-                stderr_path=root / STDERR_NAME,
-                limits=self.spec.limits,
-            )
+            adapter_kwargs: dict[str, Any] = {
+                "cwd": self.spec.cwd,
+                "env": self.env,
+                "stdout_path": root / STDOUT_NAME,
+                "stderr_path": root / STDERR_NAME,
+                "limits": self.spec.limits,
+            }
+            if _cleanup_armed is not None:
+                adapter_kwargs["cleanup_armed_callback"] = _cleanup_armed
+            outcome = adapter(self.spec.argv, **adapter_kwargs)
         except AdapterError as exc:
             adapter_exception = str(exc)
             outcome = dict(exc.outcome)
@@ -1169,8 +1725,16 @@ class PreparedAttempt:
         status = "success" if classification == "success" else "failure"
         attempt_path = root / ATTEMPT_NAME
         verdict = {
-            "schema": VERDICT_SCHEMA,
-            "contract_version": CONTRACT_VERSION,
+            "schema": (
+                CHAINED_VERDICT_SCHEMA
+                if self.spec.chain is not None
+                else VERDICT_SCHEMA
+            ),
+            "contract_version": (
+                CHAINED_CONTRACT_VERSION
+                if self.spec.chain is not None
+                else CONTRACT_VERSION
+            ),
             "attempt_id": self.attempt["attempt_id"],
             "attempt_sha256": _sha256_file(attempt_path),
             "gate_id": self.spec.gate_id,
@@ -1198,6 +1762,8 @@ class PreparedAttempt:
             "error": error,
             "created_unix_ns": time.time_ns(),
         }
+        if self.spec.chain is not None:
+            verdict["chain"] = self.spec.chain.receipt()
         _validate_verdict(verdict)
         exclusive_write_json(root / VERDICT_NAME, verdict)
         return verdict
@@ -1284,10 +1850,627 @@ def run_one_shot(
     *,
     result_validator: Callable[[Mapping[str, Any]], None] | None = None,
     _adapter: Callable[..., dict[str, Any]] | None = None,
+    _cleanup_armed: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     return prepare_attempt(spec).execute(
-        result_validator=result_validator, _adapter=_adapter
+        result_validator=result_validator,
+        _adapter=_adapter,
+        _cleanup_armed=_cleanup_armed,
     )
+
+
+ENTRY_PLAN_SCHEMA = "ring.one-shot.entry-plan.v1"
+ENTRY_PLAN_KEYS = {"schema", "contract_version", "gate_id", "launcher", "inner"}
+ENTRY_LAUNCHER_KEYS = {"path", "size", "sha256", "windows_adapter"}
+ENTRY_INNER_KEYS = {
+    "evidence_dir",
+    "argv",
+    "cwd",
+    "env",
+    "limits",
+    "success_exit_codes",
+}
+OUTER_ATTEMPT_SCHEMA = "ring.one-shot.outer-attempt.v1"
+OUTER_VERDICT_SCHEMA = "ring.one-shot.outer-verdict.v1"
+OUTER_AUDIT_SCHEMA = "ring.one-shot.outer-audit.v1"
+OUTER_ATTEMPT_NAME = "outer-attempt.json"
+OUTER_VERDICT_NAME = "outer-verdict.json"
+OUTER_STDOUT_NAME = "outer-stdout.raw"
+OUTER_STDERR_NAME = "outer-stderr.raw"
+OUTER_RAW_CAP = 1024 * 1024
+
+
+def _validate_entry_plan(plan_value: Any) -> tuple[dict[str, Any], OneShotSpec]:
+    plan = _strict_keys(plan_value, ENTRY_PLAN_KEYS, "entry plan")
+    if plan["schema"] != ENTRY_PLAN_SCHEMA or plan["contract_version"] != 1:
+        raise ContractError("entry plan schema/version mismatch")
+    if not isinstance(plan["gate_id"], str) or GATE_ID_RE.fullmatch(
+        plan["gate_id"]
+    ) is None:
+        raise ContractError("entry plan gate_id is invalid")
+    launcher = _strict_keys(
+        plan["launcher"], ENTRY_LAUNCHER_KEYS, "entry plan.launcher"
+    )
+    launcher_path = Path(launcher["path"]) if isinstance(launcher["path"], str) else Path()
+    if (
+        not launcher_path.is_absolute()
+        or launcher_path.is_symlink()
+        or not launcher_path.is_file()
+        or type(launcher["size"]) is not int
+        or launcher["size"] < 0
+        or not isinstance(launcher["sha256"], str)
+        or HEX_64_RE.fullmatch(launcher["sha256"]) is None
+    ):
+        raise ContractError("entry plan launcher identity is invalid")
+    actual_launcher = Path(__file__).resolve(strict=True)
+    if launcher_path.resolve(strict=True) != actual_launcher:
+        raise ContractError("entry plan launcher path differs from executing source")
+    if actual_launcher.stat().st_size != launcher["size"] or _sha256_file(
+        actual_launcher
+    ) != launcher["sha256"]:
+        raise ContractError("entry plan launcher bytes differ from reviewed identity")
+    windows_identity = _strict_keys(
+        launcher["windows_adapter"], TOOL_KEYS, "entry plan.launcher.windows_adapter"
+    )
+    windows_path = (
+        Path(windows_identity["path"])
+        if isinstance(windows_identity["path"], str)
+        else Path()
+    )
+    expected_windows = actual_launcher.parents[2] / "bench" / "check" / "windows_job.py"
+    if (
+        not windows_path.is_absolute()
+        or windows_path.is_symlink()
+        or windows_path.resolve(strict=True) != expected_windows.resolve(strict=True)
+        or type(windows_identity["size"]) is not int
+        or windows_identity["size"] != windows_path.stat().st_size
+        or not isinstance(windows_identity["sha256"], str)
+        or HEX_64_RE.fullmatch(windows_identity["sha256"]) is None
+        or windows_identity["sha256"] != _sha256_file(windows_path)
+    ):
+        raise ContractError("entry plan Windows adapter identity is invalid")
+
+    inner = _strict_keys(plan["inner"], ENTRY_INNER_KEYS, "entry plan.inner")
+    if inner["evidence_dir"] != "inner":
+        raise ContractError("entry plan inner evidence_dir must be exactly 'inner'")
+    argv = inner["argv"]
+    if not isinstance(argv, list) or not argv or not all(
+        isinstance(part, str) and part and "\x00" not in part for part in argv
+    ):
+        raise ContractError("entry plan inner argv is invalid")
+    cwd = Path(inner["cwd"]) if isinstance(inner["cwd"], str) else Path()
+    if not cwd.is_absolute() or not cwd.is_dir():
+        raise ContractError("entry plan inner cwd is invalid")
+    env_entries = inner["env"]
+    if not isinstance(env_entries, list):
+        raise ContractError("entry plan inner env is not a list")
+    env_pairs: list[tuple[str, str]] = []
+    for index, entry_value in enumerate(env_entries):
+        entry = _strict_keys(
+            entry_value, ENV_ENTRY_KEYS, f"entry plan.inner.env[{index}]"
+        )
+        if not isinstance(entry["name"], str) or not isinstance(entry["value"], str):
+            raise ContractError("entry plan inner env entry is invalid")
+        env_pairs.append((entry["name"], entry["value"]))
+    env_names = [name for name, _value in env_pairs]
+    if env_names != sorted(set(env_names)):
+        raise ContractError("entry plan inner env is not unique/sorted")
+    limits_value = _validate_limits_receipt(
+        inner["limits"], "entry plan.inner.limits"
+    )
+    success_exit_codes = inner["success_exit_codes"]
+    if not isinstance(success_exit_codes, list) or not success_exit_codes or not all(
+        type(code) is int for code in success_exit_codes
+    ):
+        raise ContractError("entry plan inner success_exit_codes are invalid")
+    placeholder_root = Path("/")
+    spec = OneShotSpec(
+        evidence_dir=placeholder_root,
+        gate_id=plan["gate_id"],
+        argv=tuple(argv),
+        reviewed_argv=tuple(argv),
+        cwd=cwd,
+        env=dict(env_pairs),
+        reviewed_env=tuple(env_pairs),
+        limits=Limits(**limits_value),
+        success_exit_codes=tuple(success_exit_codes),
+    )
+    return plan, spec
+
+
+def run_chained_plan(
+    plan_value: Any,
+    *,
+    outer_evidence_dir: str,
+    outer_attempt_id: str,
+    outer_attempt_sha256: str,
+    plan_sha256: str,
+    cleanup_armed_callback: Callable[[Mapping[str, Any]], None],
+) -> dict[str, Any]:
+    """Run the exact fixed inner gate as one child of an outer transaction."""
+
+    global _CHAIN_WINDOWS_ADAPTER_IDENTITY
+    plan, template = _validate_entry_plan(plan_value)
+    outer_root = Path(outer_evidence_dir)
+    if not outer_root.is_absolute() or not outer_root.is_dir() or outer_root.is_symlink():
+        raise ContractError("outer evidence root is invalid")
+    outer_attempt = outer_root / "outer-attempt.json"
+    if outer_attempt.is_symlink() or not outer_attempt.is_file():
+        raise ContractError("outer attempt is missing/non-regular")
+    if _sha256_file(outer_attempt) != outer_attempt_sha256:
+        raise ContractError("outer attempt hash changed before inner attempt")
+    outer_value = _load_json(outer_attempt)
+    if not isinstance(outer_value, dict):
+        raise ContractError("outer attempt is not an object")
+    try:
+        delivered_plan_hash = outer_value["delivery"]["plan"]["sha256"]
+        delivered_root = outer_value["evidence_root"]
+        delivered_attempt_id = outer_value["attempt_id"]
+    except (KeyError, TypeError) as exc:
+        raise ContractError("outer attempt lacks chain authority fields") from exc
+    if (
+        outer_value.get("schema") != "ring.one-shot.outer-attempt.v1"
+        or delivered_plan_hash != plan_sha256
+        or delivered_root != os.fspath(outer_root)
+        or delivered_attempt_id != outer_attempt_id
+    ):
+        raise ContractError("outer attempt chain authority mismatch")
+    chain = AttemptChain(
+        outer_attempt_id=outer_attempt_id,
+        outer_attempt_sha256=outer_attempt_sha256,
+        plan_sha256=plan_sha256,
+    )
+    chain.receipt()
+    inner_root = outer_root / plan["inner"]["evidence_dir"]
+    try:
+        inner_root.mkdir(parents=False, exist_ok=False)
+    except OSError as exc:
+        raise ContractError(f"cannot create exclusive inner evidence root: {exc}") from exc
+    spec = OneShotSpec(
+        **{
+            **template.__dict__,
+            "evidence_dir": inner_root,
+            "chain": chain,
+        }
+    )
+    windows_value = plan["launcher"]["windows_adapter"]
+    previous_windows_identity = _CHAIN_WINDOWS_ADAPTER_IDENTITY
+    _CHAIN_WINDOWS_ADAPTER_IDENTITY = {
+        "path": os.fspath(Path(windows_value["path"]).resolve(strict=True)),
+        "size": windows_value["size"],
+        "sha256": windows_value["sha256"],
+    }
+    try:
+        verdict = run_one_shot(spec, _cleanup_armed=cleanup_armed_callback)
+    finally:
+        _CHAIN_WINDOWS_ADAPTER_IDENTITY = previous_windows_identity
+    audit = audit_attempt(inner_root)
+    return {
+        "inner_evidence_dir": "inner",
+        "verdict": verdict,
+        "audit": audit,
+    }
+
+
+def _outer_file_receipt(path: Path) -> dict[str, Any] | None:
+    if path.is_symlink() or not path.is_file():
+        return None
+    return {"path": path.name, "size": path.stat().st_size, "sha256": _sha256_file(path)}
+
+
+def _outer_raw_record(path: Path) -> dict[str, Any]:
+    with path.open("r+b") as stream:
+        os.fsync(stream.fileno())
+        seen = path.stat().st_size
+        if seen > OUTER_RAW_CAP:
+            stream.truncate(OUTER_RAW_CAP)
+            stream.flush()
+            os.fsync(stream.fileno())
+    _fsync_directory(path.parent)
+    captured = path.stat().st_size
+    return {
+        "path": path.name,
+        "captured_size": captured,
+        "bytes_seen": seen,
+        "cap_bytes": OUTER_RAW_CAP,
+        "truncated_at_cap": seen > OUTER_RAW_CAP,
+        "sha256": _sha256_file(path),
+        "fsynced": True,
+    }
+
+
+def _detach_outer_streams() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except BaseException:
+            pass
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+    finally:
+        os.close(devnull)
+
+
+def _outer_inner_summary(root: Path) -> dict[str, Any] | None:
+    inner = root / "inner"
+    if not inner.is_dir() or inner.is_symlink():
+        return None
+    audit = audit_attempt(inner)
+    return {
+        "evidence_dir": "inner",
+        "attempt": _outer_file_receipt(inner / ATTEMPT_NAME),
+        "verdict": _outer_file_receipt(inner / VERDICT_NAME),
+        "stdout": _outer_file_receipt(inner / STDOUT_NAME),
+        "stderr": _outer_file_receipt(inner / STDERR_NAME),
+        "audit": audit,
+        "audit_sha256": _sha256_bytes(_json_bytes(audit)),
+    }
+
+
+def _validate_outer_attempt(value: Any) -> dict[str, Any]:
+    attempt = _strict_keys(
+        value,
+        {
+            "schema",
+            "contract_version",
+            "attempt_id",
+            "created_unix_ns",
+            "state",
+            "evidence_root",
+            "delivery",
+            "observed",
+        },
+        "outer attempt",
+    )
+    if (
+        attempt["schema"] != OUTER_ATTEMPT_SCHEMA
+        or attempt["contract_version"] != 1
+        or not isinstance(attempt["attempt_id"], str)
+        or ATTEMPT_ID_RE.fullmatch(attempt["attempt_id"]) is None
+        or attempt["state"] != "attempt-created"
+        or type(attempt["created_unix_ns"]) is not int
+        or not isinstance(attempt["evidence_root"], str)
+        or not Path(attempt["evidence_root"]).is_absolute()
+    ):
+        raise ContractError("outer attempt identity is invalid")
+    delivery = _strict_keys(
+        attempt["delivery"],
+        {
+            "required_interpreter_flags",
+            "python",
+            "entry",
+            "plan",
+            "cwd",
+            "env",
+            "env_sha256",
+        },
+        "outer attempt.delivery",
+    )
+    if delivery["required_interpreter_flags"] != ["-I", "-S", "-B", "-u"]:
+        raise ContractError("outer interpreter flags mismatch")
+    for label in ("python", "entry", "plan"):
+        keys = {"path", "size", "sha256"} | ({"version"} if label == "python" else set())
+        identity = _strict_keys(delivery[label], keys, f"outer delivery.{label}")
+        if (
+            not isinstance(identity["path"], str)
+            or not Path(identity["path"]).is_absolute()
+            or type(identity["size"]) is not int
+            or identity["size"] < 0
+            or not isinstance(identity["sha256"], str)
+            or HEX_64_RE.fullmatch(identity["sha256"]) is None
+        ):
+            raise ContractError(f"outer {label} identity is invalid")
+    environment = delivery["env"]
+    if not isinstance(environment, list) or delivery["env_sha256"] != _sha256_bytes(
+        _json_bytes(environment)
+    ):
+        raise ContractError("outer environment identity is invalid")
+    names: list[str] = []
+    for index, entry in enumerate(environment):
+        item = _strict_keys(entry, ENV_ENTRY_KEYS, f"outer env[{index}]")
+        if not isinstance(item["name"], str) or not isinstance(item["value"], str):
+            raise ContractError("outer environment entry is invalid")
+        names.append(item["name"])
+    if names != sorted(set(names)):
+        raise ContractError("outer environment names are not unique/sorted")
+    observed = _strict_keys(
+        attempt["observed"],
+        {
+            "python_path",
+            "python_version",
+            "python_implementation",
+            "entry_path",
+            "isolated",
+            "no_site",
+            "dont_write_bytecode",
+            "stdout_write_through",
+            "stderr_write_through",
+            "argv",
+        },
+        "outer attempt.observed",
+    )
+    if (
+        observed["python_path"] != delivery["python"]["path"]
+        or observed["entry_path"] != delivery["entry"]["path"]
+        or observed["python_version"] != delivery["python"]["version"]
+        or observed["python_implementation"] != "cpython"
+        or observed["isolated"] != 1
+        or observed["no_site"] != 1
+        or observed["dont_write_bytecode"] != 1
+        or observed["stdout_write_through"] is not True
+        or observed["stderr_write_through"] is not True
+        or not isinstance(observed["argv"], list)
+    ):
+        raise ContractError("outer observed trust-root identity is invalid")
+    return attempt
+
+
+def run_outer_entry(
+    plan_value: Any,
+    *,
+    delivery: Mapping[str, Any],
+    attempt: Mapping[str, Any],
+    outer_evidence_dir: str,
+    identities: Mapping[str, Any],
+    started_ns: int,
+) -> int:
+    """Execute and seal the rich outer transaction after bootstrap first-write."""
+
+    root = Path(outer_evidence_dir)
+    checked_attempt = _validate_outer_attempt(dict(attempt))
+    if checked_attempt["evidence_root"] != os.fspath(root):
+        raise ContractError("outer attempt root differs from executing root")
+    stage = "inner"
+    status = "failure"
+    classification = "infrastructure_error"
+    error: str | None = None
+    handshakes: list[dict[str, Any]] = []
+    try:
+        def cleanup_armed(value: Mapping[str, Any]) -> None:
+            if handshakes:
+                raise ContractError("cleanup handshake occurred more than once")
+            if not isinstance(value, Mapping) or value.get("target_resumed") is not False:
+                raise ContractError("cleanup handshake is malformed/late")
+            handshakes.append(dict(value))
+
+        result = run_chained_plan(
+            plan_value,
+            outer_evidence_dir=os.fspath(root),
+            outer_attempt_id=checked_attempt["attempt_id"],
+            outer_attempt_sha256=_sha256_file(root / OUTER_ATTEMPT_NAME),
+            plan_sha256=str(delivery["plan_sha256"]),
+            cleanup_armed_callback=cleanup_armed,
+        )
+        result = _strict_keys(
+            result, {"inner_evidence_dir", "verdict", "audit"}, "launcher result"
+        )
+        if result["inner_evidence_dir"] != "inner":
+            raise ContractError("launcher returned a different inner root")
+        inner_verdict = result["verdict"]
+        if not isinstance(inner_verdict, dict) or inner_verdict.get("status") not in {
+            "success",
+            "failure",
+        }:
+            raise ContractError("launcher returned an invalid inner verdict")
+        if not handshakes:
+            raise ContractError("target completed without cleanup handshake")
+        status = inner_verdict["status"]
+        classification = "success" if status == "success" else "inner_failure"
+        error = inner_verdict.get("error")
+    except BaseException as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        classification = f"{stage}_failure"
+        try:
+            traceback.print_exc()
+        except BaseException:
+            pass
+    _detach_outer_streams()
+    stdout = _outer_raw_record(root / OUTER_STDOUT_NAME)
+    stderr = _outer_raw_record(root / OUTER_STDERR_NAME)
+    if stdout["truncated_at_cap"] or stderr["truncated_at_cap"]:
+        status = "failure"
+        classification = "outer_output_limit"
+        error = error or "outer launcher output reached its cap"
+    verdict = {
+        "schema": OUTER_VERDICT_SCHEMA,
+        "contract_version": 1,
+        "attempt_id": checked_attempt["attempt_id"],
+        "attempt_sha256": _sha256_file(root / OUTER_ATTEMPT_NAME),
+        "plan_sha256": str(delivery["plan_sha256"]),
+        "status": status,
+        "classification": classification,
+        "stage": stage,
+        "error": error,
+        "identities": dict(identities),
+        "cleanup_handshakes": handshakes,
+        "inner": _outer_inner_summary(root),
+        "measurements": {
+            "outer_wall_ns": time.perf_counter_ns() - started_ns,
+            "cleanup_handshake_count": len(handshakes),
+            "platform": sys.platform,
+        },
+        "streams": {"stdout": stdout, "stderr": stderr},
+        "created_unix_ns": time.time_ns(),
+    }
+    exclusive_write_json(root / OUTER_VERDICT_NAME, verdict)
+    return 0 if status == "success" else 1
+
+
+def audit_outer(evidence_dir: Path) -> dict[str, Any]:
+    root = evidence_dir.resolve()
+    result = {
+        "schema": OUTER_AUDIT_SCHEMA,
+        "contract_version": 1,
+        "evidence_root": os.fspath(root),
+        "consumed": False,
+        "state": "absent",
+        "status": "unknown",
+        "classification": "unknown",
+        "errors": [],
+    }
+    attempt_path = root / OUTER_ATTEMPT_NAME
+    if attempt_path.is_symlink() or not attempt_path.is_file():
+        if root.exists() and any(root.iterdir()):
+            result["state"] = "incomplete"
+            result["errors"].append("outer evidence exists without regular attempt")
+        return result
+    result["consumed"] = True
+    try:
+        attempt = _validate_outer_attempt(_load_json(attempt_path))
+    except ContractError as exc:
+        result["state"] = "incomplete"
+        result["errors"].append(str(exc))
+        return result
+    verdict_path = root / OUTER_VERDICT_NAME
+    if verdict_path.is_symlink() or not verdict_path.is_file():
+        result["state"] = "incomplete"
+        result["errors"].append("outer attempt has no verdict (crash/unknown)")
+        return result
+    try:
+        verdict = _strict_keys(
+            _load_json(verdict_path),
+            {
+                "schema",
+                "contract_version",
+                "attempt_id",
+                "attempt_sha256",
+                "plan_sha256",
+                "status",
+                "classification",
+                "stage",
+                "error",
+                "identities",
+                "cleanup_handshakes",
+                "inner",
+                "measurements",
+                "streams",
+                "created_unix_ns",
+            },
+            "outer verdict",
+        )
+        if (
+            verdict["schema"] != OUTER_VERDICT_SCHEMA
+            or verdict["contract_version"] != 1
+            or verdict["attempt_id"] != attempt["attempt_id"]
+            or verdict["attempt_sha256"] != _sha256_file(attempt_path)
+            or verdict["plan_sha256"] != attempt["delivery"]["plan"]["sha256"]
+            or verdict["status"] not in {"success", "failure"}
+        ):
+            raise ContractError("outer attempt/verdict identity mismatch")
+        if verdict["status"] == "success" and (
+            verdict["classification"] != "success"
+            or verdict["error"] is not None
+            or len(verdict["cleanup_handshakes"]) != 1
+        ):
+            raise ContractError("successful outer verdict has invalid state")
+        if verdict["status"] == "failure" and verdict["classification"] == "success":
+            raise ContractError("failed outer verdict claims success")
+        if not isinstance(verdict["measurements"], dict) or type(
+            verdict["measurements"].get("outer_wall_ns")
+        ) is not int:
+            raise ContractError("outer measurements are invalid")
+        for stream, name in (
+            ("stdout", OUTER_STDOUT_NAME),
+            ("stderr", OUTER_STDERR_NAME),
+        ):
+            record = _strict_keys(
+                verdict["streams"][stream],
+                {
+                    "path",
+                    "captured_size",
+                    "bytes_seen",
+                    "cap_bytes",
+                    "truncated_at_cap",
+                    "sha256",
+                    "fsynced",
+                },
+                f"outer verdict.streams.{stream}",
+            )
+            path = root / name
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or record["path"] != name
+                or record["captured_size"] != path.stat().st_size
+                or record["sha256"] != _sha256_file(path)
+                or not record["fsynced"]
+                or record["cap_bytes"] != OUTER_RAW_CAP
+                or type(record["bytes_seen"]) is not int
+                or record["bytes_seen"] < record["captured_size"]
+                or record["captured_size"]
+                != min(record["bytes_seen"], OUTER_RAW_CAP)
+                or record["truncated_at_cap"]
+                != (record["bytes_seen"] > OUTER_RAW_CAP)
+            ):
+                raise ContractError(f"outer {stream} raw identity mismatch")
+        expected = {
+            OUTER_ATTEMPT_NAME,
+            OUTER_VERDICT_NAME,
+            OUTER_STDOUT_NAME,
+            OUTER_STDERR_NAME,
+        }
+        inner_record = verdict["inner"]
+        if inner_record is not None:
+            expected.add("inner")
+            inner_record = _strict_keys(
+                inner_record,
+                {
+                    "evidence_dir",
+                    "attempt",
+                    "verdict",
+                    "stdout",
+                    "stderr",
+                    "audit",
+                    "audit_sha256",
+                },
+                "outer verdict.inner",
+            )
+            if inner_record["evidence_dir"] != "inner":
+                raise ContractError("outer verdict references a different inner root")
+            inner_root = root / "inner"
+            for label, name in (
+                ("attempt", ATTEMPT_NAME),
+                ("verdict", VERDICT_NAME),
+                ("stdout", STDOUT_NAME),
+                ("stderr", STDERR_NAME),
+            ):
+                if inner_record[label] != _outer_file_receipt(inner_root / name):
+                    raise ContractError(f"inner {label} receipt/hash mismatch")
+            if inner_record["audit_sha256"] != _sha256_bytes(
+                _json_bytes(inner_record["audit"])
+            ):
+                raise ContractError("inner audit hash mismatch")
+            if inner_record["attempt"] is not None:
+                inner_attempt = _load_json(inner_root / ATTEMPT_NAME)
+                chain = inner_attempt.get("chain")
+                if (
+                    inner_attempt.get("schema") != CHAINED_ATTEMPT_SCHEMA
+                    or not isinstance(chain, dict)
+                    or chain.get("outer_attempt_id") != attempt["attempt_id"]
+                    or chain.get("outer_attempt_sha256") != _sha256_file(attempt_path)
+                    or chain.get("plan_sha256")
+                    != attempt["delivery"]["plan"]["sha256"]
+                ):
+                    raise ContractError("inner attempt chain mismatch")
+                if inner_record["verdict"] is not None:
+                    inner_verdict = _load_json(inner_root / VERDICT_NAME)
+                    if (
+                        inner_verdict.get("schema") != CHAINED_VERDICT_SCHEMA
+                        or inner_verdict.get("chain") != chain
+                    ):
+                        raise ContractError("inner attempt/verdict chain mismatch")
+        if {path.name for path in root.iterdir()} != expected:
+            raise ContractError("outer evidence inventory mismatch")
+    except (ContractError, OSError, KeyError, TypeError) as exc:
+        result["state"] = "incomplete"
+        result["errors"].append(str(exc))
+        return result
+    result["state"] = "complete"
+    result["status"] = verdict["status"]
+    result["classification"] = verdict["classification"]
+    return result
 
 
 def audit_attempt(evidence_dir: Path) -> dict[str, Any]:
@@ -1342,6 +2525,10 @@ def audit_attempt(evidence_dir: Path) -> dict[str, Any]:
         result["errors"].append("attempt/verdict limits mismatch")
     if verdict["success_exit_codes"] != attempt["success_exit_codes"]:
         result["errors"].append("attempt/verdict success exit codes mismatch")
+    if ("chain" in verdict) != ("chain" in attempt) or verdict.get(
+        "chain"
+    ) != attempt.get("chain"):
+        result["errors"].append("attempt/verdict chain mismatch")
     child = verdict["child"]
     preliminary, _preliminary_error = _classify_outcome(
         child, attempt["success_exit_codes"]
