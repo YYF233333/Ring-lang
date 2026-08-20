@@ -768,6 +768,21 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 
 **验收**：inventory 100% 有结论与证据锚；所有保留的本地路径/命令/Markdown link 可解析，C-only 构建/测试说明与当前入口一致；活动看板、audit、Inbox、handoff、CLAUDE/design/lang-spec 无已知状态/依赖冲突；retired backend 不再作为现行 oracle/依赖，完成流水不占活动真值；`python .agents/scripts/validate_workflow.py` 与适用的文档/link/example checks 通过；独立 reviewer 以 `current / historical / future` 三类边界主动寻找误删与漏删。
 
+### B-188 One-shot gate failure evidence durability [infra] [P1] [M] [judgment] [queued]
+
+2026-08-20 I′ oracle-substrate preflight 暴露：bounded validator child 写出 82-byte stderr 后 exit 1，但 parent 只持久化通用 `validator-worker exited 1`；attempt、stage、stream byte counts 与 generic verdict 尚在，原始 child failure 已不可恢复。该 one-shot 按门永久停止，内部原因保持 unknown；本项不得借修复重跑、追认或重新分类该结果。
+
+**目标 / 范围**：为后续所有 one-shot probe、bootstrap crossing、resource-capped build 与 acceptance gate 建立统一 failure-evidence contract。涉及 `.agents/scripts/`、`bench/check/` 的受限进程 supervisor、receipt schema 与 focused Python tests；不修改 compiler/runtime/语言语义，也不把具体 probe 的 oracle 逻辑移入公共 supervisor。
+
+**约束**：
+
+1. child stdout/stderr 在 bounded streaming 时同时写入 exclusive、fsynced、content-hashed raw files；parent 包装异常前先封存 child exit/status、argv identity、stage、resource/stream measurements 与原始输出 hash。输出 cap 触发时也保留 cap 前完整前缀并明确 truncated-at-cap，不能只留二次异常文本。
+2. attempt marker 在首个外部动作前 O_EXCL 创建；success/failure/crash 使用不可覆盖的结构化 verdict。attempt-only crash同样算已消费，恢复工具只读对账，不提供 retry 开关。parent/child/thread 崩溃、BrokenPipe、timeout、Job limit、process limit 与 schema error均有可区分状态。
+3. receipt 不保存秘密或未审 env；只记录 allowlisted execution identity。archive/manifest 必须在清理或临时目录回收前验证文件数、大小与 SHA-256。任何 raw evidence 缺失都使 gate 状态为 incomplete/unknown，禁止由 exit code、部分子门或行为结果补推。
+4. 该 contract 是未来 one-shot gate 的前置；调用方若不能证明 failure evidence 可恢复，不得启动。它不降低各 gate 自身 correctness、ownership、bootstrap、资源或 no-retry 门。
+
+**验收**：synthetic child 分别覆盖唯一 stderr/stdout、非零退出、输出 cap、timeout、memory/process limit、pipe/thread error、parent crash与结构化 schema failure；每例在 fresh attempt 中产生精确 raw files、hash、measurement和唯一 verdict，重复启动/覆盖均失败。故意丢失或篡改任一 raw file时恢复审计必须报 incomplete/unknown；archive round-trip 后 hashes/计数一致。Windows Job 路径与适用的非 Windows subprocess adapter共享同一 schema语义；workflow validator、focused supervisor tests 与独立 adversarial review通过。
+
 ### B-179 project manifest 与可复现 dependency lock [feature] [P2] [XL] [judgment] [queued] [after: B-175]
 
 首个 preview 允许以 entry `.ring` 文件作为 project root，不等待 registry；随后补 `ring.toml` + lockfile，把编译器/std 兼容、local/path/git dependency、feature/capability 与构建输入变为可复现真值。Registry、账号、签名服务与付费托管不在本项。
