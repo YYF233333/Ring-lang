@@ -13,6 +13,7 @@ import errno
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import secrets
@@ -97,15 +98,30 @@ def _load_json(path: Path) -> Any:
         return json.loads(
             path.read_text(encoding="utf-8"),
             object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_json_constant,
         )
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ContractError(f"cannot read JSON {path}: {exc}") from exc
 
 
 def _json_bytes(value: Any) -> bytes:
-    return (
-        json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
-    ).encode("ascii")
+    try:
+        return (
+            json.dumps(
+                value,
+                ensure_ascii=True,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("ascii")
+    except (TypeError, ValueError) as exc:
+        raise ContractError(f"cannot encode canonical JSON: {exc}") from exc
+
+
+def _reject_json_constant(value: str):
+    raise ContractError(f"non-finite JSON constant is forbidden: {value}")
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -180,7 +196,11 @@ def _strict_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
 def _json_safe(value: Any, label: str = "value") -> None:
     if value is None or isinstance(value, (str, bool)):
         return
-    if type(value) in (int, float):
+    if type(value) is int:
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ContractError(f"{label} is non-finite")
         return
     if isinstance(value, list):
         for index, item in enumerate(value):
@@ -205,7 +225,11 @@ class Limits:
     poll_ms: int = 10
 
     def validate(self) -> None:
-        if not isinstance(self.wall_seconds, (int, float)) or self.wall_seconds <= 0:
+        if (
+            type(self.wall_seconds) not in (int, float)
+            or not math.isfinite(float(self.wall_seconds))
+            or self.wall_seconds <= 0
+        ):
             raise ContractError("wall_seconds must be positive")
         for label, value in (
             ("stdout_cap_bytes", self.stdout_cap_bytes),
@@ -481,9 +505,11 @@ def _validate_execution_receipt(value: Any, label: str) -> dict[str, Any]:
 
 def _validate_limits_receipt(value: Any, label: str) -> dict[str, Any]:
     limits = _strict_keys(value, LIMIT_KEYS, label)
-    if not isinstance(limits["wall_seconds"], (int, float)) or limits[
-        "wall_seconds"
-    ] <= 0:
+    if (
+        type(limits["wall_seconds"]) not in (int, float)
+        or not math.isfinite(float(limits["wall_seconds"]))
+        or limits["wall_seconds"] <= 0
+    ):
         raise ContractError(f"{label}.wall_seconds is invalid")
     for key in ("stdout_cap_bytes", "stderr_cap_bytes"):
         if type(limits[key]) is not int or limits[key] < 0:
@@ -931,7 +957,7 @@ def read_all(fd):
         chunks.append(chunk)
     return b"".join(chunks)
 config_fd=int(sys.argv[1]); release_fd=int(sys.argv[2]); ready_fd=int(sys.argv[3])
-config=json.loads(read_all(config_fd).decode("ascii"))
+config=json.loads(read_all(config_fd).decode("ascii"),parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite JSON")))
 os.write(ready_fd,b"R")
 token=os.read(release_fd,1)
 if token != b"G": os._exit(125)
@@ -1877,7 +1903,6 @@ OUTER_ATTEMPT_NAME = "outer-attempt.json"
 OUTER_VERDICT_NAME = "outer-verdict.json"
 OUTER_STDOUT_NAME = "outer-stdout.raw"
 OUTER_STDERR_NAME = "outer-stderr.raw"
-OUTER_RAW_CAP = 1024 * 1024
 
 
 def _validate_entry_plan(plan_value: Any) -> tuple[dict[str, Any], OneShotSpec]:
@@ -2058,12 +2083,12 @@ def _outer_file_receipt(path: Path) -> dict[str, Any] | None:
     return {"path": path.name, "size": path.stat().st_size, "sha256": _sha256_file(path)}
 
 
-def _outer_raw_record(path: Path) -> dict[str, Any]:
+def _outer_raw_record(path: Path, cap: int) -> dict[str, Any]:
     with path.open("r+b") as stream:
         os.fsync(stream.fileno())
         seen = path.stat().st_size
-        if seen > OUTER_RAW_CAP:
-            stream.truncate(OUTER_RAW_CAP)
+        if seen > cap:
+            stream.truncate(cap)
             stream.flush()
             os.fsync(stream.fileno())
     _fsync_directory(path.parent)
@@ -2072,8 +2097,8 @@ def _outer_raw_record(path: Path) -> dict[str, Any]:
         "path": path.name,
         "captured_size": captured,
         "bytes_seen": seen,
-        "cap_bytes": OUTER_RAW_CAP,
-        "truncated_at_cap": seen > OUTER_RAW_CAP,
+        "cap_bytes": cap,
+        "truncated_at_cap": seen > cap,
         "sha256": _sha256_file(path),
         "fsynced": True,
     }
@@ -2145,11 +2170,25 @@ def _validate_outer_attempt(value: Any) -> dict[str, Any]:
             "cwd",
             "env",
             "env_sha256",
+            "limits",
         },
         "outer attempt.delivery",
     )
     if delivery["required_interpreter_flags"] != ["-I", "-S", "-B", "-u"]:
         raise ContractError("outer interpreter flags mismatch")
+    outer_limits = _strict_keys(
+        delivery["limits"],
+        {"wall_seconds", "output_cap_bytes"},
+        "outer attempt.delivery.limits",
+    )
+    if (
+        type(outer_limits["wall_seconds"]) not in (int, float)
+        or not math.isfinite(float(outer_limits["wall_seconds"]))
+        or outer_limits["wall_seconds"] <= 0
+        or type(outer_limits["output_cap_bytes"]) is not int
+        or outer_limits["output_cap_bytes"] <= 0
+    ):
+        raise ContractError("outer wall/output limits are invalid")
     for label in ("python", "entry", "plan"):
         keys = {"path", "size", "sha256"} | ({"version"} if label == "python" else set())
         identity = _strict_keys(delivery[label], keys, f"outer delivery.{label}")
@@ -2215,6 +2254,7 @@ def run_outer_entry(
     outer_evidence_dir: str,
     identities: Mapping[str, Any],
     started_ns: int,
+    outer_bound_state: Callable[[], str | None],
 ) -> int:
     """Execute and seal the rich outer transaction after bootstrap first-write."""
 
@@ -2267,9 +2307,19 @@ def run_outer_entry(
         except BaseException:
             pass
     _detach_outer_streams()
-    stdout = _outer_raw_record(root / OUTER_STDOUT_NAME)
-    stderr = _outer_raw_record(root / OUTER_STDERR_NAME)
-    if stdout["truncated_at_cap"] or stderr["truncated_at_cap"]:
+    cap = int(checked_attempt["delivery"]["limits"]["output_cap_bytes"])
+    stdout = _outer_raw_record(root / OUTER_STDOUT_NAME, cap)
+    stderr = _outer_raw_record(root / OUTER_STDERR_NAME, cap)
+    bound_reason = outer_bound_state()
+    if bound_reason == "timeout":
+        status = "failure"
+        classification = "outer_timeout"
+        error = error or "outer launcher reached its wall bound"
+    elif (
+        bound_reason == "output"
+        or stdout["truncated_at_cap"]
+        or stderr["truncated_at_cap"]
+    ):
         status = "failure"
         classification = "outer_output_limit"
         error = error or "outer launcher output reached its cap"
@@ -2389,6 +2439,7 @@ def audit_outer(evidence_dir: Path) -> dict[str, Any]:
                 f"outer verdict.streams.{stream}",
             )
             path = root / name
+            outer_cap = attempt["delivery"]["limits"]["output_cap_bytes"]
             if (
                 path.is_symlink()
                 or not path.is_file()
@@ -2396,13 +2447,13 @@ def audit_outer(evidence_dir: Path) -> dict[str, Any]:
                 or record["captured_size"] != path.stat().st_size
                 or record["sha256"] != _sha256_file(path)
                 or not record["fsynced"]
-                or record["cap_bytes"] != OUTER_RAW_CAP
+                or record["cap_bytes"] != outer_cap
                 or type(record["bytes_seen"]) is not int
                 or record["bytes_seen"] < record["captured_size"]
                 or record["captured_size"]
-                != min(record["bytes_seen"], OUTER_RAW_CAP)
+                != min(record["bytes_seen"], outer_cap)
                 or record["truncated_at_cap"]
-                != (record["bytes_seen"] > OUTER_RAW_CAP)
+                != (record["bytes_seen"] > outer_cap)
             ):
                 raise ContractError(f"outer {stream} raw identity mismatch")
         expected = {
@@ -2430,6 +2481,7 @@ def audit_outer(evidence_dir: Path) -> dict[str, Any]:
             if inner_record["evidence_dir"] != "inner":
                 raise ContractError("outer verdict references a different inner root")
             inner_root = root / "inner"
+            actual_inner_audit = audit_attempt(inner_root)
             for label, name in (
                 ("attempt", ATTEMPT_NAME),
                 ("verdict", VERDICT_NAME),
@@ -2442,6 +2494,8 @@ def audit_outer(evidence_dir: Path) -> dict[str, Any]:
                 _json_bytes(inner_record["audit"])
             ):
                 raise ContractError("inner audit hash mismatch")
+            if inner_record["audit"] != actual_inner_audit:
+                raise ContractError("stored inner audit differs from current audit")
             if inner_record["attempt"] is not None:
                 inner_attempt = _load_json(inner_root / ATTEMPT_NAME)
                 chain = inner_attempt.get("chain")
@@ -2461,6 +2515,20 @@ def audit_outer(evidence_dir: Path) -> dict[str, Any]:
                         or inner_verdict.get("chain") != chain
                     ):
                         raise ContractError("inner attempt/verdict chain mismatch")
+            if actual_inner_audit["state"] == "complete":
+                if actual_inner_audit["status"] == "failure" and (
+                    verdict["status"] != "failure"
+                    or verdict["classification"] != "inner_failure"
+                ):
+                    raise ContractError("outer status hides actual inner failure")
+                if actual_inner_audit["status"] == "success" and verdict[
+                    "status"
+                ] == "success" and verdict["classification"] != "success":
+                    raise ContractError("outer success differs from actual inner success")
+            elif verdict["status"] == "success":
+                raise ContractError("outer success lacks a complete inner result")
+        elif verdict["status"] == "success":
+            raise ContractError("outer success lacks inner evidence")
         if {path.name for path in root.iterdir()} != expected:
             raise ContractError("outer evidence inventory mismatch")
     except (ContractError, OSError, KeyError, TypeError) as exc:
@@ -2662,6 +2730,7 @@ def verify_archive(archive_path: Path) -> dict[str, Any]:
             manifest = json.loads(
                 manifest_stream.read().decode("utf-8"),
                 object_pairs_hook=_reject_duplicate_keys,
+                parse_constant=_reject_json_constant,
             )
             _strict_keys(
                 manifest,
@@ -2744,7 +2813,14 @@ def _main(argv: Sequence[str] | None = None) -> int:
             output = create_archive(args.evidence_dir, args.archive_path)
         else:
             output = verify_archive(args.archive_path)
-        print(json.dumps(output, ensure_ascii=True, sort_keys=True))
+        print(
+            json.dumps(
+                output,
+                ensure_ascii=True,
+                sort_keys=True,
+                allow_nan=False,
+            )
+        )
         return 0
     except OneShotError as exc:
         print(f"one-shot gate: {exc}", file=sys.stderr)

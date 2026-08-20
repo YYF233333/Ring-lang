@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -28,7 +29,6 @@ OUTER_ATTEMPT_NAME = "outer-attempt.json"
 OUTER_VERDICT_NAME = "outer-verdict.json"
 OUTER_STDOUT_NAME = "outer-stdout.raw"
 OUTER_STDERR_NAME = "outer-stderr.raw"
-OUTER_RAW_CAP = 1024 * 1024
 HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -37,9 +37,19 @@ class OuterEntryError(RuntimeError):
 
 
 def _json_bytes(value) -> bytes:
-    return (
-        json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
-    ).encode("ascii")
+    try:
+        return (
+            json.dumps(
+                value,
+                ensure_ascii=True,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("ascii")
+    except (TypeError, ValueError) as exc:
+        raise OuterEntryError(f"cannot encode canonical JSON: {exc}") from exc
 
 
 def _reject_duplicate_keys(pairs):
@@ -49,6 +59,10 @@ def _reject_duplicate_keys(pairs):
             raise OuterEntryError(f"duplicate JSON key {key!r}")
         result[key] = value
     return result
+
+
+def _reject_json_constant(value: str):
+    raise OuterEntryError(f"non-finite JSON constant is forbidden: {value}")
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -119,6 +133,8 @@ def _parse_delivery(argv: list[str]) -> dict[str, str | int]:
         "--entry-sha256",
         "--outer-cwd",
         "--outer-env-sha256",
+        "--outer-wall-seconds",
+        "--outer-output-cap",
     )
     if len(argv) != len(names) * 2:
         raise OuterEntryError("outer entry argv has wrong arity")
@@ -137,6 +153,18 @@ def _parse_delivery(argv: list[str]) -> dict[str, str | int]:
             raise OuterEntryError(f"outer entry {name} is not an integer") from exc
         if result[name] < 0:
             raise OuterEntryError(f"outer entry {name} is negative")
+    try:
+        result["outer_wall_seconds"] = float(str(result["outer_wall_seconds"]))
+        result["outer_output_cap"] = int(str(result["outer_output_cap"]))
+    except ValueError as exc:
+        raise OuterEntryError("outer wall/output bound is invalid") from exc
+    if (
+        not math.isfinite(float(result["outer_wall_seconds"]))
+        or result["outer_wall_seconds"] <= 0
+        or type(result["outer_output_cap"]) is not int
+        or result["outer_output_cap"] <= 0
+    ):
+        raise OuterEntryError("outer wall/output bound must be finite and positive")
     for name in (
         "plan_sha256",
         "python_sha256",
@@ -214,6 +242,10 @@ def _attempt(delivery: dict[str, str | int], root: Path) -> dict:
             "cwd": os.fspath(cwd),
             "env": environment,
             "env_sha256": env_hash,
+            "limits": {
+                "wall_seconds": delivery["outer_wall_seconds"],
+                "output_cap_bytes": delivery["outer_output_cap"],
+            },
         },
         "observed": {
             "python_path": os.fspath(Path(sys.executable).resolve()),
@@ -249,7 +281,9 @@ def _read_exact(path_value: str, size: int, digest: str, label: str) -> bytes:
 
 def _launcher_from_plan(plan_bytes: bytes) -> tuple[dict, bytes, dict]:
     plan = json.loads(
-        plan_bytes.decode("ascii"), object_pairs_hook=_reject_duplicate_keys
+        plan_bytes.decode("ascii"),
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=_reject_json_constant,
     )
     if not isinstance(plan, dict) or set(plan) != {
         "schema",
@@ -300,13 +334,13 @@ def _launcher_from_plan(plan_bytes: bytes) -> tuple[dict, bytes, dict]:
     return plan, source, dict(launcher)
 
 
-def _raw_record(path: Path) -> dict:
+def _raw_record(path: Path, cap: int) -> dict:
     with path.open("r+b") as stream:
         stream.flush()
         os.fsync(stream.fileno())
         seen = path.stat().st_size
-        if seen > OUTER_RAW_CAP:
-            stream.truncate(OUTER_RAW_CAP)
+        if seen > cap:
+            stream.truncate(cap)
             stream.flush()
             os.fsync(stream.fileno())
     _fsync_directory(path.parent)
@@ -315,8 +349,8 @@ def _raw_record(path: Path) -> dict:
         "path": path.name,
         "captured_size": captured,
         "bytes_seen": seen,
-        "cap_bytes": OUTER_RAW_CAP,
-        "truncated_at_cap": seen > OUTER_RAW_CAP,
+        "cap_bytes": cap,
+        "truncated_at_cap": seen > cap,
         "sha256": _sha256_file(path),
         "fsynced": True,
     }
@@ -337,11 +371,13 @@ def _detach_outer_streams() -> None:
 
 
 def _failure_verdict(
-    root: Path, attempt: dict, delivery: dict[str, str | int], stage: str, error: str
+    root: Path, attempt: dict, delivery: dict[str, str | int], stage: str,
+    error: str, bound_reason: str | None
 ) -> None:
     _detach_outer_streams()
-    stdout = _raw_record(root / OUTER_STDOUT_NAME)
-    stderr = _raw_record(root / OUTER_STDERR_NAME)
+    cap = int(delivery["outer_output_cap"])
+    stdout = _raw_record(root / OUTER_STDOUT_NAME, cap)
+    stderr = _raw_record(root / OUTER_STDERR_NAME, cap)
     truncated = stdout["truncated_at_cap"] or stderr["truncated_at_cap"]
     verdict = {
         "schema": OUTER_VERDICT_SCHEMA,
@@ -350,7 +386,13 @@ def _failure_verdict(
         "attempt_sha256": _sha256_file(root / OUTER_ATTEMPT_NAME),
         "plan_sha256": str(delivery["plan_sha256"]),
         "status": "failure",
-        "classification": "outer_output_limit" if truncated else f"{stage}_failure",
+        "classification": (
+            "outer_timeout"
+            if bound_reason == "timeout"
+            else "outer_output_limit"
+            if bound_reason == "output" or truncated
+            else f"{stage}_failure"
+        ),
         "stage": stage,
         "error": error,
         "identities": {},
@@ -389,7 +431,44 @@ def _run(delivery: dict[str, str | int]) -> int:
 
     stage = "identity"
     started_ns = time.perf_counter_ns()
+    bound_reason = {"value": None}
+    monitor_stop = None
+    monitor_thread = None
     try:
+        import _thread
+        import threading
+
+        monitor_stop = threading.Event()
+
+        def monitor_launcher() -> None:
+            deadline = time.monotonic() + float(delivery["outer_wall_seconds"])
+            cap = int(delivery["outer_output_cap"])
+            while not monitor_stop.wait(0.01):
+                reason = None
+                if time.monotonic() >= deadline:
+                    reason = "timeout"
+                else:
+                    try:
+                        if (
+                            (root / OUTER_STDOUT_NAME).stat().st_size > cap
+                            or (root / OUTER_STDERR_NAME).stat().st_size > cap
+                        ):
+                            reason = "output"
+                    except OSError:
+                        reason = "output"
+                if reason is not None:
+                    bound_reason["value"] = reason
+                    _thread.interrupt_main()
+                    if not monitor_stop.wait(2):
+                        os._exit(124)
+                    return
+
+        monitor_thread = threading.Thread(
+            name="outer-launcher-bound",
+            target=monitor_launcher,
+            daemon=True,
+        )
+        monitor_thread.start()
         _read_exact(
             str(delivery["python"]),
             int(delivery["python_size"]),
@@ -441,7 +520,7 @@ def _run(delivery: dict[str, str | int]) -> int:
         if not callable(run_outer):
             raise OuterEntryError("dynamic launcher lacks run_outer_entry protocol")
         stage = "outer-launcher"
-        return int(
+        result_code = int(
             run_outer(
                 plan,
                 delivery=dict(delivery),
@@ -454,16 +533,26 @@ def _run(delivery: dict[str, str | int]) -> int:
                     "launcher": launcher_identity,
                 },
                 started_ns=started_ns,
+                outer_bound_state=lambda: bound_reason["value"],
             )
         )
+        monitor_stop.set()
+        monitor_thread.join(timeout=3)
+        return result_code
     except BaseException as exc:
+        if monitor_stop is not None:
+            monitor_stop.set()
+        if monitor_thread is not None:
+            monitor_thread.join(timeout=3)
         error = f"{type(exc).__name__}: {exc}"
         try:
             traceback.print_exc()
         except BaseException:
             pass
         try:
-            _failure_verdict(root, attempt, delivery, stage, error)
+            _failure_verdict(
+                root, attempt, delivery, stage, error, bound_reason["value"]
+            )
         except FileExistsError:
             pass
         return 1
