@@ -26,6 +26,7 @@ void* inner_fn(void* inner_scope) {
     void* evidence_result;
     exact_leaf = ((void**)inner_scope)[1];
     evidence_leaf = ((void**)inner_scope)[2];
+    if (1) { branch_phi = exact_leaf; } else { branch_phi = evidence_leaf; }
     exact_result = ((void* (*)(void*))(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1]);
     method_leaf = ((void**)evidence_leaf)[3];
     evidence_result =
@@ -44,6 +45,7 @@ void* outer_fn(void* outer_scope) {
     exact_forward = ((void**)outer_scope)[1];
     evidence_forward = ((void**)outer_scope)[2];
     inner_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);
+    *(int64_t*)inner_env = 2;
     ((void**)inner_env)[1] = exact_forward;
     ((void**)inner_env)[2] = evidence_forward;
     inner_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);
@@ -62,12 +64,14 @@ void* parent_root(void* input_capsule) {
     void* outer_pair;
     void* outer_local;
     void* parent_result;
-    seed_env = ring_alloc((int64_t)sizeof(int64_t), 15);
+    seed_env = ring_alloc((int64_t)(sizeof(int64_t) + 0 * sizeof(void*)), 15);
+    *(int64_t*)seed_env = 0;
     seed_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);
     ((void**)seed_pair)[0] = (void*)seed_fn;
     ((void**)seed_pair)[1] = seed_env;
     exact_local = seed_pair;
     outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);
+    *(int64_t*)outer_env = 2;
     ((void**)outer_env)[1] = exact_local;
     ((void**)outer_env)[2] = input_capsule;
     outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);
@@ -104,6 +108,18 @@ class ProvenanceBContractTests(unittest.TestCase):
     def test_two_level_fact_analyzer_rejects_adversarial_matrix(self) -> None:
         valid = valid_two_level_c()
         mutations = {
+            "lambda extra ABI param": valid.replace(
+                "void* outer_fn(void* outer_scope)",
+                "void* outer_fn(void* outer_scope, void* junk_param)",
+            ),
+            "lambda wrong ABI param type": valid.replace(
+                "void* inner_fn(void* inner_scope)",
+                "void* inner_fn(int inner_scope)",
+            ),
+            "lambda residual ABI junk": valid.replace(
+                "void* inner_fn(void* inner_scope)",
+                "void* inner_fn(void* inner_scope trailing)",
+            ),
             "same inner index": valid.replace(
                 "evidence_leaf = ((void**)inner_scope)[2];",
                 "evidence_leaf = ((void**)inner_scope)[1];",
@@ -125,6 +141,11 @@ class ProvenanceBContractTests(unittest.TestCase):
             "method redefined as exact": valid.replace(
                 "method_leaf = ((void**)evidence_leaf)[3];",
                 "method_leaf = exact_leaf;",
+            ),
+            "method load then overwrite": valid.replace(
+                "method_leaf = ((void**)evidence_leaf)[3];",
+                "method_leaf = ((void**)evidence_leaf)[3];\n"
+                "    method_leaf = exact_leaf;",
             ),
             "outer forwarding overwrite": valid.replace(
                 "evidence_forward = ((void**)outer_scope)[2];",
@@ -166,6 +187,98 @@ class ProvenanceBContractTests(unittest.TestCase):
                 "    ((void**)outer_env)[1] = exact_local;\n"
                 "    ((void**)outer_env)[1] = input_capsule;",
             ),
+            "zero capture slot": valid.replace(
+                "exact_leaf = ((void**)inner_scope)[1];",
+                "exact_leaf = ((void**)inner_scope)[0];",
+            ),
+            "zero method slot": valid.replace(
+                "method_leaf = ((void**)evidence_leaf)[3];",
+                "method_leaf = ((void**)evidence_leaf)[0];",
+            ),
+            "header count mismatch": valid.replace(
+                "*(int64_t*)outer_env = 2;",
+                "*(int64_t*)outer_env = 3;",
+            ),
+            "type15 allocation capacity mismatch": valid.replace(
+                "outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);",
+                "outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 3 * sizeof(void*)), 15);",
+            ),
+            "capture store gap": valid.replace(
+                "((void**)outer_env)[2] = input_capsule;",
+                "((void**)outer_env)[3] = input_capsule;",
+            ),
+            "capture store before header": valid.replace(
+                "    *(int64_t*)outer_env = 2;\n"
+                "    ((void**)outer_env)[1] = exact_local;",
+                "    ((void**)outer_env)[1] = exact_local;\n"
+                "    *(int64_t*)outer_env = 2;",
+            ),
+            "header before allocation": valid.replace(
+                "    outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);\n"
+                "    *(int64_t*)outer_env = 2;",
+                "    *(int64_t*)outer_env = 2;\n"
+                "    outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);",
+            ),
+            "capture source undefined": valid.replace(
+                "((void**)outer_env)[1] = exact_local;",
+                "((void**)outer_env)[1] = ghost_capture;",
+            ),
+            "type7 slot order reversed": valid.replace(
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;\n"
+                "    ((void**)outer_pair)[1] = outer_env;",
+                "    ((void**)outer_pair)[1] = outer_env;\n"
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;",
+            ),
+            "type7 allocation size mismatch": valid.replace(
+                "outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);",
+                "outer_pair = ring_alloc((int64_t)(3 * sizeof(void*)), 7);",
+            ),
+            "type7 pre-allocation lambda slot": valid.replace(
+                "    outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);\n"
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;",
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;\n"
+                "    outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);",
+            ),
+            "type7 allocated before env ready": valid.replace(
+                "    outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);",
+                "    outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);\n"
+                "    outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);",
+            ).replace(
+                "    outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);\n"
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;",
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;",
+                1,
+            ),
+            "type7 extra slot": valid.replace(
+                "    ((void**)outer_pair)[1] = outer_env;",
+                "    ((void**)outer_pair)[1] = outer_env;\n"
+                "    ((void**)outer_pair)[2] = outer_env;",
+            ),
+            "type7 slot0 overwrite": valid.replace(
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;",
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;\n"
+                "    ((void**)outer_pair)[0] = outer_env;",
+            ),
+            "type7 wrong environment": valid.replace(
+                "    ((void**)outer_pair)[1] = outer_env;",
+                "    ((void**)outer_pair)[1] = seed_env;",
+            ),
+            "orphan type15": valid.replace(
+                "    outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);",
+                "    orphan_env = ring_alloc((int64_t)sizeof(int64_t), 15);\n"
+                "    *(int64_t*)orphan_env = 0;\n"
+                "    outer_env = ring_alloc((int64_t)(sizeof(int64_t) + 2 * sizeof(void*)), 15);",
+            ),
+            "orphan type7": valid.replace(
+                "    outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);",
+                "    orphan_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);\n"
+                "    outer_pair = ring_alloc((int64_t)(2 * sizeof(void*)), 7);",
+            ),
+            "orphan lambda slot": valid.replace(
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;",
+                "    ((void**)not_a_pair)[0] = (void*)outer_fn;\n"
+                "    ((void**)outer_pair)[0] = (void*)outer_fn;",
+            ),
             "old temp-copy assumption": valid.replace(
                 "    exact_result = ((void* (*)(void*))(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1]);",
                 "    copied_leaf = exact_leaf;\n"
@@ -200,6 +313,26 @@ class ProvenanceBContractTests(unittest.TestCase):
             "unrecognized closure call": valid.replace(
                 "(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1])",
                 "(((void**)exact_leaf)[1]))(((void**)exact_leaf)[0])",
+                1,
+            ),
+            "cast argument arity mismatch": valid.replace(
+                "((void* (*)(void*))(((void**)exact_leaf)[0]))",
+                "((void* (*)(void*, void*))(((void**)exact_leaf)[0]))",
+                1,
+            ),
+            "cast non-void type": valid.replace(
+                "((void* (*)(void*))(((void**)exact_leaf)[0]))",
+                "((void* (*)(int*))(((void**)exact_leaf)[0]))",
+                1,
+            ),
+            "nonidentifier call argument": valid.replace(
+                "(((void**)exact_leaf)[1]);",
+                "(((void**)exact_leaf)[1], RING_INT(1));",
+                1,
+            ),
+            "undefined identifier call argument": valid.replace(
+                "((void* (*)(void*))(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1]);",
+                "((void* (*)(void*, void*))(((void**)exact_leaf)[0]))(((void**)exact_leaf)[1], ghost_arg);",
                 1,
             ),
             "extra pointer receiver": valid.replace(

@@ -3374,6 +3374,14 @@ class CContainerLoadFact:
 class CAllocationFact:
     local: str
     type_id: int
+    capture_capacity: Optional[int]
+    ordinal: int
+
+
+@dataclass(frozen=True)
+class CEnvHeaderFact:
+    environment: str
+    count: int
     ordinal: int
 
 
@@ -3389,6 +3397,7 @@ class CClosureConstructionFact:
 class CUniformClosureCallFact:
     result: str
     root: str
+    args: Tuple[str, ...]
     ordinal: int
 
 
@@ -3400,15 +3409,23 @@ class CLocalAssignmentFact:
 
 
 @dataclass(frozen=True)
+class COpaqueDefinitionFact:
+    local: str
+    ordinal: int
+
+
+@dataclass(frozen=True)
 class CFunctionProvenanceFacts:
     symbol: str
     params: Tuple[str, ...]
     allocations: Tuple[CAllocationFact, ...]
+    headers: Tuple[CEnvHeaderFact, ...]
     stores: Tuple[CEnvStoreFact, ...]
     loads: Tuple[CContainerLoadFact, ...]
     closures: Tuple[CClosureConstructionFact, ...]
     closure_calls: Tuple[CUniformClosureCallFact, ...]
     assignments: Tuple[CLocalAssignmentFact, ...]
+    opaque_definitions: Tuple[COpaqueDefinitionFact, ...]
 
 
 _C_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
@@ -3416,6 +3433,111 @@ _C_PTR_INDEX_RE = re.compile(
     rf"\(\(\s*void\s*\*\s*\*\s*\)\s*({_C_IDENT})\s*\)"
     r"\s*\[\s*([0-9]+)\s*\]"
 )
+
+
+def _parse_c_pointer_params(
+    raw_params: str, symbol: str,
+) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
+    raw = raw_params.strip()
+    if raw == "void":
+        return (), None
+    if not raw:
+        return None, f"{symbol}: empty/K&R parameter list is not accepted"
+    params: List[str] = []
+    param_re = re.compile(rf"^void\s*\*\s*({_C_IDENT})$")
+    for raw_param in raw.split(","):
+        match = param_re.fullmatch(raw_param.strip())
+        if match is None:
+            return None, (
+                f"{symbol}: unrecognized parameter declaration "
+                f"{raw_param.strip()!r}")
+        params.append(match.group(1))
+    return tuple(params), None
+
+
+def _parse_uniform_closure_call_statement(
+    statement: str, ordinal: int,
+) -> Tuple[Optional[CUniformClosureCallFact], Optional[str]]:
+    closure_casts = re.findall(
+        r"void\s*\*\s*\(\s*\*\s*\)", statement)
+    refs = [(name, int(index)) for name, index in
+            _C_PTR_INDEX_RE.findall(statement)]
+    if (
+        len(closure_casts) != 1
+        or len(refs) != 2
+        or refs[0][1] != 0
+        or refs[1] != (refs[0][0], 1)
+    ):
+        return None, f"unrecognized uniform closure-call statement: {statement}"
+    assignment = re.fullmatch(rf"({_C_IDENT})\s*=\s*(.+)", statement)
+    if assignment is None:
+        return None, f"unrecognized uniform closure-call statement: {statement}"
+    rhs = assignment.group(2)
+    skeleton_parts: List[str] = []
+    last_end = 0
+    for ref_index, match in enumerate(_C_PTR_INDEX_RE.finditer(rhs)):
+        skeleton_parts.append(rhs[last_end:match.start()])
+        skeleton_parts.append(
+            "__CLOSURE_FN__" if ref_index == 0 else "__CLOSURE_ENV__")
+        last_end = match.end()
+    skeleton_parts.append(rhs[last_end:])
+    skeleton = "".join(skeleton_parts)
+    token_re = re.compile(rf"{_C_IDENT}|[(),*]")
+    tokens: List[str] = []
+    token_end = 0
+    for match in token_re.finditer(skeleton):
+        if skeleton[token_end:match.start()].strip():
+            return None, f"unrecognized uniform closure-call statement: {statement}"
+        tokens.append(match.group(0))
+        token_end = match.end()
+    if skeleton[token_end:].strip():
+        return None, f"unrecognized uniform closure-call statement: {statement}"
+
+    cursor = 0
+
+    def accept(expected: str) -> bool:
+        nonlocal cursor
+        if cursor >= len(tokens) or tokens[cursor] != expected:
+            return False
+        cursor += 1
+        return True
+
+    if not (accept("(") and accept("(") and accept("void")
+            and accept("*") and accept("(") and accept("*")
+            and accept(")") and accept("(")):
+        return None, f"unrecognized uniform closure-call statement: {statement}"
+    type_count = 0
+    while True:
+        if not (accept("void") and accept("*")):
+            return None, f"uniform closure call has a non-void* cast type: {statement}"
+        type_count += 1
+        if cursor < len(tokens) and tokens[cursor] == ",":
+            cursor += 1
+            continue
+        break
+    if not (accept(")") and accept(")") and accept("(")
+            and accept("__CLOSURE_FN__") and accept(")")
+            and accept(")") and accept("(")
+            and accept("__CLOSURE_ENV__")):
+        return None, f"unrecognized uniform closure-call statement: {statement}"
+    args: List[str] = []
+    while cursor < len(tokens) and tokens[cursor] == ",":
+        cursor += 1
+        if cursor >= len(tokens):
+            return None, f"uniform closure call has a missing argument: {statement}"
+        arg = tokens[cursor]
+        if re.fullmatch(_C_IDENT, arg) is None or arg.startswith("__CLOSURE_"):
+            return None, f"uniform closure call argument is not an identifier: {statement}"
+        args.append(arg)
+        cursor += 1
+    if not accept(")") or cursor != len(tokens):
+        return None, f"unrecognized uniform closure-call statement: {statement}"
+    if type_count != len(args) + 1:
+        return None, (
+            f"uniform closure call cast/argument arity mismatch "
+            f"{type_count} != {len(args) + 1}: {statement}")
+    return CUniformClosureCallFact(
+        assignment.group(1), refs[0][0], tuple(args), ordinal), None
 
 
 def _balanced_c_statements(function_body: str) -> Tuple[List[str], List[str]]:
@@ -3471,16 +3593,21 @@ def parse_c_function_provenance_facts(
         return None, [
             f"generated function {symbol} signature found {len(signatures)} times"
         ]
-    params = tuple(re.findall(
-        rf"\bvoid\s*\*\s*({_C_IDENT})\b", signatures[0].group(1)))
+    params, params_error = _parse_c_pointer_params(
+        signatures[0].group(1), symbol)
+    if params_error:
+        return None, [params_error]
+    assert params is not None
     statements, errors = _balanced_c_statements(body)
 
     allocations: dict[str, CAllocationFact] = {}
+    headers: List[CEnvHeaderFact] = []
     stores: List[CEnvStoreFact] = []
     loads: List[CContainerLoadFact] = []
     lambda_slots: List[Tuple[str, str, int]] = []
     closure_calls: List[CUniformClosureCallFact] = []
     assignments: List[CLocalAssignmentFact] = []
+    opaque_definitions: List[COpaqueDefinitionFact] = []
 
     allocation_re = re.compile(
         rf"^({_C_IDENT})\s*=\s*ring_alloc\s*\((.*),\s*([0-9]+)\s*\)$")
@@ -3494,12 +3621,10 @@ def parse_c_function_provenance_facts(
         rf"^({_C_IDENT})\s*=\s*\(\(\s*void\s*\*\s*\*\s*\)"
         rf"\s*({_C_IDENT})\s*\)\s*\[\s*([0-9]+)\s*\]$")
     assignment_re = re.compile(rf"^({_C_IDENT})\s*=\s*({_C_IDENT})$")
-    uniform_skeleton_re = re.compile(
-        rf"^({_C_IDENT})\s*=\s*"
-        r"\(\(\s*void\s*\*\s*\(\s*\*\s*\)\s*\([^()]*\)\s*\)"
-        r"\s*\(\s*__CLOSURE_FN__\s*\)\s*\)"
-        r"\s*\(\s*__CLOSURE_ENV__(?:\s*,.*)?\)$"
-    )
+    header_re = re.compile(
+        rf"^\*\(\s*int64_t\s*\*\s*\)\s*({_C_IDENT})"
+        r"\s*=\s*([0-9]+)$")
+    opaque_lhs_re = re.compile(rf"^({_C_IDENT})\s*=")
 
     for ordinal, statement in enumerate(statements):
         allocation = allocation_re.match(statement)
@@ -3507,8 +3632,33 @@ def parse_c_function_provenance_facts(
             local = allocation.group(1)
             if local in allocations:
                 errors.append(f"{symbol}: duplicate allocation target {local}")
+            type_id = int(allocation.group(3))
+            size_expr = allocation.group(2).strip()
+            capture_capacity: Optional[int] = None
+            if type_id == 15:
+                size_match = re.fullmatch(
+                    r"\(int64_t\)\s*\(\s*sizeof\(int64_t\)\s*\+\s*"
+                    r"([0-9]+)\s*\*\s*sizeof\(void\s*\*\)\s*\)",
+                    size_expr,
+                )
+                if size_match is None:
+                    errors.append(
+                        f"{symbol}: unrecognized type15 allocation size {size_expr}")
+                else:
+                    capture_capacity = int(size_match.group(1))
+            elif type_id == 7:
+                if re.fullmatch(
+                        r"\(int64_t\)\s*\(\s*2\s*\*\s*"
+                        r"sizeof\(void\s*\*\)\s*\)", size_expr) is None:
+                    errors.append(
+                        f"{symbol}: unrecognized type7 allocation size {size_expr}")
             allocations[local] = CAllocationFact(
-                local, int(allocation.group(3)), ordinal)
+                local, type_id, capture_capacity, ordinal)
+            continue
+        header = header_re.match(statement)
+        if header:
+            headers.append(CEnvHeaderFact(
+                header.group(1), int(header.group(2)), ordinal))
             continue
         lambda_store = lambda_store_re.match(statement)
         if lambda_store:
@@ -3526,42 +3676,28 @@ def parse_c_function_provenance_facts(
                 load.group(1), load.group(2), int(load.group(3)), ordinal))
             continue
 
-        closure_casts = re.findall(
-            r"void\s*\*\s*\(\s*\*\s*\)", statement)
-        if closure_casts:
-            refs = [(name, int(index)) for name, index in
-                    _C_PTR_INDEX_RE.findall(statement)]
-            skeleton_parts: List[str] = []
-            last_end = 0
-            for ref_index, match in enumerate(_C_PTR_INDEX_RE.finditer(statement)):
-                skeleton_parts.append(statement[last_end:match.start()])
-                skeleton_parts.append(
-                    "__CLOSURE_FN__" if ref_index == 0
-                    else "__CLOSURE_ENV__")
-                last_end = match.end()
-            skeleton_parts.append(statement[last_end:])
-            skeleton = "".join(skeleton_parts)
-            full_match = uniform_skeleton_re.fullmatch(skeleton)
-            if (
-                len(closure_casts) != 1
-                or len(refs) != 2
-                or refs[0][1] != 0
-                or refs[1] != (refs[0][0], 1)
-                or full_match is None
-            ):
-                errors.append(
-                    f"{symbol}: unrecognized uniform closure-call statement: "
-                    f"{statement}")
+        if re.search(r"void\s*\*\s*\(\s*\*\s*\)", statement):
+            closure_call, closure_error = (
+                _parse_uniform_closure_call_statement(statement, ordinal))
+            if closure_error:
+                errors.append(f"{symbol}: {closure_error}")
             else:
-                closure_calls.append(CUniformClosureCallFact(
-                    full_match.group(1), refs[0][0], ordinal))
+                assert closure_call is not None
+                closure_calls.append(closure_call)
             continue
         assignment = assignment_re.match(statement)
         if assignment:
             assignments.append(CLocalAssignmentFact(
                 assignment.group(1), assignment.group(2), ordinal))
+            continue
+        opaque_lhs = opaque_lhs_re.match(statement)
+        if opaque_lhs:
+            opaque_definitions.append(COpaqueDefinitionFact(
+                opaque_lhs.group(1), ordinal))
 
     for fact_label, fact_keys in (
+        ("env header", [
+            (fact.environment, fact.count) for fact in headers]),
         ("env store", [
             (fact.container, fact.index, fact.source) for fact in stores]),
         ("container load", [
@@ -3569,35 +3705,138 @@ def parse_c_function_provenance_facts(
         ("lambda slot", [
             (root, lambda_symbol) for root, lambda_symbol, _ in lambda_slots]),
         ("uniform closure call", [
-            (fact.result, fact.root) for fact in closure_calls]),
-        ("local assignment", [
-            (fact.target, fact.source) for fact in assignments]),
+            (fact.result, fact.root, fact.args) for fact in closure_calls]),
     ):
         if len(fact_keys) != len(set(fact_keys)):
             errors.append(f"{symbol}: duplicate {fact_label} fact")
+
+    def local_definitions(local: str) -> List[Tuple[str, int]]:
+        found: List[Tuple[str, int]] = []
+        if local in params:
+            found.append(("param", -1))
+        allocation = allocations.get(local)
+        if allocation is not None:
+            found.append(("allocation", allocation.ordinal))
+        found.extend(("load", fact.ordinal) for fact in loads
+                     if fact.target == local)
+        found.extend(("alias", fact.ordinal) for fact in assignments
+                     if fact.target == local)
+        found.extend(("call-result", fact.ordinal) for fact in closure_calls
+                     if fact.result == local)
+        found.extend(("opaque", fact.ordinal) for fact in opaque_definitions
+                     if fact.local == local)
+        return found
+
+    for call in closure_calls:
+        for arg in call.args:
+            definitions = local_definitions(arg)
+            if len(definitions) != 1 or definitions[0][1] >= call.ordinal:
+                errors.append(
+                    f"{symbol}: closure-call arg {arg} has "
+                    f"{len(definitions)} prior unique definitions")
+
+    for header in headers:
+        allocation = allocations.get(header.environment)
+        if allocation is None or allocation.type_id != 15:
+            errors.append(
+                f"{symbol}: header targets non-type15 {header.environment}")
+
+    for environment, allocation in allocations.items():
+        if allocation.type_id != 15:
+            continue
+        env_headers = [header for header in headers
+                       if header.environment == environment]
+        env_stores = [store for store in stores
+                      if store.container == environment]
+        if len(env_headers) != 1:
+            errors.append(
+                f"{symbol}: type15 {environment} has {len(env_headers)} headers")
+            continue
+        header = env_headers[0]
+        ordered_stores = sorted(env_stores, key=lambda fact: fact.ordinal)
+        expected_indices = list(range(1, header.count + 1))
+        actual_indices = [store.index for store in ordered_stores]
+        if allocation.ordinal >= header.ordinal:
+            errors.append(f"{symbol}: type15 {environment} header precedes allocation")
+        if allocation.capture_capacity != header.count:
+            errors.append(
+                f"{symbol}: type15 {environment} allocation/header count "
+                f"{allocation.capture_capacity} != {header.count}")
+        if actual_indices != expected_indices:
+            errors.append(
+                f"{symbol}: type15 {environment} stores {actual_indices}, "
+                f"expected {expected_indices}")
+        if any(store.ordinal <= header.ordinal for store in ordered_stores):
+            errors.append(f"{symbol}: type15 {environment} store precedes header")
+        for store in ordered_stores:
+            definitions = local_definitions(store.source)
+            if len(definitions) != 1 or definitions[0][1] >= store.ordinal:
+                errors.append(
+                    f"{symbol}: type15 {environment}[{store.index}] source "
+                    f"{store.source} lacks one prior definition")
 
     closures: List[CClosureConstructionFact] = []
     for root, allocation in allocations.items():
         if allocation.type_id != 7:
             continue
-        root_lambdas = [lambda_symbol for slot_root, lambda_symbol, _ in lambda_slots
+        root_lambdas = [(lambda_symbol, ordinal)
+                        for slot_root, lambda_symbol, ordinal in lambda_slots
                         if slot_root == root]
-        root_envs = [store.source for store in stores
-                     if store.container == root and store.index == 1]
-        if len(root_lambdas) != 1 or len(root_envs) != 1:
+        root_stores = [store for store in stores if store.container == root]
+        if (
+            len(root_lambdas) != 1
+            or len(root_stores) != 1
+            or root_stores[0].index != 1
+        ):
             errors.append(
                 f"{symbol}: closure root {root} has "
-                f"{len(root_lambdas)} lambda slots/{len(root_envs)} env slots")
+                f"{len(root_lambdas)} lambda slots/{len(root_stores)} generic slots")
             continue
-        environment = root_envs[0]
+        lambda_symbol, lambda_ordinal = root_lambdas[0]
+        env_store = root_stores[0]
+        environment = env_store.source
         environment_allocation = allocations.get(environment)
         if environment_allocation is None or environment_allocation.type_id != 15:
             errors.append(
                 f"{symbol}: closure root {root} environment {environment} "
                 "is not a type-15 allocation")
             continue
+        env_headers = [header for header in headers
+                       if header.environment == environment]
+        env_capture_stores = [store for store in stores
+                              if store.container == environment]
+        env_ready = max(
+            [environment_allocation.ordinal]
+            + [header.ordinal for header in env_headers]
+            + [store.ordinal for store in env_capture_stores])
+        if not (
+            env_ready < allocation.ordinal
+            < lambda_ordinal < env_store.ordinal
+        ):
+            errors.append(
+                f"{symbol}: closure root {root} layout/order is not "
+                "env-ready < alloc < slot0 < slot1")
+            continue
         closures.append(CClosureConstructionFact(
-            root, environment, root_lambdas[0], allocation.ordinal))
+            root, environment, lambda_symbol, allocation.ordinal))
+
+    type7_roots = {local for local, allocation in allocations.items()
+                   if allocation.type_id == 7}
+    for slot_root, _, _ in lambda_slots:
+        if slot_root not in type7_roots:
+            errors.append(f"{symbol}: orphan lambda slot on {slot_root}")
+    if len(closures) != len(type7_roots):
+        errors.append(
+            f"{symbol}: parsed {len(closures)} closures for "
+            f"{len(type7_roots)} type7 allocations")
+    for environment, allocation in allocations.items():
+        if allocation.type_id != 15:
+            continue
+        owners = [closure for closure in closures
+                  if closure.environment == environment]
+        if len(owners) != 1:
+            errors.append(
+                f"{symbol}: type15 {environment} has {len(owners)} closure owners")
 
     if errors:
         return None, errors
@@ -3605,11 +3844,13 @@ def parse_c_function_provenance_facts(
         symbol=symbol,
         params=params,
         allocations=tuple(allocations.values()),
+        headers=tuple(headers),
         stores=tuple(stores),
         loads=tuple(loads),
         closures=tuple(closures),
         closure_calls=tuple(closure_calls),
         assignments=tuple(assignments),
+        opaque_definitions=tuple(opaque_definitions),
     ), []
 
 
@@ -3656,6 +3897,9 @@ def analyze_two_level_provenance_c(
         for call in facts.closure_calls:
             if call.result == local:
                 found.append(("call-result", call.ordinal, call.root))
+        for opaque in facts.opaque_definitions:
+            if opaque.local == local:
+                found.append(("opaque", opaque.ordinal, None))
         return found
 
     def unique_reaching_definition(
@@ -3763,6 +4007,8 @@ def analyze_two_level_provenance_c(
     exact_local = exact_call.root
     evidence_local = method_load.container
     method_local = method_load.target
+    if method_load.index <= 0:
+        errors.append(f"{label}: evidence method load uses non-positive slot")
     if exact_local == evidence_local:
         return [f"{label}: exact closure and evidence container share one root"]
     if method_local == exact_local:
@@ -3822,6 +4068,10 @@ def analyze_two_level_provenance_c(
             errors.append(
                 f"{label}: {stage} local {local} has "
                 f"{len(matches)} env extractions")
+            return None
+        if matches[0].index <= 0:
+            errors.append(
+                f"{label}: {stage} local {local} uses non-positive env slot")
             return None
         definition = unique_reaching_definition(
             facts, local, matches[0].ordinal + 1, stage)
@@ -5295,6 +5545,49 @@ def identity_checkpoint_contract_errors(
             "resolved_dicts: resolved_dicts")):
         errors.append("map index helper bypasses exact final-zonk marker authority")
 
+    emitter_manifests = (
+        ("gen_c_lambda", (
+            'let mut sig_parts: List<Str> = ["void* env"]',
+            'c_emit(ctx, "${cv} = ((void**)env)[${i + 1}];")',
+            'c_emit(ctx, "${env} = ring_alloc((int64_t)(sizeof(int64_t) + ${captures.len()} * sizeof(void*)), 15);")',
+            'c_emit(ctx, "*(int64_t*)${env} = ${captures.len()};")',
+            'c_emit(ctx, "((void**)${env})[${i + 1}] = ${cv};")',
+            'c_emit(ctx, "${cls} = ring_alloc((int64_t)(2 * sizeof(void*)), 7);")',
+            'c_emit(ctx, "((void**)${cls})[0] = (void*)${lambda_name};")',
+            'c_emit(ctx, "((void**)${cls})[1] = ${env};")',
+        )),
+        ("gen_c_closure_call", (
+            'let mut cast_tys: List<Str> = ["void*"]',
+            'let mut call_args: List<Str> = ["((void**)${closure_val})[1]"]',
+            'cast_tys.push("void*")',
+            'call_args.push(a)',
+            'c_emit(ctx, "${t} = ((void* (*)(${cast_tys.join(", ")}))(((void**)${closure_val})[0]))(${call_args.join(", ")});")',
+        )),
+        ("gen_c_dict_dispatch_call", (
+            'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[${method_idx + 1}];")',
+            "gen_c_closure_call(ctx, cls, call_args)",
+        )),
+        ("gen_c_ord_dispatch", (
+            'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")',
+            "gen_c_closure_call(ctx, cls, [lhs, rhs])",
+        )),
+        ("gen_c_effect_op", (
+            'c_emit(ctx, "${cl} = ((void**)${ev_val})[${idx + 1}];")',
+            "gen_c_closure_call(ctx, cl, arg_vals)",
+        )),
+    )
+    for function_name, manifest in emitter_manifests:
+        body, extract_error = extract_ring_function_body(
+            sources["cexpr"], function_name)
+        if extract_error:
+            errors.append(extract_error)
+            continue
+        for token in manifest:
+            if body.count(token) != 1:
+                errors.append(
+                    f"{function_name}: finite C grammar anchor {token!r} "
+                    f"matched {body.count(token)} times")
+
     stmt_body, stmt_error = extract_ring_function_body(
         sources["cexpr"], "emit_c_stmt")
     if stmt_error:
@@ -6148,6 +6441,23 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("map helper exact final-zonk authority", "infer",
          "def_id: callee_scheme.def_id, dict_closure_dicts: none",
          "def_id: none, dict_closure_dicts: none"),
+        ("lambda emitter ABI manifest", "cexpr",
+         'let saved = c_push_fn(ctx, lambda_name)\n'
+         '    let mut sig_parts: List<Str> = ["void* env"]',
+         'let saved = c_push_fn(ctx, lambda_name)\n'
+         '    let mut sig_parts: List<Str> = ["void* env", "void* junk"]'),
+        ("closure-call emitter grammar", "cexpr",
+         'let mut call_args: List<Str> = ["((void**)${closure_val})[1]"]',
+         'let mut call_args: List<Str> = ["((void**)${closure_val})[0]"]'),
+        ("dict method-load emitter grammar", "cexpr",
+         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[${method_idx + 1}];")',
+         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[0];")'),
+        ("Ord method-load emitter grammar", "cexpr",
+         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[1];")  // cmp = slot 0',
+         'c_emit(ctx, "${cls} = ((void**)${dict_ptr})[0];")  // broken'),
+        ("effect method-load emitter grammar", "cexpr",
+         'c_emit(ctx, "${cl} = ((void**)${ev_val})[${idx + 1}];")',
+         'c_emit(ctx, "${cl} = ((void**)${ev_val})[0];")'),
         ("resolved name-only canonical key", "cexpr",
          "canonical_key: resolved_key, slot: slot",
          "canonical_key: bare_key, slot: slot"),
