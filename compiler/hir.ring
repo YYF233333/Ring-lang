@@ -232,7 +232,10 @@ pub enum TraitDispatch {
 }
 
 pub struct DictDispatchInfo {
-    pub dict_param: Str,
+    // Bound dispatch is Simple; delegated concrete/default dispatch is
+    // Static.  The tag is the authority -- codegen never guesses a domain
+    // from the spelling.
+    pub dict_ref: DictRef,
     pub method: Str
 }
 
@@ -424,10 +427,10 @@ pub enum FieldAction {
     Identity,
     FloatIdentity,
     BoolIdentity,
-    // The callee's base dict stays name-addressed; each trailing type-param
-    // evidence value is a full DictRef so nested parameterized fields retain
-    // every wrapper layer until dict_lower/codegen.
-    Call { dict_name: Str, extra_dicts: List<DictRef> },
+    // Base and trailing type-param evidence both retain explicit provenance.
+    // A bound base is Simple; a module singleton base is Static.  Wrapped
+    // bases normalize to Static(base) plus their tagged inner refs.
+    Call { base_dict: DictRef, extra_dicts: List<DictRef> },
     Tuple { element_actions: List<FieldAction> },
     FnLiteral
 }

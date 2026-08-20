@@ -2429,7 +2429,11 @@ fn infer_method_call_from_receiver(
                                 match tm {
                                     some(found_method) => {
                                         method_type = some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
-                                        dict_dispatch = some(DictDispatchInfo { dict_param: trait_bound_param_name(fb.type_param_name, fb.trait_name), method: method })
+                                        dict_dispatch = some(DictDispatchInfo {
+                                            dict_ref: DictRef::Simple(trait_bound_param_name(
+                                                fb.type_param_name, fb.trait_name)),
+                                            method: method
+                                        })
                                     },
                                     none => {}
                                 }

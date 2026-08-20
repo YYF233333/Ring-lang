@@ -39,7 +39,8 @@
 use ast::{Span}
 use types::{Type, EffectRow, EMPTY_ROW}
 use hir::{HProgram, HDecl, HStmt, HExpr, HMatchArm, HStructFieldInit,
-    HStringInterpPart, HEffectHandler, HEffectOp, HTraitMethod, DictRef, TraitDispatch,
+    HStringInterpPart, HEffectHandler, HEffectOp, HTraitMethod,
+    DictRef, TraitDispatch, DictDispatchInfo,
     HDictDef, DerivedImpl, DerivedField, DerivedVariant, FieldAction,
     dict_instance_name, hexpr_type, hexpr_effects, hexpr_span,
     synthetic_def_id, SYNTHETIC_DICT_DEF_ID_BASE,
@@ -74,12 +75,15 @@ pub fn lower_dicts(program: HProgram) -> HProgram {
 fn dl_derived_action(action: FieldAction, mut defs: List<HDictDef>,
                      mut seen: Set<Str>) -> FieldAction {
     match action {
-        FieldAction::Call { dict_name, extra_dicts } => {
+        FieldAction::Call { base_dict, extra_dicts } => {
+            let lowered_base = dl_ref_static_only(base_dict, defs, seen)
             let mut lowered: List<DictRef> = []
             for dr in extra_dicts {
                 lowered.push(dl_ref_static_only(dr, defs, seen))
             }
-            FieldAction::Call { dict_name: dict_name, extra_dicts: lowered }
+            FieldAction::Call {
+                base_dict: lowered_base, extra_dicts: lowered
+            }
         },
         FieldAction::Tuple { element_actions } => {
             let mut lowered: List<FieldAction> = []
@@ -326,6 +330,18 @@ fn dl_dispatch(d: TraitDispatch?, mut defs: List<HDictDef>, mut seen: Set<Str>) 
     }
 }
 
+fn dl_dict_dispatch(
+    d: DictDispatchInfo?, mut defs: List<HDictDef>, mut seen: Set<Str>
+) -> DictDispatchInfo? {
+    match d {
+        some(info) => some(DictDispatchInfo {
+            dict_ref: dl_ref_static_only(info.dict_ref, defs, seen),
+            method: info.method
+        }),
+        none => none
+    }
+}
+
 // ============================================================
 // Structural walkers
 // ============================================================
@@ -388,7 +404,8 @@ fn dl_expr(e: HExpr, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
                 new_dicts.push(dl_ref_dyn(dr, defs, seen, counter, lets, span))
             }
             let call = HExpr::Call { callee: new_callee, args: new_args, type_args: type_args,
-                resolved_dicts: new_dicts, dict_dispatch: dict_dispatch,
+                resolved_dicts: new_dicts,
+                dict_dispatch: dl_dict_dispatch(dict_dispatch, defs, seen),
                 ty: ty, effects: effects, span: span }
             if lets.len() == 0 {
                 call

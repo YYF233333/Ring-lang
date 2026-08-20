@@ -1791,14 +1791,16 @@ fn emit_c_derived_impl_bodies(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
 
 // Option is a builtin enum excluded from derive.ring (BUILTIN_TYPES);
 // synthesise its DerivedImpls here (port of emit_builtin_derived_impls).
-fn c_option_some_variant(dict_name: Str) -> DerivedVariant {
+fn c_option_some_variant(base_dict: DictRef) -> DerivedVariant {
     DerivedVariant {
         name: "some",
         discriminator: 0,
         fields: [DerivedField {
             name: "_0",
             positional_index: some(0),
-            action: FieldAction::Call { dict_name: dict_name, extra_dicts: [] }
+            action: FieldAction::Call {
+                base_dict: base_dict, extra_dicts: []
+            }
         }],
         has_named_fields: false
     }
@@ -1817,7 +1819,8 @@ pub fn emit_c_builtin_derived_impls(mut ctx: CCtx) {
         type_kind: TypeKind::EnumKind,
         struct_fields: none,
         enum_variants: some([
-            c_option_some_variant(trait_bound_param_name("T", "Eq")),
+            c_option_some_variant(DictRef::Simple(
+                trait_bound_param_name("T", "Eq"))),
             c_option_none_variant()
         ])
     }
@@ -1831,7 +1834,8 @@ pub fn emit_c_builtin_derived_impls(mut ctx: CCtx) {
         type_kind: TypeKind::EnumKind,
         struct_fields: none,
         enum_variants: some([
-            c_option_some_variant(trait_bound_param_name("T", "Debug")),
+            c_option_some_variant(DictRef::Simple(
+                trait_bound_param_name("T", "Debug"))),
             c_option_none_variant()
         ])
     }
@@ -1845,7 +1849,8 @@ pub fn emit_c_builtin_derived_impls(mut ctx: CCtx) {
         type_kind: TypeKind::EnumKind,
         struct_fields: none,
         enum_variants: some([
-            c_option_some_variant(trait_bound_param_name("T", "Ord")),
+            c_option_some_variant(DictRef::Simple(
+                trait_bound_param_name("T", "Ord"))),
             c_option_none_variant()
         ])
     }
@@ -1953,16 +1958,16 @@ fn end_c_derived_fn(mut ctx: CCtx, d: CDerivedFn) {
     c_pop_fn(ctx, d.c_name, d.params_str, d.saved)
 }
 
-// Resolve a dict by name for derived impls: type-param dict passed as a fn
-// param (named_values) or the static singleton chain.
-fn resolve_c_dict_for_derived(mut ctx: CCtx, name: Str) -> Str {
-    c_resolve_dict_ref(ctx, DictRef::Simple(name))
+// Resolve an explicitly tagged derived base.  Bound bases are Simple and
+// module singleton bases are Static; spelling never selects the domain.
+fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef) -> Str {
+    c_resolve_dict_ref(ctx, base_dict)
 }
 
 // Call a dict's slot-0 closure on the given args (+ resolved extra dicts) —
 // shared shape of the derived eq/cmp/debug dict calls.
-fn emit_c_derived_dict_call(mut ctx: CCtx, dict_name: Str, extra_dicts: List<DictRef>, args: List<Str>) -> Str {
-    let resolved_dict = resolve_c_dict_for_derived(ctx, dict_name)
+fn emit_c_derived_dict_call(mut ctx: CCtx, base_dict: DictRef, extra_dicts: List<DictRef>, args: List<Str>) -> Str {
+    let resolved_dict = resolve_c_dict_for_derived(ctx, base_dict)
     let cls = fresh_tmp(ctx)
     c_emit(ctx, "${cls} = ((void**)${resolved_dict})[1];")
     let mut call_args: List<Str> = []
@@ -2024,8 +2029,9 @@ fn emit_c_field_eq_flag(mut ctx: CCtx, lhs: Str, rhs: Str, action: FieldAction) 
             c_emit(ctx, "${f} = (${lhs} == ${rhs});")
             f
         },
-        FieldAction::Call { dict_name, extra_dicts } => {
-            let r = emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [lhs, rhs])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            let r = emit_c_derived_dict_call(
+                ctx, base_dict, extra_dicts, [lhs, rhs])
             let f = fresh_i64(ctx)
             c_emit(ctx, "${f} = (RING_UNTAG(${r}) != 0);")
             f
@@ -2233,8 +2239,9 @@ fn emit_c_hash_combine(mut ctx: CCtx, lhs: Str, rhs: Str) -> Str {
 // fallbacks and never inspect a pointer address.
 fn emit_c_field_hash_raw(mut ctx: CCtx, value: Str, action: FieldAction) -> Str {
     match action {
-        FieldAction::Call { dict_name, extra_dicts } => {
-            let boxed = emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [value])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            let boxed = emit_c_derived_dict_call(
+                ctx, base_dict, extra_dicts, [value])
             let raw = fresh_i64(ctx)
             c_emit(ctx, "${raw} = RING_UNTAG(${boxed});")
             raw
@@ -2408,8 +2415,8 @@ fn emit_c_field_cmp_val(mut ctx: CCtx, lhs: Str, rhs: Str, action: FieldAction) 
             c_emit(ctx, "${cv} = RING_INT(${li} < ${ri} ? -1 : (${li} > ${ri} ? 1 : 0));")
             cv
         },
-        FieldAction::Call { dict_name, extra_dicts } => {
-            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [lhs, rhs])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            emit_c_derived_dict_call(ctx, base_dict, extra_dicts, [lhs, rhs])
         },
         FieldAction::Tuple { element_actions } => {
             rt_use(ctx, "ring_list_get", 2)
@@ -2612,8 +2619,8 @@ fn emit_c_debug_field_str(mut ctx: CCtx, v: Str, action: FieldAction) -> Str {
             c_emit(ctx, "${s} = ring_bool_to_str(RING_UNTAG(${v}));")
             s
         },
-        FieldAction::Call { dict_name, extra_dicts } => {
-            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [v])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            emit_c_derived_dict_call(ctx, base_dict, extra_dicts, [v])
         },
         FieldAction::Tuple { element_actions } => {
             if element_actions.len() == 0 {
@@ -2828,8 +2835,8 @@ fn predeclare_c_json_derived_impls(
 
 fn emit_c_json_field_str(mut ctx: CCtx, value: Str, action: FieldAction) -> Str {
     match action {
-        FieldAction::Call { dict_name, extra_dicts } =>
-            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [value]),
+        FieldAction::Call { base_dict, extra_dicts } =>
+            emit_c_derived_dict_call(ctx, base_dict, extra_dicts, [value]),
         // Json derivation only produces Call actions. Keep the backend
         // fail-loud if a future derive rule violates that evidence boundary.
         _ => {

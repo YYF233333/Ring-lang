@@ -682,6 +682,33 @@ fn gen_c_unaryop(mut ctx: CCtx, op: UnaryOp, operand: HExpr, ty: Type) -> Str {
 // Calls
 // ============================================================
 
+struct CNameOnlyMatch {
+    canonical_key: Str,
+    slot: Str
+}
+
+// Resolve the actual registered key once.  A resolved/qualified key wins;
+// the bare spelling is consulted only when it names a distinct explicit
+// name-only registration.  Module/global registries are deliberately absent.
+fn c_match_name_only_slot(
+    ctx: CCtx, resolved_key: Str, bare_key: Str
+) -> CNameOnlyMatch? {
+    match c_name_only_value(ctx, resolved_key) {
+        some(slot) => some(CNameOnlyMatch {
+            canonical_key: resolved_key, slot: slot
+        }),
+        none => {
+            if bare_key == resolved_key { return none }
+            match c_name_only_value(ctx, bare_key) {
+                some(slot) => some(CNameOnlyMatch {
+                    canonical_key: bare_key, slot: slot
+                }),
+                none => none
+            }
+        }
+    }
+}
+
 // #B-087 gap 5 port: mut value-type args are passed as a shared CELL.
 fn c_lookup_call_mut_flags(ctx: CCtx, callee: HExpr) -> List<Bool>? {
     match callee {
@@ -696,9 +723,9 @@ fn c_lookup_call_mut_flags(ctx: CCtx, callee: HExpr) -> List<Bool>? {
                 some(id) => if c_exact_value_slot(ctx, name, id).is_some() {
                     return none
                 },
-                none => if c_name_only_value(ctx, call_name).is_some() ||
-                           c_name_only_value(ctx, name).is_some() {
-                    return none
+                none => match c_match_name_only_slot(ctx, call_name, name) {
+                    some(_) => { return none },
+                    none => {}
                 }
             }
             // Project metadata uses the same semantic key as the function
@@ -809,12 +836,10 @@ pub fn gen_c_cell_alloc(mut ctx: CCtx, init_val: Str) -> Str {
 pub fn c_resolve_dict_ref(mut ctx: CCtx, dr: DictRef) -> Str {
     match dr {
         DictRef::Simple(n) => {
-            // Scope reference: dict param / dict_lower local.  Unknown names
-            // (`dict_closure_dicts` names and derived Simple refs) fall
-            // through to the static singleton chain (LLVM parity).
             match c_name_only_value(ctx, n) {
                 some(cv) => cv,
-                none => resolve_c_static_dict(ctx, n),
+                none => panic(
+                    "C codegen: bound dictionary '${n}' has no name-only slot"),
             }
         },
         DictRef::Static(n) => resolve_c_static_dict(ctx, n),
@@ -1052,9 +1077,13 @@ fn ensure_c_wrapped_method_thunk(mut ctx: CCtx, method_c_name: Str, dispatch_ari
 // pointers outside Ring RC; ring_drop on them is a no-op).
 // ============================================================
 
+enum CCaptureProvenance {
+    Exact { name: Str, def_id: Int },
+    NameOnly { canonical_key: Str }
+}
+
 struct CCapture {
-    name: Str,
-    def_id: Int?,
+    provenance: CCaptureProvenance,
     extern_typed: Bool
 }
 
@@ -1075,9 +1104,11 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap) => {
-                let cv = match cap.def_id {
-                    some(id) => c_local_def(ctx, cap.name, some(id)),
-                    none => c_local(ctx, cap.name)
+                let cv = match cap.provenance {
+                    CCaptureProvenance::Exact { name, def_id } =>
+                        c_local_def(ctx, name, some(def_id)),
+                    CCaptureProvenance::NameOnly { canonical_key } =>
+                        c_local(ctx, canonical_key)
                 }
                 c_emit(ctx, "${cv} = ((void**)env)[${i + 1}];")
             },
@@ -1103,16 +1134,18 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap) => {
-                let cv = match cap.def_id {
-                    some(id) => match c_exact_value_slot(ctx, cap.name, id) {
+                let cv = match cap.provenance {
+                    CCaptureProvenance::Exact { name, def_id } =>
+                        match c_exact_value_slot(ctx, name, def_id) {
                         some(v) => v,
                         none => panic(
-                            "C codegen: exact captured DefId ${id} has no outer slot")
+                            "C codegen: exact captured DefId ${def_id} has no outer slot")
                     },
-                    none => match c_name_only_value(ctx, cap.name) {
+                    CCaptureProvenance::NameOnly { canonical_key } =>
+                        match c_name_only_value(ctx, canonical_key) {
                         some(v) => v,
                         none => panic(
-                            "C codegen: captured variable not found: ${cap.name}")
+                            "C codegen: name-only capture '${canonical_key}' has no outer slot")
                     }
                 }
                 if !cap.extern_typed {
@@ -1131,74 +1164,110 @@ fn gen_c_lambda(mut ctx: CCtx, params: List<HParam>, return_type: Type, body: HE
     cls
 }
 
-// Decide whether a bare variable name should be captured (port of
-// consider_capture_name): not a lambda param, not a known module fn, and
-// present in the enclosing scope's named_values.
-fn consider_c_capture_name(
-    ctx: CCtx, name: Str, resolved_name: Str?, def_id: Int?,
-    extern_typed: Bool, params: List<HParam>,
-    mut captures: List<CCapture>
-) {
-    let lookup_name = match resolved_name {
-        some(rn) => rn,
-        none => name,
-    }
-    if c_capture_name_is_bound(name, lookup_name, def_id, params) { return }
-    // Step 8: module-aware fn check (consider_capture_name parity —
-    // resolved lookup_name → bare name → resolved name).
-    let is_fn = match def_id {
-        some(_) => false,
-        none => if ctx.functions.contains_key(c_resolve_fn(ctx, lookup_name)) {
-            true
-        } else if ctx.functions.contains_key(c_mangle_fn(name)) {
-            true
-        } else {
-            ctx.functions.contains_key(c_resolve_fn(ctx, name))
-        }
-    }
-    if is_fn { return }
-    let is_local = match def_id {
-        some(id) => c_exact_value_slot(ctx, name, id).is_some(),
-        none => match c_name_only_value(ctx, lookup_name) {
-            some(_) => true,
-            none => c_name_only_value(ctx, name).is_some()
-        }
-    }
-    if is_local {
-        let mut already = false
-        for existing in captures {
-            let same = match def_id {
-                some(id) => match existing.def_id {
-                    some(existing_id) => existing_id == id,
-                    none => false
-                },
-                none => existing.def_id.is_none() &&
-                    (existing.name == lookup_name || existing.name == name)
-            }
-            if same { already = true }
-        }
-        if already == false {
-            captures.push(CCapture { name: lookup_name,
-                def_id: def_id, extern_typed: extern_typed })
-        }
-    }
-}
-
-fn c_capture_name_is_bound(
-    name: Str, lookup_name: Str, def_id: Int?, params: List<HParam>
-) -> Bool {
+fn c_exact_capture_param_is_bound(def_id: Int, params: List<HParam>) -> Bool {
     for p in params {
-        let same = match def_id {
-            some(id) => match p.def_id {
-                some(param_id) => param_id == id,
-                none => false
-            },
-            none => p.def_id.is_none() &&
-                (p.name == lookup_name || p.name == name)
+        let same = match p.def_id {
+            some(param_id) => param_id == def_id,
+            none => false
         }
         if same { return true }
     }
     false
+}
+
+fn push_c_exact_capture(
+    ctx: CCtx, name: Str, def_id: Int, extern_typed: Bool,
+    params: List<HParam>, mut captures: List<CCapture>
+) {
+    if c_exact_capture_param_is_bound(def_id, params) { return }
+    match c_exact_value_slot(ctx, name, def_id) {
+        some(_) => {},
+        none => {
+            // Not free in the enclosing frame: it is lambda-local or global.
+            // Exact use-time lookup remains fail-closed for a malformed local.
+            return
+        }
+    }
+    for existing in captures {
+        match existing.provenance {
+            CCaptureProvenance::Exact { def_id: existing_id, .. } => {
+                if existing_id == def_id { return }
+            },
+            CCaptureProvenance::NameOnly { .. } => {}
+        }
+    }
+    captures.push(CCapture {
+        provenance: CCaptureProvenance::Exact {
+            name: name, def_id: def_id
+        },
+        extern_typed: extern_typed
+    })
+}
+
+fn consider_c_exact_reference(
+    ctx: CCtx, name: Str, def_id: Int?, extern_typed: Bool,
+    params: List<HParam>, mut captures: List<CCapture>
+) {
+    match def_id {
+        some(id) => push_c_exact_capture(
+            ctx, name, id, extern_typed, params, captures),
+        // A reference without a DefId is global/direct.  Evidence and backend
+        // locals enter through their separate name-only metadata paths.
+        none => {}
+    }
+}
+
+fn consider_c_drop_reference(
+    ctx: CCtx, name: Str, def_id: Int, extern_typed: Bool,
+    params: List<HParam>, mut captures: List<CCapture>
+) {
+    push_c_exact_capture(ctx, name, def_id, extern_typed, params, captures)
+}
+
+fn push_c_name_only_capture(
+    matched: CNameOnlyMatch, extern_typed: Bool,
+    mut captures: List<CCapture>
+) {
+    for existing in captures {
+        match existing.provenance {
+            CCaptureProvenance::Exact { .. } => {},
+            CCaptureProvenance::NameOnly { canonical_key } => {
+                if canonical_key == matched.canonical_key { return }
+            }
+        }
+    }
+    captures.push(CCapture {
+        provenance: CCaptureProvenance::NameOnly {
+            canonical_key: matched.canonical_key
+        },
+        extern_typed: extern_typed
+    })
+}
+
+fn consider_c_required_name_only_capture(
+    ctx: CCtx, resolved_key: Str, bare_key: Str,
+    extern_typed: Bool, mut captures: List<CCapture>
+) {
+    let matched = match c_match_name_only_slot(ctx, resolved_key, bare_key) {
+        some(found) => found,
+        // Not free in the enclosing frame: a lambda-local Simple will be
+        // registered before its actual use.  c_resolve_dict_ref is the loud
+        // authority if no local/outer slot exists at that use point.
+        none => return
+    }
+    push_c_name_only_capture(matched, extern_typed, captures)
+}
+
+// Effect-row metadata can describe process-default/unhandled io/fail paths
+// that have no lexical evidence slot.  Capture it only when an explicit
+// name-only binding proves that this frame must forward it.
+fn consider_c_optional_evidence_capture(
+    ctx: CCtx, key: Str, mut captures: List<CCapture>
+) {
+    match c_match_name_only_slot(ctx, key, key) {
+        some(matched) => push_c_name_only_capture(matched, false, captures),
+        none => {}
+    }
 }
 
 // A nested handler arm is a closure nested inside the closure currently being
@@ -1232,16 +1301,20 @@ fn collect_c_dispatch_dict(
 ) {
     match dispatch {
         some(d) => match d {
-            TraitDispatch::Dict { param } => consider_c_capture_name(
-                ctx, param, none, none, false, params, captures),
-            TraitDispatch::Direct { dict, extra_dicts } => {
-                consider_c_capture_name(
-                    ctx, dict, none, none, false, params, captures)
-                for ed in extra_dicts { collect_c_dictref_names(ctx, ed, params, captures) }
+            TraitDispatch::Dict { param } => consider_c_required_name_only_capture(
+                ctx, param, param, false, captures),
+            TraitDispatch::Direct { extra_dicts, .. } => {
+                // Direct's base is a module Static dictionary.  Only its
+                // explicitly tagged trailing evidence may be dynamic.
+                for ed in extra_dicts {
+                    collect_c_dictref_names(
+                        ctx, ed, params, captures)
+                }
             },
             TraitDispatch::Tuple { elements, .. } => {
                 for element in elements {
-                    collect_c_dispatch_dict(ctx, some(element), params, captures)
+                    collect_c_dispatch_dict(
+                        ctx, some(element), params, captures)
                 }
             },
             TraitDispatch::Builtin => {},
@@ -1255,14 +1328,16 @@ fn collect_c_dictref_names(
     mut captures: List<CCapture>
 ) {
     match dr {
-        DictRef::Simple(name) => consider_c_capture_name(
-            ctx, name, none, none, false, params, captures),
+        DictRef::Simple(name) => consider_c_required_name_only_capture(
+            ctx, name, name, false, captures),
         // B-104 D4: module-level singleton — resolved globally, never captured.
         DictRef::Static(_) => {},
-        DictRef::Wrapped { dict, inner_dicts, .. } => {
-            consider_c_capture_name(
-                ctx, dict, none, none, false, params, captures)
-            for inner in inner_dicts { collect_c_dictref_names(ctx, inner, params, captures) }
+        DictRef::Wrapped { inner_dicts, .. } => {
+            // Wrapped's base is Static; dynamics live only in tagged inners.
+            for inner in inner_dicts {
+                collect_c_dictref_names(
+                    ctx, inner, params, captures)
+            }
         },
     }
 }
@@ -1274,9 +1349,8 @@ fn collect_c_captures(
     mut captures: List<CCapture>
 ) {
     match expr {
-        HExpr::Ident { name, resolved_name, def_id,
-                       dict_closure_dicts, ty, .. } => {
-            consider_c_capture_name(ctx, name, resolved_name, def_id,
+        HExpr::Ident { name, def_id, dict_closure_dicts, ty, .. } => {
+            consider_c_exact_reference(ctx, name, def_id,
                 is_extern_handle_type(ty, ctx.extern_types),
                 params, captures)
             match dict_closure_dicts {
@@ -1299,29 +1373,37 @@ fn collect_c_captures(
         },
         HExpr::Call { callee, args, resolved_dicts, dict_dispatch, effects, .. } => {
             collect_c_captures(ctx, callee, params, captures)
-            for a in args { collect_c_captures(ctx, a, params, captures) }
-            for d in resolved_dicts { collect_c_dictref_names(ctx, d, params, captures) }
+            for a in args {
+                collect_c_captures(ctx, a, params, captures)
+            }
+            for d in resolved_dicts {
+                collect_c_dictref_names(ctx, d, params, captures)
+            }
             match dict_dispatch {
-                some(dd) => consider_c_capture_name(ctx, dd.dict_param,
-                    none, none, false, params, captures),
+                some(dd) => collect_c_dictref_names(
+                    ctx, dd.dict_ref, params, captures),
                 none => {},
             }
             // B-145: evidence params forwarded by calls inside the body must
             // be captured (only ones actually in named_values are).
             let call_ev_names = extract_effect_names(effects)
             for en in call_ev_names {
-                consider_c_capture_name(ctx, evidence_param_name(en),
-                    none, none, false, params, captures)
+                let key = evidence_param_name(en)
+                consider_c_optional_evidence_capture(ctx, key, captures)
             }
         },
         HExpr::DictConstruct { inner, .. } => {
-            for d in inner { collect_c_dictref_names(ctx, d, params, captures) }
+            for d in inner {
+                collect_c_dictref_names(ctx, d, params, captures)
+            }
         },
         HExpr::FieldAccess { receiver, .. } => {
             collect_c_captures(ctx, receiver, params, captures)
         },
         HExpr::Block { stmts, tail, .. } => {
-            for s in stmts { collect_c_captures_stmt(ctx, s, params, captures) }
+            for s in stmts {
+                collect_c_captures_stmt(ctx, s, params, captures)
+            }
             match tail {
                 some(t) => collect_c_captures(ctx, t, params, captures),
                 none => {},
@@ -1348,23 +1430,30 @@ fn collect_c_captures(
         HExpr::StringInterp { parts, .. } => {
             for part in parts {
                 match part {
-                    HStringInterpPart::Expression(e) => collect_c_captures(ctx, e, params, captures),
+                    HStringInterpPart::Expression(e) =>
+                        collect_c_captures(ctx, e, params, captures),
                     _ => {},
                 }
             }
         },
         HExpr::StructLit { fields, spread, .. } => {
-            for f in fields { collect_c_captures(ctx, f.value, params, captures) }
+            for f in fields {
+                collect_c_captures(ctx, f.value, params, captures)
+            }
             match spread {
                 some(sp) => collect_c_captures(ctx, sp, params, captures),
                 none => {},
             }
         },
         HExpr::ListLit { elements, .. } => {
-            for e in elements { collect_c_captures(ctx, e, params, captures) }
+            for e in elements {
+                collect_c_captures(ctx, e, params, captures)
+            }
         },
         HExpr::TupleLit { elements, .. } => {
-            for e in elements { collect_c_captures(ctx, e, params, captures) }
+            for e in elements {
+                collect_c_captures(ctx, e, params, captures)
+            }
         },
         HExpr::IndexExpr { receiver, index, .. } => {
             collect_c_captures(ctx, receiver, params, captures)
@@ -1374,7 +1463,9 @@ fn collect_c_captures(
             collect_c_captures(ctx, lb, params, captures)
         },
         HExpr::NamedVariantConstruct { fields: nvc_fields, spread: nvc_spread, .. } => {
-            for f in nvc_fields { collect_c_captures(ctx, f.value, params, captures) }
+            for f in nvc_fields {
+                collect_c_captures(ctx, f.value, params, captures)
+            }
             match nvc_spread {
                 some(sp) => collect_c_captures(ctx, sp, params, captures),
                 none => {},
@@ -1399,24 +1490,28 @@ fn collect_c_captures(
             }
         },
         HExpr::EffectOp { effect_name: eo_eff, args: eo_args, .. } => {
-            for a in eo_args { collect_c_captures(ctx, a, params, captures) }
+            for a in eo_args {
+                collect_c_captures(ctx, a, params, captures)
+            }
             // B-090: a non-fail effect op dispatches through its evidence —
             // capture the evidence param.  fail routes through ring_raise.
             if eo_eff != "fail" {
-                consider_c_capture_name(ctx, evidence_param_name(eo_eff),
-                    none, none, false, params, captures)
+                let key = evidence_param_name(eo_eff)
+                consider_c_optional_evidence_capture(ctx, key, captures)
             }
         },
         HExpr::RangeExpr { start: rs, end: re, .. } => {
             collect_c_captures(ctx, rs, params, captures)
             collect_c_captures(ctx, re, params, captures)
         },
-        HExpr::Clone { inner, .. } => collect_c_captures(ctx, inner, params, captures),
+        HExpr::Clone { inner, .. } =>
+            collect_c_captures(ctx, inner, params, captures),
         HExpr::ReturnExpr { value, .. } => match value {
             some(v) => collect_c_captures(ctx, v, params, captures),
             none => {},
         },
-        HExpr::UnsafeBlock { body, .. } => collect_c_captures(ctx, body, params, captures),
+        HExpr::UnsafeBlock { body, .. } =>
+            collect_c_captures(ctx, body, params, captures),
         _ => {},
     }
 }
@@ -1459,7 +1554,7 @@ fn collect_c_captures_stmt(
         // B-084 #131: Perceus branch-balancing may place an HStmt::Drop for an
         // outer-scope variable inside the lambda body — treat as a use.
         HStmt::Drop { name, def_id, ty, .. } => {
-            consider_c_capture_name(ctx, name, none, some(def_id),
+            consider_c_drop_reference(ctx, name, def_id,
                 is_extern_handle_type(ty, ctx.extern_types),
                 params, captures)
         },
@@ -1478,15 +1573,18 @@ fn collect_c_extern_typed_names(
     mut out: Set<Str>
 ) {
     match expr {
-        HExpr::Ident { name, resolved_name, ty, .. } => {
+        HExpr::Ident { name, resolved_name, def_id, ty, .. } => {
             let lookup = match resolved_name { some(rn) => rn, none => name }
             let mut found = false
             for c in captures {
                 if c == lookup || c == name { found = true }
             }
+            let bound = match def_id {
+                some(id) => c_exact_capture_param_is_bound(id, params),
+                none => false
+            }
             if found
-                && c_capture_name_is_bound(
-                    name, lookup, none, params) == false
+                && bound == false
                 && is_extern_handle_type(ty, externs) {
                 out.insert(lookup)
             }
@@ -1742,6 +1840,15 @@ fn get_c_trait_method_index(ctx: CCtx, dict_param: Str, method: Str) -> Int {
 
 // Trait method call through a dict param (port of gen_dict_dispatch_call):
 // load the dict, read the method's closure slot, call through it.
+fn c_dispatch_dict_name(dict_ref: DictRef) -> Str {
+    match dict_ref {
+        DictRef::Simple(name) => name,
+        DictRef::Static(name) => name,
+        DictRef::Wrapped { .. } => panic(
+            "C codegen: DictDispatchInfo Wrapped base was not normalized")
+    }
+}
+
 fn gen_c_dict_dispatch_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, dd: DictDispatchInfo) -> Str {
     // Receiver from callee (FieldAccess) or first arg.
     let mut call_args: List<Str> = []
@@ -1767,13 +1874,9 @@ fn gen_c_dict_dispatch_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, dd:
         }
     }
 
-    // Dict param in scope; missing (delegate-expanded static dict name, B-121
-    // gap 2) → static singleton chain.
-    let dict_ptr = match c_name_only_value(ctx, dd.dict_param) {
-        some(cv) => cv,
-        none => resolve_c_static_dict(ctx, dd.dict_param),
-    }
-    let method_idx = get_c_trait_method_index(ctx, dd.dict_param, dd.method)
+    let dict_name = c_dispatch_dict_name(dd.dict_ref)
+    let dict_ptr = c_resolve_dict_ref(ctx, dd.dict_ref)
+    let method_idx = get_c_trait_method_index(ctx, dict_name, dd.method)
     let cls = fresh_tmp(ctx)
     c_emit(ctx, "${cls} = ((void**)${dict_ptr})[${method_idx + 1}];")
     gen_c_closure_call(ctx, cls, call_args)
@@ -1786,19 +1889,17 @@ fn gen_c_dict_dispatch_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, dd:
 fn resolve_c_dispatch_dict(mut ctx: CCtx, dispatch: TraitDispatch, trait_name_hint: Str?) -> Str {
     match dispatch {
         TraitDispatch::Dict { param } => {
-            match c_name_only_value(ctx, param) {
-                some(cv) => cv,
-                none => "RING_UNIT",
-            }
+            c_resolve_dict_ref(ctx, DictRef::Simple(param))
         },
         TraitDispatch::Direct { dict, extra_dicts } => {
             if extra_dicts.len() == 0 {
-                c_resolve_dict_ref(ctx, DictRef::Simple(dict))
+                c_resolve_dict_ref(ctx, DictRef::Static(dict))
             } else {
                 // B-121 gap 1: bind inner type-param dicts via a wrapped dict.
                 match trait_name_hint {
                     some(tn) => build_c_wrapped_dict(ctx, dict, tn, extra_dicts),
-                    none => c_resolve_dict_ref(ctx, DictRef::Simple(dict)),
+                    none => panic(
+                        "C codegen: Direct wrapped dispatch has no trait tag"),
                 }
             }
         },
@@ -2440,8 +2541,33 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
         none => {}
     }
 
+
+    // Backend/evidence callables have no DefId, but only an explicit
+    // name-only registration can classify them as local.  Preserve the
+    // resolved-vs-bare key that actually matched and call its slot directly.
+    let name_only_local_callee = match callee {
+        HExpr::Ident { name, resolved_name, def_id: none, .. } => {
+            let call_name = match resolved_name {
+                some(rn) => rn,
+                none => name
+            }
+            c_match_name_only_slot(ctx, call_name, name)
+        },
+        _ => none
+    }
+    match name_only_local_callee {
+        some(matched) => {
+            let closure_result = gen_c_closure_call(
+                ctx, matched.slot, arg_vals)
+            return if is_unit_type(result_ty) {
+                "RING_UNIT"
+            } else { closure_result }
+        },
+        none => {}
+    }
+
     let raw = match callee {
-        HExpr::Ident { name, resolved_name, def_id, .. } => {
+        HExpr::Ident { name, resolved_name, .. } => {
             let call_name = match resolved_name {
                 some(rn) => rn,
                 none => name,
@@ -2451,16 +2577,7 @@ fn gen_c_call(mut ctx: CCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: L
             // before this early-return path, just like gen_c_direct_call.
             let print_key = c_resolve_fn(ctx, call_name)
             let mut is_extern_print = false
-            let local_value = match def_id {
-                some(id) => c_exact_value_slot(ctx, name, id).is_some(),
-                none => {
-                    let explicit = c_name_only_value(ctx, call_name).is_some() ||
-                        c_name_only_value(ctx, name).is_some()
-                    explicit
-                }
-            }
-            if !local_value &&
-               ctx.ring_callable_names.contains(print_key) == false {
+            if ctx.ring_callable_names.contains(print_key) == false {
                 if call_name == "print" {
                     is_extern_print = true
                 } else {
@@ -2611,14 +2728,6 @@ fn gen_c_extern_abi_call(mut ctx: CCtx, abi_name: Str, arg_vals: List<Str>) -> S
 }
 
 fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: List<Str>) -> Str {
-    // LOCAL scope is authoritative before every name-based builtin special.
-    // Otherwise a legal local `ptr_from_addr`/`print`/Cell closure can inherit
-    // backend behavior that belongs to a different exact DefId.
-    match c_name_only_value(ctx, name) {
-        some(cv) => { return gen_c_closure_call(ctx, cv, arg_vals) },
-        none => {},
-    }
-
     // B-125: ptr_from_addr — pure codegen identity (untag Int → raw address).
     if name == "ptr_from_addr" {
         let a = match arg_vals.get(0) { some(v) => v, none => panic("ptr_from_addr: missing arg") }
@@ -4416,7 +4525,9 @@ fn c_for_binding_local(
     mut ctx: CCtx, binding: Str, def_id: Int?
 ) -> Str {
     if binding == "_" {
-        c_local(ctx, "__ring_for_wildcard")
+        // Wildcards need a C assignment target, not a Ring binding.  Keep the
+        // internal temp out of exact and name-only registries.
+        fresh_tmp(ctx)
     } else {
         match def_id {
             some(id) => c_local_def(ctx, binding, some(id)),

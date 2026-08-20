@@ -3,7 +3,7 @@ use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, Effec
     UseDecl, SigMember}
 use hir::{HDecl, HParam, HExpr, HStmt, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
-    DictDispatchInfo, trait_dict_name,
+    DictDispatchInfo, DictRef, trait_dict_name,
     hexpr_type, hexpr_effects, hexpr_span,
     collect_extern_type_names, compare_by_first, extern_abi_leaf}
 use env::{TypeScheme, SchemeBound, MethodOrigin,
@@ -1237,7 +1237,10 @@ fn expand_delegate_impls(
                                                     args: dict_args,
                                                     type_args: [],
                                                     resolved_dicts: [],
-                                                    dict_dispatch: some(DictDispatchInfo { dict_param: dict_name, method: tm.name }),
+                                                    dict_dispatch: some(DictDispatchInfo {
+                                                        dict_ref: DictRef::Static(dict_name),
+                                                        method: tm.name
+                                                    }),
                                                     ty: ret_ty,
                                                     effects: eff,
                                                     span: span

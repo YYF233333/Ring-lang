@@ -4363,6 +4363,8 @@ def identity_checkpoint_contract_errors(
             "pub fn validate_hir_binder_def_ids",
             "fn validate_hir_local_reference(",
             "block_local_init(stmts, id)",
+            "pub dict_ref: DictRef",
+            "Call { base_dict: DictRef, extra_dicts: List<DictRef> }",
         ),
         "infer": (
             "fn infer_scoped_block(",
@@ -4370,6 +4372,7 @@ def identity_checkpoint_contract_errors(
             "freshen_default_argument_hir(ctx, dh)",
             "bindings: pattern_bindings",
             "resume_binding: resume_binding",
+            "dict_ref: DictRef::Simple(trait_bound_param_name(",
         ),
         "infer_decl": (
             "trait default parameter has no exact DefId",
@@ -4378,6 +4381,7 @@ def identity_checkpoint_contract_errors(
             "def_id: some(exact_effect_def_id)",
             "def_id: some(trait_param_def_id)",
             "def_id: some(exact_trait_def_id)",
+            "dict_ref: DictRef::Static(dict_name)",
         ),
         "infer_ctx": (
             "struct OrPatternBindingAuthority",
@@ -4395,7 +4399,20 @@ def identity_checkpoint_contract_errors(
         "dict": (
             "synthetic_def_id(",
             "SYNTHETIC_DICT_DEF_ID_BASE",
+            "base_dict: lowered_base",
+            "dict_ref: dl_ref_static_only(info.dict_ref, defs, seen)",
             "validate_hir_binder_def_ids(lowered)",
+        ),
+        "infer_helpers": (
+            "DictRef::Static(dict) =>",
+            "TraitDispatch::Direct { dict: dict, extra_dicts: [] }",
+            "DictRef::Simple(param) =>",
+            "TraitDispatch::Dict { param: param }",
+        ),
+        "derive": (
+            "base_dict: DictRef::Simple(",
+            "base_dict: DictRef::Static(",
+            "base_dict: DictRef::Static(dict)",
         ),
         "perceus": (
             "struct OwnedSlot",
@@ -4417,14 +4434,31 @@ def identity_checkpoint_contract_errors(
             "pub fn c_name_only_value(",
             "value_slots_by_def_id: ctx.value_slots_by_def_id",
             "ctx.value_slots_by_def_id = saved.value_slots_by_def_id",
+            "name_only_slots: ctx.name_only_slots",
+            "ctx.name_only_slots = saved.name_only_slots",
+        ),
+        "cgen": (
+            "fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef)",
+            "c_resolve_dict_ref(ctx, base_dict)",
+            "FieldAction::Call { base_dict, extra_dicts }",
+            "c_option_some_variant(DictRef::Simple(",
         ),
         "cexpr": (
             "let found = match def_id",
             "some(id) => match c_exact_value_slot(ctx, name, id)",
             "let exact_local_callee = match callee",
+            "let name_only_local_callee = match callee",
+            "def_id: none",
+            "c_match_name_only_slot(ctx, call_name, name)",
             "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
-            "some(id) => c_local_def(ctx, cap.name, some(id))",
-            "none => c_local(ctx, cap.name)",
+            "enum CCaptureProvenance",
+            "Exact { name: Str, def_id: Int }",
+            "NameOnly { canonical_key: Str }",
+            "provenance: CCaptureProvenance",
+            "fn consider_c_exact_reference(",
+            "fn consider_c_required_name_only_capture(",
+            "fn consider_c_optional_evidence_capture(",
+            "C codegen: bound dictionary",
             "fn c_lookup_call_mut_flags(",
             "fn c_pattern_local(",
             "bind_c_root_pattern_after_success(",
@@ -4433,6 +4467,8 @@ def identity_checkpoint_contract_errors(
             "fn c_is_name_only_dict_def_id(",
             "let is_name_only_dict = c_is_name_only_dict_def_id(def_id)",
             "let val = gen_c_expr(ctx, init)",
+            "DictRef::Static(dict)",
+            "fresh_tmp(ctx)",
         ),
         "verify": (
             "def_ids: List<Int>",
@@ -4443,6 +4479,17 @@ def identity_checkpoint_contract_errors(
             "ctx.kinds[idx] == K_BORROW || ctx.kinds[idx] == K_CAPTURE",
             "for binding in arm.bindings",
             "def_id, \"assignment '${name}'\"",
+        ),
+        "provenance_fixture": (
+            "fn __ring_T_Ord(mut value: Int)",
+            "fn nested_trait_collision<T: Ord>",
+            "let __ring_T_Ord = fn(value: Int)",
+            "let __ring_self_ProvenanceTrait = fn()",
+            "let __ring_ev_E = fn()",
+            "let inner = fn()",
+            "trait dictlocal_1",
+            "enum ring",
+            "fn dynamic_static_dict_collision<T: Eq>",
         ),
     }
     for label, tokens in required_tokens.items():
@@ -4555,8 +4602,28 @@ def identity_checkpoint_contract_errors(
     elif not all(token in call_body for token in (
             "let exact_local_callee = match callee",
             "c_exact_value_slot(ctx, name, id)",
-            "gen_c_closure_call(ctx, slot, arg_vals)")):
-        errors.append("exact local callable no longer takes the closure ABI path")
+            "let name_only_local_callee = match callee",
+            "def_id: none",
+            "c_match_name_only_slot(ctx, call_name, name)",
+            "gen_c_closure_call(ctx, slot, arg_vals)",
+            "let raw = match callee")):
+        errors.append("callable provenance chain lost an explicit route")
+    elif not (
+        call_body.index("let exact_local_callee = match callee")
+        < call_body.index("let name_only_local_callee = match callee")
+        < call_body.index("let raw = match callee")
+    ):
+        errors.append("callable exact/name-only/global precedence drifted")
+
+    direct_body, direct_error = extract_ring_function_body(
+        sources["cexpr"], "gen_c_direct_call")
+    if direct_error:
+        errors.append(direct_error)
+    elif (
+        "c_name_only_value" in direct_body
+        or "c_match_name_only_slot" in direct_body
+    ):
+        errors.append("direct/global call regained ambient name-only lookup")
 
     stmt_body, stmt_error = extract_ring_function_body(
         sources["cexpr"], "emit_c_stmt")
@@ -4575,19 +4642,68 @@ def identity_checkpoint_contract_errors(
     if lambda_error:
         errors.append(lambda_error)
     else:
-        capture_registration = (
-            "let cv = match cap.def_id {\n"
-            "                    some(id) => c_local_def("
-            "ctx, cap.name, some(id)),\n"
-            "                    none => c_local(ctx, cap.name)\n"
-            "                }")
-        if lambda_body.count(capture_registration) != 1:
+        if lambda_body.count("match cap.provenance") != 2:
             errors.append(
-                "lambda capture extraction does not split exact and "
-                "name-only registration")
-        if "c_local_def(ctx, cap.name, cap.def_id)" in lambda_body:
+                "lambda extraction/construction must both consume capture tags")
+        for token in (
+            "CCaptureProvenance::Exact { name, def_id }",
+            "CCaptureProvenance::NameOnly { canonical_key }",
+            "c_local_def(ctx, name, some(def_id))",
+            "c_local(ctx, canonical_key)",
+            "c_exact_value_slot(ctx, name, def_id)",
+            "c_name_only_value(ctx, canonical_key)",
+        ):
+            expected_count = 2 if token.startswith(
+                "CCaptureProvenance::") else 1
+            if lambda_body.count(token) != expected_count:
+                errors.append(
+                    f"gen_c_lambda capture provenance drifted: {token!r}")
+        if "cap.def_id" in lambda_body or "cap.name" in lambda_body:
             errors.append(
-                "lambda capture extraction routes missing DefId through exact local")
+                "lambda capture regained overloaded name/DefId proof")
+
+    for function_name, tokens in (
+        ("consider_c_exact_reference", (
+            "some(id) => push_c_exact_capture(",
+            "none => {}",
+        )),
+        ("push_c_exact_capture", (
+            "CCaptureProvenance::Exact",
+            "CCaptureProvenance::NameOnly",
+            "Not free in the enclosing frame",
+            "Exact use-time lookup remains fail-closed",
+        )),
+        ("push_c_name_only_capture", (
+            "CCaptureProvenance::Exact",
+            "CCaptureProvenance::NameOnly",
+            "matched.canonical_key",
+        )),
+        ("consider_c_required_name_only_capture", (
+            "c_match_name_only_slot",
+            "Not free in the enclosing frame",
+            "c_resolve_dict_ref is the loud",
+            "none => return",
+            "push_c_name_only_capture",
+        )),
+        ("consider_c_optional_evidence_capture", (
+            "c_match_name_only_slot",
+            "some(matched) => push_c_name_only_capture",
+            "none => {}",
+        )),
+    ):
+        body, extract_error = extract_ring_function_body(
+            sources["cexpr"], function_name)
+        if extract_error:
+            errors.append(extract_error)
+        elif not all(token in body for token in tokens):
+            errors.append(
+                f"{function_name}: capture provenance contract drifted")
+        elif function_name in (
+                "consider_c_exact_reference", "push_c_exact_capture") and (
+                "c_name_only_value" in body
+                or "c_match_name_only_slot" in body):
+            errors.append(
+                f"{function_name}: exact/global route consults name-only state")
 
     dict_id_body, dict_id_error = extract_ring_function_body(
         sources["cexpr"], "c_is_name_only_dict_def_id")
@@ -4595,6 +4711,130 @@ def identity_checkpoint_contract_errors(
         errors.append(dict_id_error)
     elif "is_synthetic_dict_def_id(id)" not in dict_id_body:
         errors.append("Dict name-only provenance is not the synthetic DefId namespace")
+
+    resolve_dict_body, resolve_dict_error = extract_ring_function_body(
+        sources["cexpr"], "c_resolve_dict_ref")
+    if resolve_dict_error:
+        errors.append(resolve_dict_error)
+    else:
+        simple_arm = re.search(
+            r"DictRef::Simple\(n\)\s*=>\s*\{(.*?)"
+            r"DictRef::Static\(n\)\s*=>",
+            resolve_dict_body,
+            re.DOTALL,
+        )
+        if simple_arm is None:
+            errors.append("DictRef::Simple resolver arm is not explicit")
+        elif (
+            "c_name_only_value(ctx, n)" not in simple_arm.group(1)
+            or "bound dictionary" not in simple_arm.group(1)
+            or "resolve_c_static_dict" in simple_arm.group(1)
+        ):
+            errors.append("DictRef::Simple regained a static/name fallback")
+        if "DictRef::Static(n) => resolve_c_static_dict(ctx, n)" not in resolve_dict_body:
+            errors.append("DictRef::Static no longer selects singleton resolution")
+
+    dispatch_body, dispatch_error = extract_ring_function_body(
+        sources["cexpr"], "resolve_c_dispatch_dict")
+    if dispatch_error:
+        errors.append(dispatch_error)
+    elif not all(token in dispatch_body for token in (
+            "DictRef::Simple(param)",
+            "DictRef::Static(dict)",
+            "Direct wrapped dispatch has no trait tag")):
+        errors.append("TraitDispatch Dict/Direct provenance is not strict")
+    elif "DictRef::Simple(dict)" in dispatch_body:
+        errors.append("TraitDispatch::Direct base regained name-only resolution")
+
+    dispatch_capture_body, dispatch_capture_error = extract_ring_function_body(
+        sources["cexpr"], "collect_c_dispatch_dict")
+    if dispatch_capture_error:
+        errors.append(dispatch_capture_error)
+    elif not all(token in dispatch_capture_body for token in (
+            "TraitDispatch::Dict { param } => consider_c_required_name_only_capture",
+            "TraitDispatch::Direct { extra_dicts, .. }",
+            "for ed in extra_dicts")):
+        errors.append("TraitDispatch capture census lost explicit provenance")
+    elif "ctx, dict" in dispatch_capture_body:
+        errors.append("TraitDispatch::Direct static base is captured")
+
+    dictref_capture_body, dictref_capture_error = extract_ring_function_body(
+        sources["cexpr"], "collect_c_dictref_names")
+    if dictref_capture_error:
+        errors.append(dictref_capture_error)
+    elif not all(token in dictref_capture_body for token in (
+            "DictRef::Simple(name) => consider_c_required_name_only_capture",
+            "DictRef::Static(_) => {}",
+            "DictRef::Wrapped { inner_dicts, .. }")):
+        errors.append("DictRef capture census lost Simple/Static/Wrapped tags")
+    elif "ctx, dict" in dictref_capture_body:
+        errors.append("DictRef::Wrapped static base is captured")
+
+    dict_dispatch_body, dict_dispatch_error = extract_ring_function_body(
+        sources["cexpr"], "gen_c_dict_dispatch_call")
+    if dict_dispatch_error:
+        errors.append(dict_dispatch_error)
+    elif not all(token in dict_dispatch_body for token in (
+            "c_dispatch_dict_name(dd.dict_ref)",
+            "c_resolve_dict_ref(ctx, dd.dict_ref)")):
+        errors.append("DictDispatchInfo tag is not consumed by dispatch codegen")
+    elif "c_name_only_value" in dict_dispatch_body:
+        errors.append("DictDispatchInfo regained ambient name fallback")
+
+    derived_resolve_body, derived_resolve_error = extract_ring_function_body(
+        sources["cgen"], "resolve_c_dict_for_derived")
+    if derived_resolve_error:
+        errors.append(derived_resolve_error)
+    elif (
+        "base_dict: DictRef" not in sources["cgen"]
+        or "c_resolve_dict_ref(ctx, base_dict)" not in derived_resolve_body
+        or "DictRef::Simple" in derived_resolve_body
+    ):
+        errors.append("derived FieldAction base does not retain DictRef provenance")
+
+    wildcard_body, wildcard_error = extract_ring_function_body(
+        sources["cexpr"], "c_for_binding_local")
+    if wildcard_error:
+        errors.append(wildcard_error)
+    elif "fresh_tmp(ctx)" not in wildcard_body or "__ring_for_wildcard" in wildcard_body:
+        errors.append("for wildcard regained an ambient name-only binding")
+
+    if "dict_param:" in sources["hir"] or "dict_param:" in sources["infer"]:
+        errors.append("DictDispatchInfo retained untyped dict_param producer")
+    if sources["infer"].count("DictDispatchInfo {") != 1 or (
+        "dict_ref: DictRef::Simple(trait_bound_param_name(" not in sources["infer"]
+    ):
+        errors.append("infer DictDispatchInfo producer is not uniquely bound/Simple")
+    if sources["infer_decl"].count("DictDispatchInfo {") != 1 or (
+        "dict_ref: DictRef::Static(dict_name)" not in sources["infer_decl"]
+    ):
+        errors.append("infer_decl delegated DictDispatchInfo is not uniquely Static")
+    for label in ("derive", "dict", "cgen"):
+        if "FieldAction::Call { dict_name" in sources[label]:
+            errors.append(f"{label}: FieldAction base lost explicit DictRef tag")
+    if not all(token in sources["derive"] for token in (
+            "base_dict: DictRef::Simple(",
+            "base_dict: DictRef::Static(",
+            "some(DictRef::Wrapped { dict, inner_dicts, .. })",
+            "base_dict: DictRef::Static(dict)")):
+        errors.append("derive FieldAction Simple/Static/Wrapped inventory drifted")
+    for function_name, bound_token in (
+        ("resolve_field_action", (
+            "base_dict: DictRef::Simple(\n"
+            "                    trait_bound_param_name(param_name, trait_name))"
+        )),
+        ("resolve_hash_field_action", (
+            "base_dict: DictRef::Simple(\n"
+            "                    trait_bound_param_name(param_name, \"Hash\"))"
+        )),
+    ):
+        body, extract_error = extract_ring_function_body(
+            sources["derive"], function_name)
+        if extract_error:
+            errors.append(extract_error)
+        elif body.count(bound_token) != 1:
+            errors.append(
+                f"{function_name}: type-variable FieldAction base is not Simple")
 
     mut_flags_body, mut_flags_error = extract_ring_function_body(
         sources["cexpr"], "c_lookup_call_mut_flags")
@@ -4610,10 +4850,31 @@ def identity_checkpoint_contract_errors(
         if (
             local_gate not in mut_flags_body
             or exact_gate_block not in mut_flags_body
+            or "c_match_name_only_slot(ctx, call_name, name)" not in mut_flags_body
             or mut_flags_body.index(local_gate) > mut_flags_body.index(module_lookup)
+            or mut_flags_body.index(
+                "c_match_name_only_slot(ctx, call_name, name)")
+                > mut_flags_body.index(module_lookup)
         ):
             errors.append(
                 "exact/local callable mut flags are not gated before module metadata")
+
+    name_match_body, name_match_error = extract_ring_function_body(
+        sources["cexpr"], "c_match_name_only_slot")
+    if name_match_error:
+        errors.append(name_match_error)
+    else:
+        resolved_lookup = "c_name_only_value(ctx, resolved_key)"
+        bare_lookup = "c_name_only_value(ctx, bare_key)"
+        if not all(token in name_match_body for token in (
+                resolved_lookup,
+                "canonical_key: resolved_key",
+                "if bare_key == resolved_key { return none }",
+                bare_lookup,
+                "canonical_key: bare_key")):
+            errors.append("resolved-vs-bare name-only key match is not explicit")
+        elif name_match_body.index(resolved_lookup) > name_match_body.index(bare_lookup):
+            errors.append("bare name-only key precedes resolved canonical key")
 
     name_only_body, name_only_error = extract_ring_function_body(
         sources["cctx"], "c_name_only_value")
@@ -4631,6 +4892,27 @@ def identity_checkpoint_contract_errors(
         errors.append(exact_local_error)
     elif "name_only_slots" in exact_local_body:
         errors.append("exact source local registration contaminates name-only slots")
+
+    push_body, push_error = extract_ring_function_body(
+        sources["cctx"], "c_push_fn")
+    pop_body, pop_error = extract_ring_function_body(
+        sources["cctx"], "c_pop_fn")
+    if push_error:
+        errors.append(push_error)
+    elif pop_error:
+        errors.append(pop_error)
+    else:
+        for domain in (
+            "name_only_slots", "value_slots_by_def_id",
+            "value_slot_names_by_def_id",
+        ):
+            if (
+                f"{domain}: ctx.{domain}" not in push_body
+                or f"ctx.{domain} = map_new()" not in push_body
+                or f"ctx.{domain} = saved.{domain}" not in pop_body
+            ):
+                errors.append(
+                    f"c_push/c_pop does not independently restore {domain}")
 
     lookup_body, lookup_error = extract_ring_function_body(
         sources["verify"], "v_lookup")
@@ -4724,7 +5006,10 @@ def identity_checkpoint_contract_errors(
     # ownership metadata must remain absent from this checkpoint.
     forbidden = {
         "perceus": ("DROP_PRODUCER_NOOP_NONE", "is_option_none_ctor_ident"),
-        "hir": ("OwnershipMetadata", "Take {"),
+        "hir": (
+            "OwnershipMetadata", "Take {", "pub dict_param: Str",
+            "Call { dict_name: Str",
+        ),
         "cctx": ("exact_value_names", "name_only_values"),
         "cexpr": (
             'starts_with("__ring_dictlocal_")',
@@ -4732,7 +5017,12 @@ def identity_checkpoint_contract_errors(
             "c_is_name_only_dict_init",
             "init_for_classification",
             "init_for_codegen",
+            "cap.def_id",
+            "cap.name",
+            "DictRef::Simple(dict)",
+            'c_local(ctx, "__ring_for_wildcard")',
         ),
+        "cgen": ("FieldAction::Call { dict_name",),
     }
     for label, tokens in forbidden.items():
         for token in tokens:
@@ -4742,7 +5032,7 @@ def identity_checkpoint_contract_errors(
 
 
 def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
-    """Require distinct parameter/shadow slots in trait/effect default C."""
+    """Require exact/name-only slot separation in candidate-generated C."""
     errors: List[str] = []
     with tempfile.TemporaryDirectory(prefix="ring_identity_default_c_") as tmpdir:
         c_path, _, build_error = build_c_artifacts_fresh(
@@ -4755,6 +5045,16 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
         assert c_path is not None
         source = c_path.read_text(encoding="utf-8")
         masked = mask_c_strings_and_comments(source)
+
+        provenance_c_path, _, provenance_build_error = build_c_artifacts_fresh(
+            ring_exe, "tests/cases/provenance_b_capture_identity.ring",
+            Path(tmpdir) / "provenance-b", no_c_lines=True,
+            phase_case="compiler.identity_checkpoint/provenance-b-c",
+        )
+        if provenance_build_error:
+            return [provenance_build_error]
+        assert provenance_c_path is not None
+        provenance_source = provenance_c_path.read_text(encoding="utf-8")
 
     def exact_shadow_slot_errors(body: str, label: str) -> List[str]:
         slot_errors: List[str] = []
@@ -4865,6 +5165,129 @@ def default_body_identity_generated_c_errors(ring_exe: str) -> List[str]:
             "mixed evidence generated C expected one lambda with distinct "
             "exact-condition and name-only-dict capture slots, found "
             f"{len(separated_lambdas)}")
+
+    def lambda_refs(body: str) -> set[str]:
+        return set(re.findall(
+            r"\(\(void\*\*\)t[0-9]+\)\[0\]\s*=\s*"
+            r"\(void\*\)(ring_c_lambda_[0-9]+)\s*;",
+            body,
+        ))
+
+    def same_spelling_extractions(body: str, c_prefix: str) -> dict[str, str]:
+        spelling = rf"{re.escape(c_prefix)}(?:_[0-9]+)?"
+        return {
+            name: slot for name, slot in re.findall(
+                rf"\b({spelling})\s*=\s*"
+                r"\(\(void\*\*\)env\)\[([0-9]+)\]\s*;",
+                body,
+            )
+        }
+
+    def has_distinct_env_stores(body: str, c_prefix: str) -> bool:
+        spelling = rf"{re.escape(c_prefix)}(?:_[0-9]+)?"
+        groups: dict[str, set[str]] = {}
+        for env_name, value_name in re.findall(
+                rf"\(\(void\*\*\)(t[0-9]+)\)\[[0-9]+\]\s*=\s*"
+                rf"({spelling})\s*;",
+                body):
+            groups.setdefault(env_name, set()).add(value_name)
+        return any(len(values) >= 2 for values in groups.values())
+
+    def two_level_provenance_errors(
+        parent_symbol: str, c_prefix: str, label: str,
+    ) -> List[str]:
+        nested_errors: List[str] = []
+        parent, parent_error = extract_c_function_body(
+            provenance_source, parent_symbol)
+        if parent_error:
+            return [parent_error]
+        if not has_distinct_env_stores(parent, c_prefix):
+            nested_errors.append(
+                f"{label}: parent did not store exact/name-only peers")
+        outer_candidates: List[Tuple[str, str]] = []
+        for symbol in lambda_refs(parent):
+            body, extract_error = extract_c_function_body(
+                provenance_source, symbol)
+            if extract_error is None and len(lambda_refs(body)) > 0:
+                outer_candidates.append((symbol, body))
+        if len(outer_candidates) != 1:
+            nested_errors.append(
+                f"{label}: expected one outer forwarding lambda, found "
+                f"{len(outer_candidates)}")
+            return nested_errors
+        _, outer = outer_candidates[0]
+        outer_extractions = same_spelling_extractions(outer, c_prefix)
+        if len(outer_extractions) < 2 or len(set(outer_extractions.values())) < 2:
+            nested_errors.append(
+                f"{label}: outer lambda collapsed exact/name-only extraction")
+        if not has_distinct_env_stores(outer, c_prefix):
+            nested_errors.append(
+                f"{label}: outer lambda did not forward both provenances")
+
+        inner_candidates: List[str] = []
+        for symbol in lambda_refs(outer):
+            body, extract_error = extract_c_function_body(
+                provenance_source, symbol)
+            if extract_error is None:
+                inner_candidates.append(body)
+        if len(inner_candidates) != 1:
+            nested_errors.append(
+                f"{label}: expected one inner lambda, found "
+                f"{len(inner_candidates)}")
+            return nested_errors
+        inner = inner_candidates[0]
+        inner_extractions = same_spelling_extractions(inner, c_prefix)
+        if len(inner_extractions) < 2 or len(set(inner_extractions.values())) < 2:
+            nested_errors.append(
+                f"{label}: inner lambda collapsed exact/name-only extraction")
+            return nested_errors
+
+        spelling = rf"{re.escape(c_prefix)}(?:_[0-9]+)?"
+        evidence_names = set(re.findall(
+            rf"\(\(void\*\*\)({spelling})\)\[[0-9]+\]", inner))
+        exact_names: set[str] = set()
+        closure_temps = set(re.findall(
+            r"\(\(void\*\*\)(t[0-9]+)\)\[0\]", inner))
+        for temp_name, source_name in re.findall(
+                rf"\b(t[0-9]+)\s*=\s*({spelling})\s*;", inner):
+            if temp_name in closure_temps:
+                exact_names.add(source_name)
+        if not any(
+                exact_name != evidence_name
+                for exact_name in exact_names
+                for evidence_name in evidence_names):
+            nested_errors.append(
+                f"{label}: exact closure use aliases name-only evidence receiver")
+        if "ring___ring_T_Ord(" in inner:
+            nested_errors.append(
+                f"{label}: exact local call fell through to module function")
+        return nested_errors
+
+    for parent_symbol, c_prefix, label in (
+        ("ring_nested_trait_collision", "r___ring_T_Ord", "trait evidence"),
+        ("__ProvenanceTrait_combined", "r___ring_self_ProvenanceTrait",
+         "default self evidence"),
+        ("ring_nested_effect_collision", "r___ring_ev_E", "effect evidence"),
+    ):
+        errors.extend(two_level_provenance_errors(
+            parent_symbol, c_prefix, label))
+
+    main_body, main_error = extract_c_function_body(
+        provenance_source, "ring_main")
+    if main_error:
+        errors.append(main_error)
+    elif "ring___ring_T_Ord(" not in main_body:
+        errors.append("module function collision lost direct/global call")
+
+    dict_body, dict_error = extract_c_function_body(
+        provenance_source, "ring_dynamic_static_dict_collision")
+    if dict_error:
+        errors.append(dict_error)
+    elif not all(token in dict_body for token in (
+            "r___ring_dictlocal_1",
+            "ring_dict_init___ring_dictlocal_1")):
+        errors.append(
+            "dynamic Simple/static same-spelling dictionary separation missing")
     return errors
 
 
@@ -4874,11 +5297,17 @@ def identity_checkpoint_source_errors() -> List[str]:
         "infer": REPO / "compiler" / "infer.ring",
         "infer_decl": REPO / "compiler" / "infer_decl.ring",
         "infer_ctx": REPO / "compiler" / "infer_ctx.ring",
+        "infer_helpers": REPO / "compiler" / "infer_helpers.ring",
+        "derive": REPO / "compiler" / "derive.ring",
         "dict": REPO / "compiler" / "dict_lower.ring",
         "perceus": REPO / "compiler" / "perceus.ring",
         "cctx": REPO / "compiler" / "codegen_c_ctx.ring",
+        "cgen": REPO / "compiler" / "codegen_c.ring",
         "cexpr": REPO / "compiler" / "codegen_c_expr.ring",
         "verify": REPO / "compiler" / "verify_rc.ring",
+        "provenance_fixture": (
+            REPO / "tests" / "cases" / "provenance_b_capture_identity.ring"
+        ),
     }
     sources: dict[str, str] = {}
     errors: List[str] = []
@@ -4900,9 +5329,73 @@ def identity_checkpoint_source_errors() -> List[str]:
         ("exact local closure call", "cexpr",
          "let closure_result = gen_c_closure_call(ctx, slot, arg_vals)",
          "let closure_result = gen_c_direct_call(ctx, name, arg_vals, dict_vals)"),
-        ("name-only lambda capture extraction", "cexpr",
-         "none => c_local(ctx, cap.name)",
-         "none => c_local_def(ctx, cap.name, none)"),
+        ("capture name-only extraction tag", "cexpr",
+         "CCaptureProvenance::NameOnly { canonical_key } =>\n"
+         "                        c_local(ctx, canonical_key)",
+         "CCaptureProvenance::NameOnly { canonical_key } =>\n"
+         "                        c_local_def(ctx, canonical_key, none)"),
+        ("capture exact extraction tag", "cexpr",
+         "CCaptureProvenance::Exact { name, def_id } =>\n"
+         "                        c_local_def(ctx, name, some(def_id))",
+         "CCaptureProvenance::Exact { name, def_id } =>\n"
+         "                        c_local(ctx, name)"),
+        ("name-only census current-frame filter", "cexpr",
+         "// registered before its actual use.  c_resolve_dict_ref is the loud\n"
+         "        // authority if no local/outer slot exists at that use point.\n"
+         "        none => return",
+         "// broken census eagerly treats a lambda-local as missing\n"
+         "        none => panic(\"missing capture slot\")"),
+        ("exact census current-frame filter", "cexpr",
+         "// Not free in the enclosing frame: it is lambda-local or global.\n"
+         "            // Exact use-time lookup remains fail-closed for a malformed local.\n"
+         "            return",
+         "panic(\"exact capture missing from outer frame\")"),
+        ("optional evidence remains optional", "cexpr",
+         "some(matched) => push_c_name_only_capture(matched, false, captures),\n"
+         "        none => {}",
+         "some(matched) => push_c_name_only_capture(matched, false, captures),\n"
+         "        none => panic(\"missing optional evidence\")"),
+        ("callee name-only tag", "cexpr",
+         "HExpr::Ident { name, resolved_name, def_id: none, .. }",
+         "HExpr::Ident { name, resolved_name, .. }"),
+        ("resolved name-only canonical key", "cexpr",
+         "canonical_key: resolved_key, slot: slot",
+         "canonical_key: bare_key, slot: slot"),
+        ("direct call name-only fallback", "cexpr",
+         "fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: List<Str>) -> Str {",
+         "fn gen_c_direct_call(mut ctx: CCtx, name: Str, arg_vals: List<Str>, dict_vals: List<Str>) -> Str {\n"
+         "    let _ = c_name_only_value(ctx, name)"),
+        ("Simple dictionary missing failure", "cexpr",
+         "none => panic(\n"
+         "                    \"C codegen: bound dictionary '${n}' has no name-only slot\")",
+         "none => resolve_c_static_dict(ctx, n)"),
+        ("Direct dictionary static base", "cexpr",
+         "c_resolve_dict_ref(ctx, DictRef::Static(dict))",
+         "c_resolve_dict_ref(ctx, DictRef::Simple(dict))"),
+        ("Direct dictionary capture census", "cexpr",
+         "TraitDispatch::Direct { extra_dicts, .. }",
+         "TraitDispatch::Direct { dict, extra_dicts }"),
+        ("Wrapped dictionary capture census", "cexpr",
+         "DictRef::Wrapped { inner_dicts, .. }",
+         "DictRef::Wrapped { dict, inner_dicts, .. }"),
+        ("bound DictDispatchInfo tag", "infer",
+         "dict_ref: DictRef::Simple(trait_bound_param_name(",
+         "dict_ref: DictRef::Static(trait_bound_param_name("),
+        ("delegated DictDispatchInfo tag", "infer_decl",
+         "dict_ref: DictRef::Static(dict_name)",
+         "dict_ref: DictRef::Simple(dict_name)"),
+        ("FieldAction bound base tag", "derive",
+         "base_dict: DictRef::Simple(\n"
+         "                    trait_bound_param_name(param_name, trait_name))",
+         "base_dict: DictRef::Static(\n"
+         "                    trait_bound_param_name(param_name, trait_name))"),
+        ("wildcard internal temp", "cexpr",
+         "if binding == \"_\" {\n"
+         "        // Wildcards need a C assignment target, not a Ring binding.  Keep the\n"
+         "        // internal temp out of exact and name-only registries.\n"
+         "        fresh_tmp(ctx)",
+         "if binding == \"_\" {\n"
+         "        c_local(ctx, \"__ring_for_wildcard\")"),
         ("synthetic Dict provenance", "cexpr",
          "is_synthetic_dict_def_id(id)",
          "is_synthetic_anf_def_id(id)"),
@@ -4914,6 +5407,9 @@ def identity_checkpoint_source_errors() -> List[str]:
          "some(id) => if c_exact_value_slot(ctx, name, id).is_some() {\n                    return ctx.fn_mut_params.get(name)"),
         ("independent name-only slot map", "cctx",
          "ctx.name_only_slots.get(name)", "ctx.named_values.get(name)"),
+        ("nested name-only domain restoration", "cctx",
+         "ctx.name_only_slots = saved.name_only_slots",
+         "ctx.name_only_slots = saved.named_values"),
         ("verifier exact lookup", "verify", "ctx.def_ids[i] == def_id",
          "ctx.names[i] == name"),
         ("or-pattern shared slot", "cexpr", "bind_c_root_pattern_after_success(",
