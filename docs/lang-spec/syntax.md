@@ -471,7 +471,7 @@ PatList      ::= Pattern (',' Pattern)* ','?
 NamedPat     ::= Ident (':' Pattern)? ','?
 ```
 
-`|` 只在 match/catch arm 的最外层 `OrPattern` 中分隔备选模式（如 `A | B => expr`）；它不是通用二元或管道运算符。每个备选可以是 enum 变体、字面量、构造器或绑定模式，且必须绑定相同的变量集合。嵌套位置（如 tuple 或构造器字段）不会自行解析 `|`。
+`|` 只在 match/catch arm 的最外层 `OrPattern` 中分隔备选模式（如 `A | B => expr`）；它不是通用二元或管道运算符。每个备选可以是 enum 变体、字面量、构造器或绑定模式。**所有备选必须各自恰好一次地绑定相同的非 `_` 变量集合**；同名绑定的类型、可变性与 ownership mode 必须兼容，并在 guard/body 中表示同一个 canonical binding。变量集合不同、单个备选重复绑定同名变量，或同名绑定类型不兼容，均为 E0301。只需合并匹配而不使用不同 payload 时必须写 `_`；需要不同 payload 名时拆成不同 arm。嵌套位置（如 tuple 或构造器字段）不会自行解析 `|`。
 
 与零字段 enum 变体同名的绑定模式会被重分类为构造器模式。命名构造器模式支持字段 punning（`{ x }` ≡ `{ x: x }`）和部分匹配（`..` 忽略其余字段）。
 

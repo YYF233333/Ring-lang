@@ -753,6 +753,21 @@ async 需要挂起，现行 handler 只有 tail-resumptive + abort。中性评�
 
 ## 基础设施
 
+### B-187 Repository 文档漂移复核与过期内容清理 [infra] [P2] [M] [judgment] [queued] [after: #268+#269]
+
+> **2026-08-20 用户方向**：当前 ownership 主线完成后，安排一轮 bounded 文档维护，清理再次累积的过期、重复和相互矛盾内容；不打断 I′ → S′ → A′，也不把文档清理包装成新的语言设计。
+
+**范围 / 真值对账**：`CLAUDE.md`、root/子目录 README、`docs/*.md`、`docs/lang-spec/`、活动 backlog/audit/Inbox/handoff，以及 `.agents/.claude` provider adapter。以最新 main 的 C11 compiler/runtime/std、可执行测试、tracked bootstrap 和现行 workflow 为事实源，逐项核对：退役 LLVM/JS/旧 anchor 仍被写成现状、完成 item/历史过程残留在活动 spec、失效路径/命令/行号/依赖、设计/规范/实现互相矛盾、重复产品主张、过长 handoff 与断链引用。
+
+**约束**：
+
+1. 先形成有界 inventory，每项只允许 `仍正确保留 / 直接修订 / 删除并由 Git 保留历史 / 新建具体 backlog finding / 用户决策` 五种结论；不得凭措辞陈旧机械删掉仍承载公开语义或 safety/ownership 约束的文本。
+2. 文档事实可由当前设计唯一推出时直接同步；涉及公开语义、保证、release gate、平台支持或路线重排时停止该项并形成 decision dossier，不在 cleanup 中偷渡。
+3. 活动 spec 只保留当前目标、约束、验收和必要 blocker；逐轮实验、已拒绝候选、长日志与完成历史回归 Git/evidence index。provider adapter 不复制 `docs/workflow.md` 全文。
+4. 本项默认只改文档/adapter/文档验证器；发现实现 bug 只立可复现 item，不顺带改 compiler/runtime/std/tests。
+
+**验收**：inventory 100% 有结论与证据锚；所有保留的本地路径/命令/Markdown link 可解析，C-only 构建/测试说明与当前入口一致；活动看板、audit、Inbox、handoff、CLAUDE/design/lang-spec 无已知状态/依赖冲突；retired backend 不再作为现行 oracle/依赖，完成流水不占活动真值；`python .agents/scripts/validate_workflow.py` 与适用的文档/link/example checks 通过；独立 reviewer 以 `current / historical / future` 三类边界主动寻找误删与漏删。
+
 ### B-179 project manifest 与可复现 dependency lock [feature] [P2] [XL] [judgment] [queued] [after: B-175]
 
 首个 preview 允许以 entry `.ring` 文件作为 project root，不等待 registry；随后补 `ring.toml` + lockfile，把编译器/std 兼容、local/path/git dependency、feature/capability 与构建输入变为可复现真值。Registry、账号、签名服务与付费托管不在本项。

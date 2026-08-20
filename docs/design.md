@@ -391,9 +391,9 @@ fn safe_write(file: FileHandle, data: Str where data.len() > 0) with {fail<Str>,
 
 以上六个交互覆盖 Refinement × Ownership × Effects 三大支柱。以下为其余重要特性交互的已确定规则。
 
-**GADTs × Or-Pattern（禁止不兼容约束合并）**
+**GADTs × Or-Pattern（类型等式与绑定环境分别兼容）**
 
-Or-pattern 合并的 GADT 变体必须携带兼容的类型等式。`Lit(n) | Add(a,b)` 合法（两者均 T=Int），`Lit(n) | IsZero(e)` 非法（T=Int vs T=Bool 冲突）。编译器在 or-pattern 展开时验证各分支的 GADT 类型约束一致性，不一致则报编译错误。
+Or-pattern 合并的 GADT 变体必须同时满足两道独立门：各 alternative 携带兼容的类型等式，并按语言规范绑定完全相同、类型/模式兼容的变量集合。`Lit(_) | Add(_, _)` 合法（两边绑定集合均为空，且均给出 T=Int）；`Lit(n) | Add(a, b)` 非法，即使两边都是 T=Int，shared arm 也不存在对每条成功路径都已初始化的共同绑定环境；要使用不同 payload 必须拆成两个 arm。`Lit(_) | IsZero(_)` 同样非法，因为 T=Int 与 T=Bool 的 GADT 等式冲突。编译器在 or-pattern authority 中分别验证绑定集合/同名类型与 GADT 约束，任一不兼容均报编译错误。
 
 **Refinement × mut 参数（赋值点重新验证）**
 
