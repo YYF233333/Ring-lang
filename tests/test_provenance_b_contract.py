@@ -13,6 +13,20 @@ if str(TESTS_DIR) not in sys.path:
 import run_tests as runner
 
 
+def coff_object(
+    *, timestamp: int = 0x01020304, machine: int = 0x8664,
+    section_count: int = 3, length: int = 64,
+) -> bytes:
+    data = bytearray(length)
+    if length >= 2:
+        data[0:2] = machine.to_bytes(2, "little")
+    if length >= 4:
+        data[2:4] = section_count.to_bytes(2, "little")
+    if length >= 8:
+        data[4:8] = timestamp.to_bytes(4, "little")
+    return bytes(data)
+
+
 class ProvenanceBContractTests(unittest.TestCase):
     def test_registered_source_and_mutation_inventory(self) -> None:
         self.assertEqual(runner.identity_checkpoint_source_errors(), [])
@@ -34,6 +48,45 @@ class ProvenanceBContractTests(unittest.TestCase):
             "_parse_uniform_closure_call_statement",
         ):
             self.assertFalse(hasattr(runner, name), name)
+
+    def test_coff_timestamp_only_difference_is_equal_without_mutation(self) -> None:
+        left = coff_object(timestamp=0x01020304)
+        right = coff_object(timestamp=0xA1B2C3D4)
+        left_before = bytes(left)
+        right_before = bytes(right)
+        self.assertEqual(
+            runner.coff_object_timestamp_equality_errors(
+                "timestamp-only", left, right),
+            [],
+        )
+        self.assertEqual(left, left_before)
+        self.assertEqual(right, right_before)
+
+    def test_coff_difference_outside_timestamp_fails(self) -> None:
+        left = coff_object()
+        changed = bytearray(left)
+        changed[8] = 1
+        errors = runner.coff_object_timestamp_equality_errors(
+            "offset-eight", left, bytes(changed))
+        self.assertTrue(any("diff outside timestamp" in error for error in errors))
+
+    def test_coff_wrong_machine_fails_as_invalid(self) -> None:
+        errors = runner.coff_object_timestamp_equality_errors(
+            "wrong-machine", coff_object(machine=0x014C), coff_object())
+        self.assertTrue(any("invalid COFF" in error for error in errors))
+
+    def test_coff_length_and_section_count_fail_as_invalid(self) -> None:
+        for label, left, right in (
+            ("short", coff_object(length=19), coff_object(length=19)),
+            ("length", coff_object(length=64), coff_object(length=65)),
+            ("zero-sections", coff_object(section_count=0), coff_object()),
+            ("too-many-sections", coff_object(section_count=97), coff_object()),
+        ):
+            with self.subTest(label=label):
+                errors = runner.coff_object_timestamp_equality_errors(
+                    label, left, right)
+                self.assertTrue(
+                    any("invalid COFF" in error for error in errors), errors)
 
     def test_evidence_root_is_exact_empty_persistent_authority(self) -> None:
         with tempfile.TemporaryDirectory() as sandbox:
@@ -180,7 +233,7 @@ class ProvenanceBContractTests(unittest.TestCase):
                 stdout=stdout,
                 stderr=b"",
                 c_bytes=c_bytes,
-                object_bytes=b"same-object",
+                object_bytes=coff_object(),
                 ledger_bytes=(b"RING-C-IDENTITY-LEDGER|1\n" if ledger else None),
                 verdict={"status": "success"},
                 audit={"state": "complete", "status": "success"},

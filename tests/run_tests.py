@@ -5137,6 +5137,45 @@ def identity_ledger_contract_errors(
         if "_controlled_environment" in candidate_mode_source:
             errors.append(
                 "run_identity_candidate_mode rebuilt a controlled nested environment")
+    coff_helper_match = re.search(
+        r"(?ms)^def coff_object_timestamp_equality_errors\(.*?"
+        r"(?=^def default_body_identity_generated_c_errors\()",
+        runner,
+    )
+    if coff_helper_match is None:
+        errors.append("cannot isolate COFF object equality helper")
+    else:
+        coff_helper_source = coff_helper_match.group(0)
+        for token in (
+            "if len(data) < 20:",
+            "if machine != 0x8664:",
+            "if not 1 <= section_count <= 96:",
+            "allowed_offsets = {4, 5, 6, 7}",
+            "if not diff_offsets.issubset(allowed_offsets):",
+            "normalized_left[4:8] =",
+            "normalized_right[4:8] =",
+        ):
+            if coff_helper_source.count(token) != 1:
+                errors.append(f"COFF timestamp equality authority missing {token!r}")
+    generated_gate_match = re.search(
+        r"(?ms)^def default_body_identity_generated_c_errors\(.*?"
+        r"(?=^def identity_checkpoint_source_errors\()",
+        runner,
+    )
+    if generated_gate_match is None:
+        errors.append("cannot isolate generated-C identity gate")
+    else:
+        generated_gate_source = generated_gate_match.group(0)
+        if generated_gate_source.count(
+            "coff_object_timestamp_equality_errors("
+        ) != 2:
+            errors.append("generated-C gate does not compare both objects via COFF helper")
+        for forbidden in (
+            '("off/on1 object", off.object_bytes, on1.object_bytes)',
+            '("on1/on2 object", on1.object_bytes, on2.object_bytes)',
+        ):
+            if forbidden in generated_gate_source:
+                errors.append("generated-C gate restored raw object inequality")
     runner_tokens = (
         "OneShotSpec(",
         "run_one_shot(spec, result_validator=validate_artifacts)",
@@ -6384,6 +6423,47 @@ def run_identity_candidate_mode(
     ), None
 
 
+def coff_object_timestamp_equality_errors(
+    label: str, left: bytes, right: bytes,
+) -> List[str]:
+    errors: List[str] = []
+    for side, data in (("left", left), ("right", right)):
+        if len(data) < 20:
+            errors.append(f"{label}: invalid COFF {side} header length {len(data)}")
+            continue
+        machine = int.from_bytes(data[0:2], "little")
+        section_count = int.from_bytes(data[2:4], "little")
+        if machine != 0x8664:
+            errors.append(
+                f"{label}: invalid COFF {side} machine 0x{machine:04X}")
+        if not 1 <= section_count <= 96:
+            errors.append(
+                f"{label}: invalid COFF {side} section count {section_count}")
+    if errors:
+        return errors
+    if len(left) != len(right):
+        return [
+            f"{label}: invalid COFF object length mismatch "
+            f"{len(left)} != {len(right)}"
+        ]
+
+    diff_offsets = {
+        offset for offset, (a, b) in enumerate(zip(left, right)) if a != b
+    }
+    allowed_offsets = {4, 5, 6, 7}
+    if not diff_offsets.issubset(allowed_offsets):
+        outside = sorted(diff_offsets - allowed_offsets)
+        return [f"{label}: COFF diff outside timestamp at offsets {outside}"]
+
+    normalized_left = bytearray(left)
+    normalized_right = bytearray(right)
+    normalized_left[4:8] = b"\x00\x00\x00\x00"
+    normalized_right[4:8] = b"\x00\x00\x00\x00"
+    if bytes(normalized_left) != bytes(normalized_right):
+        return [f"{label}: COFF diff outside timestamp after normalization"]
+    return []
+
+
 def default_body_identity_generated_c_errors(
     ring_exe: str, evidence_root: Path, evidence_log: List[str],
 ) -> List[str]:
@@ -6410,13 +6490,16 @@ def default_body_identity_generated_c_errors(
     for label, left, right in (
             ("off/on1 C", off.c_bytes, on1.c_bytes),
             ("on1/on2 C", on1.c_bytes, on2.c_bytes),
-            ("off/on1 object", off.object_bytes, on1.object_bytes),
-            ("on1/on2 object", on1.object_bytes, on2.object_bytes),
             ("off/on1 stderr", off.stderr, on1.stderr),
             ("on1/on2 stderr", on1.stderr, on2.stderr),
     ):
         if left != right:
             errors.append(f"identity ledger changed {label} bytes")
+
+    errors.extend(coff_object_timestamp_equality_errors(
+        "off/on1 object", off.object_bytes, on1.object_bytes))
+    errors.extend(coff_object_timestamp_equality_errors(
+        "on1/on2 object", on1.object_bytes, on2.object_bytes))
 
     canonical_stdout: List[bytes] = []
     for run in runs:
@@ -6736,6 +6819,21 @@ def identity_checkpoint_source_errors() -> List[str]:
          "    environment.pop(IDENTITY_CANDIDATE_ENV, None)\n"
          "    environment.pop(IDENTITY_EVIDENCE_ROOT_ENV, None)",
          "    environment = dict(_controlled_environment(ring_exe, clang))"),
+        ("COFF timestamp range", "runner",
+         "    allowed_offsets = {4, 5, 6, 7}",
+         "    allowed_offsets = {4, 5, 6, 7, 8}"),
+        ("COFF AMD64 machine guard", "runner",
+         "        if machine != 0x8664:",
+         "        if False:"),
+        ("COFF object helper routing", "runner",
+         "    errors.extend(coff_object_timestamp_equality_errors(\n"
+         "        \"off/on1 object\", off.object_bytes, on1.object_bytes))\n"
+         "    errors.extend(coff_object_timestamp_equality_errors(\n"
+         "        \"on1/on2 object\", on1.object_bytes, on2.object_bytes))",
+         "    if off.object_bytes != on1.object_bytes:\n"
+         "        errors.append(\"identity ledger changed off/on1 object bytes\")\n"
+         "    if on1.object_bytes != on2.object_bytes:\n"
+         "        errors.append(\"identity ledger changed on1/on2 object bytes\")"),
         ("candidate source fail-first", "runner",
          "errors = identity_checkpoint_source_errors()\n"
          "    if errors:\n"
