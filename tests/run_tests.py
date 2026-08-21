@@ -5484,6 +5484,25 @@ def identity_checkpoint_contract_errors(
             if token not in source:
                 errors.append(f"{label}: missing exact-slot contract {token!r}")
 
+    pattern_local_contract = (
+        "fn c_pattern_local(\n"
+        "    mut ctx: CCtx, name: Str, bindings: List<HPatternBinding>\n"
+        ") -> Str {\n"
+        "    if name == \"_\" {\n"
+        "        return fresh_tmp(ctx)\n"
+        "    }\n"
+        "    let def_id = exact_pattern_def_id(bindings, name)\n"
+        "    match c_exact_value_slot(ctx, name, def_id) {\n"
+        "        some(slot) => c_exact_slot_c_name(slot),\n"
+        "        none => c_local_def(ctx, name, some(def_id))\n"
+        "    }\n"
+        "}"
+    )
+    if sources["cexpr"].count(pattern_local_contract) != 1:
+        errors.append(
+            "cexpr: c_pattern_local wildcard must return only fresh_tmp before "
+            "exact DefId lookup; named binding route drifted")
+
     infer_source = sources["infer"]
     if len(re.findall(r"\binfer_scoped_block\b", infer_source)) != 5:
         errors.append("infer: scoped-block helper must have one definition and four call sites")
@@ -6737,6 +6756,18 @@ def identity_checkpoint_source_errors() -> List[str]:
          "        fresh_tmp(ctx)",
          "if binding == \"_\" {\n"
          "        c_local(ctx, \"__ring_for_wildcard\")"),
+        ("pattern wildcard guard deletion", "cexpr",
+         "    if name == \"_\" {\n"
+         "        return fresh_tmp(ctx)\n"
+         "    }\n",
+         ""),
+        ("pattern wildcard guard reversal", "cexpr",
+         "    if name == \"_\" {\n"
+         "        return fresh_tmp(ctx)\n"
+         "    }\n",
+         "    if name != \"_\" {\n"
+         "        return fresh_tmp(ctx)\n"
+         "    }\n"),
         ("synthetic Dict provenance", "cexpr",
          "is_synthetic_dict_def_id(id)",
          "is_synthetic_anf_def_id(id)"),

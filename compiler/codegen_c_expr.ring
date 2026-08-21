@@ -3921,6 +3921,9 @@ fn exact_pattern_def_id(
 fn c_pattern_local(
     mut ctx: CCtx, name: Str, bindings: List<HPatternBinding>
 ) -> Str {
+    if name == "_" {
+        return fresh_tmp(ctx)
+    }
     let def_id = exact_pattern_def_id(bindings, name)
     match c_exact_value_slot(ctx, name, def_id) {
         some(slot) => c_exact_slot_c_name(slot),
