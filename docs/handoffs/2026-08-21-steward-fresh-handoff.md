@@ -1,6 +1,6 @@
 # Ring-lang Steward fresh handoff（2026-08-21）
 
-后继 Steward：`Ring-lang Steward (fresh)` / `01a022a3-7da5-79b3-a097-c2744b39bd1e`。配对 Discussion：`01a022a3-799e-72d0-9ebc-644caaee03c9`。不得再创建 Steward。
+后继 Steward：`Ring-lang Steward (fresh)` / `01a02435-45eb-7710-8bbe-6d9397cf3966`。配对 Discussion：`01a02435-0a23-7f43-8846-e2c63c1b5a43`。不得再创建 Steward。
 
 ## 安全 checkpoint
 
