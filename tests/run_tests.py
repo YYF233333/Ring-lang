@@ -4076,7 +4076,8 @@ def parse_c_probe_statements(
             errors.append(f"{symbol}: empty statement is outside finite grammar")
             continue
 
-        declaration = re.fullmatch(rf"void\s*\*\s*({ident})", text)
+        declaration = re.fullmatch(
+            rf"void\s*\*\s*({ident})(?:\s*=\s*NULL)?", text)
         if declaration:
             statements.append(CProbeStatement(
                 "declare", offset, text, target=declaration.group(1)))
@@ -4500,12 +4501,28 @@ return RING_UNIT;""",
         "return RING_UNIT;",
         "backslash-newline splice is outside finite grammar",
     ),
+    (
+        "non-null-declaration-initializer",
+        "ring_structural_raw_identity",
+        """void* t1 = RING_UNIT; void* r_local; void* t2;
+t1 = r_value; r_local = t1; t2 = r_local; return t2;""",
+        "statement is outside finite grammar",
+    ),
 )
 
 
 def c_probe_mutation_matrix_errors() -> List[str]:
     """Keep every accepted Argument counterexample permanently rejected."""
     errors: List[str] = []
+    null_initialized_canonical = """void* t1 = NULL;
+void* r_local = NULL; void* t2 = NULL;
+t1 = r_value; r_local = t1; t2 = r_local; return t2;"""
+    positive_errors = validate_c_probe_body(
+        "ring_structural_raw_identity", null_initialized_canonical)
+    if positive_errors:
+        errors.append(
+            "NULL-initialized canonical probe was rejected: "
+            f"{' | '.join(positive_errors)}")
     for name, symbol, body, expected_fragment in C_PROBE_MUTATION_MATRIX:
         mutation_errors = validate_c_probe_body(symbol, body)
         if not mutation_errors:
