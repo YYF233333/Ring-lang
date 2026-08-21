@@ -253,6 +253,104 @@ class OneShotGateTests(unittest.TestCase):
             gc.collect()
             self.assertEqual(windows_job.current_process_handle_count(), before)
 
+    @unittest.skipUnless(os.name == "nt", "Windows Job sampling required")
+    def test_windows_working_set_open_unavailable_is_best_effort(self) -> None:
+        original_job_pids = windows_job._job_pids
+        opened_pids: list[int] = []
+
+        def include_unavailable_pid(job: int) -> list[int]:
+            pids = original_job_pids(job)
+            return [*pids, 0x7FFFFFFE] if pids else pids
+
+        def unavailable(sample_pid: int):
+            opened_pids.append(sample_pid)
+            return None
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            code = "import os,time;print(os.getpid(),flush=True);time.sleep(0.15)"
+            with (
+                mock.patch.object(
+                    windows_job, "_job_pids", side_effect=include_unavailable_pid),
+                mock.patch.object(
+                    windows_job, "_open_process", side_effect=unavailable),
+            ):
+                verdict = gate.run_one_shot(
+                    make_spec(root, code),
+                    _adapter=windows_job.run_one_shot_job,
+                )
+            root_pid = int((root / gate.STDOUT_NAME).read_text().strip())
+            self.assertEqual(verdict["status"], "success")
+            self.assertIsNone(verdict["child"]["infrastructure_error"])
+            self.assertNotIn(root_pid, opened_pids)
+            self.assertGreater(
+                verdict["measurements"]["working_set_unavailable_samples"], 0)
+            self.assertFalse(verdict["measurements"]["working_set_complete"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job sampling required")
+    def test_windows_working_set_memory_unavailable_closes_handle(self) -> None:
+        original_job_pids = windows_job._job_pids
+        original_open_process = windows_job._open_process
+        original_memory_info = windows_job._memory_info
+        opened_handles: list[int] = []
+
+        def include_unavailable_pid(job: int) -> list[int]:
+            pids = original_job_pids(job)
+            return [*pids, 0x7FFFFFFD] if pids else pids
+
+        def open_measurable_process(_sample_pid: int) -> int | None:
+            handle = original_open_process(os.getpid())
+            if handle is not None:
+                opened_handles.append(handle)
+            return handle
+
+        def unavailable_memory(handle: int):
+            if handle in opened_handles:
+                return None
+            return original_memory_info(handle)
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            closed = mock.Mock(wraps=windows_job._close_handle)
+            with (
+                mock.patch.object(
+                    windows_job, "_job_pids", side_effect=include_unavailable_pid),
+                mock.patch.object(
+                    windows_job, "_open_process", side_effect=open_measurable_process),
+                mock.patch.object(
+                    windows_job, "_memory_info", side_effect=unavailable_memory),
+                mock.patch.object(windows_job, "_close_handle", closed),
+            ):
+                verdict = gate.run_one_shot(
+                    make_spec(root, "import time;time.sleep(0.15)"),
+                    _adapter=windows_job.run_one_shot_job,
+                )
+            closed_handles = [call.args[0] for call in closed.call_args_list]
+            self.assertTrue(opened_handles)
+            self.assertTrue(all(handle in closed_handles for handle in opened_handles))
+            self.assertEqual(verdict["status"], "success")
+            self.assertIsNone(verdict["child"]["infrastructure_error"])
+            self.assertGreater(
+                verdict["measurements"]["working_set_unavailable_samples"], 0)
+            self.assertFalse(verdict["measurements"]["working_set_complete"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job sampling required")
+    def test_windows_working_set_normal_sample_is_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "attempt"
+            root.mkdir()
+            verdict = gate.run_one_shot(
+                make_spec(root, "import time;time.sleep(0.15)"),
+                _adapter=windows_job.run_one_shot_job,
+            )
+            self.assertEqual(verdict["status"], "success")
+            self.assertIsNone(verdict["child"]["infrastructure_error"])
+            self.assertEqual(
+                verdict["measurements"]["working_set_unavailable_samples"], 0)
+            self.assertTrue(verdict["measurements"]["working_set_complete"])
+
     def test_pipe_and_thread_faults_have_distinct_durable_verdicts(self) -> None:
         for kind, expected in (("pipe", "pipe_error"), ("thread", "thread_error")):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp:
