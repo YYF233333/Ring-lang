@@ -19,15 +19,17 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     type_contains_extern_handle,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, DictRef, TypeKind,
     DERIVED_HASH_SEED}
-use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo,
-    CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_local, c_mangle_fn,
+use codegen_c_ctx::{CCtx, CFnInfo, CStructInfo, CEnumInfo, CEnumVariantInfo, CTypedRef,
+    CEmitState, new_c_ctx, c_emit, c_raw, c_param, c_param_def,
+    c_local, c_mangle_fn,
     c_mangle_fn_with_prefix, c_mangle_method, c_sanitize, c_symbol_for_fn_key, c_symbol_fragment,
     c_line_directive,
     rt_use, rt_use_raw,
     get_or_assign_c_typeid, is_runtime_symbol, fresh_tmp, fresh_i64, fresh_dbl,
-    fresh_label, c_push_fn, c_pop_fn, c_global_cstr}
+    fresh_label, c_push_fn, c_pop_fn, c_global_cstr, c_ref_c_name,
+    c_enable_identity_ledger, c_identity_ledger_text}
 use codegen_c_expr::{gen_c_expr, emit_c_stmt, c_resolve_dict_ref,
-    ensure_c_dict_getter, gen_c_closure_call,
+    ensure_c_dict_getter, gen_c_closure_call, emit_c_receiver_load,
     emit_c_default_evidence_init}
 use effect_analysis::{extract_effect_names, collect_fn_callees}
 use resolver::{module_prefix}
@@ -38,8 +40,12 @@ use resolver::{module_prefix}
 // emit_lines: #line directive toggle (--no-c-lines disables).
 // ============================================================
 
-pub fn generate_c(program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool) -> Bool {
+pub fn generate_c(
+    program: HProgram, c_path: Str, o_path: Str, emit_lines: Bool,
+    emit_identity_ledger: Bool
+) -> Bool {
     let mut ctx = new_c_ctx(emit_lines)
+    if emit_identity_ledger { c_enable_identity_ledger(ctx) }
 
     // B-091: auto-boxed mut-cell def_ids (closure write-through capture).
     for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
@@ -221,8 +227,21 @@ pub fn generate_c_project(
 // Shared tail of both entry points: assemble the translation unit, write it
 // to disk, shell out to clang (audit #242: emit failure must exit non-zero).
 fn c_write_and_compile(ctx: CCtx, c_path: Str, o_path: Str) -> Bool {
+    // Internal-only H+T output. The runner owns a fresh single-use directory;
+    // the compiler accepts no ledger path and performs no racy existence
+    // check. Relation validation completes before this sole ledger write.
+    let identity_ledger = if ctx.identity_ledger_enabled {
+        some(c_identity_ledger_text(ctx))
+    } else {
+        none
+    }
     let text = assemble_c_file(ctx)
     write_file(c_path, text)
+    match identity_ledger {
+        some(ledger_text) => write_file(
+            "${c_path}.identity-ledger", ledger_text),
+        none => {}
+    }
 
     let rc = exec_sync("clang", ["-std=c11", "-O2", "-c", c_path, "-o", o_path])
     if rc != 0 {
@@ -841,6 +860,8 @@ fn begin_c_fn(mut ctx: CCtx, mangled: Str) -> Map<Str, Str> {
     ctx.used_locals = set_new()
     let saved = ctx.named_values
     ctx.named_values = map_new()
+    ctx.name_only_slots = map_new()
+    ctx.value_slots_by_def_id = map_new()
     ctx.in_function = true
     ctx.current_fn_name = mangled
     ctx.indent = 1
@@ -857,6 +878,8 @@ fn end_c_fn(mut ctx: CCtx, mangled: Str, params_str: Str, saved: Map<Str, Str>) 
     def.push("}")
     ctx.fn_defs.push(def.join("\n"))
     ctx.named_values = saved
+    ctx.name_only_slots = map_new()
+    ctx.value_slots_by_def_id = map_new()
     ctx.in_function = false
     ctx.current_fn_name = ""
 }
@@ -890,7 +913,7 @@ fn emit_c_fn_body(mut ctx: CCtx, name: Str, params: List<HParam>, effects: Effec
     // Parameters → C signature (uniform void* boxing, LLVM parity).
     let mut sig_parts: List<Str> = []
     for p in params {
-        let cn = c_param(ctx, p.name)
+        let cn = c_param_def(ctx, p.name, p.def_id)
         sig_parts.push("void* ${cn}")
     }
     for b in trait_bounds {
@@ -1543,7 +1566,7 @@ fn emit_c_one_default_method(mut ctx: CCtx, c_name: Str, default_fn_name: Str, t
 
     // Regular params (including self).
     for p in method.params {
-        let pv = c_param(ctx, p.name)
+        let pv = c_param_def(ctx, p.name, p.def_id)
         sig_parts.push("void* ${pv}")
     }
 
@@ -1784,14 +1807,16 @@ fn emit_c_derived_impl_bodies(mut ctx: CCtx, derived_impls: List<DerivedImpl>) {
 
 // Option is a builtin enum excluded from derive.ring (BUILTIN_TYPES);
 // synthesise its DerivedImpls here (port of emit_builtin_derived_impls).
-fn c_option_some_variant(dict_name: Str) -> DerivedVariant {
+fn c_option_some_variant(base_dict: DictRef) -> DerivedVariant {
     DerivedVariant {
         name: "some",
         discriminator: 0,
         fields: [DerivedField {
             name: "_0",
             positional_index: some(0),
-            action: FieldAction::Call { dict_name: dict_name, extra_dicts: [] }
+            action: FieldAction::Call {
+                base_dict: base_dict, extra_dicts: []
+            }
         }],
         has_named_fields: false
     }
@@ -1810,7 +1835,8 @@ pub fn emit_c_builtin_derived_impls(mut ctx: CCtx) {
         type_kind: TypeKind::EnumKind,
         struct_fields: none,
         enum_variants: some([
-            c_option_some_variant(trait_bound_param_name("T", "Eq")),
+            c_option_some_variant(DictRef::Simple(
+                trait_bound_param_name("T", "Eq"))),
             c_option_none_variant()
         ])
     }
@@ -1824,7 +1850,8 @@ pub fn emit_c_builtin_derived_impls(mut ctx: CCtx) {
         type_kind: TypeKind::EnumKind,
         struct_fields: none,
         enum_variants: some([
-            c_option_some_variant(trait_bound_param_name("T", "Debug")),
+            c_option_some_variant(DictRef::Simple(
+                trait_bound_param_name("T", "Debug"))),
             c_option_none_variant()
         ])
     }
@@ -1838,7 +1865,8 @@ pub fn emit_c_builtin_derived_impls(mut ctx: CCtx) {
         type_kind: TypeKind::EnumKind,
         struct_fields: none,
         enum_variants: some([
-            c_option_some_variant(trait_bound_param_name("T", "Ord")),
+            c_option_some_variant(DictRef::Simple(
+                trait_bound_param_name("T", "Ord"))),
             c_option_none_variant()
         ])
     }
@@ -1946,37 +1974,41 @@ fn end_c_derived_fn(mut ctx: CCtx, d: CDerivedFn) {
     c_pop_fn(ctx, d.c_name, d.params_str, d.saved)
 }
 
-// Resolve a dict by name for derived impls: type-param dict passed as a fn
-// param (named_values) or the static singleton chain.
-fn resolve_c_dict_for_derived(mut ctx: CCtx, name: Str) -> Str {
-    c_resolve_dict_ref(ctx, DictRef::Simple(name))
+// Resolve an explicitly tagged derived base.  Bound bases are Simple and
+// module singleton bases are Static; spelling never selects the domain.
+fn resolve_c_dict_for_derived(mut ctx: CCtx, base_dict: DictRef) -> CTypedRef {
+    c_resolve_dict_ref(ctx, base_dict)
 }
 
 // Call a dict's slot-0 closure on the given args (+ resolved extra dicts) —
 // shared shape of the derived eq/cmp/debug dict calls.
-fn emit_c_derived_dict_call(mut ctx: CCtx, dict_name: Str, extra_dicts: List<DictRef>, args: List<Str>) -> Str {
-    let resolved_dict = resolve_c_dict_for_derived(ctx, dict_name)
-    let cls = fresh_tmp(ctx)
-    c_emit(ctx, "${cls} = ((void**)${resolved_dict})[1];")
+fn emit_c_derived_dict_call(mut ctx: CCtx, base_dict: DictRef, extra_dicts: List<DictRef>, args: List<Str>) -> Str {
+    let resolved_dict = resolve_c_dict_for_derived(ctx, base_dict)
+    let cls_ref = emit_c_receiver_load(ctx, resolved_dict, 1, "dict")
     let mut call_args: List<Str> = []
     let mut owned_extra_dicts: List<Str> = []
     for a in args { call_args.push(a) }
     for ed in extra_dicts {
         match ed {
             DictRef::Wrapped { dict, trait_name, inner_dicts } => {
-                let value = c_resolve_dict_ref(ctx, DictRef::Wrapped {
+                let reference = c_resolve_dict_ref(ctx, DictRef::Wrapped {
                     dict: dict, trait_name: trait_name, inner_dicts: inner_dicts
                 })
+                let value = c_ref_c_name(reference)
                 call_args.push(value)
                 owned_extra_dicts.push(value)
             },
-            DictRef::Simple(name) =>
-                call_args.push(c_resolve_dict_ref(ctx, DictRef::Simple(name))),
-            DictRef::Static(name) =>
-                call_args.push(c_resolve_dict_ref(ctx, DictRef::Static(name))),
+            DictRef::Simple(name) => {
+                let reference = c_resolve_dict_ref(ctx, DictRef::Simple(name))
+                call_args.push(c_ref_c_name(reference))
+            },
+            DictRef::Static(name) => {
+                let reference = c_resolve_dict_ref(ctx, DictRef::Static(name))
+                call_args.push(c_ref_c_name(reference))
+            },
         }
     }
-    let result = gen_c_closure_call(ctx, cls, call_args)
+    let result = gen_c_closure_call(ctx, cls_ref, call_args)
     for owned in owned_extra_dicts {
         rt_use(ctx, "ring_drop", 1)
         c_emit(ctx, "ring_drop(${owned});")
@@ -2017,8 +2049,9 @@ fn emit_c_field_eq_flag(mut ctx: CCtx, lhs: Str, rhs: Str, action: FieldAction) 
             c_emit(ctx, "${f} = (${lhs} == ${rhs});")
             f
         },
-        FieldAction::Call { dict_name, extra_dicts } => {
-            let r = emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [lhs, rhs])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            let r = emit_c_derived_dict_call(
+                ctx, base_dict, extra_dicts, [lhs, rhs])
             let f = fresh_i64(ctx)
             c_emit(ctx, "${f} = (RING_UNTAG(${r}) != 0);")
             f
@@ -2226,8 +2259,9 @@ fn emit_c_hash_combine(mut ctx: CCtx, lhs: Str, rhs: Str) -> Str {
 // fallbacks and never inspect a pointer address.
 fn emit_c_field_hash_raw(mut ctx: CCtx, value: Str, action: FieldAction) -> Str {
     match action {
-        FieldAction::Call { dict_name, extra_dicts } => {
-            let boxed = emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [value])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            let boxed = emit_c_derived_dict_call(
+                ctx, base_dict, extra_dicts, [value])
             let raw = fresh_i64(ctx)
             c_emit(ctx, "${raw} = RING_UNTAG(${boxed});")
             raw
@@ -2401,8 +2435,8 @@ fn emit_c_field_cmp_val(mut ctx: CCtx, lhs: Str, rhs: Str, action: FieldAction) 
             c_emit(ctx, "${cv} = RING_INT(${li} < ${ri} ? -1 : (${li} > ${ri} ? 1 : 0));")
             cv
         },
-        FieldAction::Call { dict_name, extra_dicts } => {
-            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [lhs, rhs])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            emit_c_derived_dict_call(ctx, base_dict, extra_dicts, [lhs, rhs])
         },
         FieldAction::Tuple { element_actions } => {
             rt_use(ctx, "ring_list_get", 2)
@@ -2605,8 +2639,8 @@ fn emit_c_debug_field_str(mut ctx: CCtx, v: Str, action: FieldAction) -> Str {
             c_emit(ctx, "${s} = ring_bool_to_str(RING_UNTAG(${v}));")
             s
         },
-        FieldAction::Call { dict_name, extra_dicts } => {
-            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [v])
+        FieldAction::Call { base_dict, extra_dicts } => {
+            emit_c_derived_dict_call(ctx, base_dict, extra_dicts, [v])
         },
         FieldAction::Tuple { element_actions } => {
             if element_actions.len() == 0 {
@@ -2821,8 +2855,8 @@ fn predeclare_c_json_derived_impls(
 
 fn emit_c_json_field_str(mut ctx: CCtx, value: Str, action: FieldAction) -> Str {
     match action {
-        FieldAction::Call { dict_name, extra_dicts } =>
-            emit_c_derived_dict_call(ctx, dict_name, extra_dicts, [value]),
+        FieldAction::Call { base_dict, extra_dicts } =>
+            emit_c_derived_dict_call(ctx, base_dict, extra_dicts, [value]),
         // Json derivation only produces Call actions. Keep the backend
         // fail-loud if a future derive rule violates that evidence boundary.
         _ => {

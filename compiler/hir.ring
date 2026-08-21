@@ -12,6 +12,27 @@ pub use builtin_methods::{CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
     OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS,
     STRINGBUILDER_METHODS}
 
+// Source and pattern/default binders use the checker's non-negative DefId
+// allocator.  Later lowering passes use disjoint negative namespaces so a
+// synthetic binding can never alias source HIR or another pass's binding.
+pub const SYNTHETIC_DICT_DEF_ID_BASE: Int = 0 - 3000000000
+pub const SYNTHETIC_ANF_DEF_ID_BASE: Int = 0 - 4000000000
+pub const SYNTHETIC_RC_DEF_ID_BASE: Int = 0 - 5000000000
+pub const SYNTHETIC_DEF_ID_NAMESPACE_SIZE: Int = 1000000000
+
+pub fn synthetic_def_id(base: Int, ordinal: Int) -> Int {
+    if ordinal <= 0 || ordinal >= SYNTHETIC_DEF_ID_NAMESPACE_SIZE {
+        panic("unreachable: synthetic DefId namespace exhausted")
+    }
+    base - ordinal
+}
+
+pub fn is_synthetic_dict_def_id(def_id: Int) -> Bool {
+    def_id < SYNTHETIC_DICT_DEF_ID_BASE &&
+        def_id > SYNTHETIC_DICT_DEF_ID_BASE -
+            SYNTHETIC_DEF_ID_NAMESPACE_SIZE
+}
+
 // Callable values installed directly by builtins.ring rather than parsed from
 // a Decl. Checker provenance and both native backends must consume this one
 // list so a newly added checker-only callable cannot drift across phases.
@@ -211,7 +232,10 @@ pub enum TraitDispatch {
 }
 
 pub struct DictDispatchInfo {
-    pub dict_param: Str,
+    // Bound dispatch is Simple; delegated concrete/default dispatch is
+    // Static.  The tag is the authority -- codegen never guesses a domain
+    // from the spelling.
+    pub dict_ref: DictRef,
     pub method: Str
 }
 
@@ -220,8 +244,17 @@ pub struct HStructFieldInit {
     pub value: HExpr
 }
 
+// Pattern AST preserves source shape.  This parallel transport is the exact
+// lexical slot contract consumed by RC verification and native lowering.
+pub struct HPatternBinding {
+    pub name: Str,
+    pub def_id: Int,
+    pub ty: Type
+}
+
 pub struct HMatchArm {
     pub pattern: Pattern,
+    pub bindings: List<HPatternBinding>,
     pub guard: HExpr?,
     pub body: HExpr,
     pub span: Span
@@ -231,7 +264,7 @@ pub struct HEffectHandler {
     pub effect_name: Str,
     pub op_name: Str,
     pub params: List<HParam>,
-    pub resume_name: Str?,
+    pub resume_binding: HPatternBinding?,
     pub body: HExpr
 }
 
@@ -319,10 +352,10 @@ pub enum HStmt {
     Break { span: Span },
     Continue { span: Span },
     LetDestructure { pattern: Pattern, bindings: List<HLetDestructureBinding>, init: HExpr, span: Span },
-    IfLet { pattern: Pattern, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
+    IfLet { pattern: Pattern, bindings: List<HPatternBinding>, expr: HExpr, then_block: HExpr, else_block: HExpr?, span: Span },
 
     // Perceus RC: explicit reference counting op inserted by the RC pass.
-    Drop { name: Str, ty: Type, span: Span }
+    Drop { name: Str, def_id: Int, ty: Type, span: Span }
 }
 
 pub struct HStructField {
@@ -394,10 +427,10 @@ pub enum FieldAction {
     Identity,
     FloatIdentity,
     BoolIdentity,
-    // The callee's base dict stays name-addressed; each trailing type-param
-    // evidence value is a full DictRef so nested parameterized fields retain
-    // every wrapper layer until dict_lower/codegen.
-    Call { dict_name: Str, extra_dicts: List<DictRef> },
+    // Base and trailing type-param evidence both retain explicit provenance.
+    // A bound base is Simple; a module singleton base is Static.  Wrapped
+    // bases normalize to Static(base) plus their tagged inner refs.
+    Call { base_dict: DictRef, extra_dicts: List<DictRef> },
     Tuple { element_actions: List<FieldAction> },
     FnLiteral
 }
@@ -452,6 +485,485 @@ pub struct HProgram {
     pub drop_types: Set<Str>
 }
 
+// Definition identity is a cross-pass invariant.  Validate immediately after
+// synthetic lowering and again after RC insertion so a missing/colliding slot
+// cannot degrade into a backend spelling lookup.
+pub fn validate_hir_binder_def_ids(program: HProgram) {
+    let mut seen: Set<Int> = set_new()
+    validate_hir_decls(program.decls, seen)
+}
+
+struct HirValidationScope {
+    names: List<Str>,
+    def_ids: List<Int>,
+    frames: List<Int>
+}
+
+fn new_hir_validation_scope() -> HirValidationScope {
+    HirValidationScope { names: [], def_ids: [], frames: [] }
+}
+
+fn push_hir_validation_scope(mut scope: HirValidationScope) {
+    scope.frames.push(scope.names.len())
+}
+
+fn pop_hir_validation_scope(mut scope: HirValidationScope) {
+    let base = match scope.frames.pop() { some(value) => value, none => 0 }
+    while scope.names.len() > base {
+        scope.names.pop()
+        scope.def_ids.pop()
+    }
+}
+
+fn bind_hir_validation_scope(
+    mut scope: HirValidationScope, name: Str, def_id: Int
+) {
+    scope.names.push(name)
+    scope.def_ids.push(def_id)
+}
+
+fn hir_validation_name_index(scope: HirValidationScope, name: Str) -> Int {
+    let mut index = scope.names.len() - 1
+    while index >= 0 {
+        if scope.names[index] == name { return index }
+        index = index - 1
+    }
+    0 - 1
+}
+
+fn hir_validation_def_id_index(
+    scope: HirValidationScope, def_id: Int
+) -> Int {
+    let mut index = scope.def_ids.len() - 1
+    while index >= 0 {
+        if scope.def_ids[index] == def_id { return index }
+        index = index - 1
+    }
+    0 - 1
+}
+
+fn validate_hir_local_reference(
+    scope: HirValidationScope, name: Str, def_id: Int?, label: Str
+) {
+    let name_index = hir_validation_name_index(scope, name)
+    match def_id {
+        some(id) => {
+            let id_index = hir_validation_def_id_index(scope, id)
+            if id_index >= 0 && scope.names[id_index] != name {
+                panic("HIR ${label} DefId ${id} names '${scope.names[id_index]}', not '${name}'")
+            }
+            if name_index >= 0 && scope.def_ids[name_index] != id {
+                panic("HIR ${label} '${name}' has mismatched DefId ${id}; visible slot is ${scope.def_ids[name_index]}")
+            }
+        },
+        none => if name_index >= 0 {
+            panic("HIR ${label} local reference '${name}' has no exact DefId")
+        }
+    }
+}
+
+fn validate_hir_drop_reference(
+    scope: HirValidationScope, name: Str, def_id: Int
+) {
+    let id_index = hir_validation_def_id_index(scope, def_id)
+    if id_index < 0 {
+        panic("HIR Drop '${name}' references out-of-scope DefId ${def_id}")
+    }
+    if scope.names[id_index] != name {
+        panic("HIR Drop DefId ${def_id} names '${scope.names[id_index]}', not '${name}'")
+    }
+}
+
+fn validate_hir_binder(mut seen: Set<Int>, def_id: Int, label: Str) {
+    if seen.contains(def_id) {
+        panic("HIR binder DefId collision ${def_id} at ${label}")
+    }
+    seen.insert(def_id)
+}
+
+fn required_hir_def_id(def_id: Int?, label: Str) -> Int {
+    match def_id {
+        some(id) => id,
+        none => panic("HIR ${label} has no exact DefId")
+    }
+}
+
+fn validate_hir_params(
+    params: List<HParam>, mut seen: Set<Int>,
+    mut scope: HirValidationScope, label: Str
+) {
+    for param in params {
+        let id = required_hir_def_id(
+            param.def_id, "${label} parameter '${param.name}'")
+        validate_hir_binder(seen, id,
+            "${label} parameter '${param.name}'")
+        bind_hir_validation_scope(scope, param.name, id)
+    }
+}
+
+fn collect_hir_pattern_names(pattern: Pattern, mut names: Set<Str>) {
+    match pattern {
+        Pattern::Binding { name, .. } => {
+            if name != "_" { names.insert(name) }
+        },
+        Pattern::Constructor { fields, .. } => {
+            for field in fields { collect_hir_pattern_names(field, names) }
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            for field in fields {
+                collect_hir_pattern_names(field.pattern, names)
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for element in elements {
+                collect_hir_pattern_names(element, names)
+            }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            for alternative in patterns {
+                collect_hir_pattern_names(alternative, names)
+            }
+        },
+        Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
+    }
+}
+
+fn validate_hir_pattern_bindings(
+    pattern: Pattern, bindings: List<HPatternBinding>,
+    mut seen: Set<Int>, mut scope: HirValidationScope, label: Str
+) {
+    let mut pattern_names: Set<Str> = set_new()
+    collect_hir_pattern_names(pattern, pattern_names)
+    let mut metadata_names: Set<Str> = set_new()
+    for binding in bindings {
+        if !pattern_names.contains(binding.name) {
+            panic("HIR ${label} metadata names non-binding '${binding.name}'")
+        }
+        if metadata_names.contains(binding.name) {
+            panic("HIR ${label} repeats binding metadata for '${binding.name}'")
+        }
+        metadata_names.insert(binding.name)
+        validate_hir_binder(seen, binding.def_id,
+            "${label} binding '${binding.name}'")
+        bind_hir_validation_scope(scope, binding.name, binding.def_id)
+    }
+    for name in pattern_names {
+        if !metadata_names.contains(name) {
+            panic("HIR ${label} binding '${name}' has no exact metadata")
+        }
+    }
+}
+
+fn validate_hir_arm(
+    arm: HMatchArm, mut seen: Set<Int>,
+    mut scope: HirValidationScope, label: Str
+) {
+    push_hir_validation_scope(scope)
+    validate_hir_pattern_bindings(
+        arm.pattern, arm.bindings, seen, scope, label)
+    match arm.guard {
+        some(guard) => validate_hir_expr(guard, seen, scope),
+        none => {}
+    }
+    validate_hir_expr(arm.body, seen, scope)
+    pop_hir_validation_scope(scope)
+}
+
+fn validate_hir_local_binding(
+    name: Str, def_id: Int?, init: HExpr,
+    mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    validate_hir_expr(init, seen, scope)
+    if name != "_" {
+        let id = required_hir_def_id(
+            def_id, "local binding '${name}'")
+        validate_hir_binder(seen, id, "local binding '${name}'")
+        bind_hir_validation_scope(scope, name, id)
+    }
+}
+
+fn validate_hir_stmt(
+    stmt: HStmt, mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    match stmt {
+        HStmt::Let { name, def_id, init, .. } =>
+            validate_hir_local_binding(
+                name, def_id, init, seen, scope),
+        HStmt::Var { name, def_id, init, .. } =>
+            validate_hir_local_binding(
+                name, def_id, init, seen, scope),
+        HStmt::Assign { target, value, .. } => {
+            validate_hir_expr(target, seen, scope)
+            validate_hir_expr(value, seen, scope)
+        },
+        HStmt::ExprStmt { expr, .. } =>
+            validate_hir_expr(expr, seen, scope),
+        HStmt::Return { value, .. } => match value {
+            some(expr) => validate_hir_expr(expr, seen, scope),
+            none => {}
+        },
+        HStmt::While { condition, body, .. } => {
+            validate_hir_expr(condition, seen, scope)
+            validate_hir_expr(body, seen, scope)
+        },
+        HStmt::ForIn { binding, def_id, destructure,
+                       iterable, body, .. } => {
+            validate_hir_expr(iterable, seen, scope)
+            push_hir_validation_scope(scope)
+            match destructure {
+                some(bindings) => {
+                    for binding_ in bindings {
+                        if binding_.name != "_" {
+                            let id = required_hir_def_id(binding_.def_id,
+                                "for destructure binding '${binding_.name}'")
+                            validate_hir_binder(seen, id,
+                                "for destructure binding '${binding_.name}'")
+                            bind_hir_validation_scope(
+                                scope, binding_.name, id)
+                        }
+                    }
+                },
+                none => if binding != "_" {
+                    let id = required_hir_def_id(
+                        def_id, "for binding '${binding}'")
+                    validate_hir_binder(
+                        seen, id, "for binding '${binding}'")
+                    bind_hir_validation_scope(scope, binding, id)
+                }
+            }
+            validate_hir_expr(body, seen, scope)
+            pop_hir_validation_scope(scope)
+        },
+        HStmt::LetDestructure { bindings, init, .. } => {
+            validate_hir_expr(init, seen, scope)
+            for binding in bindings {
+                if binding.name != "_" {
+                    let id = required_hir_def_id(binding.def_id,
+                        "destructure binding '${binding.name}'")
+                    validate_hir_binder(seen, id,
+                        "destructure binding '${binding.name}'")
+                    bind_hir_validation_scope(scope, binding.name, id)
+                }
+            }
+        },
+        HStmt::IfLet { pattern, bindings, expr,
+                       then_block, else_block, .. } => {
+            validate_hir_expr(expr, seen, scope)
+            push_hir_validation_scope(scope)
+            validate_hir_pattern_bindings(
+                pattern, bindings, seen, scope, "if-let pattern")
+            validate_hir_expr(then_block, seen, scope)
+            pop_hir_validation_scope(scope)
+            match else_block {
+                some(block) => validate_hir_expr(block, seen, scope),
+                none => {}
+            }
+        },
+        HStmt::Drop { name, def_id, .. } =>
+            validate_hir_drop_reference(scope, name, def_id),
+        HStmt::Break { .. } | HStmt::Continue { .. } => {}
+    }
+}
+
+fn validate_hir_field_values(
+    fields: List<HStructFieldInit>, spread: HExpr?,
+    mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    for field in fields {
+        validate_hir_expr(field.value, seen, scope)
+    }
+    match spread {
+        some(value) => validate_hir_expr(value, seen, scope),
+        none => {}
+    }
+}
+
+fn validate_hir_expr_values(
+    values: List<HExpr>, mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    for value in values {
+        validate_hir_expr(value, seen, scope)
+    }
+}
+
+fn validate_hir_expr(
+    expr: HExpr, mut seen: Set<Int>, mut scope: HirValidationScope
+) {
+    match expr {
+        HExpr::Ident { name, def_id, .. } =>
+            validate_hir_local_reference(
+                scope, name, def_id, "Ident"),
+        HExpr::BinOp { left, right, .. } => {
+            validate_hir_expr(left, seen, scope)
+            validate_hir_expr(right, seen, scope)
+        },
+        HExpr::UnaryOp { operand, .. } =>
+            validate_hir_expr(operand, seen, scope),
+        HExpr::Call { callee, args, .. } => {
+            validate_hir_expr(callee, seen, scope)
+            for arg in args { validate_hir_expr(arg, seen, scope) }
+        },
+        HExpr::FieldAccess { receiver, .. } =>
+            validate_hir_expr(receiver, seen, scope),
+        HExpr::StructLit { fields, spread, .. } =>
+            validate_hir_field_values(fields, spread, seen, scope),
+        HExpr::NamedVariantConstruct { fields, spread, .. } =>
+            validate_hir_field_values(fields, spread, seen, scope),
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            validate_hir_expr(scrutinee, seen, scope)
+            for arm in arms {
+                validate_hir_arm(arm, seen, scope, "match arm")
+            }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            push_hir_validation_scope(scope)
+            for stmt in stmts { validate_hir_stmt(stmt, seen, scope) }
+            match tail {
+                some(value) => validate_hir_expr(value, seen, scope),
+                none => {}
+            }
+            pop_hir_validation_scope(scope)
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            validate_hir_expr(condition, seen, scope)
+            validate_hir_expr(then_branch, seen, scope)
+            match else_branch {
+                some(value) => validate_hir_expr(value, seen, scope),
+                none => {}
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Literal(_) => {},
+                    HStringInterpPart::Expression(value) =>
+                        validate_hir_expr(value, seen, scope)
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            validate_hir_expr(body, seen, scope)
+            for arm in arms {
+                validate_hir_arm(arm, seen, scope, "catch arm")
+            }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            validate_hir_expr(body, seen, scope)
+            for handler in handlers {
+                let label = "handler '${handler.effect_name}.${handler.op_name}'"
+                push_hir_validation_scope(scope)
+                validate_hir_params(handler.params, seen, scope, label)
+                match handler.resume_binding {
+                    some(binding) => {
+                        validate_hir_binder(seen, binding.def_id,
+                            "${label} resume binding '${binding.name}'")
+                        bind_hir_validation_scope(
+                            scope, binding.name, binding.def_id)
+                    },
+                    none => {}
+                }
+                validate_hir_expr(handler.body, seen, scope)
+                pop_hir_validation_scope(scope)
+            }
+        },
+        HExpr::Lambda { params, body, .. } => {
+            push_hir_validation_scope(scope)
+            validate_hir_params(params, seen, scope, "lambda")
+            validate_hir_expr(body, seen, scope)
+            pop_hir_validation_scope(scope)
+        },
+        HExpr::EffectOp { args, .. } => {
+            for arg in args { validate_hir_expr(arg, seen, scope) }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            validate_hir_expr(start, seen, scope)
+            validate_hir_expr(end, seen, scope)
+        },
+        HExpr::ListLit { elements, .. } =>
+            validate_hir_expr_values(elements, seen, scope),
+        HExpr::TupleLit { elements, .. } =>
+            validate_hir_expr_values(elements, seen, scope),
+        HExpr::IndexExpr { receiver, index, .. } => {
+            validate_hir_expr(receiver, seen, scope)
+            validate_hir_expr(index, seen, scope)
+        },
+        HExpr::Clone { inner, .. } =>
+            validate_hir_expr(inner, seen, scope),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(inner) => validate_hir_expr(inner, seen, scope),
+            none => {}
+        },
+        HExpr::UnsafeBlock { body, .. } =>
+            validate_hir_expr(body, seen, scope),
+        HExpr::IntLit { .. } | HExpr::FloatLit { .. } |
+        HExpr::StrLit { .. } | HExpr::BoolLit { .. } |
+        HExpr::DictConstruct { .. } => {}
+    }
+}
+
+fn validate_hir_decls(decls: List<HDecl>, mut seen: Set<Int>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, def_id, params, body, .. } => {
+                match def_id {
+                    some(id) => validate_hir_binder(
+                        seen, id, "function '${name}'"),
+                    none => {}
+                }
+                let mut scope = new_hir_validation_scope()
+                validate_hir_params(
+                    params, seen, scope, "function '${name}'")
+                validate_hir_expr(body, seen, scope)
+            },
+            HDecl::Impl { methods, .. } => validate_hir_decls(methods, seen),
+            HDecl::Effect { name, ops, .. } => {
+                for op in ops {
+                    match op.default_body {
+                        some(body) => {
+                            let mut scope = new_hir_validation_scope()
+                            validate_hir_params(op.params, seen, scope,
+                                "effect default '${name}.${op.name}'")
+                            validate_hir_expr(body, seen, scope)
+                        },
+                        none => {}
+                    }
+                }
+            },
+            HDecl::Test { body, .. } => {
+                let mut scope = new_hir_validation_scope()
+                validate_hir_expr(body, seen, scope)
+            },
+            HDecl::Trait { name, methods, .. } => {
+                for method in methods {
+                    match method.body {
+                        some(body) => {
+                            let mut scope = new_hir_validation_scope()
+                            validate_hir_params(method.params, seen, scope,
+                                "trait default '${name}.${method.name}'")
+                            validate_hir_expr(body, seen, scope)
+                        },
+                        none => {}
+                    }
+                }
+            },
+            HDecl::Const { name, def_id, init, .. } => {
+                match def_id {
+                    some(id) => validate_hir_binder(
+                        seen, id, "const '${name}'"),
+                    none => {}
+                }
+                let mut scope = new_hir_validation_scope()
+                validate_hir_expr(init, seen, scope)
+            },
+            HDecl::ModBlock { decls: inner, .. } =>
+                validate_hir_decls(inner, seen),
+            HDecl::Struct { .. } | HDecl::Enum { .. } |
+            HDecl::ExternFn { .. } | HDecl::ExternType { .. } |
+            HDecl::TypeAlias { .. } | HDecl::Sig { .. } => {}
+        }
+    }
+}
+
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case
 // (is_type_dag_type_name / is_type_dag_type) is REMOVED.  Type and the
 // structs/enums reachable from it now participate in ordinary Perceus RC:
@@ -493,6 +1005,15 @@ pub fn is_nullary_variant_ctor_ident(expr: HExpr) -> Bool {
 // direct-ABI wrapper closure (some([]) is the explicit zero-bound marker).
 // Control-flow wrappers preserve that fact only when every value-producing path
 // yields the same fresh callable. Perceus and verify_rc share this predicate.
+pub fn is_exact_direct_call_ident(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Ident {
+            def_id: some(_), dict_closure_dicts: some(_), ..
+        } => true,
+        _ => false
+    }
+}
+
 pub fn is_materialized_fn_value(expr: HExpr) -> Bool {
     match expr {
         HExpr::Ident { dict_closure_dicts, .. } => dict_closure_dicts.is_some(),
@@ -1015,17 +1536,20 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
         // tail-escape invariant moves a fresh tail / Clone-wraps an
         // owner-bearing one) and is never in the block's own drop set (it is
         // created after block_locals).  So: a non-Ident tail classifies
-        // directly; an Ident tail classifies via the init of the LAST Let/Var
-        // of that name among this block's direct statements (the hoist, or a
+        // directly; an Ident tail classifies via the init of its exact DefId
+        // among this block's direct statements (the hoist, or a
         // user binding — which, in a NON-dropping block, was necessarily
         // non-droppable, so its init classifies false: borrows stay
         // un-dropped).  An Ident with no binding in this block is an outer
         // borrow → false.
         HExpr::Block { stmts, tail, .. } => match tail {
             some(t) => match t {
-                HExpr::Ident { name, .. } => match block_local_init(stmts, name) {
-                    some(init) => is_fresh_owned_bool_value(init),
-                    none => false,
+                HExpr::Ident { def_id, .. } => match def_id {
+                    some(id) => match block_local_init(stmts, id) {
+                        some(init) => is_fresh_owned_bool_value(init),
+                        none => false
+                    },
+                    none => false
                 },
                 _ => is_fresh_owned_bool_value(t),
             },
@@ -1052,17 +1576,17 @@ pub fn compare_by_first<T>(a: (Str, T), b: (Str, T)) -> Int {
     if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 }
 }
 
-// The initialiser of the LAST direct `let`/`var` statement binding `name` in a
+// The initialiser of the exact direct `let`/`var` statement binding `def_id` in a
 // statement list (helper for is_fresh_owned_bool_value's post-RC Block arm).
-fn block_local_init(stmts: List<HStmt>, name: Str) -> HExpr? {
+fn block_local_init(stmts: List<HStmt>, def_id: Int) -> HExpr? {
     let mut found: HExpr? = none
     for s in stmts {
         match s {
-            HStmt::Let { name: n, init, .. } => {
-                if n == name { found = some(init) }
+            HStmt::Let { def_id: some(id), init, .. } => {
+                if id == def_id { found = some(init) }
             },
-            HStmt::Var { name: n, init, .. } => {
-                if n == name { found = some(init) }
+            HStmt::Var { def_id: some(id), init, .. } => {
+                if id == def_id { found = some(init) }
             },
             _ => {},
         }

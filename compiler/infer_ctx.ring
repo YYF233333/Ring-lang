@@ -1145,6 +1145,10 @@ pub fn variant_ctor_origin(ctx: InferCtx, scheme: TypeScheme) -> Str? {
     }
 }
 
+pub fn has_variant_ctor_origin_def_id(ctx: InferCtx, def_id: Int) -> Bool {
+    ctx.env.types.variant_ctor_origins.contains_key(def_id)
+}
+
 fn resolve_fn_bound_dict_ref(
     current_fn_bounds: List<FnBoundsEntry>,
     id: Int, s: UnionFind, trait_name: Str
@@ -2271,6 +2275,71 @@ pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr
 // Pattern binding
 // ============================================================
 
+struct OrPatternBindingAuthority {
+    name: Str,
+    scheme: TypeScheme
+}
+
+fn collect_or_pattern_binding_names(
+    pattern: Pattern, mut names: List<Str>, mut duplicates: List<Str>
+) {
+    match pattern {
+        Pattern::Binding { name, .. } => if name != "_" {
+            if names.contains(name) {
+                if !duplicates.contains(name) { duplicates.push(name) }
+            } else { names.push(name) }
+        },
+        Pattern::Constructor { fields, .. } => {
+            for field in fields {
+                collect_or_pattern_binding_names(field, names, duplicates)
+            }
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            for field in fields {
+                collect_or_pattern_binding_names(
+                    field.pattern, names, duplicates)
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for element in elements {
+                collect_or_pattern_binding_names(element, names, duplicates)
+            }
+        },
+        // Parser chains are flat. A nested OrPattern is its own authority;
+        // its first alternative describes the canonical set visible here.
+        Pattern::OrPattern { patterns, .. } => match patterns.get(0) {
+            some(first) => collect_or_pattern_binding_names(
+                first, names, duplicates),
+            none => {}
+        },
+        Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
+    }
+}
+
+fn same_or_pattern_binding_names(
+    left: List<Str>, right: List<Str>
+) -> Bool {
+    if left.len() != right.len() { return false }
+    for name in left {
+        if !right.contains(name) { return false }
+    }
+    true
+}
+
+fn report_duplicate_or_pattern_bindings(
+    sink: CollectingSink, duplicates: List<Str>, span: Span
+) -> Bool {
+    let found = duplicates.len() > 0
+    for duplicate in duplicates {
+        let _ = type_error(sink, E0301,
+            "Pattern repeats binding '${duplicate}'",
+            span, DiagnosticContext::OtherContext {
+                detail: some("duplicate pattern binding")
+            })
+    }
+    found
+}
+
 // Error recovery must preserve lexical scope without attempting any further
 // type or constructor resolution. In particular, nested constructor syntax in
 // an already-invalid pattern must not emit secondary diagnostics.
@@ -2400,12 +2469,95 @@ pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, su
             }
         },
         Pattern::OrPattern { patterns, span } => {
-            // Bind each sub-pattern against the same expected type.
-            // For or-patterns without bindings, this just validates each alternative.
-            // For or-patterns with bindings, each sub-pattern introduces the same names.
+            // Every successful alternative publishes one lexical binding
+            // contract: the same names exactly once, compatible types, and
+            // the first alternative's one canonical DefId per name.
+            if patterns.len() == 0 {
+                let _ = type_error(ctx.sink, E0301,
+                    "Or-pattern must contain at least one alternative",
+                    span, DiagnosticContext::OtherContext {
+                        detail: some("empty or-pattern")
+                    })
+                fail.raise(CompileError {})
+            }
+
+            let mut expected_names: List<Str> = []
+            let mut has_expected_contract = false
+            let mut binding_sets_valid = true
+            let mut mismatch_reported = false
+            for alternative in patterns {
+                let mut names: List<Str> = []
+                let mut duplicates: List<Str> = []
+                collect_or_pattern_binding_names(
+                    alternative, names, duplicates)
+                if report_duplicate_or_pattern_bindings(
+                        ctx.sink, duplicates, span) {
+                    binding_sets_valid = false
+                }
+                if !has_expected_contract {
+                    for name in names { expected_names.push(name) }
+                    has_expected_contract = true
+                } else if !same_or_pattern_binding_names(
+                        expected_names, names) {
+                    binding_sets_valid = false
+                    if !mismatch_reported {
+                        let _ = type_error(ctx.sink, E0301,
+                            "Or-pattern alternatives must bind the same variables",
+                            span, DiagnosticContext::OtherContext {
+                                detail: some("or-pattern binding set mismatch")
+                            })
+                        mismatch_reported = true
+                    }
+                }
+            }
+            if !binding_sets_valid {
+                fail.raise(CompileError {})
+            }
+
             let mut s = subst
-            for pat in patterns {
-                s = bind_pattern(ctx, pat, expected_type, s)
+            let mut authorities: List<OrPatternBindingAuthority> = []
+            let mut alternative_index = 0
+            for alternative in patterns {
+                s = bind_pattern(ctx, alternative, expected_type, s)
+                if alternative_index == 0 {
+                    for name in expected_names {
+                        let scheme = match ctx.env.lookup(name) {
+                            some(value) => value,
+                            none => panic(
+                                "unreachable: validated or-pattern binding is absent from its lexical scope")
+                        }
+                        match scheme.def_id {
+                            some(_) => {},
+                            none => panic(
+                                "unreachable: canonical or-pattern binding has no exact DefId")
+                        }
+                        authorities.push(OrPatternBindingAuthority {
+                            name: name, scheme: scheme
+                        })
+                    }
+                } else {
+                    // The new alternative temporarily owns fresh DefIds.
+                    // Unify its types, then restore the first alternative's
+                    // scheme so guard/body/HIR see one exact shared slot.
+                    for authority in authorities {
+                        let candidate = match ctx.env.lookup(authority.name) {
+                            some(value) => value,
+                            none => panic(
+                                "unreachable: validated or-pattern binding is absent from an alternative")
+                        }
+                        match candidate.def_id {
+                            some(_) => {},
+                            none => panic(
+                                "unreachable: or-pattern alternative binding has no exact DefId")
+                        }
+                        s = unify_at(ctx.sink, ctx.env,
+                            authority.scheme.ty, candidate.ty, s, span)
+                    }
+                    for authority in authorities {
+                        ctx.env.bind(authority.name, authority.scheme)
+                    }
+                }
+                alternative_index = alternative_index + 1
             }
             s
         }

@@ -534,6 +534,8 @@ def run_one_shot_job(
     thread_errors: list[str] = []
     job_messages: list[int] = []
     peak_tree_working_set = 0
+    working_set_unavailable_samples = 0
+    working_set_complete = True
     sampled_process_peak = 0
     started_ns = time.perf_counter_ns()
     exit_code: int | None = None
@@ -690,26 +692,31 @@ def run_one_shot_job(
                     pids = _job_pids(job)
                     sampled_process_peak = max(sampled_process_peak, len(pids))
                     tree_working_set = 0
-                    for pid in pids:
-                        handle = process_handle if len(pids) == 1 else _open_process(pid)
+                    for sample_pid in pids:
+                        handle = (
+                            process_handle
+                            if sample_pid == _pid
+                            else _open_process(sample_pid)
+                        )
                         if handle is None:
-                            infrastructure_errors.append(
-                                f"working set unavailable for pid {pid}"
-                            )
+                            working_set_unavailable_samples += 1
+                            working_set_complete = False
                             continue
-                        memory = _memory_info(handle)
-                        if handle != process_handle:
-                            _close_handle(handle)
+                        try:
+                            memory = _memory_info(handle)
+                        finally:
+                            if sample_pid != _pid:
+                                _close_handle(handle)
                         if memory is None:
-                            infrastructure_errors.append(
-                                f"working set query failed for pid {pid}"
-                            )
+                            working_set_unavailable_samples += 1
+                            working_set_complete = False
                         else:
                             tree_working_set += int(memory.WorkingSetSize)
                     peak_tree_working_set = max(
                         peak_tree_working_set, tree_working_set
                     )
                 except JobMeasurementError as exc:
+                    working_set_complete = False
                     infrastructure_errors.append(str(exc))
                     stop_event.set()
 
@@ -841,6 +848,8 @@ def run_one_shot_job(
         "measurements": {
             "wall_ns": time.perf_counter_ns() - started_ns,
             "peak_tree_working_set_bytes": peak_tree_working_set,
+            "working_set_unavailable_samples": working_set_unavailable_samples,
+            "working_set_complete": working_set_complete,
             "peak_job_commit_bytes": peak_job_commit,
             "sampled_process_peak": sampled_process_peak,
             "process_count": process_count,

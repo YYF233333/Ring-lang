@@ -762,7 +762,8 @@ fn resolve_field_action(
                 bounds.push(TraitBound { type_param: param_name, trait_name: trait_name })
             }
             some(FieldAction::Call {
-                dict_name: trait_bound_param_name(param_name, trait_name),
+                base_dict: DictRef::Simple(
+                    trait_bound_param_name(param_name, trait_name)),
                 extra_dicts: []
             })
         },
@@ -770,14 +771,22 @@ fn resolve_field_action(
             if name == self_type_name {
                 let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                 match extra {
-                    some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                    some(e) => some(FieldAction::Call {
+                        base_dict: DictRef::Static(
+                            trait_dict_name(name, trait_name)),
+                        extra_dicts: e
+                    }),
                     none => none,
                 }
             } else {
                 if known.contains(name) {
                     let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                     match extra {
-                        some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                        some(e) => some(FieldAction::Call {
+                            base_dict: DictRef::Static(
+                                trait_dict_name(name, trait_name)),
+                            extra_dicts: e
+                        }),
                         none => none,
                     }
                 } else {
@@ -789,14 +798,22 @@ fn resolve_field_action(
             if name == self_type_name {
                 let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                 match extra {
-                    some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                    some(e) => some(FieldAction::Call {
+                        base_dict: DictRef::Static(
+                            trait_dict_name(name, trait_name)),
+                        extra_dicts: e
+                    }),
                     none => none,
                 }
             } else {
                 if known.contains(name) {
                     let extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
                     match extra {
-                        some(e) => some(FieldAction::Call { dict_name: trait_dict_name(name, trait_name), extra_dicts: e }),
+                        some(e) => some(FieldAction::Call {
+                            base_dict: DictRef::Static(
+                                trait_dict_name(name, trait_name)),
+                            extra_dicts: e
+                        }),
                         none => none,
                     }
                 } else {
@@ -847,15 +864,15 @@ fn resolve_json_field_action(
         env, field_type, type_param_vars, type_param_names, "Json", bounds
     ) {
         some(DictRef::Simple(dict_name)) => some(FieldAction::Call {
-            dict_name: dict_name,
+            base_dict: DictRef::Simple(dict_name),
             extra_dicts: []
         }),
         some(DictRef::Static(dict_name)) => some(FieldAction::Call {
-            dict_name: dict_name,
+            base_dict: DictRef::Static(dict_name),
             extra_dicts: []
         }),
         some(DictRef::Wrapped { dict, inner_dicts, .. }) => some(FieldAction::Call {
-            dict_name: dict,
+            base_dict: DictRef::Static(dict),
             extra_dicts: inner_dicts
         }),
         none => none
@@ -960,13 +977,16 @@ fn resolve_hash_field_action(
 ) -> FieldAction? {
     match field_type {
         Type::IntType => some(FieldAction::Call {
-            dict_name: trait_dict_name("Int", "Hash"), extra_dicts: []
+            base_dict: DictRef::Static(trait_dict_name("Int", "Hash")),
+            extra_dicts: []
         }),
         Type::StrType => some(FieldAction::Call {
-            dict_name: trait_dict_name("Str", "Hash"), extra_dicts: []
+            base_dict: DictRef::Static(trait_dict_name("Str", "Hash")),
+            extra_dicts: []
         }),
         Type::BoolType => some(FieldAction::Call {
-            dict_name: trait_dict_name("Bool", "Hash"), extra_dicts: []
+            base_dict: DictRef::Static(trait_dict_name("Bool", "Hash")),
+            extra_dicts: []
         }),
         Type::TypeVar { id, .. } => {
             let param_idx = index_of_int(type_param_vars, id)
@@ -976,7 +996,8 @@ fn resolve_hash_field_action(
                 bounds.push(TraitBound { type_param: param_name, trait_name: "Hash" })
             }
             some(FieldAction::Call {
-                dict_name: trait_bound_param_name(param_name, "Hash"),
+                base_dict: DictRef::Simple(
+                    trait_bound_param_name(param_name, "Hash")),
                 extra_dicts: []
             })
         },
@@ -989,7 +1010,9 @@ fn resolve_hash_field_action(
                 "Hash", known, self_type_name, bounds)
             match extra {
                 some(e) => some(FieldAction::Call {
-                    dict_name: trait_dict_name(name, "Hash"), extra_dicts: e
+                    base_dict: DictRef::Static(
+                        trait_dict_name(name, "Hash")),
+                    extra_dicts: e
                 }),
                 none => none,
             }
@@ -1003,7 +1026,9 @@ fn resolve_hash_field_action(
                 "Hash", known, self_type_name, bounds)
             match extra {
                 some(e) => some(FieldAction::Call {
-                    dict_name: trait_dict_name(name, "Hash"), extra_dicts: e
+                    base_dict: DictRef::Static(
+                        trait_dict_name(name, "Hash")),
+                    extra_dicts: e
                 }),
                 none => none,
             }

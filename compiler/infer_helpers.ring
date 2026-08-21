@@ -724,7 +724,9 @@ pub fn resolve_value_ident(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
                     }
                     let getter = HExpr::Ident {
                         name: name, resolved_name: none, def_id: def_id,
-                        dict_closure_dicts: none, ty: getter_ty,
+                        // This synthetic direct getter Call is returned from
+                        // zonk and will not pass through zonk_direct_callee.
+                        dict_closure_dicts: some([]), ty: getter_ty,
                         effects: EMPTY_ROW, span: span
                     }
                     return HExpr::Call {

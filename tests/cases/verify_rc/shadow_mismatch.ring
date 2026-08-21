@@ -1,9 +1,6 @@
-// B-104 D2 negative case (fatal): re-binding a name flips droppability on the
-// shared alloca — the first let produces a droppable (K_OWNED) binding, the
-// second let (a catch value) produces a non-droppable (K_NONOWNED) binding.
-// The scope-end drop from the first classification frees a non-owned value.
-// The verifier must report the fatal uaf-shadow-mismatch class (and the
-// consequent uaf-drop-borrow on the scope-end Drop).
+// Exact-DefId regression: the owned first `x` and opaque catch-result `x` are
+// separate slots. Strict verification retains only the honest x-effect-value
+// exemption for the catch result; shadowing itself is not a fatal mismatch.
 
 fn might_fail(s: Str) -> Str {
     if s == "" { fail.raise("empty") }

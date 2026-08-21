@@ -315,12 +315,18 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     // first-class the dict evidence (static singleton set + local
     // constructions for dynamic wrapped dicts) — both before perceus/codegen.
     let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types }
+    let has_errors = ctx.sink.has_errors()
     // B-002p1: check for use-after-move on Drop types (before lowering)
-    if assembled.drop_types.len() > 0 {
+    if !has_errors && assembled.drop_types.len() > 0 {
         check_drop_moves(assembled, ctx.sink)
     }
+    let checked_program = if has_errors {
+        assembled
+    } else {
+        lower_dicts(lower_andor(assembled))
+    }
     CheckResult {
-        program: lower_dicts(lower_andor(assembled)),
+        program: checked_program,
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
         value_origins: map_clone(ctx.use_aliases),
@@ -540,12 +546,18 @@ pub fn check_module(
     for d in hprogram.decls { all_decls.push(d) }
     // B-104 D7 + D4: see check() above.
     let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names, drop_types: hprogram.drop_types }
+    let has_errors = ctx.sink.has_errors()
     // B-002p1: check for use-after-move on Drop types (before lowering)
-    if assembled.drop_types.len() > 0 {
+    if !has_errors && assembled.drop_types.len() > 0 {
         check_drop_moves(assembled, ctx.sink)
     }
+    let checked_program = if has_errors {
+        assembled
+    } else {
+        lower_dicts(lower_andor(assembled))
+    }
     CheckResult {
-        program: lower_dicts(lower_andor(assembled)),
+        program: checked_program,
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params,
         value_origins: map_clone(ctx.use_aliases),
