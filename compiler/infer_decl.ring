@@ -2259,8 +2259,10 @@ fn check_fn_decl_transaction(
         trait_bounds.push(TraitBound { type_param: fb.type_param_name, trait_name: fb.trait_name })
     }
 
-    let fn_scheme = ctx.env.lookup(name)
-    let fn_def_id = match fn_scheme { some(s) => s.def_id, none => none }
+    let fn_def_id = match registration_scheme {
+        some(scheme) => scheme.def_id,
+        none => none
+    }
     match fn_def_id {
         some(did) => ctx.env.record_def_span(did, span),
         none => {}

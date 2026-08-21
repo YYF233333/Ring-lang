@@ -5329,6 +5329,13 @@ def identity_checkpoint_contract_errors(
             "def_id: some(trait_param_def_id)",
             "def_id: some(exact_trait_def_id)",
             "dict_ref: DictRef::Static(dict_name)",
+            "let fn_def_id = match registration_scheme {",
+        ),
+        "checker": (
+            "let has_errors = ctx.sink.has_errors()",
+            "if !has_errors && assembled.drop_types.len() > 0",
+            "let checked_program = if has_errors {",
+            "program: checked_program",
         ),
         "infer_ctx": (
             "struct OrPatternBindingAuthority",
@@ -5502,6 +5509,28 @@ def identity_checkpoint_contract_errors(
         errors.append(
             "cexpr: c_pattern_local wildcard must return only fresh_tmp before "
             "exact DefId lookup; named binding route drifted")
+
+    if "let fn_scheme = ctx.env.lookup(name)" in sources["infer_decl"]:
+        errors.append(
+            "infer_decl: function HDecl DefId must not re-query a same-spelled env binding")
+    checker_error_guard = (
+        "    let has_errors = ctx.sink.has_errors()\n"
+        "    // B-002p1: check for use-after-move on Drop types (before lowering)\n"
+        "    if !has_errors && assembled.drop_types.len() > 0 {\n"
+        "        check_drop_moves(assembled, ctx.sink)\n"
+        "    }\n"
+        "    let checked_program = if has_errors {\n"
+        "        assembled\n"
+        "    } else {\n"
+        "        lower_dicts(lower_andor(assembled))\n"
+        "    }\n"
+        "    CheckResult {\n"
+        "        program: checked_program,"
+    )
+    if sources["checker"].count(checker_error_guard) != 2:
+        errors.append(
+            "checker: check/check_module must return assembled HIR on existing "
+            "errors and guard move/lowering")
 
     infer_source = sources["infer"]
     if len(re.findall(r"\binfer_scoped_block\b", infer_source)) != 5:
@@ -6570,6 +6599,7 @@ def identity_checkpoint_source_errors() -> List[str]:
         "hir": REPO / "compiler" / "hir.ring",
         "infer": REPO / "compiler" / "infer.ring",
         "infer_decl": REPO / "compiler" / "infer_decl.ring",
+        "checker": REPO / "compiler" / "checker.ring",
         "infer_ctx": REPO / "compiler" / "infer_ctx.ring",
         "infer_helpers": REPO / "compiler" / "infer_helpers.ring",
         "zonk": REPO / "compiler" / "zonk.ring",
@@ -6886,6 +6916,23 @@ def identity_checkpoint_source_errors() -> List[str]:
          "def_id: none"),
         ("trait default body identity", "infer_decl", "def_id: some(exact_trait_def_id)",
          "def_id: some(ctx.env.fresh_def_id())"),
+        ("function registration DefId authority", "infer_decl",
+         "let fn_def_id = match registration_scheme {\n"
+         "        some(scheme) => scheme.def_id,\n"
+         "        none => none\n"
+         "    }",
+         "let fn_scheme = ctx.env.lookup(name)\n"
+         "    let fn_def_id = match fn_scheme { some(s) => s.def_id, none => none }"),
+        ("checker move error guard", "checker",
+         "if !has_errors && assembled.drop_types.len() > 0",
+         "if assembled.drop_types.len() > 0"),
+        ("checker lowering error guard", "checker",
+         "let checked_program = if has_errors {\n"
+         "        assembled\n"
+         "    } else {\n"
+         "        lower_dicts(lower_andor(assembled))\n"
+         "    }",
+         "let checked_program = lower_dicts(lower_andor(assembled))"),
         ("or-pattern canonical restore", "infer_ctx",
          "ctx.env.bind(authority.name, authority.scheme)",
          "ctx.env.bind(authority.name, candidate)"),
