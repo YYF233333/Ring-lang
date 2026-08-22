@@ -16,7 +16,7 @@
       "name": "main",
       "role": "governance",
       "active_items": [],
-      "checkpoint": "086237823e3eacb1a30934bd48e438c20f6e457c"
+      "checkpoint": "fb5086737cd66a1e725742c923143466fbd4529a"
     },
     {
       "name": "codex/b180-feedback-loop-continuation",
@@ -39,7 +39,7 @@
       "name": "codex/ownership-sprime-first",
       "role": "authority",
       "active_items": ["#268", "#269"],
-      "checkpoint": "c473baaa3463a8f1595e338eb77cacb1eace2e1f"
+      "checkpoint": "fb5086737cd66a1e725742c923143466fbd4529a"
     },
     {
       "name": "codex/b176-workflow-throughput",
