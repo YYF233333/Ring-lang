@@ -1249,15 +1249,38 @@ extern fn read_all(path: Str) -> Str / io             // path is readonly
 
 函数类型中同样标注约定：`fn(T)` = borrow，`fn(mut T)` = mutable，`fn(move T)` = move。
 
-**ownership 实现真值（2026-08-06，#268/#269 Argument A′）**：
+#### 7.3.1 Final-HIR 单一 Resource Planner（2026-08-22 用户理解并批准）
 
-- `Borrow / MutBorrow / Move` 与返回值的 owned/borrowed 属性是 callable type 的组成部分，必须进入 `FnType`、HIR param/call、trait/signature/extern、函数值和 module export；不得再由 checker、Perceus 或 backend 按 callee 名字各自猜测。模式不匹配默认拒绝，除非存在显式、可验证的 adapter。
-- 用户函数与 lambda 在类型推断完成后生成 mode constraints；直接调用、方法、函数值、高阶泛型、trait thunk、重导出和互递归 SCC 进入同一个有限 lattice fixed point。无函数体的接口使用显式 builtin/extern contract；没有契约时保持 borrow，不能暗中接管实参。
-- Drop 传播由 symbolic ownership shape 表达：nominal identity、直接 Drop、字段/类型参数依赖位与显式阻断边界。递归 nominal SCC 求最小不动点；tuple/record/Option/Result 结构传播，List/Map/Set 等隐藏 raw-slot owner 使用集中 override，Ptr 与未来 `Rc<T>` 等共享边界显式阻断。未解析 TypeVar 以 may-Drop 进入 checker，不允许因此复制潜在线性值。
-- 所有会合成调用的 lowering 完成后、Perceus 之前运行独立 ownership pass。该 pass 以稳定 binding `DefId` 建临时 CFG，区分 normal/return/break/continue/exceptional edge，以 `Available / Moved / MaybeMoved` 做 branch join 与 loop fixed point；重新赋值可恢复 Available，shadow/synthetic binding 不按裸名称合并。
-- 真正移交的完整 binding 在 HIR 中物化为 `Take`。C11 lowering 先把原值保存到临时量，再把源槽清为 null，最后交给目标；所有 cleanup-visible 槽在注册 cleanup 前初始化为 null，scope drop 始终按逆声明序无条件执行，null drop 为 no-op。Perceus 不再维护 block 级 moved-name 抑制表，verifier 独立核对 Take、调用契约、drop 与 moved-read，不盲信 annotation。
-- 当前不支持 partial move：field/index/pattern/destructure/spread 中移出 may-Drop 值必须给出单轮可修诊断；完整 binding 与 fresh temporary 可移交。普通 closure 只允许捕获已证明 non-may-own 的外部 binding，并采用 borrow/mut capture；may-own、未解析 TypeVar 与含 may-own 字段的复合值在 closure 构造点 fail loud。Tail-resumptive handler arm 同样按 exact outer binding 执行这条边界，因为 handler evidence 可经 effectful function value 逃出 `handle`；`fail.raise` abort arm 是当前 C 控制流中的 inline 边界，不构造该 evidence closure，但仍禁止 handled body 移交其外层 binding。原因是普通 `FnType` 不携带 capture ownership shape，若直接 rc+1 会破坏 Drop 值 rc 恒 1，若隐式移交又需要 FnOnce/consume-call 契约。在该契约落地前，closure/handler body 移交捕获值同样一律拒绝。
-- B-168 固定 C-native failure/control ABI 前，任何可能跨 `catch`/raise 边界修改外层 cleanup-visible 槽的 `Take` 一律 fail loud；不得把自动局部置空或 drop flag 带过现行 `setjmp` 边界。B-168 完成后由同一 ownership plan 接入选定的稳定存储/显式 failure edge。
+本节取代 2026-08-06 A′ 的实现分层，但不改变上文公开参数语义。此前实际尝试把 ownership authority 放在 checker 一侧，同时仍允许后续 lowering 与 Perceus ANF/RC 补造 cleanup-visible 槽，迫使 checker、Perceus、verifier 与 codegen 分别猜 ownership；`some(Resource)` 的 source slot 在 planner 之后才成为 `__anf`，因此出现接管后仍 Drop 的 double-drop。终态只允许一条无回边流水线：
+
+```text
+Parse / project Resolver / Type+Effect
+→ 全部语义 lowering
+→ ownership-neutral ANF + pattern projection + scope-result normalization
+→ project-wide FinalHIR identity/binder freeze
+→ ONE ResourcePlanner
+→ RcHIR + ranked ResourceCertificate
+→ certificate verifier
+→ mechanical C codegen
+```
+
+**FinalHIR 契约**：default、delegate、derive、protocol for-in、and/or、dictionary、extern-forward 等语义展开全部完成；所有非原子值、pattern projection 与 value-yielding control result 已有 exact typed slot；Trait/Effect default、Test、Const、Lambda/handler、derived/intrinsic/constructor/drop/dict helper 等所有 executable body 或显式 contract 进入一个共享 `ExecutableInventory`。Neutral ANF 只保持同一 evaluation region 内的严格左到右求值，不跨 short-circuit、branch、loop/lambda、guard、catch/handle、unsafe 或 control-transfer 边界，也不产生 `Clone/Take/Drop/Cleanup`。FinalHIR freeze 后任何阶段新增 HIR binder 都是 internal error。
+
+**Identity**：具名 source/member 使用 resolver/registry 已选定 origin 构造的 typed `SymbolRef { origin_module_key, namespace_kind, canonical_payload, declaration_site_path }`；re-export 原样携带，same-origin diamond 自然相等，不消耗共享 source counter。局部槽使用 `SlotRef(module_key, domain, local_def_id)`；Lambda、call-result、ANF/result/projection 等 synthetic identity 使用 final normalized tree 的 owner+path `PathRef`，只服务 planner/certificate，不进入 C 名称。Static call 必须携带 `CalleeRef`；dynamic call 必须落到 exact callable slot，freeze 后缺 identity 直接 fatal，Planner 不查 name/resolver/FnType fallback。
+
+**唯一 Planner 的固定内部顺序**：
+
+1. `Logical OwnershipShape` 与 `Physical RcShape` 分轴求有限最小不动点。前者记录 direct Drop / may-unique-own / type-parameter 依赖，决定 compile-time失效与 `Take`；后者记录 physical RC / boxing / drop glue / foreign containment / 参数依赖，决定 `Clone/Drop`。Int/Ptr 的显式 FORCE 可逻辑失效但不参与 RC；shareable RC 的 Own edge 产生 `Clone`，unique Resource 的 Own edge 产生 whole-slot `Take`。
+2. Project-wide callable graph在 solve 前一次冻结，统一 direct/member/extern/effect/constructor/delegate/dictionary、function value/HOF、Lambda、factory/call-result、re-export/diamond 与 extern bridge。参数格为有限 `Borrow < MutBorrow < Own`，FORCE 独立；返回值保留 owned/borrowed contract。Worklist 从 bottom 单调求 least fixed point，solve 期间禁止新增 node/edge，也不回写或重跑 type/effect inference。
+3. 每个 executable body 建 ephemeral CFG，以 `Empty / Live / Moved / MaybeMoved` 做 branch/loop/catch join，并一次性输出 `Clone/Take/Drop/Cleanup`。每个 value edge 必须精确分类 Borrow/MutBorrow/Own/Discard；may-own projection 的 partial move 按现行设计 fail loud，只有完整 slot 可 `Take`。
+
+**A′ 与 S′ 统一**：exact source clear、overwrite old-value Drop、exact-none 与 scope/early-exit cleanup属于同一个 slot-state machine，不再有独立 S′ producer/tail analysis。所有可能 physical-own 的 storage 在 normalization 预建并初始化为空；Assign 固定为“完整求值 RHS → ownership转入预建 temp → Drop旧target → temp写入target → 清temp ownership”，RHS divergence无后继。`Take` 固定为保存 exact source 值并立即清空 source；normal/return/break/continue/current-frame catch/handler exit按逆词法序显式 cleanup。`ring_drop(NULL)`、tagged scalar与never-drop `Option::none`均no-op；Extern/Ptr/NoDrop仍由Physical RcShape排除。
+
+**Planner 后职责**：RcHIR 的 binder set 与 FinalHIR 完全相同，资源操作全部显式；旧 Perceus 不再是独立 ownership pass，不造 `__anf/__rc_scope`、不猜 fresh/escape/sink/producer。Verifier不运行resolver或第二solver：certificate记录frozen graph hash、seeds、final cells、每次提升的rule/premises/严格较低rank、CFG states与每个RC op witness；检查全部约束与有限推导两侧，从而证明 claimed 解恰是least fixed point，并验证每条路径的owner守恒。Codegen只接受verified RcHIR，机械lower `Clone`、`Take(save; source=NULL)`、`Drop`与cleanup。
+
+**终止性与入口统一**：FinalHIR的type/callable/edge/slot/CFG集合有限且solve前冻结；shape bit只升一次，param mode最多升两次，FORCE只升一次，result与CFG格有限，固定worklist必停，无timeout或任意fuel。Single-file包装为单节点ModuleGraph，和project共享prelude/intrinsic inventory、identity freeze、Planner、certificate verifier与codegen入口；`ModuleKey`属于identity，prefix只影响输出符号。
+
+**现行能力边界保持**：普通closure/可逃逸tail-resumptive handler不得捕获may-unique-own外部binding；未解析TypeVar fail closed；partial move拒绝。B-168固定failure/control ABI前，任何必须跨现行`setjmp`边界修改外层cleanup-visible slot的Take继续fail loud；跨帧abort unwind由B-168/B-002以同一FinalHIR/ResourcePlanner failure edge续接，不冒充本checkpoint已完成。
 
 ### 7.4 别名追踪与 mutation 安全
 
